@@ -208,6 +208,41 @@ def test_install_sam_feature_respects_config(monkeypatch, qapp):
     assert manager.cacheLimit() == 1
 
 
+def test_sam_feature_install_defers_predictor_dependency_imports(
+    monkeypatch, qapp, tmp_path
+):
+    checkpoint = tmp_path / "sam-checkpoint.pt"
+    checkpoint.write_bytes(b"ready")
+
+    def fail_ensure_dependencies():
+        raise AssertionError("SAM dependencies should load in predictor workers")
+
+    monkeypatch.setattr(service, "ensure_dependencies", fail_ensure_dependencies)
+    monkeypatch.setattr(
+        service,
+        "resolve_checkpoint_path",
+        lambda checkpoint_path=None: Path(checkpoint_path).resolve(),
+    )
+    monkeypatch.setattr(
+        service,
+        "ensure_checkpoint",
+        lambda checkpoint_path, **_kwargs: Path(checkpoint_path).resolve(),
+    )
+    executor = StubExecutor()
+    config = Config(
+        sam_download_mode="disabled",
+        sam_model_path=str(checkpoint),
+    )
+    qpane = QPane(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane.resize(64, 64)
+    try:
+        assert qpane.samFeatureAvailable()
+        assert qpane.samManager() is not None
+    finally:
+        qpane.deleteLater()
+        qapp.processEvents()
+
+
 def test_install_sam_feature_disabled_missing_checkpoint(monkeypatch, qapp):
     _stub_sam_service(monkeypatch)
 

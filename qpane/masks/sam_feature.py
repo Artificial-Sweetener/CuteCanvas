@@ -103,7 +103,7 @@ class _CheckpointDownloadWorker(QRunnable, BaseWorker):
 
 
 def install_sam_feature(qpane: "QPane", device: str | None = None) -> None:
-    """Install SAM support onto the qpane instance for the requested SAM device."""
+    """Install SAM support without loading predictor dependencies eagerly."""
     hooks = qpane.hooks
     masks = qpane._masks_controller
     if not masks.mask_feature_available():
@@ -112,19 +112,11 @@ def install_sam_feature(qpane: "QPane", device: str | None = None) -> None:
         from qpane.sam.service import (
             SamDependencyError,
             ensure_checkpoint,
-            ensure_dependencies,
             resolve_checkpoint_path,
         )
     except ImportError as exc:
         raise FeatureInstallError(
             "Failed to import SAM services.",
-            hint="Install the SAM extras via 'pip install qpane[sam]' and verify GPU tooling.",
-        ) from exc
-    try:
-        ensure_dependencies()
-    except SamDependencyError as exc:
-        raise FeatureInstallError(
-            str(exc),
             hint="Install the SAM extras via 'pip install qpane[sam]' and verify GPU tooling.",
         ) from exc
     try:
