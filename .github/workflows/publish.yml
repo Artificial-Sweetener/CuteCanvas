@@ -16,14 +16,14 @@ jobs:
       released: ${{ steps.semver.outputs.released }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload dist
         if: steps.semver.outputs.released == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dist-${{ steps.semver.outputs.version }}
           path: dist/*
@@ -76,7 +76,7 @@ jobs:
     if: needs.release.outputs.released == 'true'
     steps:
       - name: Download dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dist-${{ needs.release.outputs.version }}
           path: dist/
