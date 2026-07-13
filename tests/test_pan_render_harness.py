@@ -1,0 +1,141 @@
+#    QPane - High-performance PySide6 image viewer
+#    Copyright (C) 2025  Artificial Sweetener and contributors
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""Tests for differential headless pan-render artifact detection."""
+
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QRect, QSize
+from PySide6.QtGui import QColor, QImage, QPainter
+
+from tools.pan_render_harness import (
+    FrameArtifactDetector,
+    HeadlessPanHarness,
+    coordinate_fingerprint_image,
+    random_walk_pans,
+)
+
+
+def test_detector_accepts_identical_frames() -> None:
+    """Equal frames should not produce a rendering-artifact report."""
+    frame = coordinate_fingerprint_image(QSize(32, 24))
+
+    difference = FrameArtifactDetector().compare(frame, QImage(frame))
+
+    assert difference.detected is False
+    assert difference.mismatch_pixels == 0
+    assert difference.column_spans == ()
+
+
+def test_detector_finds_injected_vertical_black_lines() -> None:
+    """Full-height black corruption should be reported as exact column spans."""
+    expected = coordinate_fingerprint_image(QSize(32, 24))
+    actual = QImage(expected)
+    painter = QPainter(actual)
+    try:
+        painter.fillRect(QRect(9, 0, 2, actual.height()), QColor(0, 0, 0, 255))
+        painter.fillRect(QRect(21, 0, 1, actual.height()), QColor(0, 0, 0, 255))
+    finally:
+        painter.end()
+
+    detector = FrameArtifactDetector()
+    difference = detector.compare(actual, expected)
+
+    assert difference.detected is True
+    assert difference.mismatch_pixels == actual.height() * 3
+    assert difference.mismatch_bounds == QRect(9, 0, 13, actual.height())
+    assert difference.column_spans == ((9, 10), (21, 21))
+    assert difference.max_channel_delta > 0
+    assert difference.max_column_coverage == 1.0
+
+
+def test_detector_honors_channel_tolerance() -> None:
+    """Small configured channel variation should not trigger a mismatch."""
+    expected = QImage(8, 8, QImage.Format.Format_RGBA8888)
+    expected.fill(QColor(100, 100, 100, 255))
+    actual = QImage(8, 8, QImage.Format.Format_RGBA8888)
+    actual.fill(QColor(102, 98, 101, 255))
+
+    difference = FrameArtifactDetector(channel_tolerance=2).compare(actual, expected)
+
+    assert difference.detected is False
+
+
+def test_headless_pan_harness_matches_clean_full_redraws(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    """Normal incremental pans should match synchronized full-redraw frames."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(256, 256)),
+        viewport_size=QSize(96, 96),
+        zoom=1.75,
+        artifact_root=tmp_path,
+    )
+    try:
+        failures = harness.run(
+            (
+                QPointF(7.0, 0.0),
+                QPointF(7.5, 4.25),
+                QPointF(-3.25, 4.75),
+                QPointF(18.75, -12.5),
+            )
+        )
+    finally:
+        harness.close()
+
+    assert failures == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_headless_pan_harness_survives_accumulated_tiled_edge_repairs(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    """Repeated high-DPI tile-strip repairs should remain identical to redraws."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(1024, 1024)),
+        viewport_size=QSize(320, 240),
+        device_pixel_ratio=1.5,
+        artifact_root=tmp_path,
+    )
+    try:
+        failures = harness.run(random_walk_pans(steps=437, seed=819))
+    finally:
+        harness.close()
+
+    assert failures == []
+
+
+def test_headless_pan_harness_handles_fractionally_aligned_odd_viewport(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    """Odd viewport centers and clamp fractions should remain redraw-identical."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(1024, 1024)),
+        viewport_size=QSize(511, 97),
+        artifact_root=tmp_path,
+    )
+    try:
+        failures = harness.run(random_walk_pans(steps=150, seed=23, max_step=29))
+    finally:
+        harness.close()
+
+    assert failures == []

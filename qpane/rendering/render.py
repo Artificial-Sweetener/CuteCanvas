@@ -153,17 +153,51 @@ class Renderer:
             return
         raise TypeError(f"Unsupported dirty input: {type(dirty_rect)!r}")
 
-    def tryScrollBuffers(self, new_pan: QPointF) -> bool:
+    def tryScrollBuffers(
+        self,
+        new_pan: QPointF,
+        *,
+        repair_plan: SceneRenderPlan | None = None,
+    ) -> bool:
         """Attempts to reuse the existing buffer by scrolling and repairing edge strips."""
         if self._base_image_buffer is None:
             return False
-        delta_pan = new_pan - self._buffer_pan
         self._scroll_attempts += 1
-        dx = int(delta_pan.x())
-        dy = int(delta_pan.y())
+        if not isclose(
+            self._base_image_buffer.devicePixelRatio(),
+            1.0,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            self._scroll_misses += 1
+            return False
+        viewport = self.qpane.view().viewport
+        if not isclose(viewport.zoom, 1.0, rel_tol=0.0, abs_tol=1e-9):
+            self._scroll_misses += 1
+            return False
+        qpane_view = getattr(self.qpane, "view", None)
+        view = qpane_view() if callable(qpane_view) else None
+        plan_calculate = getattr(view, "calculateRenderPlan", None)
+        if not callable(plan_calculate):
+            raise AttributeError(
+                "QPane view must provide calculateRenderPlan for buffer repair"
+            )
+        plan = repair_plan or plan_calculate(use_pan=new_pan)
+        if not self._plan_supports_exact_scroll_reuse(plan):
+            self._scroll_misses += 1
+            return False
+        delta_pan = new_pan - self._buffer_pan
+        rounded_dx = round(delta_pan.x())
+        rounded_dy = round(delta_pan.y())
+        if not isclose(delta_pan.x(), rounded_dx, abs_tol=1e-9) or not isclose(
+            delta_pan.y(), rounded_dy, abs_tol=1e-9
+        ):
+            self._scroll_misses += 1
+            return False
+        dx = int(rounded_dx)
+        dy = int(rounded_dy)
         if dx == 0 and dy == 0:
             self._scroll_hits += 1
-            viewport = self.qpane.view().viewport
             self._subpixel_pan_offset = viewport.pan - self._buffer_pan
             self.qpane.update()
             return True
@@ -173,8 +207,6 @@ class Renderer:
         ):
             self._scroll_misses += 1
             return False
-        context = CoordinateContext(self.qpane)
-        logical_delta = context.physical_to_logical(QPointF(dx, dy))
         base_image = self._base_image_buffer
         previous_buffer_pan = QPointF(self._buffer_pan)
         previous_subpixel_offset = QPointF(self._subpixel_pan_offset)
@@ -188,11 +220,9 @@ class Renderer:
             )
         self._scroll_temp.swap(self._base_image_buffer)
         self._base_image_buffer.fill(Qt.transparent)
-        painter = QPainter(self._base_image_buffer)
-        painter.drawImage(logical_delta, self._scroll_temp)
-        painter.end()
+        self._copy_scrolled_buffer_pixels(dx, dy)
         self._mark_diagnostics_dirty()
-        self._buffer_pan += QPointF(dx, dy)
+        self._buffer_pan = QPointF(new_pan)
         w = self._base_image_buffer.width()
         h = self._base_image_buffer.height()
         repair_rects: list[QRect] = []
@@ -205,14 +235,6 @@ class Renderer:
         if dx < 0:
             repair_rects.append(QRect(w + dx, 0, -dx, h))
         if repair_rects:
-            qpane_view = getattr(self.qpane, "view", None)
-            view = qpane_view() if callable(qpane_view) else None
-            plan_calculate = getattr(view, "calculateRenderPlan", None)
-            if not callable(plan_calculate):
-                raise AttributeError(
-                    "QPane view must provide calculateRenderPlan for buffer repair"
-                )
-            plan = plan_calculate(use_pan=self._buffer_pan)
             if plan and self._repair_base_buffer_strips(repair_rects, plan) is False:
                 self._scroll_temp.swap(self._base_image_buffer)
                 self._buffer_pan = previous_buffer_pan
@@ -220,7 +242,6 @@ class Renderer:
                 self._scroll_misses += 1
                 return False
         self._scroll_hits += 1
-        viewport = self.qpane.view().viewport
         self._subpixel_pan_offset = viewport.pan - self._buffer_pan
         self.qpane.update()
         self._mark_diagnostics_dirty()
@@ -281,6 +302,72 @@ class Renderer:
             average,
             self._paint_duration_max_ms,
         )
+
+    @classmethod
+    def _plan_supports_exact_scroll_reuse(
+        cls,
+        plan: SceneRenderPlan | None,
+    ) -> bool:
+        """Return whether a plan can be translated without changing raster phase."""
+        if plan is None:
+            return False
+        item = cls._base_only_raster_item(plan)
+        if item is None:
+            return False
+        transform = item.transform
+        if not transform.isAffine():
+            return False
+        zero_components = (
+            transform.m12(),
+            transform.m21(),
+        )
+        scale_x = transform.m11()
+        scale_y = transform.m22()
+        integer_scale = (
+            scale_x >= 1.0
+            and isclose(scale_x, scale_y, rel_tol=0.0, abs_tol=1e-9)
+            and isclose(
+                scale_x,
+                round(scale_x),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+        )
+        if not integer_scale or any(
+            not isclose(value, 0.0, rel_tol=0.0, abs_tol=1e-9)
+            for value in zero_components
+        ):
+            return False
+        return isclose(
+            transform.dx(),
+            round(transform.dx()),
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ) and isclose(
+            transform.dy(),
+            round(transform.dy()),
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        )
+
+    def _copy_scrolled_buffer_pixels(self, dx: int, dy: int) -> None:
+        """Copy the prior buffer at an exact physical-device-pixel offset."""
+        base_image = self._base_image_buffer
+        source_image = self._scroll_temp
+        if base_image is None or source_image is None:
+            raise RuntimeError("scroll buffers must be allocated before copying")
+        base_dpr = base_image.devicePixelRatio()
+        source_dpr = source_image.devicePixelRatio()
+        base_image.setDevicePixelRatio(1.0)
+        source_image.setDevicePixelRatio(1.0)
+        painter = QPainter(base_image)
+        try:
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.drawImage(QPointF(dx, dy), source_image)
+        finally:
+            painter.end()
+            base_image.setDevicePixelRatio(base_dpr)
+            source_image.setDevicePixelRatio(source_dpr)
 
     def _buffer_rect_to_image_rect(
         self, buffer_rect_phys: QRectF, item: RasterLayerRenderItem
@@ -346,7 +433,7 @@ class Renderer:
     def _repair_base_raster_strips_directly(
         self, repair_rects: list[QRect], plan: SceneRenderPlan
     ) -> None:
-        """Repair base-only scroll strips by drawing mapped source rectangles."""
+        """Repair base-only strips through the normal clipped layer draw path."""
         base_item = plan.base_raster_item
         if base_item is None:
             return
@@ -366,25 +453,7 @@ class Renderer:
                     Qt.transparent,
                 )
             painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.save()
-            try:
-                if base_item.render_hint_enabled:
-                    painter.setRenderHint(
-                        QPainter.RenderHint.SmoothPixmapTransform,
-                        True,
-                    )
-                painter.setTransform(base_item.transform, True)
-                self._draw_raster_source_strips(
-                    painter,
-                    base_item,
-                    repair_rects,
-                    context,
-                    draw_source_for_tiled=True,
-                )
-                if base_item.debug_draw_tile_grid:
-                    self._draw_tile_debug_overlay(painter, plan, base_item)
-            finally:
-                painter.restore()
+            self._draw_raster_item(painter, plan, base_item)
         finally:
             painter.end()
 
@@ -419,25 +488,10 @@ class Renderer:
                     continue
                 painter.save()
                 try:
-                    painter.setTransform(item.transform, True)
-                    self._apply_layer_clip(painter, plan, item)
                     if isinstance(item, RasterLayerRenderItem):
-                        if not self._draw_raster_source_strips(
-                            painter,
-                            item,
-                            repair_rects,
-                            context,
-                        ):
-                            return False
+                        self._draw_raster_item(painter, plan, item)
                     elif isinstance(item, MaskLayerRenderItem):
-                        painter.setOpacity(item.descriptor.opacity)
-                        if not self._draw_pixmap_source_strips(
-                            painter,
-                            item,
-                            repair_rects,
-                            context,
-                        ):
-                            painter.drawPixmap(0, 0, item.pixmap)
+                        self._draw_mask_item(painter, plan, item)
                 finally:
                     painter.restore()
             return True
@@ -478,86 +532,6 @@ class Renderer:
                 1,
             )
         )
-
-    def _draw_raster_source_strips(
-        self,
-        painter: QPainter,
-        item: RasterLayerRenderItem,
-        repair_rects: list[QRect],
-        context: CoordinateContext,
-        *,
-        draw_source_for_tiled: bool = False,
-    ) -> bool:
-        """Draw raster pixels that map into the repaired strip rectangles."""
-        inverse, invertible = item.transform.inverted()
-        if not invertible:
-            return False
-        source_bounds = QRectF(
-            0.0,
-            0.0,
-            float(item.source_image.width()),
-            float(item.source_image.height()),
-        )
-        for rect in repair_rects:
-            source_rect = inverse.mapRect(
-                self._buffer_physical_to_widget_logical(QRectF(rect), context)
-            ).intersected(source_bounds)
-            if source_rect.isEmpty():
-                continue
-            if item.strategy == RenderStrategy.TILE and not draw_source_for_tiled:
-                painter.drawImage(source_rect, item.source_image, source_rect)
-                self._draw_intersecting_tile_strips(painter, item, source_rect)
-            else:
-                painter.drawImage(source_rect, item.source_image, source_rect)
-        return True
-
-    def _draw_pixmap_source_strips(
-        self,
-        painter: QPainter,
-        item: MaskLayerRenderItem,
-        repair_rects: list[QRect],
-        context: CoordinateContext,
-    ) -> bool:
-        """Draw only pixmap source pixels that map into repaired strips."""
-        inverse, invertible = item.transform.inverted()
-        if not invertible:
-            return False
-        source_bounds = QRectF(
-            0.0,
-            0.0,
-            float(item.pixmap.width()),
-            float(item.pixmap.height()),
-        )
-        for rect in repair_rects:
-            source_rect = inverse.mapRect(
-                self._buffer_physical_to_widget_logical(QRectF(rect), context)
-            ).intersected(source_bounds)
-            if source_rect.isEmpty():
-                continue
-            painter.drawPixmap(source_rect, item.pixmap, source_rect)
-        return True
-
-    @staticmethod
-    def _draw_intersecting_tile_strips(
-        painter: QPainter,
-        item: RasterLayerRenderItem,
-        repair_source_rect: QRectF,
-    ) -> None:
-        """Draw only tile payloads whose source rect intersects a repaired strip."""
-        tile_size = item.tile_size
-        if tile_size <= 0:
-            return
-        for tile_data in item.tiles_to_draw:
-            tile_rect = QRectF(
-                tile_data.draw_pos,
-                QSizeF(tile_data.image.width(), tile_data.image.height()),
-            )
-            intersected = tile_rect.intersected(repair_source_rect)
-            if intersected.isEmpty():
-                continue
-            source_offset = intersected.topLeft() - tile_data.draw_pos
-            tile_source_rect = QRectF(source_offset, intersected.size())
-            painter.drawImage(intersected, tile_data.image, tile_source_rect)
 
     def _allocate_dpi_buffer(self, physical_size: QSize, dpr: float) -> QImage:
         """Create an ARGB buffer tagged with the given DPR for the physical viewport size."""

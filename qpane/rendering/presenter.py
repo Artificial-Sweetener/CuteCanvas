@@ -452,7 +452,17 @@ class RenderingPresenter:
             return False
         if self.renderer.get_base_buffer() is None:
             return False
-        result = self.renderer.tryScrollBuffers(QPointF(self.viewport.pan))
+        candidate_plan = self.calculateRenderPlan(
+            use_pan=QPointF(self.viewport.pan),
+            is_blank=False,
+        )
+        candidate_signature = self._scroll_reuse_signature_for_plan(candidate_plan)
+        if candidate_signature != self._last_scroll_reuse_signature:
+            return False
+        result = self.renderer.tryScrollBuffers(
+            QPointF(self.viewport.pan),
+            repair_plan=candidate_plan,
+        )
         return result
 
     def allocate_buffers(self) -> None:
@@ -586,7 +596,7 @@ class RenderingPresenter:
 
     @staticmethod
     def _scroll_reuse_signature_for_plan(
-        plan: SceneRenderPlan,
+        plan: SceneRenderPlan | None,
     ) -> tuple[object, ...] | None:
         """Return static render-plan inputs that must stay stable for scroll reuse."""
         if not isinstance(plan, SceneRenderPlan):
@@ -604,11 +614,19 @@ class RenderingPresenter:
                 item.descriptor.source_revision,
                 item.asset_key,
                 item.pyramid_asset_key,
+                item.source_image.cacheKey(),
                 item.pyramid_scale,
                 item.strategy,
+                item.render_hint_enabled,
                 item.tile_size,
                 item.tile_overlap,
+                item.max_tile_cols,
+                item.max_tile_rows,
                 item.visible_tile_range,
+                tuple(
+                    (tile.draw_pos, tile.image.cacheKey())
+                    for tile in item.tiles_to_draw
+                ),
                 item.debug_draw_tile_grid,
             )
             for item in plan.render_items
@@ -624,6 +642,8 @@ class RenderingPresenter:
                 item.descriptor.source,
                 item.descriptor.source_revision,
                 item.asset_key,
+                item.pixmap.cacheKey(),
+                item.render_hint_enabled,
                 item.scale,
             )
             for item in plan.render_items

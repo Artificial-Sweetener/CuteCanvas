@@ -45,5 +45,6 @@ Thumbs.db
 
 # Project-specific
 paktest/
+pan-harness-artifacts/
 tests/perf/results/
 qpane/models/mobile_sam.pt

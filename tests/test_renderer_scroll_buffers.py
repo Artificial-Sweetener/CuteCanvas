@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import math
 import uuid
 
 import pytest
@@ -142,12 +141,15 @@ def _make_qpane_with_checker_image(
     *,
     size: int = 256,
     dpr: float = 1.0,
+    image_format: QImage.Format | None = None,
 ) -> QPane:
     """Return a QPane containing one high-contrast image."""
     qpane = QPane(features=())
     qpane.resize(128, 128)
     qpane.devicePixelRatioF = lambda: dpr  # type: ignore[method-assign]
     image = checker_image(QRect(0, 0, size, size).size())
+    if image_format is not None:
+        image = image.convertToFormat(image_format)
     image_id = uuid.uuid4()
     qpane.setImagesByID(QPane.imageMapFromLists([image], [None], [image_id]), image_id)
     qpane.setZoom1To1()
@@ -275,6 +277,29 @@ def test_default_scene_scroll_repair_matches_full_redraw(qapp) -> None:
         qapp.processEvents()
 
 
+def test_tiled_scroll_strip_matches_full_redraw_for_rgba_source(qapp) -> None:
+    """Tiled edge repair should share full-redraw rasterization for RGBA sources."""
+    qpane = _make_qpane_with_checker_image(
+        qapp,
+        size=1024,
+        dpr=1.0,
+        image_format=QImage.Format_RGBA8888,
+    )
+    try:
+        start_pan = QPointF(-159.0, 300.0)
+        target_pan = QPointF(-135.0, 300.0)
+        expected = _render_clean_frame(qpane, target_pan)
+        actual = _render_scrolled_frame(
+            qpane,
+            start_pan=start_pan,
+            target_pan=target_pan,
+        )
+        assert_images_match(actual, expected)
+    finally:
+        qpane.deleteLater()
+        qapp.processEvents()
+
+
 @pytest.mark.parametrize("dpr", [1.0, 1.25, 1.5, 2.0, 2.5, 3.0])
 @pytest.mark.parametrize(
     "target_pan",
@@ -286,20 +311,37 @@ def test_default_scene_scroll_repair_matches_full_redraw(qapp) -> None:
         QPointF(0.5, 0.5),
     ],
 )
-def test_fractional_scroll_reuse_covers_viewport_edges(
+def test_fractional_scroll_delta_is_rejected_without_mutating_buffer(
     qapp,
     dpr: float,
     target_pan: QPointF,
 ) -> None:
-    """Fractional scroll reuse should not expose uncovered edge strips."""
+    """Fractional device-pixel deltas should leave the existing buffer untouched."""
     qpane = _make_qpane_with_checker_image(qapp, size=1024, dpr=dpr)
     try:
-        actual = _render_scrolled_frame(
-            qpane,
-            start_pan=QPointF(0.0, 0.0),
-            target_pan=target_pan,
-        )
-        _assert_edges_are_covered(actual)
+        view = qpane.view()
+        renderer = view.renderer
+        view.allocate_buffers()
+        start_pan = QPointF(0.0, 0.0)
+        view.viewport.pan = QPointF(start_pan)
+        renderer.markDirty()
+        start_plan = view.calculateRenderPlan(use_pan=start_pan, is_blank=False)
+        assert start_plan is not None
+        renderer.paint(start_plan)
+        original_buffer = QImage(renderer.get_base_buffer())
+        before = renderer.snapshot_metrics()
+
+        view.viewport.pan = QPointF(target_pan)
+        assert renderer.tryScrollBuffers(target_pan) is False
+
+        after = renderer.snapshot_metrics()
+        current_buffer = renderer.get_base_buffer()
+        assert current_buffer is not None
+        assert_images_match(QImage(current_buffer), original_buffer)
+        assert renderer._buffer_pan == start_pan
+        assert renderer.get_subpixel_pan_offset() == QPointF(0.0, 0.0)
+        assert after.scroll_misses == before.scroll_misses + 1
+        assert after.scroll_hits == before.scroll_hits
     finally:
         qpane.deleteLater()
         qapp.processEvents()
@@ -324,6 +366,181 @@ def test_live_pan_uses_scroll_buffer_reuse(qapp) -> None:
         assert after.scroll_attempts == before.scroll_attempts + 1
         assert after.scroll_hits == before.scroll_hits + 1
         assert after.full_redraws == before.full_redraws
+    finally:
+        qpane.deleteLater()
+        qapp.processEvents()
+
+
+def test_live_pan_falls_back_when_candidate_render_source_changes(
+    qapp,
+    monkeypatch,
+) -> None:
+    """A newly selected render source must invalidate the reused buffer interior."""
+    qpane = _make_qpane_with_checker_image(qapp)
+    try:
+        presenter = qpane.view().presenter
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+        renderer = qpane.view().renderer
+        before = renderer.snapshot_metrics()
+        original_calculate = presenter.calculateRenderPlan
+
+        def calculate_with_replaced_source(*, use_pan=None, is_blank=False):
+            plan = original_calculate(use_pan=use_pan, is_blank=is_blank)
+            if plan is None or use_pan is None:
+                return plan
+            base_item = plan.base_raster_item
+            assert base_item is not None
+            replacement_source = QImage(base_item.source_image)
+            replacement_source.setPixel(
+                0,
+                0,
+                replacement_source.pixel(0, 0) ^ 0x00FFFFFF,
+            )
+            replacement_item = replace(base_item, source_image=replacement_source)
+            return replace(plan, render_items=(replacement_item,))
+
+        monkeypatch.setattr(
+            presenter, "calculateRenderPlan", calculate_with_replaced_source
+        )
+        monkeypatch.setattr(
+            renderer,
+            "tryScrollBuffers",
+            lambda *_args, **_kwargs: pytest.fail(
+                "changed render sources must bypass scroll reuse"
+            ),
+        )
+
+        qpane.setPan(QPointF(6.0, 0.0))
+
+        after = renderer.snapshot_metrics()
+        assert after.scroll_attempts == before.scroll_attempts
+        assert not renderer._dirty_region.isEmpty()
+        assert renderer._dirty_region.boundingRect().contains(qpane.rect())
+    finally:
+        qpane.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("dpr", [1.25, 1.5, 2.0, 2.5, 3.0])
+def test_live_high_dpi_pan_falls_back_to_full_redraw(
+    qapp,
+    dpr: float,
+) -> None:
+    """DPR-tagged buffers should redraw instead of relying on unstable Qt rounding."""
+    qpane = _make_qpane_with_checker_image(qapp, size=1024, dpr=dpr)
+    try:
+        presenter = qpane.view().presenter
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+        renderer = qpane.view().renderer
+        before = renderer.snapshot_metrics()
+
+        qpane.setPan(QPointF(6.0, 0.0))
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+
+        after = renderer.snapshot_metrics()
+        assert after.scroll_attempts == before.scroll_attempts + 1
+        assert after.scroll_misses == before.scroll_misses + 1
+        assert after.scroll_hits == before.scroll_hits
+        assert after.full_redraws == before.full_redraws + 1
+        assert renderer.get_subpixel_pan_offset() == QPointF(0.0, 0.0)
+    finally:
+        qpane.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("zoom", [0.5, 0.75, 1.25, 1.5, 2.0, 3.75, 8.0])
+def test_live_scaled_pan_falls_back_to_full_redraw(
+    qapp,
+    zoom: float,
+) -> None:
+    """Scaled raster transforms should redraw instead of shifting sampled pixels."""
+    qpane = _make_qpane_with_checker_image(qapp, size=1024)
+    try:
+        viewport = qpane.view().viewport
+        viewport.setZoomAndPan(zoom, QPointF(0.0, 0.0))
+        presenter = qpane.view().presenter
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+        renderer = qpane.view().renderer
+        before = renderer.snapshot_metrics()
+
+        qpane.setPan(QPointF(6.0, 0.0))
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+
+        after = renderer.snapshot_metrics()
+        assert after.scroll_attempts == before.scroll_attempts + 1
+        assert after.scroll_misses == before.scroll_misses + 1
+        assert after.scroll_hits == before.scroll_hits
+        assert after.full_redraws == before.full_redraws + 1
+        assert renderer.get_subpixel_pan_offset() == QPointF(0.0, 0.0)
+    finally:
+        qpane.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("dpr", [1.0, 1.25, 1.5, 2.5, 3.0])
+def test_live_fractional_physical_pan_falls_back_to_full_redraw(
+    qapp,
+    dpr: float,
+) -> None:
+    """Fractional device-pixel pans must redraw instead of shifting reused pixels."""
+    qpane = _make_qpane_with_checker_image(qapp, size=1024, dpr=dpr)
+    try:
+        presenter = qpane.view().presenter
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+        renderer = qpane.view().renderer
+        before = renderer.snapshot_metrics()
+
+        qpane.setPan(QPointF(-25.5, -63.5))
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+
+        after = renderer.snapshot_metrics()
+        assert after.scroll_attempts == before.scroll_attempts + 1
+        assert after.scroll_misses == before.scroll_misses + 1
+        assert after.scroll_hits == before.scroll_hits
+        assert after.full_redraws == before.full_redraws + 1
+        assert renderer.get_subpixel_pan_offset() == QPointF(0.0, 0.0)
     finally:
         qpane.deleteLater()
         qapp.processEvents()
@@ -392,8 +609,8 @@ def test_scroll_repair_failure_restores_original_buffer(qapp, monkeypatch) -> No
         qapp.processEvents()
 
 
-def test_public_scene_scroll_repair_matches_full_redraw(qapp) -> None:
-    """Multi-layer public scene pan repair should match a clean full redraw."""
+def test_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
+    """Multi-layer public scenes should bypass single-raster scroll reuse."""
     qpane = QPane(features=())
     try:
         qpane.resize(96, 96)
@@ -428,22 +645,35 @@ def test_public_scene_scroll_repair_matches_full_redraw(qapp) -> None:
         )
         qpane.composeScene(request)
         qpane.setZoom1To1()
-        start_pan = QPointF(0.0, 0.0)
-        target_pan = QPointF(9.0, 4.0)
-        expected = _render_clean_frame(qpane, target_pan)
-        actual = _render_scrolled_frame(
-            qpane,
-            start_pan=start_pan,
-            target_pan=target_pan,
+        presenter = qpane.view().presenter
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
         )
-        assert_images_match(actual, expected)
+        renderer = qpane.view().renderer
+        before = renderer.snapshot_metrics()
+        target_pan = QPointF(9.0, 4.0)
+        qpane.setPan(target_pan)
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+        after = renderer.snapshot_metrics()
+        assert after.scroll_hits == before.scroll_hits
+        assert after.full_redraws == before.full_redraws + 1
     finally:
         qpane.deleteLater()
         qapp.processEvents()
 
 
-def test_clipped_public_scene_scroll_repair_matches_full_redraw(qapp) -> None:
-    """Clipped scene layers should repair pan strips to the same pixels as redraw."""
+def test_clipped_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
+    """Clipped public scenes should bypass translation-only scroll reuse."""
     qpane = QPane(features=())
     try:
         qpane.resize(96, 96)
@@ -463,7 +693,7 @@ def test_clipped_public_scene_scroll_repair_matches_full_redraw(qapp) -> None:
         request = QPaneSceneRequest(
             composition_id=None,
             title="Clipped scroll repair scene",
-            bounds=QRectF(0.0, 0.0, 128.0, 128.0),
+            bounds=QRectF(0.0, 0.0, 256.0, 128.0),
             layers=(
                 QPaneCatalogImageLayerRequest(
                     layer_id=uuid.uuid4(),
@@ -483,15 +713,28 @@ def test_clipped_public_scene_scroll_repair_matches_full_redraw(qapp) -> None:
         )
         qpane.composeScene(request)
         qpane.setZoom1To1()
-        start_pan = QPointF(0.0, 0.0)
-        target_pan = QPointF(8.0, 6.0)
-        expected = _render_clean_frame(qpane, target_pan)
-        actual = _render_scrolled_frame(
-            qpane,
-            start_pan=start_pan,
-            target_pan=target_pan,
+        presenter = qpane.view().presenter
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
         )
-        assert_images_match(actual, expected)
+        renderer = qpane.view().renderer
+        before = renderer.snapshot_metrics()
+        target_pan = QPointF(8.0, 0.0)
+        qpane.setPan(target_pan)
+        presenter.paint(
+            is_blank=False,
+            content_overlays={},
+            scene_overlays={},
+            overlays_suspended=False,
+            draw_tool_overlay=None,
+        )
+        after = renderer.snapshot_metrics()
+        assert after.scroll_hits == before.scroll_hits
+        assert after.full_redraws == before.full_redraws + 1
     finally:
         qpane.deleteLater()
         qapp.processEvents()
@@ -577,34 +820,42 @@ def test_base_dirty_redraw_uses_direct_fast_path(
     assert direct_calls == [plan.base_raster_item]
 
 
-def test_layered_strip_repair_draws_mask_source_strips(
+def test_layered_strip_repair_uses_normal_item_draw_paths(
     qpane_with_image,
     monkeypatch,
 ) -> None:
-    """Layered mask strip repair should avoid full-pixmap redraw when possible."""
+    """Layered strip repair should share rasterization with full redraws."""
     qpane = qpane_with_image
     renderer = qpane.view().renderer
     plan, mask_item = _make_mask_plan(qpane.rect())
+    base_item = plan.base_raster_item
+    assert base_item is not None
     repair_rects = [QRect(0, 0, 16, 16)]
+    raster_calls = []
     mask_calls = []
 
     monkeypatch.setattr(
         renderer,
-        "_draw_raster_source_strips",
-        lambda *_args, **_kwargs: True,
+        "_draw_raster_item",
+        lambda painter, render_plan, item: raster_calls.append((render_plan, item)),
     )
     monkeypatch.setattr(
         renderer,
-        "_draw_pixmap_source_strips",
-        lambda painter, item, rects, context: mask_calls.append((item, rects)) or True,
+        "_draw_mask_item",
+        lambda painter, render_plan, item: mask_calls.append((render_plan, item)),
     )
 
     assert renderer._repair_layered_strips(repair_rects, plan) is True
 
-    assert mask_calls == [(mask_item, repair_rects)]
+    assert raster_calls == [(plan, base_item)]
+    assert mask_calls == [(plan, mask_item)]
 
 
-def test_try_scroll_buffers_tracks_fractional_offsets(qpane_with_image, monkeypatch):
+def test_try_scroll_buffers_accepts_near_integer_float_noise(
+    qpane_with_image,
+    monkeypatch,
+) -> None:
+    """Insignificant float noise around device pixels should preserve reuse."""
     qpane = qpane_with_image
     view = qpane.view()
     renderer = view.renderer
@@ -612,14 +863,12 @@ def test_try_scroll_buffers_tracks_fractional_offsets(qpane_with_image, monkeypa
     monkeypatch.setattr(
         renderer, "_repair_base_buffer_strips", lambda rects, state: None
     )
-    fractional_pan = QPointF(7.75, 2.5)
-    view.viewport.pan = QPointF(fractional_pan)
-    result = renderer.tryScrollBuffers(fractional_pan)
+    noisy_integer_pan = QPointF(7.0000000001, 2.9999999999)
+    view.viewport.pan = QPointF(noisy_integer_pan)
+    result = renderer.tryScrollBuffers(noisy_integer_pan)
     assert result is True
-    offset = renderer.get_subpixel_pan_offset()
-    expected_offset = view.viewport.pan - renderer._buffer_pan
-    assert math.isclose(offset.x(), expected_offset.x(), abs_tol=1e-6)
-    assert math.isclose(offset.y(), expected_offset.y(), abs_tol=1e-6)
+    assert renderer._buffer_pan == noisy_integer_pan
+    assert renderer.get_subpixel_pan_offset() == QPointF(0.0, 0.0)
 
 
 def test_try_scroll_buffers_rejects_large_scroll(qpane_with_image):
