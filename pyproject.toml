@@ -68,6 +68,9 @@ include = ["qpane", "qpane.*", "examples"]
 [tool.setuptools]
 zip-safe = false
 
+[tool.setuptools.package-data]
+qpane = ["*.pyi", "py.typed"]
+
 [tool.pytest.ini_options]
 addopts = ["--basetemp=.pytest-tmp"]
 markers = [
