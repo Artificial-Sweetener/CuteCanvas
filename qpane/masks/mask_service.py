@@ -45,6 +45,7 @@ from .mask_controller import MaskController, Masking
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_undo import MaskUndoProvider, MaskUndoState
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
+from .stroke_models import MaskStrokeSegmentPayload
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 
@@ -172,16 +173,18 @@ class MaskService:
 
     def applyStrokeSegment(
         self,
-        start_point,
-        end_point,
-        erase: bool,
+        segment: MaskStrokeSegmentPayload,
     ) -> None:
         """Handle a brush segment emitted by the tool manager."""
-        self._stroke_pipeline.apply_stroke_segment(start_point, end_point, erase)
+        self._stroke_pipeline.apply_stroke_segment(segment)
 
     def commitStroke(self) -> None:
         """Flush the currently recorded stroke to the controller."""
         self._stroke_pipeline.commit_active_stroke()
+
+    def cancelStroke(self) -> None:
+        """Discard the currently recorded provisional stroke."""
+        self._stroke_pipeline.cancel_active_stroke()
 
     def resetStrokePipeline(
         self,

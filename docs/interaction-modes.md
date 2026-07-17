@@ -36,10 +36,12 @@ if modes:
 ## Built-in Modes
 QPane comes with core navigation modes ready to use. You can refer to them via the `ControlMode` enum or the string constants on `QPane`.
 
-* **Pan/Zoom (`ControlMode.PANZOOM`):** The default. Users drag to pan and scroll to zoom. Double-clicking toggles between "fit" and "1:1" views. Wheel steps snap to 100% when crossing it, so you never skip the native scale. Use `QPane.CONTROL_MODE_PANZOOM` when a toolbar or shortcut should return to normal navigation.
+* **Pan/Zoom (`ControlMode.PANZOOM`):** The default. Mouse users drag to pan and scroll to zoom. Touch users drag with one finger, pan and pinch simultaneously with two fingers, and double tap to toggle between fit and 1:1. Wheel steps snap to 100% when crossing it, so you never skip the native scale. Use `QPane.CONTROL_MODE_PANZOOM` when a toolbar or shortcut should return to normal navigation.
 * **Cursor (`ControlMode.CURSOR`):** "Look but don't touch." The viewport stays locked, and drag/scroll events are ignored. Use `QPane.CONTROL_MODE_CURSOR` for read-only states, kiosks, or hosts that handle pointer events outside the viewer.
 
 If you have installed the `mask` or `sam` extras, you will also see `ControlMode.DRAW_BRUSH` and `ControlMode.SMART_SELECT`. Use `QPane.CONTROL_MODE_DRAW_BRUSH` for the raster mask brush and `QPane.CONTROL_MODE_SMART_SELECT` for the SAM box-selection tool. These modes are unavailable when the catalog is empty. See [Masks and SAM](masks-and-sam.md) for details.
+
+Touch and active-pen input are enabled automatically. Brush mode supports fixed-size finger painting, contact-visible touch feedback, pressure-sensitive active pens, floating pen-hover previews, eraser tips, palm rejection, and two-finger navigation. Moving a real mouse after direct input restores its platform brush cursor immediately. Smart Select supports one-finger box selection and two-finger navigation. See [Touch and Pen Input](touch-and-pen.md) for the complete gesture contract, hardware limits, and simulator.
 
 ## View State
 You can control how placeholder and startup image fitting works using `ZoomMode`. `ZoomMode.FIT` keeps the whole image visible, `ZoomMode.LOCKED_ZOOM` keeps the configured zoom value stable for inspection workflows, and `ZoomMode.LOCKED_SIZE` keeps the rendered placeholder size stable when the viewport changes.
@@ -66,6 +68,7 @@ Host controls can call `QPane.setComparisonSplit` directly to move the boundary.
 > **Pro Tip:** Want the best of both worlds? QPane includes a built-in "hold Space to pan" feature that temporarily switches to `CONTROL_MODE_PANZOOM` while the widget has focus. For a global implementation that works even when focus is elsewhere (like in the demo), see `examples/demonstration/demo_window.py`.
 
 ## Related Docs
+* [Touch and Pen Input](touch-and-pen.md): Direct manipulation, pen pressure, palm rejection, and synthetic tests.
 * [Masks and SAM](masks-and-sam.md): Details on the brush and smart selection tools.
 * [Extensibility](extensibility.md): How to register your own custom tools and cursors.
 * [Catalog and Navigation](catalog-and-navigation.md): Managing the images you are interacting with.

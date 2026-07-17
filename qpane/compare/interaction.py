@@ -34,9 +34,10 @@ if TYPE_CHECKING:
 
 
 class CompareDividerInteraction:
-    """Own mouse-driven comparison divider behavior."""
+    """Own mouse- and touch-driven comparison divider behavior."""
 
     _HIT_WIDTH = 12.0
+    _TOUCH_HIT_WIDTH = 44.0
 
     def __init__(self, *, qpane: "QPane", service: CompareService) -> None:
         """Capture the owning widget and comparison state service."""
@@ -81,17 +82,7 @@ class CompareDividerInteraction:
 
     def geometry(self) -> ProjectedClipBoundary | None:
         """Return divider geometry for the active comparison state."""
-        state = self._service.state()
-        if not state.enabled:
-            return None
-        plan = self._current_render_plan()
-        if plan is None:
-            return None
-        return projected_comparison_boundary(
-            plan,
-            orientation=state.orientation,
-            hit_width=self._HIT_WIDTH,
-        )
+        return self._geometry(self._HIT_WIDTH)
 
     def state(self) -> ComparisonDividerState:
         """Return public divider state for host-owned drawing."""
@@ -162,9 +153,56 @@ class CompareDividerInteraction:
         self._qpane.update()
         return True
 
+    def handle_touch_begin(self, point: QPointF) -> bool:
+        """Start a divider drag using a touch-friendly hit target."""
+        geometry = self._geometry(self._TOUCH_HIT_WIDTH)
+        if (
+            not self._interaction_active()
+            or geometry is None
+            or not geometry.contains(point)
+        ):
+            return False
+        self._dragging = True
+        self._hovered = False
+        self._set_split_from_point(point)
+        self._qpane.update()
+        return True
+
+    def handle_touch_update(self, point: QPointF) -> bool:
+        """Move a divider while its touch sequence remains captured."""
+        if not self._dragging:
+            return False
+        self._set_split_from_point(point)
+        self._qpane.update()
+        return True
+
+    def handle_touch_end(self, point: QPointF) -> bool:
+        """Finish an active touch divider drag."""
+        if not self._dragging:
+            return False
+        self._set_split_from_point(point)
+        self._dragging = False
+        self._hovered = False
+        self._qpane.update()
+        return True
+
     def _interaction_active(self) -> bool:
         """Return whether divider hit testing should run."""
         return self._interactive and self._service.state().enabled
+
+    def _geometry(self, hit_width: float) -> ProjectedClipBoundary | None:
+        """Return divider geometry using the requested interaction target width."""
+        state = self._service.state()
+        if not state.enabled:
+            return None
+        plan = self._current_render_plan()
+        if plan is None:
+            return None
+        return projected_comparison_boundary(
+            plan,
+            orientation=state.orientation,
+            hit_width=hit_width,
+        )
 
     def _set_split_from_point(self, point: QPointF) -> None:
         """Convert a widget point into a normalized comparison split."""

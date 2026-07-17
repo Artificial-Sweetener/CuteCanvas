@@ -16,10 +16,11 @@
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor
 from qpane.masks.tools.smart_select import SmartSelectTool
 from qpane.tools import ToolDependencies
+from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
 
 
 class _PointWrapper:
@@ -127,6 +128,39 @@ def test_smart_select_emits_bbox_from_origin(smart_select_tool):
     bbox, erase_flag = emissions[0]
     assert np.array_equal(bbox, np.array([0, 0, 10, 10]))
     assert erase_flag is False
+
+
+def test_smart_select_accepts_direct_touch_drag(smart_select_tool) -> None:
+    emissions = []
+    smart_select_tool.signals.region_selected_for_masking.connect(
+        lambda bbox, erase: emissions.append((bbox, erase))
+    )
+
+    def sample(phase: PointerPhase, point: QPointF) -> PointerSample:
+        return PointerSample(
+            pointer_id=1,
+            device=PointerDeviceKind.TOUCH,
+            phase=phase,
+            position=point,
+            global_position=point,
+            pressure=1.0,
+            buttons=Qt.MouseButton.NoButton,
+            modifiers=Qt.KeyboardModifier.NoModifier,
+            timestamp_ms=0,
+        )
+
+    assert smart_select_tool.handle_pointer_sample(
+        sample(PointerPhase.BEGIN, QPointF(2.0, 3.0))
+    )
+    assert smart_select_tool.handle_pointer_sample(
+        sample(PointerPhase.UPDATE, QPointF(20.0, 30.0))
+    )
+    assert smart_select_tool.handle_pointer_sample(
+        sample(PointerPhase.END, QPointF(20.0, 30.0))
+    )
+
+    assert len(emissions) == 1
+    assert np.array_equal(emissions[0][0], np.array([2, 3, 20, 30]))
 
 
 def test_smart_select_ignores_zero_area_selection(smart_select_tool):

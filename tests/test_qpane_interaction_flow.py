@@ -131,6 +131,22 @@ def test_enter_and_leave_events_delegate_to_tool_manager(qapp, monkeypatch):
         _cleanup_qpane(qpane, qapp)
 
 
+def test_control_mode_selected_before_show_is_preserved(qapp) -> None:
+    """An explicit host selection should win over first-show initialization."""
+    qpane = QPane(features=())
+    qpane.resize(64, 64)
+    _load_images(qpane, [Qt.white])
+    try:
+        qpane.setControlMode(QPane.CONTROL_MODE_CURSOR)
+
+        qpane.show()
+        qapp.processEvents()
+
+        assert qpane.getControlMode() == QPane.CONTROL_MODE_CURSOR
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
 def test_set_current_image_id_suspends_overlays(qapp, monkeypatch):
     qpane = QPane(features=())
     qpane.resize(64, 64)

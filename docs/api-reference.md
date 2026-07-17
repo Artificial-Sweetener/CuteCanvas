@@ -316,6 +316,8 @@ See also: [Diagnostics](diagnostics.md).
 - QPane.redoMaskEdit — Redo the last reverted mask edit when a mask is active.
 - QPane.CONTROL_MODE_DRAW_BRUSH — Built-in brush mode for mask painting.
 
+QPane receives touch and tablet input automatically. Pan/zoom mode supports direct one-finger pan, centroid-anchored two-finger pan/pinch, double tap, and optional translation inertia. Brush mode supports fixed-size touch painting plus pressure-sensitive active pens and eraser tips. These behaviors are configured through `Config`; see [Touch and Pen Input](touch-and-pen.md).
+
 ### SAM
 - QPane.samFeatureAvailable — Check whether the SAM feature is installed.
 - QPane.samCheckpointReady — Check whether the resolved SAM checkpoint exists on disk.

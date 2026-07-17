@@ -105,6 +105,36 @@ def test_has_consumer_reflects_registration():
     assert coordinator.has_consumer("tiles")
 
 
+def test_usage_notification_during_trim_does_not_reenter_enforcement() -> None:
+    """Synchronous trim notifications must not recursively enforce the budget."""
+    coordinator = CacheCoordinator(active_budget_bytes=0)
+    usage = 0
+    trim_calls = 0
+
+    def trim_to(_target: int) -> None:
+        """Report unchanged usage once, then expose any recursive retry."""
+        nonlocal trim_calls
+        trim_calls += 1
+        if trim_calls > 1:
+            raise RuntimeError("recursive enforcement")
+        coordinator.update_usage("cache", usage)
+
+    coordinator.register_consumer(
+        "cache",
+        priority=CachePriority.TILES,
+        callbacks=CacheConsumerCallbacks(
+            get_usage=lambda: usage,
+            set_budget=lambda _target: None,
+            trim_to=trim_to,
+        ),
+    )
+
+    usage = 10
+    coordinator.update_usage("cache", usage)
+
+    assert trim_calls == 1
+
+
 def test_consumer_override_updates_budget():
     coordinator = CacheCoordinator(active_budget_bytes=200)
     consumer = FakeConsumer(usage=150)

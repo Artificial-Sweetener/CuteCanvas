@@ -37,6 +37,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..core import Config
 from .coordinates import CoordinateContext, PanelHitTest
+from .viewport_motion import ViewportMotionController
 from ..scene.render_plan import SceneContentSnapshot
 
 
@@ -67,6 +68,7 @@ class Viewport(QObject):
     _SMOOTH_ZOOM_FAST_THRESHOLD_MS = 40.0
     _SMOOTH_ZOOM_SLOW_THRESHOLD_MS = 160.0
     _PAN_EPSILON_PX = 1e-6
+    _MAX_ZOOM = 10.0
 
     def __init__(self, qpane: QWidget, config: Config):
         """Initialise viewport state tied to the hosting qpane.
@@ -103,12 +105,18 @@ class Viewport(QObject):
         self._zoom_anim_last_tick_ms: float | None = None
         self._zoom_last_request_time: float | None = None
         self._smooth_zoom_last_burst = False
+        self._motion = ViewportMotionController(
+            get_pan=lambda: QPointF(self.pan),
+            apply_pan=self._apply_inertial_pan,
+            parent=self,
+        )
 
     def setContentSize(self, size: QSize):
         """Record the content size used for zoom and clamp calculations."""
         self.content_size = size
         if size.isNull():
             self._stop_zoom_animation()
+            self._motion.stop()
 
     def is_locked(self) -> bool:
         """Return whether pan and zoom updates are currently blocked."""
@@ -119,6 +127,7 @@ class Viewport(QObject):
         self._pan_zoom_locked = locked
         if locked:
             self._stop_zoom_animation()
+            self._motion.stop()
 
     def get_zoom_mode(self) -> ViewportZoomMode:
         """Expose the active zoom mode."""
@@ -126,6 +135,7 @@ class Viewport(QObject):
 
     def setPan(self, pan: QPointF):
         """Clamp and apply panning when unlocked, emitting viewChanged on updates."""
+        self._motion.stop()
         if self._pan_zoom_locked and pan != self.pan:
             return
         # _commit_zoom_change handles the check for whether the view changed
@@ -134,9 +144,43 @@ class Viewport(QObject):
 
     def setZoomAndPan(self, zoom: float, pan: QPointF) -> None:
         """Apply zoom and pan together when unlocked so callers move atomically."""
+        self._motion.stop()
         if self._pan_zoom_locked and (zoom != self.zoom or pan != self.pan):
             return
         self._commit_zoom_change(zoom, pan)
+
+    def clamp_zoom(self, requested_zoom: float) -> float:
+        """Clamp a requested zoom to the authoritative viewport limits."""
+        safe_minimum = max(
+            self.min_zoom(),
+            float(getattr(self._config, "safe_min_zoom", 1e-3)),
+        )
+        return min(self._MAX_ZOOM, max(float(requested_zoom), safe_minimum))
+
+    def apply_direct_manipulation(self, requested_zoom: float, pan: QPointF) -> None:
+        """Apply a live gesture transform without interpolation or split updates."""
+        if self.content_size.isNull() or self._pan_zoom_locked:
+            return
+        self._stop_zoom_animation()
+        self._commit_zoom_change(
+            self.clamp_zoom(requested_zoom),
+            QPointF(pan),
+            zoom_mode=ViewportZoomMode.CUSTOM,
+        )
+
+    def stop_transient_motion(self) -> None:
+        """Stop kinetic translation before a new direct manipulation begins."""
+        self._motion.stop()
+
+    def start_translation_inertia(
+        self,
+        velocity: QPointF,
+        deceleration: float,
+    ) -> bool:
+        """Start bounded translation inertia after touch contacts release."""
+        if self.content_size.isNull() or self._pan_zoom_locked:
+            return False
+        return self._motion.start(velocity, deceleration)
 
     def nativeZoom(self) -> float:
         """Return the zoom level where one image pixel maps to one device pixel."""
@@ -234,6 +278,7 @@ class Viewport(QObject):
         Args:
             anchor: Optional panel coordinate to keep stationary while zooming.
         """
+        self._motion.stop()
         if self.content_size.isNull():
             return
         if self._pan_zoom_locked:
@@ -257,6 +302,7 @@ class Viewport(QObject):
 
     def setZoom1To1Interpolated(self, anchor: QPoint | QPointF | None = None) -> None:
         """Snap zoom to native pixel ratio using an interpolated transition."""
+        self._motion.stop()
         if self.content_size.isNull():
             return
         if self._pan_zoom_locked:
@@ -274,6 +320,7 @@ class Viewport(QObject):
 
     def setZoomFit(self):
         """Fit the content within the viewport and recenter pan."""
+        self._motion.stop()
         if self.content_size.isNull():
             return
         if self._pan_zoom_locked:
@@ -294,6 +341,7 @@ class Viewport(QObject):
 
     def setZoomFitInterpolated(self) -> None:
         """Fit the content within the viewport using an interpolated transition."""
+        self._motion.stop()
         if self.content_size.isNull():
             return
         if self._pan_zoom_locked:
@@ -316,6 +364,7 @@ class Viewport(QObject):
 
     def applyZoom(self, requested_zoom: float, anchor: QPoint | QPointF | None = None):
         """Apply the requested zoom, keeping an anchor steady when provided and clamping pan to bounds."""
+        self._motion.stop()
         if self.content_size.isNull() or self._pan_zoom_locked:
             return
         self._stop_zoom_animation()
@@ -326,6 +375,7 @@ class Viewport(QObject):
         self, requested_zoom: float, anchor: QPoint | QPointF | None = None
     ) -> None:
         """Apply the requested zoom using a short interpolation window."""
+        self._motion.stop()
         if self.content_size.isNull() or self._pan_zoom_locked:
             return
         request_delta_ms = self._record_zoom_request_time()
@@ -348,6 +398,7 @@ class Viewport(QObject):
         fit_zoom: float | None = None,
     ) -> None:
         """Apply an interpolated zoom request while setting the requested mode."""
+        self._motion.stop()
         if self.content_size.isNull() or self._pan_zoom_locked:
             return
         request_delta_ms = self._record_zoom_request_time()
@@ -436,7 +487,7 @@ class Viewport(QObject):
         context = CoordinateContext(self.qpane, content_snapshot=content_snapshot)
         return context.panel_to_image(QPointF(panel_pos))
 
-    def panel_hit_test(self, panel_pos: QPoint) -> PanelHitTest | None:
+    def panel_hit_test(self, panel_pos: QPoint | QPointF) -> PanelHitTest | None:
         """Return content hit-test metadata for a panel coordinate when content is available."""
         content_snapshot = self._current_content_snapshot()
         if content_snapshot is None:
@@ -501,16 +552,35 @@ class Viewport(QObject):
             return None
         return snapshot_getter()
 
-    def _commit_zoom_change(self, zoom: float, pan: QPointF):
-        """Clamp pan and zoom, update stored state, and emit viewChanged when values change."""
+    def _commit_zoom_change(
+        self,
+        zoom: float,
+        pan: QPointF,
+        *,
+        zoom_mode: ViewportZoomMode | None = None,
+    ) -> bool:
+        """Commit one changed view state and optionally assign its semantic mode."""
         panel_size = self._physical_viewport_size()
         clamped_pan = self.clampPan(pan, zoom, panel_size, self.content_size)
         if self.zoom == zoom and self.pan == clamped_pan:
-            return
+            return False
+        if zoom_mode is not None:
+            self.zoom_mode = zoom_mode
         self.zoom = zoom
         self.pan = clamped_pan
         self.viewChanged.emit()
         self._mark_diagnostics_dirty()
+        return True
+
+    def _apply_inertial_pan(self, pan: QPointF) -> None:
+        """Apply one kinetic pan frame without restarting motion ownership."""
+        if self.content_size.isNull() or self._pan_zoom_locked:
+            return
+        self._commit_zoom_change(
+            self.zoom,
+            QPointF(pan),
+            zoom_mode=ViewportZoomMode.CUSTOM,
+        )
 
     def _should_interpolate_zoom(self, old_zoom: float, new_zoom: float) -> bool:
         """Return True when zoom interpolation should be used for this change."""

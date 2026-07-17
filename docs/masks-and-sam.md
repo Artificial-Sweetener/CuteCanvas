@@ -96,6 +96,8 @@ Use `QPane.setControlMode` to activate the tools.
 viewer.setControlMode(QPane.CONTROL_MODE_DRAW_BRUSH)
 ```
 
+Brush mode accepts mouse, touch, and active-pen input directly. A finger paints with the configured fixed diameter and receives a visible contact ring. A hover-capable active pen previews the nominal brush or eraser before contact, preserves subpixel coordinates, and uses pressure-sensitive diameter by default while painting. Two contacts that arrive before a finger stroke begins navigate the viewport without creating an undo entry. Recent pen input suppresses palm-like single-touch painting while retaining two-finger navigation. See [Touch and Pen Input](touch-and-pen.md) for the exact arbitration rules and no-hardware simulator.
+
 > **Heads-up:** These modes are disabled when the catalog is empty (placeholder active).
 
 ### Smart Select (SAM)

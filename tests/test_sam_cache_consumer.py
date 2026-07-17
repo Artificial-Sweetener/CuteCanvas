@@ -19,9 +19,14 @@
 from __future__ import annotations
 from typing import Callable, List
 import uuid
+
 import pytest
+from PySide6.QtGui import QColor, QImage
+
 from qpane.cache.coordinator import CacheCoordinator
 from qpane.cache.consumers import SamPredictorCacheConsumer
+from qpane.sam.manager import SamManager
+from tests.helpers.executor_stubs import StubExecutor
 
 
 class _Signal:
@@ -45,6 +50,8 @@ class _ManagerStub:
         self.request_calls: list[tuple[object, uuid.UUID, object]] = []
         self.cache_bytes = 0
         self.pending_bytes = 0
+        self.predictor_id_queries = 0
+        self.release_pending_after_queries: int | None = None
         self._sam_predictors: dict[uuid.UUID, object] = {}
         self.predictorReady = _Signal()
         self.predictorCacheCleared = _Signal()
@@ -60,6 +67,12 @@ class _ManagerStub:
         return self.pending_bytes
 
     def predictorImageIds(self) -> list[uuid.UUID]:
+        self.predictor_id_queries += 1
+        if (
+            self.release_pending_after_queries is not None
+            and self.predictor_id_queries >= self.release_pending_after_queries
+        ):
+            self.pending_bytes = 0
         return list(self._sam_predictors.keys())
 
     def cancelPendingPredictor(self, image_id: uuid.UUID) -> bool:
@@ -79,25 +92,70 @@ class _ManagerMissingHook(_ManagerStub):
         self.cancelPendingPredictor = None
 
 
-def test_predictor_consumer_tracks_pending_and_ready_usage():
+def test_predictor_consumer_tracks_only_resident_predictor_usage():
+    """Pending work stays separate while ready predictors count as cache usage."""
     manager = _ManagerStub()
     coordinator = CacheCoordinator(512 * 1024 * 1024)
-    consumer = SamPredictorCacheConsumer(manager, coordinator)
+    SamPredictorCacheConsumer(manager, coordinator)
     image_id = uuid.uuid4()
     manager.pending_bytes = 4096
     manager.cache_bytes = 0
     manager.requestPredictor(None, image_id, source_path=None)  # wrapped by consumer
     snapshot = coordinator.snapshot()
-    assert snapshot["consumers"]["predictors"]["usage_bytes"] == 4096
+    assert snapshot["consumers"]["predictors"]["usage_bytes"] == 0
     manager.pending_bytes = 0
     manager.cache_bytes = 2048
     manager._sam_predictors[image_id] = object()
     manager.predictorReady.emit(object(), image_id)
     snapshot = coordinator.snapshot()
     assert snapshot["consumers"]["predictors"]["usage_bytes"] == 2048
-    consumer._trim_to(0)
+    coordinator.set_active_budget(0)
     snapshot = coordinator.snapshot()
     assert snapshot["consumers"]["predictors"]["usage_bytes"] == 0
+
+
+def test_pending_predictor_is_not_treated_as_evictable_cache_usage(caplog) -> None:
+    """Pending predictor work must not enter resident-cache enforcement."""
+    manager = _ManagerStub()
+    coordinator = CacheCoordinator(0)
+    SamPredictorCacheConsumer(manager, coordinator)
+    manager.pending_bytes = 128 * 1024 * 1024
+    manager.release_pending_after_queries = 2
+
+    manager.requestPredictor(None, uuid.uuid4(), source_path=None)
+
+    snapshot = coordinator.snapshot()
+    assert snapshot["consumers"]["predictors"]["usage_bytes"] == 0
+    assert manager.predictor_id_queries == 0
+    assert "failed to trim below target" not in caplog.text
+    assert "Cache remains over budget" not in caplog.text
+
+
+def test_real_manager_pending_request_stays_outside_cache_budget(
+    qapp, tmp_path, caplog
+) -> None:
+    """The production manager contract keeps in-flight work out of cache usage."""
+    checkpoint = tmp_path / "sam-checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    executor = StubExecutor()
+    manager = SamManager(executor=executor, checkpoint_path=checkpoint)
+    coordinator = CacheCoordinator(0)
+    SamPredictorCacheConsumer(manager, coordinator)
+    image = QImage(16, 16, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    image_id = uuid.uuid4()
+
+    try:
+        manager.requestPredictor(image, image_id, source_path=tmp_path / "image.png")
+
+        assert manager.pendingUsageBytes() == 128 * 1024 * 1024
+        assert list(executor.pending_tasks())
+        snapshot = coordinator.snapshot()
+        assert snapshot["consumers"]["predictors"]["usage_bytes"] == 0
+        assert "failed to trim below target" not in caplog.text
+        assert "Cache remains over budget" not in caplog.text
+    finally:
+        manager.shutdown()
 
 
 def test_predictor_consumer_errors_when_required_hook_missing(caplog):

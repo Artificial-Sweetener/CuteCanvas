@@ -144,6 +144,26 @@ config.configure(
 )
 ```
 
+## Touch and Active Pen
+
+Direct input is enabled by default. Touch navigation, finger painting, stylus painting, pressure response, palm rejection, and translation inertia have independent settings, so a host can preserve two-finger navigation while disabling finger paint or reserve tablet events for another component.
+
+```python
+config.configure(
+    touch_navigation_enabled=True,
+    touch_paint_enabled=True,
+    stylus_paint_enabled=True,
+    pen_pressure_enabled=True,
+    pen_pressure_min_ratio=0.15,
+    pen_pressure_gamma=1.0,
+    palm_rejection_ms=800,
+    touch_inertia_enabled=True,
+    touch_inertia_deceleration=4500.0,
+)
+```
+
+See [Touch and Pen Input](touch-and-pen.md) for gesture arbitration, pressure mapping, and hardware-test guidance.
+
 ## Concurrency
 QPane uses a sophisticated background executor to keep the UI responsive. By default, it runs with two worker threads (`max_workers=2`). This ensures that background tasks (like prefetching the next image or running SAM) never block the primary thread responsible for decoding visible tiles.
 
@@ -186,6 +206,7 @@ If you are building a UI that exposes settings for optional features (like SAM),
 
 ## Related Docs
 * [Configuration Reference](configuration-reference.md): The complete list of every field and default value.
+* [Touch and Pen Input](touch-and-pen.md): Direct manipulation and mask-paint behavior.
 * [Masks and SAM](masks-and-sam.md): Feature-specific settings.
 * [Diagnostics](diagnostics.md): How to observe runtime behavior.
 * [Catalog and Navigation](catalog-and-navigation.md): Managing the image list.

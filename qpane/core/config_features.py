@@ -89,6 +89,21 @@ class MaskConfigSlice:
 
 
 @dataclass
+class InputConfigSlice:
+    """Touch, active-pen, pressure, and direct-manipulation policy."""
+
+    touch_navigation_enabled: bool = _BASE_CONFIG.touch_navigation_enabled
+    touch_paint_enabled: bool = _BASE_CONFIG.touch_paint_enabled
+    stylus_paint_enabled: bool = _BASE_CONFIG.stylus_paint_enabled
+    pen_pressure_enabled: bool = _BASE_CONFIG.pen_pressure_enabled
+    pen_pressure_min_ratio: float = _BASE_CONFIG.pen_pressure_min_ratio
+    pen_pressure_gamma: float = _BASE_CONFIG.pen_pressure_gamma
+    palm_rejection_ms: int = _BASE_CONFIG.palm_rejection_ms
+    touch_inertia_enabled: bool = _BASE_CONFIG.touch_inertia_enabled
+    touch_inertia_deceleration: float = _BASE_CONFIG.touch_inertia_deceleration
+
+
+@dataclass
 class DiagnosticsConfigSlice:
     """Diagnostics overlay switches and viewer debug toggles."""
 
@@ -163,6 +178,28 @@ def _validate_mask_config(slice_obj: MaskConfigSlice) -> None:
         raise ValueError(
             "mask_autosave_path_template must be set when autosave is enabled"
         )
+
+
+def _validate_input_config(slice_obj: InputConfigSlice) -> None:
+    """Enforce supported direct-input policy ranges."""
+    boolean_fields = (
+        "touch_navigation_enabled",
+        "touch_paint_enabled",
+        "stylus_paint_enabled",
+        "pen_pressure_enabled",
+        "touch_inertia_enabled",
+    )
+    for field_name in boolean_fields:
+        if not isinstance(getattr(slice_obj, field_name), bool):
+            raise ValueError(f"{field_name} must be a boolean")
+    if not 0 < slice_obj.pen_pressure_min_ratio <= 1:
+        raise ValueError("pen_pressure_min_ratio must be greater than 0 and at most 1")
+    if slice_obj.pen_pressure_gamma <= 0:
+        raise ValueError("pen_pressure_gamma must be greater than 0")
+    if slice_obj.palm_rejection_ms < 0:
+        raise ValueError("palm_rejection_ms must be non-negative")
+    if slice_obj.touch_inertia_deceleration <= 0:
+        raise ValueError("touch_inertia_deceleration must be greater than 0")
 
 
 def _validate_diagnostics_config(slice_obj: DiagnosticsConfigSlice) -> None:
@@ -315,6 +352,13 @@ MASK_DESCRIPTOR = FeatureConfigDescriptor(
     description="Mask editing, autosave, and diagnostics knobs.",
     validators=(_validate_mask_config,),
 )
+INPUT_DESCRIPTOR = FeatureConfigDescriptor(
+    namespace="input",
+    schema=InputConfigSlice,
+    title="Touch and pen",
+    description="Direct touch navigation, mask painting, pressure, and palm rejection.",
+    validators=(_validate_input_config,),
+)
 DIAGNOSTICS_DESCRIPTOR = FeatureConfigDescriptor(
     namespace="diagnostics",
     schema=DiagnosticsConfigSlice,
@@ -333,6 +377,7 @@ SAM_DESCRIPTOR = FeatureConfigDescriptor(
 
 for descriptor in (
     CORE_DESCRIPTOR,
+    INPUT_DESCRIPTOR,
     MASK_DESCRIPTOR,
     DIAGNOSTICS_DESCRIPTOR,
     SAM_DESCRIPTOR,

@@ -74,6 +74,15 @@ config = {
     # --- Masks & Tools ---
     "default_brush_size": 30,  # Default brush size in pixels.
     "brush_scroll_increment": 5,  # Brush size delta per scroll tick.
+    "touch_navigation_enabled": True,  # Enable direct one- and two-finger viewport gestures.
+    "touch_paint_enabled": True,  # Allow one-finger mask painting in Brush mode.
+    "stylus_paint_enabled": True,  # Route active-pen tablet events directly to Brush mode.
+    "pen_pressure_enabled": True,  # Scale active-pen diameter from tablet pressure.
+    "pen_pressure_min_ratio": 0.15,  # Minimum pressure diameter ratio; range (0, 1].
+    "pen_pressure_gamma": 1.0,  # Positive exponent shaping the pressure curve.
+    "palm_rejection_ms": 800,  # Reject single-touch painting after recent pen activity.
+    "touch_inertia_enabled": True,  # Continue translation briefly after touch release.
+    "touch_inertia_deceleration": 4500.0,  # Kinetic deceleration in physical px/s².
     "mask_undo_limit": 20,  # Max undo steps retained per mask.
     "smart_select_min_size": 5,  # Minimum selection size (px) for smart-select tool.
     "mask_border_enabled": False,  # Draw mask borders (uses OpenCV if available).

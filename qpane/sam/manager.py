@@ -390,10 +390,10 @@ class SamManager(QObject):
         self._pending_estimates.clear()
         self.predictorCacheCleared.emit()
 
-    def removeFromCache(self, image_id: uuid.UUID):
-        """Remove the cached predictor for image_id and cancel any queued retry."""
+    def removeFromCache(self, image_id: uuid.UUID) -> bool:
+        """Remove a cached predictor and report whether it was present."""
         self._retry.cancel(self._retry_key(image_id))
-        self._drop_predictor(image_id)
+        return self._drop_predictor(image_id)
 
     def shutdown(self) -> None:
         """Cancel pending predictor work and clear retries."""

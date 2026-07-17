@@ -122,8 +122,9 @@ class ToolSignals(ExtensionToolSignals):
     """Internal signal hub for built-in tools and feature wiring."""
 
     drag_start_maybe_requested = Signal(QMouseEvent)
-    stroke_applied = Signal(QPoint, QPoint, bool)
+    stroke_applied = Signal(object)
     stroke_completed = Signal()
+    stroke_cancelled = Signal()
     brush_size_changed = Signal(int)
     region_selected_for_masking = Signal(np.ndarray, bool)
     mask_component_adjustment_requested = Signal(QPoint, bool)
@@ -390,20 +391,25 @@ class PanZoomTool(BaseTool):
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         """Toggle between fit and one-to-one zoom anchored at the click position."""
+        self.handle_double_tap(event.position())
+
+    def handle_double_tap(self, position: QPointF) -> bool:
+        """Toggle fit and one-to-one for a normalized direct-input tap."""
         if self._is_pan_zoom_locked():
-            return
+            return False
         if self._is_image_null():
-            return
+            return False
         if self._get_zoom_mode() != _viewport_zoom_mode().FIT:
             if self._set_zoom_fit_interpolated is not None:
                 self._set_zoom_fit_interpolated()
             else:
                 self._set_zoom_fit()
-            return
+            return True
         if self._set_zoom_one_to_one_interpolated is not None:
-            self._set_zoom_one_to_one_interpolated(event.position())
+            self._set_zoom_one_to_one_interpolated(position)
         else:
-            self._set_zoom_one_to_one(event.position())
+            self._set_zoom_one_to_one(position)
+        return True
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """Request zoom adjustments around the pointer using wheel delta magnitude.

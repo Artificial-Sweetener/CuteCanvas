@@ -197,8 +197,13 @@ class CacheCoordinator:
         if state is None:
             self._warn_unknown_consumer(consumer_id, "update_usage")
             return
-        state.usage_bytes = max(0, usage_bytes)
-        self._enforce_budget()
+        normalized_usage = max(0, usage_bytes)
+        usage_changed = normalized_usage != state.usage_bytes
+        state.usage_bytes = normalized_usage
+        if self._enforcing:
+            self._pending_enforce = self._pending_enforce or usage_changed
+        else:
+            self._enforce_budget()
         self._mark_dirty()
 
     def set_consumer_override(

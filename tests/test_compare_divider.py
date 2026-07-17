@@ -369,6 +369,26 @@ def test_divider_hit_target_tracks_real_boundary(qapp) -> None:
         _cleanup_qpane(viewer, qapp)
 
 
+def test_divider_touch_drag_uses_forty_four_pixel_hit_target(qapp) -> None:
+    """Touch should capture near the divider beyond the precise mouse target."""
+    viewer, _base_id, _compare_id = _viewer_with_comparison(qapp)
+    try:
+        interaction = viewer.comparisonDividerInteraction()
+        geometry = interaction.geometry()
+        assert geometry is not None
+        assert geometry.visible_segment is not None
+        midpoint = _segment_midpoint(geometry.visible_segment)
+        touch_point = QPointF(midpoint.x() + 15.0, midpoint.y())
+
+        assert not interaction.hit_test(touch_point)
+        assert interaction.handle_touch_begin(touch_point)
+        assert viewer.comparisonDividerState().dragging
+        assert interaction.handle_touch_end(touch_point)
+        assert not viewer.comparisonDividerState().dragging
+    finally:
+        _cleanup_qpane(viewer, qapp)
+
+
 def test_vertical_divider_drag_updates_split_from_scene_coordinates(qapp) -> None:
     """Dragging a vertical divider should update split using scene coordinates."""
     viewer, _base_id, _compare_id = _viewer_with_comparison(qapp)

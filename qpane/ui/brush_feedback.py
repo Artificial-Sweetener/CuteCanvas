@@ -14,23 +14,30 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Widget configuration helpers for QPane's Qt facade."""
+"""Shared high-contrast rendering policy for brush-size feedback."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 
 
-def apply_widget_defaults(widget: QWidget) -> None:
-    """Configure QPane's QWidget defaults such as translucency and tracking.
+BRUSH_OUTLINE_PADDING = 4
 
-    Args:
-        widget: QWidget that should adopt the baseline drawing and sizing contract.
-    """
-    widget.setAttribute(Qt.WA_TranslucentBackground)
-    widget.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
-    widget.setMouseTracking(True)
-    widget.setTabletTracking(True)
-    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    widget.setMinimumSize(1, 1)
+
+def draw_brush_outline(
+    painter: QPainter,
+    ellipse: QRectF,
+    color: QColor,
+) -> None:
+    """Draw a black/white/color ring visible over arbitrary image content."""
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    for ring_color, width in (
+        (QColor(Qt.GlobalColor.black), 5.0),
+        (QColor(Qt.GlobalColor.white), 3.0),
+        (QColor(color), 1.0),
+    ):
+        pen = QPen(ring_color, width)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawEllipse(ellipse)

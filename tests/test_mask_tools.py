@@ -21,13 +21,15 @@ import uuid
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
 from qpane.catalog.image_utils import qimage_to_numpy_view_grayscale8
 from qpane.masks.strokes import _DecimatedStrokeState
 from qpane.masks.stroke_render import render_stroke_segments
 from qpane.masks.tools import BrushTool
 from qpane.rendering.coordinates import PanelHitTest
-from qpane.masks.mask_controller import MaskStrokeSegmentPayload
+from qpane.masks.stroke_models import MaskStrokeSegmentPayload
 from qpane.tools import ToolDependencies
+from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
 
 
 class _WheelEventStub:
@@ -75,15 +77,43 @@ class _MouseEventStub:
         self.accepted = False
 
 
-class _MonotonicStub:
-    def __init__(self):
-        self._value = 0.0
+def _record_segment(
+    strokes: list[tuple[QPoint, QPoint, bool]],
+    segment: MaskStrokeSegmentPayload,
+) -> None:
+    """Convert one payload to the integer tuple used by mouse characterizations."""
+    strokes.append(
+        (
+            QPoint(round(segment.start[0]), round(segment.start[1])),
+            QPoint(round(segment.end[0]), round(segment.end[1])),
+            segment.erase,
+        )
+    )
 
-    def advance(self, delta: float) -> None:
-        self._value += delta
 
-    def __call__(self) -> float:
-        return self._value
+def _pointer_sample(
+    phase: PointerPhase,
+    position: QPointF,
+    *,
+    pressure: float,
+    device: PointerDeviceKind = PointerDeviceKind.PEN,
+) -> PointerSample:
+    """Build a normalized direct-input sample for brush tests."""
+    return PointerSample(
+        pointer_id=17,
+        device=device,
+        phase=phase,
+        position=QPointF(position),
+        global_position=QPointF(position),
+        pressure=pressure,
+        buttons=(
+            Qt.MouseButton.NoButton
+            if phase in (PointerPhase.END, PointerPhase.HOVER)
+            else Qt.MouseButton.LeftButton
+        ),
+        modifiers=Qt.KeyboardModifier.NoModifier,
+        timestamp_ms=0,
+    )
 
 
 def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
@@ -94,16 +124,16 @@ def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
     end = QPoint(3, 3)
     preview = state.preview_segment(
         dirty_rect=dirty_rect,
-        start_point=start,
-        end_point=end,
-        erase=False,
-        brush_size=4,
+        segment=MaskStrokeSegmentPayload.fixed(
+            (start.x(), start.y()), (end.x(), end.y()), 4, False
+        ),
         mask_view=mask_view,
     )
     assert state._dirty_rect == dirty_rect
-    assert preview.text("qpane_preview_stride") == "2"
-    assert preview.text("qpane_preview_provisional") == "1"
-    preview_view, _ = qimage_to_numpy_view_grayscale8(preview)
+    assert preview.rect == dirty_rect
+    assert preview.image.text("qpane_preview_stride") == "2"
+    assert preview.image.text("qpane_preview_provisional") == "1"
+    preview_view, _ = qimage_to_numpy_view_grayscale8(preview.image)
     height = dirty_rect.bottom() - dirty_rect.top() + 1
     width = dirty_rect.right() - dirty_rect.left() + 1
     expected_height = math.ceil(height / state.stride)
@@ -111,15 +141,14 @@ def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
     assert preview_view.shape == (expected_height, expected_width)
     assert np.any(preview_view > 0)
     second_rect = QRect(QPoint(2, 2), QPoint(4, 4))
-    state.preview_segment(
+    accumulated_preview = state.preview_segment(
         dirty_rect=second_rect,
-        start_point=QPoint(2, 2),
-        end_point=QPoint(4, 4),
-        erase=True,
-        brush_size=4,
+        segment=MaskStrokeSegmentPayload.fixed((2, 2), (4, 4), 4, True),
         mask_view=mask_view,
     )
-    assert state._dirty_rect == dirty_rect.united(second_rect)
+    accumulated_rect = dirty_rect.united(second_rect)
+    assert state._dirty_rect == accumulated_rect
+    assert accumulated_preview.rect == accumulated_rect
     assert len(state._segments) == 2
 
 
@@ -133,20 +162,19 @@ def test_preview_matches_worker_single_point(brush_size):
     dirty_rect = stroke_rect.adjusted(-margin, -margin, margin, margin)
     preview = state.preview_segment(
         dirty_rect=dirty_rect,
-        start_point=start,
-        end_point=start,
-        erase=False,
-        brush_size=brush_size,
+        segment=MaskStrokeSegmentPayload.fixed(
+            (start.x(), start.y()), (start.x(), start.y()), brush_size, False
+        ),
         mask_view=mask_view,
     )
-    preview_view, _ = qimage_to_numpy_view_grayscale8(preview)
+    preview_view, _ = qimage_to_numpy_view_grayscale8(preview.image)
     y0, x0 = dirty_rect.top(), dirty_rect.left()
     y1, x1 = dirty_rect.bottom() + 1, dirty_rect.right() + 1
     before_slice = mask_view[y0:y1, x0:x1]
-    segment = MaskStrokeSegmentPayload(
+    segment = MaskStrokeSegmentPayload.fixed(
         start=(int(start.x()), int(start.y())),
         end=(int(start.x()), int(start.y())),
-        brush_size=brush_size,
+        diameter=brush_size,
         erase=False,
     )
     after_slice, _ = render_stroke_segments(
@@ -184,6 +212,219 @@ def test_brush_tool_wheel_clamps_and_grows(qapp):
     assert emitted_sizes == [1, 6]
 
 
+def test_brush_tool_preserves_pen_pressure_and_subpixel_samples(qapp) -> None:
+    tool = BrushTool()
+    tool.activate(
+        ToolDependencies(
+            get_brush_size=lambda: 40,
+            panel_hit_test_precise=lambda point: PanelHitTest(
+                panel_point=point.toPoint(),
+                raw_point=QPointF(point),
+                clamped_point=point.toPoint(),
+                inside_image=True,
+            ),
+            get_image_rect=lambda: QRect(0, 0, 100, 100),
+            get_pen_pressure_min_ratio=lambda: 0.15,
+            get_pen_pressure_gamma=lambda: 1.0,
+            get_pen_pressure_enabled=lambda: True,
+        )
+    )
+    segments: list[MaskStrokeSegmentPayload] = []
+    undo_events: list[None] = []
+    completed_events: list[None] = []
+    tool.signals.stroke_applied.connect(segments.append)
+    tool.signals.undo_state_push_requested.connect(lambda: undo_events.append(None))
+    tool.signals.stroke_completed.connect(lambda: completed_events.append(None))
+
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.BEGIN, QPointF(10.25, 20.75), pressure=0.25)
+    )
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.UPDATE, QPointF(20.75, 30.125), pressure=1.0)
+    )
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.END, QPointF(20.75, 30.125), pressure=0.0)
+    )
+
+    assert segments[0].start == (10.25, 20.75)
+    assert segments[0].start_diameter == pytest.approx(14.5)
+    assert segments[1].end == (20.75, 30.125)
+    assert segments[1].start_diameter == pytest.approx(14.5)
+    assert segments[1].end_diameter == pytest.approx(40.0)
+    assert len(undo_events) == 1
+    assert len(completed_events) == 1
+
+
+def test_brush_tool_pen_hover_previews_nominal_size_without_painting(qapp) -> None:
+    tool = BrushTool()
+    tool.activate(
+        ToolDependencies(
+            get_brush_size=lambda: 40,
+            panel_hit_test_precise=lambda point: PanelHitTest(
+                panel_point=point.toPoint(),
+                raw_point=QPointF(point),
+                clamped_point=point.toPoint(),
+                inside_image=True,
+            ),
+            get_image_rect=lambda: QRect(0, 0, 100, 100),
+            get_zoom=lambda: 2.0,
+            get_dpr=lambda: 2.0,
+            get_active_mask_color=lambda: QColor(Qt.GlobalColor.red),
+        )
+    )
+    segments: list[MaskStrokeSegmentPayload] = []
+    undo_events: list[None] = []
+    tool.signals.stroke_applied.connect(segments.append)
+    tool.signals.undo_state_push_requested.connect(lambda: undo_events.append(None))
+
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.HOVER, QPointF(30.25, 30.75), pressure=0.0)
+    )
+
+    preview = tool.pointer_preview
+    assert preview is not None
+    assert preview.position == QPointF(30.25, 30.75)
+    assert preview.diameter == pytest.approx(40.0)
+    assert preview.contact is False
+    assert preview.erase is False
+    assert segments == []
+    assert undo_events == []
+
+    canvas = QImage(80, 80, QImage.Format.Format_ARGB32_Premultiplied)
+    canvas.fill(Qt.GlobalColor.white)
+    painter = QPainter(canvas)
+    tool.draw_overlay(painter)
+    painter.end()
+
+    assert canvas.pixelColor(50, 31) != QColor(Qt.GlobalColor.white)
+    assert canvas.pixelColor(30, 31) == QColor(Qt.GlobalColor.white)
+
+
+def test_brush_tool_contact_preview_matches_pressure_diameter(qapp) -> None:
+    tool = BrushTool()
+    tool.activate(
+        ToolDependencies(
+            get_brush_size=lambda: 40,
+            panel_to_content_point=lambda point: point,
+            get_pen_pressure_min_ratio=lambda: 0.15,
+            get_pen_pressure_gamma=lambda: 1.0,
+            get_pen_pressure_enabled=lambda: True,
+        )
+    )
+
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.BEGIN, QPointF(10.0, 20.0), pressure=0.25)
+    )
+
+    preview = tool.pointer_preview
+    assert preview is not None
+    assert preview.diameter == pytest.approx(14.5)
+    assert preview.contact is True
+
+
+def test_brush_tool_eraser_hover_previews_erase_state(qapp) -> None:
+    tool = BrushTool()
+    tool.activate(
+        ToolDependencies(
+            get_brush_size=lambda: 20,
+            panel_to_content_point=lambda point: point,
+        )
+    )
+
+    assert tool.handle_pointer_sample(
+        _pointer_sample(
+            PointerPhase.HOVER,
+            QPointF(5.0, 5.0),
+            pressure=0.0,
+            device=PointerDeviceKind.ERASER,
+        )
+    )
+
+    preview = tool.pointer_preview
+    assert preview is not None
+    assert preview.erase is True
+
+
+def test_brush_tool_bounds_hover_repaints_to_old_and_new_ring_extents(qapp) -> None:
+    updates: list[QRect] = []
+    tool = BrushTool()
+    tool.activate(
+        ToolDependencies(
+            get_brush_size=lambda: 20,
+            panel_to_content_point=lambda point: point,
+            get_zoom=lambda: 2.0,
+            get_dpr=lambda: 2.0,
+            request_overlay_update=updates.append,
+        )
+    )
+
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.HOVER, QPointF(20.0, 20.0), pressure=0.0)
+    )
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.HOVER, QPointF(50.0, 20.0), pressure=0.0)
+    )
+
+    assert len(updates) == 2
+    assert updates[0].contains(QPoint(10, 20))
+    assert updates[1].contains(QPoint(10, 20))
+    assert updates[1].contains(QPoint(60, 20))
+
+
+def test_brush_tool_eraser_tip_overrides_modifier_mode(qapp) -> None:
+    tool = BrushTool()
+    tool.activate(
+        ToolDependencies(
+            get_brush_size=lambda: 20,
+            panel_to_content_point=lambda point: point,
+        )
+    )
+    segments: list[MaskStrokeSegmentPayload] = []
+    tool.signals.stroke_applied.connect(segments.append)
+
+    assert tool.handle_pointer_sample(
+        _pointer_sample(
+            PointerPhase.BEGIN,
+            QPointF(5.0, 5.0),
+            pressure=0.5,
+            device=PointerDeviceKind.ERASER,
+        )
+    )
+    assert tool.handle_pointer_sample(
+        _pointer_sample(
+            PointerPhase.END,
+            QPointF(5.0, 5.0),
+            pressure=0.0,
+            device=PointerDeviceKind.ERASER,
+        )
+    )
+
+    assert segments[0].erase
+
+
+def test_brush_tool_cancel_discards_session_without_completing(qapp) -> None:
+    tool = BrushTool()
+    tool.activate(
+        ToolDependencies(
+            get_brush_size=lambda: 20,
+            panel_to_content_point=lambda point: point,
+        )
+    )
+    cancelled: list[None] = []
+    completed: list[None] = []
+    tool.signals.stroke_cancelled.connect(lambda: cancelled.append(None))
+    tool.signals.stroke_completed.connect(lambda: completed.append(None))
+
+    assert tool.handle_pointer_sample(
+        _pointer_sample(PointerPhase.BEGIN, QPointF(5.0, 5.0), pressure=0.5)
+    )
+    assert tool.cancel_pointer_stroke()
+
+    assert cancelled == [None]
+    assert completed == []
+    assert not tool.is_drawing
+
+
 def test_brush_tool_straight_line_shift_mode(qapp):
     tool = BrushTool()
     shift_state = False
@@ -201,7 +442,7 @@ def test_brush_tool_straight_line_shift_mode(qapp):
     strokes: list[tuple[QPoint, QPoint, bool]] = []
     undo_events: list[None] = []
     tool.signals.stroke_applied.connect(
-        lambda start, end, erase: strokes.append((start, end, erase))
+        lambda segment: _record_segment(strokes, segment)
     )
     tool.signals.undo_state_push_requested.connect(lambda: undo_events.append(None))
     first_point = QPoint(10, 10)
@@ -243,7 +484,7 @@ def test_brush_tool_continuous_stroke_emits_segments(qapp):
     undo_events: list[None] = []
     completed_events: list[None] = []
     tool.signals.stroke_applied.connect(
-        lambda start, end, erase: strokes.append((start, end, erase))
+        lambda segment: _record_segment(strokes, segment)
     )
     tool.signals.undo_state_push_requested.connect(lambda: undo_events.append(None))
     tool.signals.stroke_completed.connect(lambda: completed_events.append(None))
@@ -269,22 +510,19 @@ def test_brush_tool_continuous_stroke_emits_segments(qapp):
     assert tool.is_drawing is False
 
 
-def test_brush_tool_merges_back_to_back_taps(qapp):
+def test_brush_tool_accepts_back_to_back_taps(qapp):
+    """Every distinct mouse press starts a paintable stroke immediately."""
     tool = BrushTool()
-    clock = _MonotonicStub()
     tool.activate(
         ToolDependencies(
             panel_to_content_point=lambda point: point,
-            monotonic_time=clock,
-            stroke_merge_window_s=0.25,
-            stroke_merge_distance_px=5,
         )
     )
     strokes: list[tuple[QPoint, QPoint, bool]] = []
     undo_events: list[None] = []
     completed_events: list[None] = []
     tool.signals.stroke_applied.connect(
-        lambda start, end, erase: strokes.append((start, end, erase))
+        lambda segment: _record_segment(strokes, segment)
     )
     tool.signals.undo_state_push_requested.connect(lambda: undo_events.append(None))
     tool.signals.stroke_completed.connect(lambda: completed_events.append(None))
@@ -292,40 +530,37 @@ def test_brush_tool_merges_back_to_back_taps(qapp):
     first_press = _MouseEventStub(point)
     tool.mousePressEvent(first_press)
     assert first_press.accepted
-    clock.advance(0.01)
     first_release = _MouseEventStub(point)
     tool.mouseReleaseEvent(first_release)
     assert first_release.accepted
     assert len(strokes) == 1
     assert len(undo_events) == 1
     assert len(completed_events) == 1
-    clock.advance(0.05)
     second_press = _MouseEventStub(point)
     tool.mousePressEvent(second_press)
     assert second_press.accepted
     second_release = _MouseEventStub(point)
     tool.mouseReleaseEvent(second_release)
-    assert not second_release.accepted
-    assert len(strokes) == 1
-    assert len(undo_events) == 1
-    assert len(completed_events) == 1
-    clock.advance(0.4)
+    assert second_release.accepted
+    assert len(strokes) == 2
+    assert len(undo_events) == 2
+    assert len(completed_events) == 2
     third_press = _MouseEventStub(point)
     tool.mousePressEvent(third_press)
     assert third_press.accepted
     third_release = _MouseEventStub(point)
     tool.mouseReleaseEvent(third_release)
     assert third_release.accepted
-    assert len(strokes) == 2
-    assert len(undo_events) == 2
-    assert len(completed_events) == 2
+    assert len(strokes) == 3
+    assert len(undo_events) == 3
+    assert len(completed_events) == 3
 
 
 def test_brush_tool_accepts_partial_edge_stroke(qapp):
     tool = BrushTool()
     strokes: list[tuple[QPoint, QPoint, bool]] = []
     tool.signals.stroke_applied.connect(
-        lambda start, end, erase: strokes.append((start, end, erase))
+        lambda segment: _record_segment(strokes, segment)
     )
 
     def panel_hit(point: QPoint) -> PanelHitTest:

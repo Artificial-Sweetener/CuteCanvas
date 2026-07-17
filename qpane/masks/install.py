@@ -108,6 +108,7 @@ def install_mask_feature(qpane: "QPane") -> None:
     tm_signals = qpane._tools_manager.signals
     tm_signals.stroke_applied.connect(service.applyStrokeSegment)
     tm_signals.stroke_completed.connect(service.commitStroke)
+    tm_signals.stroke_cancelled.connect(service.cancelStroke)
     tm_signals.brush_size_changed.connect(qpane.setBrushSize)
     tm_signals.undo_state_push_requested.connect(service.pushActiveMaskState)
     controller.mask_updated.connect(_handle_mask_updated)

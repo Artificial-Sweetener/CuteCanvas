@@ -97,6 +97,41 @@ def test_pan_and_zoom_mutators_respect_lock_state():
     assert viewport.pan == QPointF(10, 12)
 
 
+def test_set_zoom_and_pan_commits_one_atomic_view_change():
+    """Zoom and pan should publish one coherent viewport state."""
+    viewport, _ = _make_viewport(
+        dpr=1.0,
+        content_size=(1200, 1200),
+        zoom=1.0,
+        pan=QPointF(0, 0),
+    )
+    snapshots: list[tuple[float, QPointF]] = []
+    viewport.viewChanged.connect(
+        lambda: snapshots.append((viewport.zoom, QPointF(viewport.pan)))
+    )
+
+    viewport.setZoomAndPan(2.0, QPointF(75, -50))
+
+    assert snapshots == [(2.0, QPointF(75, -50))]
+
+
+def test_noop_direct_manipulation_preserves_semantic_zoom_mode() -> None:
+    """A stationary touch update must not turn Fit into Custom mode."""
+    viewport, _ = _make_viewport(
+        dpr=1.0,
+        content_size=(1200, 800),
+        zoom=0.25,
+        pan=QPointF(),
+    )
+    viewport.zoom_mode = ViewportZoomMode.FIT
+
+    viewport.apply_direct_manipulation(0.25, QPointF())
+
+    assert viewport.zoom == pytest.approx(0.25)
+    assert viewport.pan == QPointF()
+    assert viewport.get_zoom_mode() is ViewportZoomMode.FIT
+
+
 def test_fit_mode_rejects_pan_after_near_exact_fit():
     viewport, _ = _make_viewport(
         qpane_size=(593, 887),

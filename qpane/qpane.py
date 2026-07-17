@@ -20,7 +20,7 @@ import logging
 import uuid
 from math import isclose
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, cast
 
 import numpy as np
 from PySide6.QtCore import (
@@ -39,6 +39,8 @@ from PySide6.QtGui import (
     QImage,
     QPainter,
     QScreen,
+    QTabletEvent,
+    QTouchEvent,
     QWheelEvent,
     QWindow,
 )
@@ -1952,12 +1954,10 @@ class QPane(QWidget):
         viewport = self.view().viewport
         if not self._can_apply_zoom():
             return None
-        # Limit maximum zoom, and reinterpret '1.0' as nativeZoom() for DPI-accuracy
-        requested_zoom = min(requested_zoom, 10.0)
+        # Reinterpret '1.0' as nativeZoom() for DPI-accuracy.
         if reinterpret_one_as_native and abs(requested_zoom - 1.0) < 1e-6:
             requested_zoom = self.nativeZoom()
-        min_zoom = viewport.min_zoom()
-        return max(requested_zoom, min_zoom)
+        return viewport.clamp_zoom(requested_zoom)
 
     def _can_apply_zoom(self) -> bool:
         """Return True when zoom updates are allowed for the current view."""
@@ -2405,10 +2405,20 @@ class QPane(QWidget):
         super().leaveEvent(event)
 
     def event(self, event):
-        """Refresh screen tracking when widget window ownership changes."""
+        """Route direct input and refresh screen tracking on window changes."""
         if not hasattr(self, "_state"):
             return super().event(event)
         event_type = event.type()
+        if event_type in (
+            QEvent.Type.TouchBegin,
+            QEvent.Type.TouchUpdate,
+            QEvent.Type.TouchEnd,
+            QEvent.Type.TouchCancel,
+        ):
+            if self.interaction.handle_touch_event(cast(QTouchEvent, event)):
+                event.accept()
+                return True
+            event.ignore()
         if event_type in (
             QEvent.Type.WinIdChange,
             QEvent.Type.ParentChange,
@@ -2416,6 +2426,13 @@ class QPane(QWidget):
         ):
             self._refresh_screen_tracking()
         return super().event(event)
+
+    def tabletEvent(self, event: QTabletEvent) -> None:
+        """Route active-pen input through the interaction controller."""
+        if self.interaction.handle_tablet_event(event):
+            event.accept()
+            return
+        event.ignore()
 
     def showEvent(self, event):
         """Handle initial show-time setup that depends on widget geometry."""

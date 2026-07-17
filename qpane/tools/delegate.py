@@ -39,6 +39,7 @@ from ..ui import (
     apply_widget_defaults,
 )
 from .dependencies import ToolDependencies
+from .input import PointerDeviceKind, PointerInputController
 from .tools import Tools
 
 
@@ -69,6 +70,10 @@ class ToolInteractionDelegate:
         self._overlays_resume_pending = False
         self._drag_request_handler = None
         self._copy_image_handler = None
+        self._pointer_input = PointerInputController(
+            qpane,
+            on_modality_changed=self._handle_pointer_modality_changed,
+        )
 
     def _viewport(self):
         """Return the viewport managed by the rendering stack."""
@@ -212,6 +217,7 @@ class ToolInteractionDelegate:
 
     def suspend_overlays_for_navigation(self) -> None:
         """Flag content overlays as hidden until navigation completes."""
+        self._pointer_input.cancel_active_sequences()
         self._overlays_suspended = True
         self._overlays_resume_pending = True
 
@@ -234,6 +240,7 @@ class ToolInteractionDelegate:
         consistent.
         """
         qpane = self._qpane
+        self._pointer_input.cancel_active_sequences()
         qpane._is_blank = True
         qpane.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
         self.set_control_mode(Tools.CONTROL_MODE_PANZOOM)
@@ -290,6 +297,7 @@ class ToolInteractionDelegate:
             {
                 "is_alt_held": lambda: self._alt_key_held,
                 "panel_hit_test": qpane.panelHitTest,
+                "panel_hit_test_precise": viewport.panel_hit_test,
                 "panel_to_content_point": viewport.panel_to_content_point,
                 "image_to_panel_point": viewport.content_to_panel_point,
                 "is_pan_zoom_locked": viewport.is_locked,
@@ -322,6 +330,9 @@ class ToolInteractionDelegate:
                     self._preview_inline_pen,
                 ),
                 "get_brush_increment": lambda: qpane.settings.brush_scroll_increment,
+                "get_pen_pressure_min_ratio": lambda: qpane.settings.pen_pressure_min_ratio,
+                "get_pen_pressure_gamma": lambda: qpane.settings.pen_pressure_gamma,
+                "get_pen_pressure_enabled": lambda: qpane.settings.pen_pressure_enabled,
                 "get_dpr": qpane.devicePixelRatioF,
                 "get_min_selection_size": lambda: qpane.settings.smart_select_min_size,
                 "get_active_mask_color": lambda: (
@@ -329,9 +340,13 @@ class ToolInteractionDelegate:
                     if qpane.mask_service
                     else None
                 ),
+                "request_overlay_update": qpane.update,
             }
         )
+        if tools.get_control_mode() != mode:
+            self._pointer_input.cancel_active_sequences()
         tools.set_mode(mode, dependencies)
+        self._tools_activated = True
 
     def get_control_mode(self) -> str:
         """Return the current tool control mode."""
@@ -355,6 +370,17 @@ class ToolInteractionDelegate:
             qpane.setCursor(divider_cursor)
             return
         tools = qpane._tools_manager
+        if (
+            tools.get_control_mode() == Tools.CONTROL_MODE_DRAW_BRUSH
+            and self._pointer_input.active_device
+            in {
+                PointerDeviceKind.TOUCH,
+                PointerDeviceKind.PEN,
+                PointerDeviceKind.ERASER,
+            }
+        ):
+            qpane.setCursor(QCursor(Qt.CursorShape.BlankCursor))
+            return
         active_tool = tools.get_active_tool()
         if active_tool and hasattr(active_tool, "getCursor"):
             try:
@@ -437,14 +463,28 @@ class ToolInteractionDelegate:
             self._qpane._tools_manager.wheelEvent, event, guard_image=True
         )
 
+    def handle_touch_event(self, event) -> bool:
+        """Route a touch frame through device-neutral input coordination."""
+        return self._pointer_input.handle_touch_event(event)
+
+    def handle_tablet_event(self, event) -> bool:
+        """Route a tablet frame through device-neutral input coordination."""
+        return self._pointer_input.handle_tablet_event(event)
+
     def handle_mouse_press(self, event: QMouseEvent) -> None:
         """Forward mouse press events to the active tool."""
+        if not self._pointer_input.observe_mouse_event(event):
+            event.accept()
+            return
         if self._qpane.comparisonDividerInteraction().handle_mouse_press(event):
             return
         self._forward_tool_event(self._qpane._tools_manager.mousePressEvent, event)
 
     def handle_mouse_move(self, event: QMouseEvent) -> None:
         """Forward mouse move events to the active tool."""
+        if not self._pointer_input.observe_mouse_event(event):
+            event.accept()
+            return
         divider = self._qpane.comparisonDividerInteraction()
         had_divider_cursor = divider.owns_cursor()
         if divider.handle_mouse_move(event):
@@ -456,6 +496,9 @@ class ToolInteractionDelegate:
 
     def handle_mouse_release(self, event: QMouseEvent) -> None:
         """Forward mouse release events to the active tool."""
+        if not self._pointer_input.observe_mouse_event(event):
+            event.accept()
+            return
         if self._qpane.comparisonDividerInteraction().handle_mouse_release(event):
             self.update_cursor()
             return
@@ -463,6 +506,9 @@ class ToolInteractionDelegate:
 
     def handle_mouse_double_click(self, event: QMouseEvent) -> None:
         """Forward double-click events to the active tool."""
+        if not self._pointer_input.observe_mouse_event(event):
+            event.accept()
+            return
         self._forward_tool_event(
             self._qpane._tools_manager.mouseDoubleClickEvent, event
         )
@@ -476,11 +522,24 @@ class ToolInteractionDelegate:
 
     def handle_leave_event(self, event) -> None:
         """Notify the active tool that the cursor left the widget."""
+        self._pointer_input.handle_widget_leave()
         self._qpane.comparisonDividerInteraction().cancel_drag()
         self._qpane.update()
         self._forward_tool_event(
             self._qpane._tools_manager.leaveEvent, event, guard_blank=False
         )
+
+    def _handle_pointer_modality_changed(self, device: PointerDeviceKind) -> None:
+        """Apply OS cursor policy after the input controller changes modality."""
+        if device in {
+            PointerDeviceKind.TOUCH,
+            PointerDeviceKind.PEN,
+            PointerDeviceKind.ERASER,
+        }:
+            self._qpane.setCursor(QCursor(Qt.CursorShape.BlankCursor))
+            return
+        if device is PointerDeviceKind.MOUSE:
+            self.update_cursor()
 
     def handle_show_event(self) -> None:
         """Ensure pan/zoom is active on first show and force view alignment."""

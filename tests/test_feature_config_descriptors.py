@@ -21,6 +21,7 @@ import pytest
 from qpane.core.config_features import (
     CORE_DESCRIPTOR,
     DIAGNOSTICS_DESCRIPTOR,
+    INPUT_DESCRIPTOR,
     MASK_DESCRIPTOR,
     SAM_DESCRIPTOR,
     ConfigFeatureRegistry,
@@ -33,9 +34,10 @@ from qpane.core.config_features import (
 def test_iter_descriptors_returns_expected_order() -> None:
     descriptors = iter_descriptors()
     assert descriptors[0] is CORE_DESCRIPTOR
-    assert descriptors[1] is MASK_DESCRIPTOR
-    assert descriptors[2] is DIAGNOSTICS_DESCRIPTOR
-    assert descriptors[3] is SAM_DESCRIPTOR
+    assert descriptors[1] is INPUT_DESCRIPTOR
+    assert descriptors[2] is MASK_DESCRIPTOR
+    assert descriptors[3] is DIAGNOSTICS_DESCRIPTOR
+    assert descriptors[4] is SAM_DESCRIPTOR
 
 
 def test_registry_rejects_duplicate_namespaces() -> None:

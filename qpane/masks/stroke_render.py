@@ -19,28 +19,30 @@
 from __future__ import annotations
 
 import numpy as np
+import math
+
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import QBrush, QImage, QPainter, QPen
+from PySide6.QtGui import QBrush, QImage, QPainter
 
 from ..catalog.image_utils import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,
 )
-from .mask_controller import MaskStrokeSegmentPayload
+from .stroke_models import MaskStrokeSegmentPayload
 
 
-def stroke_pen_width(brush_size: int, stride: int = 1) -> int:
+def stroke_pen_width(brush_size: float, stride: int = 1) -> int:
     """Return the pen width for a brush diameter respecting preview stride."""
     stride_value = max(1, int(stride))
-    brush_value = max(1, int(brush_size))
+    brush_value = max(1.0, float(brush_size))
     width = int(round(float(brush_value) / stride_value))
     return max(1, width)
 
 
-def stroke_radius(brush_size: int, stride: int = 1) -> float:
+def stroke_radius(brush_size: float, stride: int = 1) -> float:
     """Return the ellipse radius for a brush diameter respecting preview stride."""
     stride_value = max(1, int(stride))
-    brush_value = max(1, int(brush_size))
+    brush_value = max(1.0, float(brush_size))
     radius = (float(brush_value) / 2.0) / stride_value
     return max(0.5, radius)
 
@@ -59,39 +61,54 @@ def render_stroke_segments(
         try:
             origin = dirty_rect.topLeft()
             for segment in segments:
-                _paint_segment(painter, origin, segment)
+                paint_stroke_segment(painter, origin, segment)
         finally:
             painter.end()
     after_slice = qimage_to_numpy_grayscale8(image)
     return after_slice, image.copy()
 
 
-def _paint_segment(
+def paint_stroke_segment(
     painter: QPainter,
     origin: QPoint,
     segment: MaskStrokeSegmentPayload,
+    *,
+    stride: int = 1,
 ) -> None:
-    """Paint `segment` relative to `origin` onto `painter`."""
-    stride = 1
+    """Paint a deterministically resampled segment relative to ``origin``."""
+    stride_value = max(1, int(stride))
     draw_color = Qt.GlobalColor.black if segment.erase else Qt.GlobalColor.white
-    pen = QPen()
-    pen.setWidth(stroke_pen_width(segment.brush_size, stride=stride))
-    pen.setColor(draw_color)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    painter.setPen(pen)
-    start = QPoint(
-        int(segment.start[0] - origin.x()),
-        int(segment.start[1] - origin.y()),
+    painter.setBrush(QBrush(draw_color))
+    painter.setPen(Qt.PenStyle.NoPen)
+    for center, diameter in resampled_segment_dabs(segment):
+        offset = QPointF(
+            (center.x() - origin.x()) / stride_value,
+            (center.y() - origin.y()) / stride_value,
+        )
+        radius = stroke_radius(diameter, stride=stride_value)
+        painter.drawEllipse(offset, radius, radius)
+
+
+def resampled_segment_dabs(
+    segment: MaskStrokeSegmentPayload,
+) -> tuple[tuple[QPointF, float], ...]:
+    """Return stable subpixel dabs that cover a variable-width segment."""
+    start = QPointF(float(segment.start[0]), float(segment.start[1]))
+    end = QPointF(float(segment.end[0]), float(segment.end[1]))
+    delta = end - start
+    distance = math.hypot(delta.x(), delta.y())
+    minimum_diameter = max(
+        1.0,
+        min(float(segment.start_diameter), float(segment.end_diameter)),
     )
-    end = QPoint(
-        int(segment.end[0] - origin.x()),
-        int(segment.end[1] - origin.y()),
+    spacing = max(0.5, minimum_diameter * 0.2)
+    step_count = max(1, int(math.ceil(distance / spacing)))
+    return tuple(
+        (
+            start + delta * (step / step_count),
+            float(segment.start_diameter)
+            + (float(segment.end_diameter) - float(segment.start_diameter))
+            * (step / step_count),
+        )
+        for step in range(step_count + 1)
     )
-    painter.drawLine(start, end)
-    if segment.start == segment.end:
-        painter.setBrush(QBrush(draw_color))
-        painter.setPen(Qt.PenStyle.NoPen)
-        radius = stroke_radius(segment.brush_size, stride=stride)
-        center = QPointF(float(start.x()), float(start.y()))
-        painter.drawEllipse(center, radius, radius)

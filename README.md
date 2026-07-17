@@ -135,6 +135,8 @@ QPane is designed to be the library I wish I had. It uses a **Facade Pattern** t
 
 The package includes a comprehensive demo application that lets you test the performance and features (including the AI tools) without writing any code. The demo launcher bootstraps a dedicated virtual environment and installs all necessary dependencies, so a working Python install is all you need to get started.
 
+Developers without touch or pen hardware can run `python -m examples.demonstration.touch_and_pen_simulator` to inspect finger feedback, pen and eraser hover, pressure changes, proximity leave, two-finger navigation, and touch-to-mouse cursor restoration through synthetic Qt events.
+
 ```bash
 # Run the interactive launcher
 python -m examples.demo
@@ -176,6 +178,7 @@ widget.maskSaved.connect(lambda mid, path: print(f"Saved mask to {path}"))
 *   **[Catalog and Navigation](docs/catalog-and-navigation.md):** Managing image lists and linked views.
 *   **[Scene Composition](docs/scenes.md):** Building contact sheets, layered scenes, templates, hit tests, and scene overlays.
 *   **[Interaction Modes](docs/interaction-modes.md):** Switching between pan/zoom, cursor, and custom tools.
+*   **[Touch and Pen Input](docs/touch-and-pen.md):** Native touch gestures, pressure-sensitive mask painting, palm rejection, and testing.
 *   **[Masks and SAM](docs/masks-and-sam.md):** Deep dive into manual painting and AI-powered masking workflows.
 *   **[Diagnostics](docs/diagnostics.md):** How to observe runtime behavior and debug performance.
 *   **[Extensibility](docs/extensibility.md):** Registering custom overlays, cursors, and tools.

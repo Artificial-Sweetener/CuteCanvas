@@ -22,7 +22,7 @@ import logging
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 import numpy as np
@@ -38,6 +38,11 @@ from ..core import CacheSettings, Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from .mask import MaskLayer, MaskManager
 from .mask_diagnostics import MaskStrokeDiagnostics
+from .stroke_models import (
+    MaskStrokeJobResult,
+    MaskStrokeJobSpec,
+    MaskStrokePayload,
+)
 from .mask_undo import MaskHistoryChange, MaskPatch
 
 logger = logging.getLogger(__name__)
@@ -97,51 +102,6 @@ class MaskRenderCacheKey:
         """Validate cache-key revision metadata."""
         if self.render_revision < 0:
             raise ValueError("mask render revision must be non-negative")
-
-
-@dataclass(frozen=True, slots=True)
-class MaskStrokeSegmentPayload:
-    """Immutable description of a brush segment captured on the UI thread."""
-
-    start: tuple[int, int]
-    end: tuple[int, int]
-    brush_size: int
-    erase: bool
-
-
-@dataclass(frozen=True, slots=True)
-class MaskStrokePayload:
-    """Bundle stroke segments and stride metadata for worker replays."""
-
-    segments: tuple[MaskStrokeSegmentPayload, ...]
-    stride: int = 1
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class MaskStrokeJobSpec:
-    """Describe a mask stroke job prepared on the UI thread."""
-
-    mask_id: uuid.UUID
-    generation: int
-    dirty_rect: QRect
-    before: np.ndarray
-    payload: MaskStrokePayload | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class MaskStrokeJobResult:
-    """Capture the outcome of a mask stroke ready for main-thread merging."""
-
-    mask_id: uuid.UUID
-    generation: int
-    dirty_rect: QRect
-    before: np.ndarray
-    after: np.ndarray
-    preview_image: QImage | None = None
-    payload: MaskStrokePayload | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 class Masking:

@@ -19,6 +19,8 @@
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap
 
+from .brush_feedback import BRUSH_OUTLINE_PADDING, draw_brush_outline
+
 
 class CursorBuilder:
     """Cache-aware factory for QPane's brush and smart select cursors."""
@@ -132,9 +134,7 @@ class CursorBuilder:
         self, size: int, color: QColor, *, erase_indicator: bool
     ) -> QCursor:
         """Render a circular brush cursor image and wrap it in a QCursor."""
-        pen = QPen(color)
-        pen.setWidth(1)
-        border = 1
+        border = BRUSH_OUTLINE_PADDING
         canvas_size = size + (border * 2)
         cursor_image = QImage(
             QSize(canvas_size, canvas_size), QImage.Format_ARGB32_Premultiplied
@@ -142,11 +142,12 @@ class CursorBuilder:
         cursor_image.fill(Qt.transparent)
         painter = QPainter(cursor_image)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(pen)
         ellipse_diameter = size - 1
         top_left = float(border) + 0.5
-        painter.drawEllipse(
-            QRectF(top_left, top_left, ellipse_diameter, ellipse_diameter)
+        draw_brush_outline(
+            painter,
+            QRectF(top_left, top_left, ellipse_diameter, ellipse_diameter),
+            color,
         )
         if erase_indicator:
             self._draw_erase_indicator(painter, size, origin_offset=float(border))

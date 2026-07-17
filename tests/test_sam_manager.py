@@ -476,6 +476,20 @@ def test_drop_predictor_removes_sizes_and_estimates(tmp_path) -> None:
     assert image_id not in manager._pending_estimates
 
 
+def test_remove_from_cache_reports_whether_a_predictor_was_removed(tmp_path) -> None:
+    """The public cache hook must truthfully report each eviction result."""
+    manager = SamManager(
+        executor=StubExecutor(),
+        checkpoint_path=_touch_checkpoint(tmp_path / "sam-checkpoint.pt"),
+    )
+    image_id = uuid.uuid4()
+    manager._sam_predictors[image_id] = object()
+    manager._predictor_sizes[image_id] = 12
+
+    assert manager.removeFromCache(image_id) is True
+    assert manager.removeFromCache(image_id) is False
+
+
 def test_measure_predictor_bytes_returns_zero_without_model(tmp_path) -> None:
     """Predictors without model metadata should report zero bytes."""
     manager = SamManager(

@@ -82,6 +82,21 @@ def test_mask_validation_failure_defaults_restored() -> None:
     assert "mask" in settings.validation_failures()
 
 
+def test_input_validation_rejects_invalid_pressure_curve() -> None:
+    config = Config(pen_pressure_min_ratio=0.0)
+    descriptors = iter_descriptors()
+
+    with pytest.raises(
+        ValueError, match="Feature 'input' configuration failed validation"
+    ):
+        FeatureAwareConfig(
+            config,
+            descriptors=descriptors,
+            installed_features=(),
+            strict=True,
+        )
+
+
 def test_sam_device_cuda_unavailable_falls_back(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

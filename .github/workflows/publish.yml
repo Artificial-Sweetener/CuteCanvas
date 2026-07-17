@@ -9,7 +9,11 @@ permissions:
   id-token: write
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   release:
+    needs: verify
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.semver.outputs.version }}

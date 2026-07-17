@@ -38,6 +38,8 @@ from qpane.masks.mask import MaskManager
 from qpane.masks.mask_controller import (
     MaskController,
     MaskReadyUpdate,
+)
+from qpane.masks.stroke_models import (
     MaskStrokeJobResult,
     MaskStrokePayload,
     MaskStrokeSegmentPayload,
@@ -934,7 +936,14 @@ def _emit_brush_stroke(qpane, start, end=None, erase=False):
     tools = qpane._tools_manager
     tools.signals.undo_state_push_requested.emit()
     end_point = start if end is None else end
-    tools.signals.stroke_applied.emit(start, end_point, erase)
+    tools.signals.stroke_applied.emit(
+        MaskStrokeSegmentPayload.fixed(
+            (start.x(), start.y()),
+            (end_point.x(), end_point.y()),
+            qpane.interaction.brush_size,
+            erase,
+        )
+    )
     tools.signals.stroke_completed.emit()
     executor = getattr(qpane, "executor", None)
     drain = getattr(executor, "drain_all", None)
@@ -968,7 +977,14 @@ def _queue_pending_stroke(qpane, start, end=None, erase=False):
     tools = qpane._tools_manager
     tools.signals.undo_state_push_requested.emit()
     end_point = start if end is None else end
-    tools.signals.stroke_applied.emit(start, end_point, erase)
+    tools.signals.stroke_applied.emit(
+        MaskStrokeSegmentPayload.fixed(
+            (start.x(), start.y()),
+            (end_point.x(), end_point.y()),
+            qpane.interaction.brush_size,
+            erase,
+        )
+    )
     tools.signals.stroke_completed.emit()
     app = QCoreApplication.instance()
     if app is not None:
@@ -990,6 +1006,29 @@ def test_empty_stroke_completion_does_not_commit(qapp):
         qapp.processEvents()
         generation_after = controller.getMaskGeneration(mask_id)
         assert generation_after == generation_before
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_cancelled_stroke_discards_preview_without_changing_mask(qapp) -> None:
+    qpane, image = _prepare_qpane_with_mask_feature()
+    try:
+        service = _mask_service(qpane)
+        assert service is not None
+        mask_id = service.createBlankMask(image.size())
+        assert mask_id is not None
+        layer = service.manager.get_layer(mask_id)
+        assert layer is not None
+        before = snapshot_mask_layer(layer)
+        qpane._tools_manager.signals.undo_state_push_requested.emit()
+        qpane._tools_manager.signals.stroke_applied.emit(
+            MaskStrokeSegmentPayload.fixed((4, 4), (8, 8), 5, False)
+        )
+
+        qpane._tools_manager.signals.stroke_cancelled.emit()
+
+        assert service.strokeDebugSnapshot().preview_state_ids == ()
+        np.testing.assert_array_equal(snapshot_mask_layer(layer), before)
     finally:
         _cleanup_qpane(qpane, qapp)
 
@@ -1071,7 +1110,14 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
 
         def queue_stroke(point: QPoint) -> None:
             tools.signals.undo_state_push_requested.emit()
-            tools.signals.stroke_applied.emit(point, point, False)
+            tools.signals.stroke_applied.emit(
+                MaskStrokeSegmentPayload.fixed(
+                    (point.x(), point.y()),
+                    (point.x(), point.y()),
+                    qpane.interaction.brush_size,
+                    False,
+                )
+            )
             tools.signals.stroke_completed.emit()
             qapp.processEvents()
 
@@ -2598,10 +2644,10 @@ def test_mask_stroke_worker_matches_render_output(qpane_with_mask):
     mask_manager.associate_mask_with_image(mask_id, image_id)
     controller.setActiveMaskID(mask_id)
     dirty_rect = QRect(0, 0, 8, 8)
-    segment = MaskStrokeSegmentPayload(
+    segment = MaskStrokeSegmentPayload.fixed(
         start=(1, 1),
         end=(6, 6),
-        brush_size=5,
+        diameter=5,
         erase=False,
     )
     payload = MaskStrokePayload(
@@ -2880,10 +2926,10 @@ def test_worker_job_matches_render_result(qapp, monkeypatch, brush_size, erase):
     layer.mask_image.fill(fill_value)
     controller = service.controller
     rect = QRect(0, 0, 8, 8)
-    segment = MaskStrokeSegmentPayload(
+    segment = MaskStrokeSegmentPayload.fixed(
         start=(2, 2),
         end=(6, 6),
-        brush_size=brush_size,
+        diameter=brush_size,
         erase=erase,
     )
     payload = MaskStrokePayload(

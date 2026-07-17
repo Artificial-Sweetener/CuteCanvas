@@ -24,7 +24,7 @@ from typing import Callable
 from PySide6.QtCore import QCoreApplication, QRunnable, QTimer
 
 from ..concurrency.base_worker import BaseWorker
-from .mask_controller import (
+from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
     MaskStrokePayload,

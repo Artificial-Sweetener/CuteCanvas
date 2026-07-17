@@ -14,23 +14,19 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Widget configuration helpers for QPane's Qt facade."""
+"""Device-neutral pointer input models and interaction coordination."""
 
-from __future__ import annotations
+from .arena import TouchGestureArena, TouchGestureKind
+from .controller import PointerInputController
+from .model import PointerDeviceKind, PointerPhase, PointerSample
+from .navigation import TouchNavigationSession
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSizePolicy, QWidget
-
-
-def apply_widget_defaults(widget: QWidget) -> None:
-    """Configure QPane's QWidget defaults such as translucency and tracking.
-
-    Args:
-        widget: QWidget that should adopt the baseline drawing and sizing contract.
-    """
-    widget.setAttribute(Qt.WA_TranslucentBackground)
-    widget.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
-    widget.setMouseTracking(True)
-    widget.setTabletTracking(True)
-    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    widget.setMinimumSize(1, 1)
+__all__ = (
+    "PointerDeviceKind",
+    "PointerInputController",
+    "PointerPhase",
+    "PointerSample",
+    "TouchGestureArena",
+    "TouchGestureKind",
+    "TouchNavigationSession",
+)

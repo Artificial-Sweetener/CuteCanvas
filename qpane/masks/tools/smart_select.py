@@ -27,6 +27,7 @@ from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QWheelEv
 
 from qpane.tools.base import BaseTool
 from qpane.tools import ToolDependencies
+from qpane.tools.input.model import PointerPhase, PointerSample
 
 logger = logging.getLogger(__name__)
 
@@ -116,58 +117,38 @@ class SmartSelectTool(BaseTool):
         """Start a rectangular selection when the user presses the left button."""
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        image_point = self._panel_to_content_point(event.position().toPoint())
-        if image_point is None:
-            return
-        self.is_selecting_region = True
-        self.selection_start_point = image_point
-        self.selection_end_point = image_point
-        self.signals.repaint_overlay_requested.emit()
-        event.accept()
+        if self._begin_selection(event.position().toPoint()):
+            event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         """Update the active selection as the pointer moves."""
-        if not self.is_selecting_region:
-            return
-        image_point = self._panel_to_content_point(event.position().toPoint())
-        if image_point is None:
-            return
-        self.selection_end_point = image_point
-        self.signals.repaint_overlay_requested.emit()
-        event.accept()
+        if self._update_selection(event.position().toPoint()):
+            event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         """Finalize the selection and emit a bounding box when valid."""
         if event.button() != Qt.MouseButton.LeftButton or not self.is_selecting_region:
             return
-        self.is_selecting_region = False
-        self.selection_end_point = self._panel_to_content_point(
-            event.position().toPoint()
-        )
-        if (
-            self.selection_start_point is not None
-            and self.selection_end_point is not None
-        ):
-            x1 = min(self.selection_start_point.x(), self.selection_end_point.x())
-            y1 = min(self.selection_start_point.y(), self.selection_end_point.y())
-            x2 = max(self.selection_start_point.x(), self.selection_end_point.x())
-            y2 = max(self.selection_start_point.y(), self.selection_end_point.y())
-            if x2 <= x1 or y2 <= y1:
-                logger.debug(
-                    "Ignoring smart-select release: zero-area rectangle (start=%s, end=%s)",
-                    self.selection_start_point,
-                    self.selection_end_point,
-                )
-            else:
-                min_size = self._get_min_selection_size()
-                if (x2 - x1) > min_size and (y2 - y1) > min_size:
-                    bbox = np.array([x1, y1, x2, y2])
-                    erase_mode = self._is_alt_held()
-                    self.signals.region_selected_for_masking.emit(bbox, erase_mode)
-        self.selection_start_point = None
-        self.selection_end_point = None
-        self.signals.repaint_overlay_requested.emit()
+        self._finish_selection(event.position().toPoint())
         event.accept()
+
+    def handle_pointer_sample(self, sample: PointerSample) -> bool:
+        """Handle direct touch selection without synthesized mouse events."""
+        point = sample.position.toPoint()
+        if sample.phase is PointerPhase.BEGIN:
+            return self._begin_selection(point)
+        if sample.phase is PointerPhase.UPDATE:
+            return self._update_selection(point)
+        if sample.phase is PointerPhase.END:
+            if not self.is_selecting_region:
+                return False
+            self._finish_selection(point)
+            return True
+        if sample.phase is PointerPhase.CANCEL:
+            was_selecting = self.is_selecting_region
+            self._clear_selection()
+            return was_selecting
+        return False
 
     def wheelEvent(self, event: QWheelEvent):
         """Request mask component adjustments or absorb the gesture."""
@@ -211,6 +192,61 @@ class SmartSelectTool(BaseTool):
             painter.drawRect(QRectF(p1, p2).normalized())
         finally:
             painter.restore()
+
+    def _begin_selection(self, panel_point: QPoint) -> bool:
+        """Start a selection from one panel point."""
+        image_point = self._panel_to_content_point(panel_point)
+        if image_point is None:
+            return False
+        self.is_selecting_region = True
+        self.selection_start_point = image_point
+        self.selection_end_point = image_point
+        self.signals.repaint_overlay_requested.emit()
+        return True
+
+    def _update_selection(self, panel_point: QPoint) -> bool:
+        """Move the endpoint of an active selection."""
+        if not self.is_selecting_region:
+            return False
+        image_point = self._panel_to_content_point(panel_point)
+        if image_point is None:
+            return False
+        self.selection_end_point = image_point
+        self.signals.repaint_overlay_requested.emit()
+        return True
+
+    def _finish_selection(self, panel_point: QPoint) -> None:
+        """Emit a valid selection rectangle and clear transient state."""
+        self.is_selecting_region = False
+        self.selection_end_point = self._panel_to_content_point(panel_point)
+        if (
+            self.selection_start_point is not None
+            and self.selection_end_point is not None
+        ):
+            x1 = min(self.selection_start_point.x(), self.selection_end_point.x())
+            y1 = min(self.selection_start_point.y(), self.selection_end_point.y())
+            x2 = max(self.selection_start_point.x(), self.selection_end_point.x())
+            y2 = max(self.selection_start_point.y(), self.selection_end_point.y())
+            if x2 <= x1 or y2 <= y1:
+                logger.debug(
+                    "Ignoring smart-select release: zero-area rectangle (start=%s, end=%s)",
+                    self.selection_start_point,
+                    self.selection_end_point,
+                )
+            else:
+                min_size = self._get_min_selection_size()
+                if (x2 - x1) > min_size and (y2 - y1) > min_size:
+                    bbox = np.array([x1, y1, x2, y2])
+                    erase_mode = self._is_alt_held()
+                    self.signals.region_selected_for_masking.emit(bbox, erase_mode)
+        self._clear_selection()
+
+    def _clear_selection(self) -> None:
+        """Clear transient selection geometry and repaint the overlay."""
+        self.is_selecting_region = False
+        self.selection_start_point = None
+        self.selection_end_point = None
+        self.signals.repaint_overlay_requested.emit()
 
 
 def connect_smart_select_signals(

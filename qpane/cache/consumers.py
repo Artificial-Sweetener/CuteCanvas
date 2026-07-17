@@ -171,7 +171,6 @@ class _BudgetedCacheConsumer:
             missing_hook_label=self._missing_batch_label,
             warn_message=self._warn_message,
         )
-        self._notify()
 
     def _notify(self) -> None:
         """Publish cache usage to the coordinator."""
@@ -264,32 +263,21 @@ class SamPredictorCacheConsumer:
         self._notify()
 
     def _get_usage(self) -> int:
-        """Return the predictor usage including pending estimates in bytes."""
+        """Return resident predictor-cache usage in bytes."""
         usage_getter = getattr(self._manager, "cache_usage_bytes", None)
         if usage_getter is None:
             logger.error(
                 "SAM predictor manager missing cache_usage_bytes; cannot report usage"
             )
             raise RuntimeError("cache_usage_bytes missing for SAM cache consumer")
-        pending_getter = getattr(self._manager, "pendingUsageBytes", None)
-        if pending_getter is None:
-            logger.error(
-                "SAM predictor manager missing pendingUsageBytes; cannot report usage"
-            )
-            raise RuntimeError("pendingUsageBytes missing for SAM cache consumer")
         try:
-            manager_usage = _safe_int(
+            return _safe_int(
                 usage_getter() if callable(usage_getter) else usage_getter,
                 label="sam_cache_usage_bytes",
-            )
-            pending_usage = _safe_int(
-                pending_getter() if callable(pending_getter) else pending_getter,
-                label="sam_pending_usage_bytes",
             )
         except Exception:  # pragma: no cover - defensive
             logger.exception("SAM predictor usage hooks failed")
             raise
-        return manager_usage + pending_usage
 
     def _set_budget(self, target_bytes: int) -> None:  # noqa: ARG002
         """SAM predictors lack a budget knob; trims drive enforcement."""
@@ -316,8 +304,8 @@ class SamPredictorCacheConsumer:
         for image_id in id_accessor():
             if usage <= target:
                 break
-            if drop(image_id):
-                usage = self._get_usage()
+            drop(image_id)
+            usage = self._get_usage()
         usage = max(usage, 0)
         if usage > target:
             logger.warning(
@@ -327,7 +315,6 @@ class SamPredictorCacheConsumer:
                 usage,
                 target,
             )
-        self._coordinator.update_usage(self._consumer_id, usage)
 
     def _notify(self) -> None:
         """Push the current predictor usage to the coordinator."""
@@ -443,7 +430,6 @@ class MaskOverlayCacheConsumer:
                 usage,
                 target,
             )
-        self._notify()
 
     def _notify(self) -> None:
         """Publish overlay cache usage to the coordinator."""

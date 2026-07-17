@@ -149,7 +149,7 @@ def test_sam_predictor_consumer_trims_and_updates_usage() -> None:
 
     manager = _ManagerStub()
     coordinator = CacheCoordinator(active_budget_bytes=1024)
-    consumer = SamPredictorCacheConsumer(manager, coordinator)
-    consumer._trim_to(0)
+    SamPredictorCacheConsumer(manager, coordinator)
+    coordinator.set_active_budget(0)
     snapshot = coordinator.snapshot()
     assert snapshot["consumers"]["predictors"]["usage_bytes"] == 0

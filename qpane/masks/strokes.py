@@ -19,29 +19,30 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import TYPE_CHECKING, Callable, Mapping, MutableMapping
 from uuid import UUID
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRect
-from PySide6.QtGui import QBrush, QImage, QPainter, QPen, Qt
+from PySide6.QtCore import QPoint, QRect
+from PySide6.QtGui import QImage, QPainter
 
 from ..catalog.image_utils import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_view_grayscale8,
 )
 from ..concurrency import TaskExecutorProtocol, TaskHandle
-from .mask_controller import (
-    MaskController,
+from .mask_controller import MaskController
+from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
     MaskStrokePayload,
     MaskStrokeSegmentPayload,
 )
 from .mask_diagnostics import MaskStrokeDiagnostics
-from .stroke_render import stroke_pen_width, stroke_radius
+from .stroke_render import paint_stroke_segment
 from .stroke_worker import MaskStrokeWorker
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -58,6 +59,14 @@ class MaskStrokeDebugSnapshot:
     preview_tokens: dict[UUID, int] = field(default_factory=dict)
     pending_jobs: dict[UUID, tuple[TaskHandle, ...]] = field(default_factory=dict)
     forced_drop_masks: tuple[UUID, ...] = tuple()
+
+
+@dataclass(frozen=True)
+class _MaskStrokePreview:
+    """Bind a provisional mask image to its image-space destination rectangle."""
+
+    rect: QRect
+    image: QImage
 
 
 @dataclass(slots=True)
@@ -82,25 +91,26 @@ class _DecimatedStrokeState:
         self,
         *,
         dirty_rect: QRect,
-        start_point: QPoint,
-        end_point: QPoint,
-        erase: bool,
-        brush_size: int,
+        segment: MaskStrokeSegmentPayload,
         mask_view: np.ndarray,
-    ) -> QImage:
-        """Render a decimated preview snippet for the provided segment."""
-        segment = MaskStrokeSegmentPayload(
-            start=(int(start_point.x()), int(start_point.y())),
-            end=(int(end_point.x()), int(end_point.y())),
-            brush_size=int(brush_size),
-            erase=bool(erase),
-        )
+    ) -> _MaskStrokePreview:
+        """Record a segment and render its accumulated provisional mask."""
         self._segments.append(segment)
         rect_copy = QRect(dirty_rect)
         if self._dirty_rect is None:
             self._dirty_rect = rect_copy
         else:
             self._dirty_rect = self._dirty_rect.united(rect_copy)
+        preview = self.current_preview(mask_view)
+        if preview is None:
+            raise RuntimeError("recorded stroke must produce a preview image")
+        return preview
+
+    def current_preview(self, mask_view: np.ndarray) -> _MaskStrokePreview | None:
+        """Render all recorded segments against the latest durable mask pixels."""
+        if not self._segments or self._dirty_rect is None:
+            return None
+        rect_copy = QRect(self._dirty_rect)
         stride = max(1, self.stride)
         y0 = rect_copy.top()
         x0 = rect_copy.left()
@@ -111,10 +121,14 @@ class _DecimatedStrokeState:
         painter = QPainter(preview_image)
         try:
             for recorded in self._segments:
-                start_qpoint = QPoint(recorded.start[0], recorded.start[1])
-                end_qpoint = QPoint(recorded.end[0], recorded.end[1])
+                start_qpoint = QPoint(
+                    int(round(recorded.start[0])), int(round(recorded.start[1]))
+                )
+                end_qpoint = QPoint(
+                    int(round(recorded.end[0])), int(round(recorded.end[1]))
+                )
                 segment_rect = QRect(start_qpoint, end_qpoint).normalized()
-                segment_margin = int(recorded.brush_size / 2) + 2
+                segment_margin = int(recorded.maximum_diameter / 2.0) + 2
                 segment_rect = segment_rect.adjusted(
                     -segment_margin,
                     -segment_margin,
@@ -123,34 +137,17 @@ class _DecimatedStrokeState:
                 )
                 if not segment_rect.intersects(rect_copy):
                     continue
-                draw_color = (
-                    Qt.GlobalColor.black if recorded.erase else Qt.GlobalColor.white
+                paint_stroke_segment(
+                    painter,
+                    rect_copy.topLeft(),
+                    recorded,
+                    stride=stride,
                 )
-                pen = QPen()
-                pen.setWidth(stroke_pen_width(recorded.brush_size, stride=stride))
-                pen.setColor(draw_color)
-                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                painter.setPen(pen)
-                start_offset = QPointF(
-                    (start_qpoint.x() - rect_copy.left()) / stride,
-                    (start_qpoint.y() - rect_copy.top()) / stride,
-                )
-                end_offset = QPointF(
-                    (end_qpoint.x() - rect_copy.left()) / stride,
-                    (end_qpoint.y() - rect_copy.top()) / stride,
-                )
-                painter.drawLine(start_offset, end_offset)
-                if recorded.start == recorded.end:
-                    painter.setBrush(QBrush(draw_color))
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    radius = stroke_radius(recorded.brush_size, stride=stride)
-                    painter.drawEllipse(start_offset, radius, radius)
         finally:
             painter.end()
         preview_image.setText("qpane_preview_stride", str(stride))
         preview_image.setText("qpane_preview_provisional", "1")
-        return preview_image
+        return _MaskStrokePreview(rect=rect_copy, image=preview_image)
 
     def _build_payload(self) -> MaskStrokePayload:
         """Return the recorded segments packaged for worker execution."""
@@ -167,8 +164,7 @@ class _DecimatedStrokeState:
         self,
         *,
         controller: MaskController,
-        submit_job: Callable[[MaskStrokeJobSpec, bool, str, bool, int], bool],
-        clear_preview_state: bool,
+        submit_job: Callable[[MaskStrokeJobSpec, str, bool, int], bool],
         source: str,
         commit: bool,
         allocate_job_token: Callable[[], int],
@@ -208,7 +204,6 @@ class _DecimatedStrokeState:
         try:
             queued = submit_job(
                 spec_with_token,
-                clear_preview_state=clear_preview_state,
                 source=source,
                 commit=commit,
                 job_token=job_token,
@@ -394,7 +389,6 @@ class MaskStrokePipeline:
         self,
         spec: MaskStrokeJobSpec,
         *,
-        clear_preview_state: bool,
         source: str,
         commit: bool,
         job_token: int,
@@ -433,7 +427,6 @@ class MaskStrokePipeline:
             self._finalize_stroke_result(
                 result,
                 handle=handle_box["handle"],
-                clear_preview_state=clear_preview_state,
                 commit=commit,
             )
 
@@ -473,7 +466,6 @@ class MaskStrokePipeline:
         result: MaskStrokeJobResult,
         *,
         handle: TaskHandle | None,
-        clear_preview_state: bool,
         commit: bool,
     ) -> None:
         """Merge a completed stroke, update diagnostics, and clean pending state."""
@@ -500,9 +492,6 @@ class MaskStrokePipeline:
                 return
             if self._preview_tokens.get(target_mask_id) == token_value:
                 self._preview_tokens.pop(target_mask_id, None)
-
-        if clear_preview_state:
-            self._preview_states.pop(mask_id, None)
 
         def _record_completion(
             status: str,
@@ -605,8 +594,6 @@ class MaskStrokePipeline:
             detail: str | None = None,
         ) -> None:
             """Handle stale results by reverting preview state and logging drops."""
-            if clear_preview_state:
-                self._preview_states.pop(stale_job.mask_id, None)
             stale_metadata = stale_job.metadata
             stale_token = (
                 stale_metadata.get("job_token")
@@ -617,6 +604,7 @@ class MaskStrokePipeline:
             latest_layer = mask_manager.get_layer(stale_job.mask_id)
             if latest_layer is not None:
                 qpane.updateMaskRegion(stale_job.dirty_rect, latest_layer)
+                self._refresh_active_preview(stale_job.mask_id, latest_layer)
             if diagnostics is not None:
                 diagnostics.record_drop(
                     mask_id=stale_job.mask_id,
@@ -693,14 +681,13 @@ class MaskStrokePipeline:
             _record_completion("committed")
         else:
             _record_completion("applied", detail="preview")
+        self._refresh_active_preview(job_result.mask_id, mask_layer)
         _clear_pending_token(job_result.mask_id, job_token)
         _notify_idle()
 
     def apply_stroke_segment(
         self,
-        start_point: QPoint,
-        end_point: QPoint,
-        is_erase: bool,
+        segment: MaskStrokeSegmentPayload,
     ) -> None:
         """Render a preview segment and enqueue work for the active mask."""
         qpane = self._qpane
@@ -746,8 +733,10 @@ class MaskStrokePipeline:
         controller = service.controller
         mask_image = mask_layer.mask_image
         mask_bounds = mask_image.rect()
+        start_point = QPoint(math.floor(segment.start[0]), math.floor(segment.start[1]))
+        end_point = QPoint(math.ceil(segment.end[0]), math.ceil(segment.end[1]))
         stroke_rect = QRect(start_point, end_point).normalized()
-        margin = int(qpane.interaction.brush_size / 2) + 2
+        margin = int(segment.maximum_diameter / 2.0) + 2
         dirty_rect = stroke_rect.adjusted(-margin, -margin, margin, margin)
         dirty_rect = dirty_rect.intersected(mask_bounds)
         if dirty_rect.isNull() or dirty_rect.isEmpty():
@@ -775,7 +764,6 @@ class MaskStrokePipeline:
             state.flush_to_mask(
                 controller=controller,
                 submit_job=self._submit_stroke_job,
-                clear_preview_state=True,
                 source="stroke-final",
                 commit=False,
                 allocate_job_token=self._allocate_job_token,
@@ -790,18 +778,15 @@ class MaskStrokePipeline:
         if state is None:
             state = _DecimatedStrokeState(mask_id=active_mask_id, stride=stride)
             self._preview_states[active_mask_id] = state
-        preview_image = state.preview_segment(
+        preview = state.preview_segment(
             dirty_rect=dirty_rect,
-            start_point=start_point,
-            end_point=end_point,
-            erase=is_erase,
-            brush_size=qpane.interaction.brush_size,
+            segment=segment,
             mask_view=view_array,
         )
         qpane.updateMaskRegion(
-            dirty_rect,
+            preview.rect,
             mask_layer,
-            sub_mask_image=preview_image,
+            sub_mask_image=preview.image,
         )
 
     def commit_active_stroke(self) -> None:
@@ -825,7 +810,6 @@ class MaskStrokePipeline:
         queued = state.flush_to_mask(
             controller=controller,
             submit_job=self._submit_stroke_job,
-            clear_preview_state=True,
             source="stroke-final",
             commit=True,
             allocate_job_token=self._allocate_job_token,
@@ -835,6 +819,33 @@ class MaskStrokePipeline:
         if not queued:
             controller.commitStroke(mask_id)
         self._notify_idle_if_clear(mask_id)
+
+    def cancel_active_stroke(self) -> None:
+        """Discard active preview and pending work without committing undo content."""
+        service = self._service
+        mask_id = service.getActiveMaskId()
+        if mask_id is None:
+            return
+        self.reset_state(mask_id, request_redraw=True)
+        service.controller.pushUndoState()
+
+    def _refresh_active_preview(self, mask_id: UUID, mask_layer: object) -> None:
+        """Reapply a newer live stroke after an older worker updates its cache."""
+        state = self._preview_states.get(mask_id)
+        if state is None:
+            return
+        mask_image = getattr(mask_layer, "mask_image", None)
+        if mask_image is None or mask_image.isNull():
+            return
+        mask_view, _ = qimage_to_numpy_view_grayscale8(mask_image)
+        preview = state.current_preview(mask_view)
+        if preview is None:
+            return
+        self._qpane.updateMaskRegion(
+            preview.rect,
+            mask_layer,
+            sub_mask_image=preview.image,
+        )
 
     def _notify_idle_if_clear(self, mask_id: UUID | None) -> None:
         """Invoke the idle callback when ``mask_id`` has no pending stroke state."""
