@@ -774,9 +774,7 @@ class MaskStrokePipeline:
             return
         viewport = view.viewport
         zoom = getattr(viewport, "zoom", 1.0) or 1.0
-        stride = 1
-        if zoom < 1.0:
-            stride = max(1, int(round(1.0 / max(zoom, 1e-6))))
+        stride = controller.preview_stride_for_mask(active_mask_id, zoom)
         state = self._preview_states.get(active_mask_id)
         view_array, _ = qimage_to_numpy_view_grayscale8(mask_image)
         if state is not None and state.stride != stride:

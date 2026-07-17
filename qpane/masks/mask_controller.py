@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from collections import OrderedDict
@@ -228,6 +229,7 @@ class MaskController(QObject):
         self._colorize_threshold_ms: float = 25.0
         self._colorize_last_source: str | None = None
         self._mask_cache_index: dict[uuid.UUID, set[MaskRenderCacheKey]] = {}
+        self._requested_render_scales: dict[uuid.UUID, float] = {}
         self._missing_cv2_warned = False
         self._prefetch_requested: int = 0
         self._prefetch_completed: int = 0
@@ -346,11 +348,25 @@ class MaskController(QObject):
             + (config_generation << 52)
         )
 
+    def preview_stride_for_mask(
+        self,
+        mask_id: uuid.UUID,
+        viewport_zoom: float,
+    ) -> int:
+        """Return a preview stride that satisfies the active render resolution."""
+        safe_zoom = max(1e-6, float(viewport_zoom))
+        requested_scale = self._requested_render_scales.get(mask_id, 1.0)
+        required_scale = max(safe_zoom, requested_scale)
+        if required_scale >= 1.0:
+            return 1
+        return max(1, math.floor(1.0 / required_scale))
+
     def discardMaskGeneration(self, mask_id: uuid.UUID) -> None:
         """Forget controller generation tracking for `mask_id`."""
         self.cancel_async_colorize(mask_id)
         self._mask_generations.pop(mask_id, None)
         self._mask_style_generations.pop(mask_id, None)
+        self._requested_render_scales.pop(mask_id, None)
 
     def prepareStrokeJob(
         self,
@@ -1664,6 +1680,8 @@ class MaskController(QObject):
         mask_layer = self._get_layer(mask_id)
         if mask_layer is None:
             return None
+        scale_key = self._normalize_scale_key(scale)
+        self._requested_render_scales[mask_id] = 1.0 if scale_key is None else scale_key
         return self._get_colorized_mask(mask_layer, scale=scale)
 
     def _apply_history_delta(

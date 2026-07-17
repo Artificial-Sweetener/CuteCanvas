@@ -26,6 +26,8 @@ from PySide6.QtWidgets import QApplication
 
 from qpane import QPane
 from tests.harness import MountedQPaneHarness
+from tests.harness.abuse_model import HarnessPoint, PointerKind, StrokeAction
+from tests.harness.input_driver import QtStrokeDriver
 
 
 class MountedMaskFeedbackProbe(MountedQPaneHarness):
@@ -215,6 +217,56 @@ def test_held_mouse_drag_presents_filled_continuous_stroke_before_release(
             end,
         )
     finally:
+        probe.close()
+
+
+@pytest.mark.parametrize("device", tuple(PointerKind))
+def test_decimated_drag_preview_presents_each_move_without_forced_grab(
+    qapp: QApplication,
+    device: PointerKind,
+) -> None:
+    """Low-zoom preview frames must show every held-contact move naturally."""
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(4096, 4096),
+        widget_size=QSize(320, 500),
+        brush_size=30,
+    )
+    action = StrokeAction(
+        device=device,
+        points=tuple(
+            HarnessPoint(x_position, 250) for x_position in range(48, 273, 32)
+        ),
+        brush_size=30,
+        step_delay_ms=1,
+    )
+    driver = QtStrokeDriver(probe)
+    pressed = False
+    try:
+        assert probe.viewer.currentZoom() == pytest.approx(0.078125)
+        with probe.observe_presented_frames() as frame_probe:
+            for point_index, harness_point in enumerate(action.points):
+                point = harness_point.to_qpoint()
+                frame_count = len(frame_probe.frames)
+                if point_index == 0:
+                    driver.begin(action)
+                    pressed = True
+                else:
+                    driver.move(action, point_index)
+                QTest.qWait(20)
+                qapp.processEvents()
+
+                presented = frame_probe.frames[frame_count:]
+                assert presented, f"move {point_index} did not present a frame"
+                frame = presented[-1]
+                assert any(
+                    probe.is_mask_tint(frame.color_at(point + QPoint(dx, dy)))
+                    for dy in range(-4, 5)
+                    for dx in range(-4, 5)
+                ), f"move {point_index} presented no mask feedback"
+    finally:
+        if pressed:
+            driver.end(action)
         probe.close()
 
 

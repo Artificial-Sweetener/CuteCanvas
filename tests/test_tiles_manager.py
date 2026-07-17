@@ -439,7 +439,10 @@ def test_tile_manager_retries_after_throttle(qapp) -> None:
 
 
 def test_prefetch_tiles_counts_cache_hits(qapp):
-    manager = TileManager(config=Config(), executor=StubExecutor())
+    manager = TileManager(
+        config=Config(cache={"tiles": {"mb": 1}}),
+        executor=StubExecutor(),
+    )
     source_image = QImage(64, 64, QImage.Format_ARGB32)
     image_id = uuid.uuid4()
     identifier = make_tile_key(image_id, Path("cache-hit.png"), 1.0, 0, 0)
