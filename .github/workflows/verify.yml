@@ -78,6 +78,17 @@ jobs:
       - name: Run test suite
         run: python -m pytest -n auto
 
+      - name: Run mounted QPane abuse profile
+        run: python -m tests.harness --profile ci --seed 20260716
+
+      - name: Upload mounted QPane failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qpane-abuse-${{ matrix.os }}-py${{ matrix.python }}
+          path: qpane-abuse-artifacts
+          if-no-files-found: ignore
+
   gate:
     name: Gate
     if: always()

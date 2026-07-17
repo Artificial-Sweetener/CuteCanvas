@@ -403,6 +403,17 @@ class MaskManager:
             return
         self._undo_provider.submit(mask_id, command, self._undo_limit)
 
+    def record_applied_undo_command(
+        self,
+        mask_id: uuid.UUID,
+        command: MaskUndoCommand,
+    ) -> None:
+        """Record an undo command whose after-state is already authoritative."""
+        if mask_id not in self._masks:
+            _warn_missing_mask(mask_id, action="record applied undo command")
+            return
+        self._undo_provider.record_applied(mask_id, command, self._undo_limit)
+
     def build_mask_patch_command(
         self,
         mask_id: uuid.UUID,
@@ -453,6 +464,24 @@ class MaskManager:
         if command is None:
             return False
         self.submit_undo_command(mask_id, command)
+        return True
+
+    def record_applied_mask_patches(
+        self,
+        mask_id: uuid.UUID,
+        patches: Sequence[MaskPatch],
+        *,
+        notify: Callable[[uuid.UUID], None] | None = None,
+    ) -> bool:
+        """Record patches whose after-state is already present on the surface."""
+        command = self.build_mask_patch_command(
+            mask_id,
+            patches,
+            notify=notify,
+        )
+        if command is None:
+            return False
+        self.record_applied_undo_command(mask_id, command)
         return True
 
     def build_mask_image_command(

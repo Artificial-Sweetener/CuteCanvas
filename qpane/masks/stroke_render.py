@@ -52,8 +52,9 @@ def render_stroke_segments(
     before: np.ndarray,
     dirty_rect: QRect,
     segments: tuple[MaskStrokeSegmentPayload, ...],
+    preview_stride: int = 1,
 ) -> tuple[np.ndarray, QImage]:
-    """Replay `segments` against `before` and return the updated slice and preview."""
+    """Return an exact mask slice plus a display-scale stroke preview."""
     working_array = np.array(before, copy=True)
     image = numpy_to_qimage_grayscale8(working_array)
     if segments:
@@ -65,7 +66,25 @@ def render_stroke_segments(
         finally:
             painter.end()
     after_slice = qimage_to_numpy_grayscale8(image)
-    return after_slice, image.copy()
+    stride = max(1, int(preview_stride))
+    if stride == 1:
+        return after_slice, image.copy()
+    preview_array = np.array(before[::stride, ::stride], copy=True)
+    preview_image = numpy_to_qimage_grayscale8(preview_array)
+    if segments:
+        preview_painter = QPainter(preview_image)
+        try:
+            origin = dirty_rect.topLeft()
+            for segment in segments:
+                paint_stroke_segment(
+                    preview_painter,
+                    origin,
+                    segment,
+                    stride=stride,
+                )
+        finally:
+            preview_painter.end()
+    return after_slice, preview_image.copy()
 
 
 def paint_stroke_segment(

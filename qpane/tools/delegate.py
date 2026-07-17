@@ -39,7 +39,7 @@ from ..ui import (
     apply_widget_defaults,
 )
 from .dependencies import ToolDependencies
-from .input import PointerDeviceKind, PointerInputController
+from .input import PointerInputController
 from .tools import Tools
 
 
@@ -72,7 +72,7 @@ class ToolInteractionDelegate:
         self._copy_image_handler = None
         self._pointer_input = PointerInputController(
             qpane,
-            on_modality_changed=self._handle_pointer_modality_changed,
+            on_pointer_state_changed=self._handle_pointer_state_changed,
         )
 
     def _viewport(self):
@@ -362,6 +362,9 @@ class ToolInteractionDelegate:
         if qpane._is_blank:
             qpane.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
             return
+        if self._pointer_input.cursor_suppressed:
+            qpane.setCursor(QCursor(Qt.CursorShape.BlankCursor))
+            return
         try:
             divider_cursor = qpane.comparisonDividerInteraction().cursor()
         except AttributeError:
@@ -370,17 +373,6 @@ class ToolInteractionDelegate:
             qpane.setCursor(divider_cursor)
             return
         tools = qpane._tools_manager
-        if (
-            tools.get_control_mode() == Tools.CONTROL_MODE_DRAW_BRUSH
-            and self._pointer_input.active_device
-            in {
-                PointerDeviceKind.TOUCH,
-                PointerDeviceKind.PEN,
-                PointerDeviceKind.ERASER,
-            }
-        ):
-            qpane.setCursor(QCursor(Qt.CursorShape.BlankCursor))
-            return
         active_tool = tools.get_active_tool()
         if active_tool and hasattr(active_tool, "getCursor"):
             try:
@@ -477,8 +469,10 @@ class ToolInteractionDelegate:
             event.accept()
             return
         if self._qpane.comparisonDividerInteraction().handle_mouse_press(event):
+            self._synchronize_effective_cursor()
             return
         self._forward_tool_event(self._qpane._tools_manager.mousePressEvent, event)
+        self._synchronize_effective_cursor()
 
     def handle_mouse_move(self, event: QMouseEvent) -> None:
         """Forward mouse move events to the active tool."""
@@ -489,10 +483,12 @@ class ToolInteractionDelegate:
         had_divider_cursor = divider.owns_cursor()
         if divider.handle_mouse_move(event):
             self.update_cursor()
+            self._synchronize_effective_cursor()
             return
         if had_divider_cursor or divider.owns_cursor():
             self.update_cursor()
         self._forward_tool_event(self._qpane._tools_manager.mouseMoveEvent, event)
+        self._synchronize_effective_cursor()
 
     def handle_mouse_release(self, event: QMouseEvent) -> None:
         """Forward mouse release events to the active tool."""
@@ -501,8 +497,10 @@ class ToolInteractionDelegate:
             return
         if self._qpane.comparisonDividerInteraction().handle_mouse_release(event):
             self.update_cursor()
+            self._synchronize_effective_cursor()
             return
         self._forward_tool_event(self._qpane._tools_manager.mouseReleaseEvent, event)
+        self._synchronize_effective_cursor()
 
     def handle_mouse_double_click(self, event: QMouseEvent) -> None:
         """Forward double-click events to the active tool."""
@@ -512,9 +510,11 @@ class ToolInteractionDelegate:
         self._forward_tool_event(
             self._qpane._tools_manager.mouseDoubleClickEvent, event
         )
+        self._synchronize_effective_cursor()
 
     def handle_enter_event(self, event) -> None:
         """Notify the active tool that the cursor entered the widget."""
+        self._pointer_input.observe_enter_event(event)
         self.update_cursor()
         self._forward_tool_event(
             self._qpane._tools_manager.enterEvent, event, guard_blank=False
@@ -529,17 +529,34 @@ class ToolInteractionDelegate:
             self._qpane._tools_manager.leaveEvent, event, guard_blank=False
         )
 
-    def _handle_pointer_modality_changed(self, device: PointerDeviceKind) -> None:
-        """Apply OS cursor policy after the input controller changes modality."""
-        if device in {
-            PointerDeviceKind.TOUCH,
-            PointerDeviceKind.PEN,
-            PointerDeviceKind.ERASER,
-        }:
-            self._qpane.setCursor(QCursor(Qt.CursorShape.BlankCursor))
+    def _handle_pointer_state_changed(self) -> None:
+        """Reconcile QPane's cursor with direct-input lifecycle state."""
+        self.update_cursor()
+
+    def _synchronize_effective_cursor(self) -> None:
+        """Apply QPane's desired cursor to its active Qt window synchronously."""
+        top_level = self._qpane.window()
+        window = top_level.windowHandle() if top_level is not None else None
+        if window is None:
             return
-        if device is PointerDeviceKind.MOUSE:
-            self.update_cursor()
+        desired = self._qpane.cursor()
+        if self._cursor_states_match(window.cursor(), desired):
+            return
+        window.setCursor(desired)
+
+    @staticmethod
+    def _cursor_states_match(current: QCursor, desired: QCursor) -> bool:
+        """Return whether two Qt cursors have the same observable appearance."""
+        if current.shape() != desired.shape():
+            return False
+        if desired.shape() != Qt.CursorShape.BitmapCursor:
+            return True
+        current_pixmap = current.pixmap()
+        desired_pixmap = desired.pixmap()
+        return (
+            current_pixmap.cacheKey() == desired_pixmap.cacheKey()
+            and current.hotSpot() == desired.hotSpot()
+        )
 
     def handle_show_event(self) -> None:
         """Ensure pan/zoom is active on first show and force view alignment."""

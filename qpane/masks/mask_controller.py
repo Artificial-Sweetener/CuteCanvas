@@ -135,24 +135,35 @@ class _StrokeAccumulator:
     """Collect and merge mask patches produced during a stroke."""
 
     _patches: list[MaskPatch]
+    _already_applied: bool | None
 
     def __init__(self) -> None:
         """Start with an empty patch list ready to capture strokes."""
         self._patches = []
+        self._already_applied = None
 
     def reset(self) -> None:
         """Clear the recorded patches so a new stroke can begin."""
         self._patches.clear()
+        self._already_applied = None
 
-    def add_patch(self, patch: MaskPatch) -> None:
+    def add_patch(self, patch: MaskPatch, *, already_applied: bool) -> None:
         """Append ``patch`` to the accumulator."""
+        if (
+            self._already_applied is not None
+            and self._already_applied != already_applied
+        ):
+            raise ValueError("A stroke cannot mix applied and unapplied mask patches.")
+        self._already_applied = already_applied
         self._patches.append(patch)
 
-    def consume(self) -> tuple[MaskPatch, ...]:
+    def consume(self) -> tuple[tuple[MaskPatch, ...], bool]:
         """Return and clear the recorded patches."""
         patches = tuple(self._patches)
+        already_applied = bool(self._already_applied)
         self._patches.clear()
-        return patches
+        self._already_applied = None
+        return patches, already_applied
 
 
 class MaskController(QObject):
@@ -226,7 +237,7 @@ class MaskController(QObject):
         self._async_colorize_handler: Callable[[uuid.UUID, MaskLayer], bool] | None = (
             None
         )
-        self._async_colorize_pending: set[uuid.UUID] = set()
+        self._async_colorize_pending: dict[uuid.UUID, int] = {}
         self._async_colorize_threshold_px: int = 512 * 512
         self._cache_usage_callback: Callable[[], None] | None = None
         self._prefetched_image_limit = 8
@@ -276,11 +287,13 @@ class MaskController(QObject):
             self._stroke_accumulators[mask_id] = accumulator
         return accumulator
 
-    def _drain_stroke_patches(self, mask_id: uuid.UUID) -> tuple[MaskPatch, ...]:
+    def _drain_stroke_patches(
+        self, mask_id: uuid.UUID
+    ) -> tuple[tuple[MaskPatch, ...], bool]:
         """Return and clear recorded patches for ``mask_id``."""
         accumulator = self._stroke_accumulators.pop(mask_id, None)
         if accumulator is None:
-            return tuple()
+            return tuple(), False
         return accumulator.consume()
 
     def getMaskGeneration(self, mask_id: uuid.UUID) -> int:
@@ -335,6 +348,7 @@ class MaskController(QObject):
 
     def discardMaskGeneration(self, mask_id: uuid.UUID) -> None:
         """Forget controller generation tracking for `mask_id`."""
+        self.cancel_async_colorize(mask_id)
         self._mask_generations.pop(mask_id, None)
         self._mask_style_generations.pop(mask_id, None)
 
@@ -439,6 +453,9 @@ class MaskController(QObject):
                 mask_id,
             )
             return False
+        if np.array_equal(job.before, job.after):
+            self._record_stroke_event("no_op")
+            return True
         top = rect.top()
         left = rect.left()
         bottom = top + height
@@ -450,8 +467,15 @@ class MaskController(QObject):
             np.copyto(region, job.after)
 
         layer.surface.mutate_with_view(_apply)
-        self.recordStrokePatchFromArrays(mask_id, rect, job.before, job.after)
+        self.recordStrokePatchFromArrays(
+            mask_id,
+            rect,
+            job.before,
+            job.after,
+            already_applied=True,
+        )
         self.bumpMaskGeneration(mask_id, reason="stroke_job_applied")
+        self._promote_mask_cache_revision(mask_id)
         if emit_mask_updated:
             self.mask_updated.emit(mask_id, rect)
         return True
@@ -470,11 +494,19 @@ class MaskController(QObject):
         rect: QRect,
         before: QImage,
         after: QImage,
+        *,
+        already_applied: bool = False,
     ) -> None:
         """Record a patch delta for `mask_id` covering `rect`."""
         before_np = qimage_to_numpy_grayscale8(before)
         after_np = qimage_to_numpy_grayscale8(after)
-        self.recordStrokePatchFromArrays(mask_id, rect, before_np, after_np)
+        self.recordStrokePatchFromArrays(
+            mask_id,
+            rect,
+            before_np,
+            after_np,
+            already_applied=already_applied,
+        )
 
     def recordStrokePatchFromArrays(
         self,
@@ -482,6 +514,8 @@ class MaskController(QObject):
         rect: QRect,
         before: np.ndarray,
         after: np.ndarray,
+        *,
+        already_applied: bool = False,
     ) -> None:
         """Record a patch delta using precomputed grayscale arrays."""
         if rect.isNull() or rect.isEmpty():
@@ -518,7 +552,8 @@ class MaskController(QObject):
                 before=before_image,
                 after=after_image,
                 mask=mask_slice,
-            )
+            ),
+            already_applied=already_applied,
         )
 
     def _commit_mask_update(
@@ -529,10 +564,17 @@ class MaskController(QObject):
         before: QImage | None = None,
         patches: Sequence[MaskPatch] | tuple[MaskPatch, ...] = (),
         preserve_cache: bool = False,
+        already_applied: bool = False,
     ) -> bool:
         """Submit the recorded update and refresh caches."""
         if patches:
-            success = self.mask_manager.commit_mask_patches(mask_id, patches)
+            if already_applied:
+                success = self.mask_manager.record_applied_mask_patches(
+                    mask_id,
+                    patches,
+                )
+            else:
+                success = self.mask_manager.commit_mask_patches(mask_id, patches)
         else:
             if image is None:
                 logger.error(
@@ -547,7 +589,8 @@ class MaskController(QObject):
             )
         if not success:
             return False
-        self.bumpMaskGeneration(mask_id, reason="commit_mask_update")
+        if not already_applied:
+            self.bumpMaskGeneration(mask_id, reason="commit_mask_update")
         layer = self._get_layer(mask_id)
         if layer is not None and not preserve_cache:
             self._invalidate_colorized_mask_cache(layer)
@@ -703,9 +746,24 @@ class MaskController(QObject):
         if threshold_px is not None and threshold_px > 0:
             self._async_colorize_threshold_px = threshold_px
 
-    def notify_async_colorize_complete(self, mask_id: uuid.UUID) -> None:
-        """Mark any pending async colorize request for `mask_id` as finished."""
-        self._async_colorize_pending.discard(mask_id)
+    def notify_async_colorize_complete(
+        self,
+        mask_id: uuid.UUID,
+        render_revision: int,
+    ) -> None:
+        """Finish the matching asynchronous colorization request."""
+        if self._async_colorize_pending.get(mask_id) == render_revision:
+            self._async_colorize_pending.pop(mask_id, None)
+
+    def cancel_async_colorize(self, mask_id: uuid.UUID) -> None:
+        """Cancel asynchronous colorization ownership for ``mask_id``."""
+        self._async_colorize_pending.pop(mask_id, None)
+
+    def has_pending_async_colorize(self, mask_id: uuid.UUID | None = None) -> bool:
+        """Return whether asynchronous colorization still owns render work."""
+        if mask_id is None:
+            return bool(self._async_colorize_pending)
+        return mask_id in self._async_colorize_pending
 
     def invalidate_mask_cache(
         self, mask_id: uuid.UUID | None, *, reason: str = "invalidate"
@@ -780,21 +838,24 @@ class MaskController(QObject):
         *,
         scaled: Sequence[tuple[float, QImage]] | None = None,
     ) -> None:
-        """Insert a prefetched mask image (and any scaled variants) into the cache."""
+        """Fill missing cache entries without replacing visible render surfaces."""
         if mask_layer is None or image.isNull():
             return
         self._store_prefetched_image(mask_id, image)
         self._store_prefetched_scaled_images(mask_id, scaled)
         pixmap = QPixmap.fromImage(image)
         cache_key = self._cache_key(mask_id, None)
-        self._cache_misses += 1
-        self._record_cache_insert(cache_key, pixmap, mask_id=mask_id)
+        if cache_key not in self._colorized_mask_cache:
+            self._cache_misses += 1
+            self._record_cache_insert(cache_key, pixmap, mask_id=mask_id)
         if scaled:
             for scale_value, scaled_image in scaled:
                 normalized_scale = self._normalize_scale_key(scale_value)
                 if normalized_scale is None or scaled_image.isNull():
                     continue
                 scaled_cache_key = self._cache_key(mask_id, normalized_scale)
+                if scaled_cache_key in self._colorized_mask_cache:
+                    continue
                 scaled_pixmap = QPixmap.fromImage(scaled_image)
                 self._record_cache_insert(
                     scaled_cache_key, scaled_pixmap, mask_id=mask_id
@@ -959,7 +1020,11 @@ class MaskController(QObject):
                     before_patch = existing_image.copy(diff_rect)
                     after_patch = image.copy(diff_rect)
                     self.recordStrokePatch(
-                        mask_id, diff_rect, before_patch, after_patch
+                        mask_id,
+                        diff_rect,
+                        before_patch,
+                        after_patch,
+                        already_applied=True,
                     )
             else:
                 logger.debug(
@@ -975,23 +1040,22 @@ class MaskController(QObject):
         return layer
 
     def commitStroke(self, mask_id: uuid.UUID) -> bool:
-        """Finalize a stroke using accumulated patches or full-image fallback."""
-        layer = self._get_layer(mask_id)
-        if layer is None:
+        """Finalize a stroke only when it accumulated an actual mask mutation."""
+        if self._get_layer(mask_id) is None:
             self._stroke_accumulators.pop(mask_id, None)
             logger.warning("Cannot commit stroke %s: missing mask.", mask_id)
             return False
-        patches = self._drain_stroke_patches(mask_id)
+        patches, already_applied = self._drain_stroke_patches(mask_id)
         if patches:
             if not self._commit_mask_update(
-                mask_id, patches=patches, preserve_cache=True
+                mask_id,
+                patches=patches,
+                preserve_cache=True,
+                already_applied=already_applied,
             ):
                 return False
             return True
-        final_image = layer.mask_image.copy()
-        if not self._commit_mask_update(mask_id, image=final_image):
-            return False
-        return True
+        return False
 
     def apply_mask_image(
         self,
@@ -1002,10 +1066,13 @@ class MaskController(QObject):
         preserve_cache: bool = False,
     ) -> bool:
         """Submit an undoable command using patch data when available."""
-        patches = self._drain_stroke_patches(mask_id)
+        patches, already_applied = self._drain_stroke_patches(mask_id)
         if patches:
             return self._commit_mask_update(
-                mask_id, patches=patches, preserve_cache=True
+                mask_id,
+                patches=patches,
+                preserve_cache=True,
+                already_applied=already_applied,
             )
         return self._commit_mask_update(
             mask_id,
@@ -1043,10 +1110,6 @@ class MaskController(QObject):
             or dirty_image_rect.isEmpty()
         ):
             return
-        colorized_pixmap_cache = self._get_colorized_mask(active_mask_layer)
-        if not colorized_pixmap_cache:
-            self.mask_updated.emit(self._active_mask_id, QRect())
-            return
         mask_uuid = self._resolve_mask_id(active_mask_layer)
         preview_stride: int | None = None
         preview_provisional = False
@@ -1061,6 +1124,21 @@ class MaskController(QObject):
                 )
             except (TypeError, ValueError):
                 preview_provisional = False
+        base_cache_key = None if mask_uuid is None else self._cache_key(mask_uuid, None)
+        if preview_stride is not None and preview_stride > 1:
+            colorized_pixmap_cache = (
+                None
+                if base_cache_key is None
+                else self._colorized_mask_cache.get(base_cache_key)
+            )
+            if base_cache_key is not None and colorized_pixmap_cache is not None:
+                self._drop_cached_mask(
+                    base_cache_key,
+                    reason="decimated_preview",
+                )
+                colorized_pixmap_cache = None
+        else:
+            colorized_pixmap_cache = self._get_colorized_mask(active_mask_layer)
         if mask_uuid is not None:
             self._prefetched_images.pop(mask_uuid, None)
             self._prefetched_scaled_images.pop(mask_uuid, None)
@@ -1077,32 +1155,44 @@ class MaskController(QObject):
         else:
             colorized_qimage = colorized_image
         snippet_pixmap = QPixmap.fromImage(colorized_qimage)
-        cache_painter = QPainter(colorized_pixmap_cache)
-        cache_painter.setCompositionMode(QPainter.CompositionMode_Source)
-        if (
-            preview_stride
-            and preview_stride > 1
-            and snippet_pixmap.size() != dirty_image_rect.size()
-        ):
-            destination_rect = QRect(
-                dirty_image_rect.topLeft(),
-                dirty_image_rect.size(),
-            )
-            cache_painter.drawPixmap(
-                destination_rect,
-                snippet_pixmap,
-                QRect(QPoint(0, 0), snippet_pixmap.size()),
-            )
-        else:
-            cache_painter.drawPixmap(dirty_image_rect.topLeft(), snippet_pixmap)
-        cache_painter.end()
+        if colorized_pixmap_cache is not None and not colorized_pixmap_cache.isNull():
+            cache_painter = QPainter(colorized_pixmap_cache)
+            cache_painter.setCompositionMode(QPainter.CompositionMode_Source)
+            if (
+                preview_stride
+                and preview_stride > 1
+                and snippet_pixmap.size() != dirty_image_rect.size()
+            ):
+                destination_rect = QRect(
+                    dirty_image_rect.topLeft(),
+                    dirty_image_rect.size(),
+                )
+                cache_painter.drawPixmap(
+                    destination_rect,
+                    snippet_pixmap,
+                    QRect(QPoint(0, 0), snippet_pixmap.size()),
+                )
+            else:
+                cache_painter.drawPixmap(dirty_image_rect.topLeft(), snippet_pixmap)
+            cache_painter.end()
         if mask_uuid is None:
             cache_keys: set[MaskRenderCacheKey] = set()
         else:
-            cache_keys = self._mask_cache_index.get(mask_uuid, set())
+            cache_keys = tuple(self._mask_cache_index.get(mask_uuid, set()))
+        preview_scale = (
+            None
+            if preview_stride is None or preview_stride <= 1
+            else 1.0 / preview_stride
+        )
         for cache_key in cache_keys:
             scale_key = cache_key.scale_key
             if scale_key is None:
+                continue
+            if preview_scale is not None and scale_key > preview_scale + 1e-4:
+                self._drop_cached_mask(
+                    cache_key,
+                    reason="decimated_preview",
+                )
                 continue
             scaled_pixmap = self._colorized_mask_cache.get(cache_key)
             if scaled_pixmap is None or scaled_pixmap.isNull():
@@ -1132,6 +1222,60 @@ class MaskController(QObject):
             return
         dirty_panel_rect_f = QRectF(tl, br).normalized().adjusted(-2, -2, 2, 2)
         self.mask_updated.emit(self._active_mask_id, dirty_panel_rect_f.toRect())
+
+    def _promote_mask_cache_revision(self, mask_id: uuid.UUID) -> None:
+        """Carry the latest live cache entries into the current content revision."""
+        keys = tuple(self._mask_cache_index.get(mask_id, set()))
+        if not keys:
+            return
+        retained = {
+            scale: (pixmap, size)
+            for scale, (_key, pixmap, size) in self._latest_cached_mask_entries(
+                mask_id
+            ).items()
+        }
+        for key in keys:
+            self._colorized_mask_cache.pop(key, None)
+            size = self._colorized_mask_bytes.pop(key, 0)
+            self._colorized_cache_total_bytes = max(
+                0,
+                self._colorized_cache_total_bytes - size,
+            )
+        self._mask_cache_index.pop(mask_id, None)
+        promoted_keys: set[MaskRenderCacheKey] = set()
+        for scale_key, (pixmap, size) in retained.items():
+            if pixmap is None or pixmap.isNull():
+                continue
+            promoted_key = self._cache_key(mask_id, scale_key)
+            self._colorized_mask_cache[promoted_key] = pixmap
+            self._colorized_mask_bytes[promoted_key] = size
+            self._colorized_cache_total_bytes += size
+            promoted_keys.add(promoted_key)
+        if promoted_keys:
+            self._mask_cache_index[mask_id] = promoted_keys
+        self._notify_cache_usage()
+
+    def _latest_cached_mask_entries(
+        self,
+        mask_id: uuid.UUID,
+    ) -> dict[float | None, tuple[MaskRenderCacheKey, QPixmap, int]]:
+        """Return the newest usable cached surface at each render scale."""
+        latest_by_scale: dict[
+            float | None,
+            tuple[MaskRenderCacheKey, QPixmap, int],
+        ] = {}
+        for key in tuple(self._mask_cache_index.get(mask_id, set())):
+            pixmap = self._colorized_mask_cache.get(key)
+            if pixmap is None or pixmap.isNull():
+                continue
+            current = latest_by_scale.get(key.scale_key)
+            if current is None or key.render_revision > current[0].render_revision:
+                latest_by_scale[key.scale_key] = (
+                    key,
+                    pixmap,
+                    self._colorized_mask_bytes.get(key, 0),
+                )
+        return latest_by_scale
 
     def handle_mask_ready(
         self,
@@ -1444,9 +1588,10 @@ class MaskController(QObject):
                 and self._async_colorize_handler is not None
                 and mask_layer.mask_image.width() * mask_layer.mask_image.height()
                 > self._async_colorize_threshold_px
-                and mask_id not in self._async_colorize_pending
+                and self._async_colorize_pending.get(mask_id)
+                != cache_key.render_revision
             ):
-                self._async_colorize_pending.add(mask_id)
+                self._async_colorize_pending[mask_id] = cache_key.render_revision
                 scheduled = False
                 try:
                     scheduled = bool(self._async_colorize_handler(mask_id, mask_layer))
@@ -1456,7 +1601,11 @@ class MaskController(QObject):
                     )
                 if scheduled:
                     return None
-                self._async_colorize_pending.discard(mask_id)
+                if (
+                    self._async_colorize_pending.get(mask_id)
+                    == cache_key.render_revision
+                ):
+                    self._async_colorize_pending.pop(mask_id, None)
             pixmap = self.colorize_mask(
                 mask_layer.mask_image,
                 mask_layer.color,
@@ -1520,24 +1669,76 @@ class MaskController(QObject):
     def _apply_history_delta(
         self, mask_layer: MaskLayer, change: MaskHistoryChange
     ) -> bool:
-        """Apply cached undo/redo snippets directly to cached mask renders."""
+        """Atomically apply canonical history pixels to visible cached renders."""
         if not change.snippets:
             return False
         mask_id = self._resolve_mask_id(mask_layer)
         if mask_id is None:
             return False
-        base_key = self._cache_key(mask_id, None)
-        base_pixmap = self._colorized_mask_cache.get(base_key)
-        if base_pixmap is None or base_pixmap.isNull():
+        latest_by_scale = self._latest_cached_mask_entries(mask_id)
+        if not latest_by_scale:
             return False
-        applied = False
+        mask_rect = mask_layer.mask_image.rect()
+        dirty_rects: list[QRect] = []
         for snippet in change.snippets:
-            rect = snippet.rect.normalized()
+            rect = snippet.rect.normalized().intersected(mask_rect)
             if rect.isNull() or rect.isEmpty():
                 continue
-            self.updateMaskRegion(rect, mask_layer, sub_mask_image=snippet.image)
-            applied = True
-        return applied
+            if self._mask_config.mask_border_enabled:
+                rect = rect.adjusted(-1, -1, 1, 1).intersected(mask_rect)
+            dirty_rects.append(rect)
+        if not dirty_rects:
+            return False
+
+        for rect in dirty_rects:
+            canonical_snippet = mask_layer.mask_image.copy(rect)
+            colorized_image = self._colorize_with_metrics(
+                canonical_snippet,
+                mask_layer.color,
+                mask_id=mask_id,
+                source="history_snippet",
+            )
+            snippet_pixmap = QPixmap.fromImage(colorized_image)
+            for scale_key, (_key, cached_pixmap, _size) in latest_by_scale.items():
+                painter = QPainter(cached_pixmap)
+                try:
+                    painter.setCompositionMode(QPainter.CompositionMode_Source)
+                    if scale_key is None:
+                        painter.drawPixmap(rect.topLeft(), snippet_pixmap)
+                        continue
+                    painter.setRenderHint(
+                        QPainter.RenderHint.SmoothPixmapTransform,
+                        True,
+                    )
+                    destination = QRect(
+                        QPoint(
+                            int(round(rect.left() * scale_key)),
+                            int(round(rect.top() * scale_key)),
+                        ),
+                        self._target_scaled_size(rect.size(), scale_key),
+                    )
+                    painter.drawPixmap(
+                        destination,
+                        snippet_pixmap,
+                        QRect(QPoint(0, 0), snippet_pixmap.size()),
+                    )
+                finally:
+                    painter.end()
+
+        self._promote_mask_cache_revision(mask_id)
+        dirty_image_rect = QRect(dirty_rects[0])
+        for rect in dirty_rects[1:]:
+            dirty_image_rect = dirty_image_rect.united(rect)
+        top_left = self._image_to_panel_point(dirty_image_rect.topLeft())
+        bottom_right = self._image_to_panel_point(dirty_image_rect.bottomRight())
+        if top_left is None or bottom_right is None:
+            self.mask_updated.emit(mask_id, QRect())
+            return True
+        dirty_panel_rect = (
+            QRectF(top_left, bottom_right).normalized().adjusted(-2, -2, 2, 2)
+        )
+        self.mask_updated.emit(mask_id, dirty_panel_rect.toRect())
+        return True
 
     def _create_premultiplied_alpha_lut(self) -> np.ndarray:
         """Create a 256x256 LUT for premultiplied alpha blending."""

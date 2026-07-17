@@ -111,6 +111,14 @@ class MaskUndoProvider(Protocol):
     def submit(self, mask_id: uuid.UUID, command: MaskUndoCommand, limit: int) -> None:
         """Record ``command`` for ``mask_id`` and execute it immediately."""
 
+    def record_applied(
+        self,
+        mask_id: uuid.UUID,
+        command: MaskUndoCommand,
+        limit: int,
+    ) -> None:
+        """Record ``command`` after its mutation has already been applied."""
+
     def undo(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
         """Undo the latest change for ``mask_id`` when available."""
 
@@ -241,6 +249,15 @@ class MaskLayerUndoProvider:
     def submit(self, mask_id: uuid.UUID, command: MaskUndoCommand, limit: int) -> None:
         """Execute ``command`` and push it on the undo stack."""
         command.redo()
+        self.record_applied(mask_id, command, limit)
+
+    def record_applied(
+        self,
+        mask_id: uuid.UUID,
+        command: MaskUndoCommand,
+        limit: int,
+    ) -> None:
+        """Push an already-applied command without replaying its mutation."""
         history = self._history.setdefault(mask_id, [])
         history.append(command)
         self._redos[mask_id] = []

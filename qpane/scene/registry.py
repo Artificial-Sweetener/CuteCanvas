@@ -143,6 +143,7 @@ class SceneProviderRegistry:
         self._replacement_providers: list[SceneReplacementProvider] = []
         self._geometry_adapters: list[SceneGeometryAdapter] = []
         self._contribution_providers: list[SceneContributionProvider] = []
+        self._registration_revision = 0
 
     def register_replacement(
         self, provider: SceneReplacementProvider
@@ -150,15 +151,19 @@ class SceneProviderRegistry:
         """Register a provider that can replace default scene resolution."""
         if provider not in self._replacement_providers:
             self._replacement_providers.append(provider)
+            self._registration_revision += 1
         return provider
 
     def unregister_replacement(self, provider: SceneReplacementProvider) -> None:
         """Remove a replacement provider."""
+        previous_count = len(self._replacement_providers)
         self._replacement_providers = [
             candidate
             for candidate in self._replacement_providers
             if candidate is not provider
         ]
+        if len(self._replacement_providers) != previous_count:
+            self._registration_revision += 1
 
     def register_geometry_adapter(
         self, provider: SceneGeometryAdapter
@@ -166,15 +171,19 @@ class SceneProviderRegistry:
         """Register a provider that can adapt default scene geometry."""
         if provider not in self._geometry_adapters:
             self._geometry_adapters.append(provider)
+            self._registration_revision += 1
         return provider
 
     def unregister_geometry_adapter(self, provider: SceneGeometryAdapter) -> None:
         """Remove a previously registered scene geometry adapter."""
+        previous_count = len(self._geometry_adapters)
         self._geometry_adapters = [
             candidate
             for candidate in self._geometry_adapters
             if candidate is not provider
         ]
+        if len(self._geometry_adapters) != previous_count:
+            self._registration_revision += 1
 
     def register_contribution(
         self, provider: SceneContributionProvider
@@ -182,15 +191,37 @@ class SceneProviderRegistry:
         """Register a provider that can contribute layers to a scene."""
         if provider not in self._contribution_providers:
             self._contribution_providers.append(provider)
+            self._registration_revision += 1
         return provider
 
     def unregister_contribution(self, provider: SceneContributionProvider) -> None:
         """Remove a contribution provider."""
+        previous_count = len(self._contribution_providers)
         self._contribution_providers = [
             candidate
             for candidate in self._contribution_providers
             if candidate is not provider
         ]
+        if len(self._contribution_providers) != previous_count:
+            self._registration_revision += 1
+
+    def revision(self) -> tuple[object, ...]:
+        """Return registry structure plus provider-owned dynamic revisions."""
+        return (
+            self._registration_revision,
+            tuple(
+                self._provider_revision(provider)
+                for provider in self._replacement_providers
+            ),
+            tuple(
+                self._provider_revision(provider)
+                for provider in self._geometry_adapters
+            ),
+            tuple(
+                self._provider_revision(provider)
+                for provider in self._contribution_providers
+            ),
+        )
 
     def replacement_contributions(self) -> tuple[SceneContribution, ...]:
         """Return active replacement scene contributions."""
@@ -219,6 +250,14 @@ class SceneProviderRegistry:
             if (contribution := provider.scene_contribution(base_scene, image_id))
             is not None
         )
+
+    @staticmethod
+    def _provider_revision(provider: object) -> object:
+        """Return a provider's dynamic token or its stable identity."""
+        revision_getter = getattr(provider, "revision", None)
+        if callable(revision_getter):
+            return revision_getter()
+        return id(provider)
 
 
 class LayerSourceResolverRegistry:

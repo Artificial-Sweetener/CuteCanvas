@@ -23,7 +23,7 @@ Contact-count transitions are re-anchored before another transform is applied, s
 
 ## Brush and Stylus Behavior
 
-Brush feedback follows the active physical device. A mouse uses the platform brush cursor. The first genuine mouse movement after touch or pen input restores that cursor immediately, while synthesized mouse packets produced from handled touch or tablet input are ignored. Touch and active pens use a canvas overlay so feedback is not limited by platform cursor-image dimensions.
+Brush feedback follows the active physical device. A mouse uses the platform brush cursor. Touch suppresses that cursor only while QPane owns an active contact and restores it as soon as the final contact ends or is cancelled, even though touch remains the most recently used device. A mouse therefore does not need to click, leave the canvas, or produce a specially classified move event before its brush is available again. Active pens use their canvas hover preview while in proximity; genuine mouse movement or pen proximity leave transfers cursor ownership. Synthesized mouse packets produced from handled touch or tablet input are ignored. Touch and active pens use a canvas overlay so feedback is not limited by platform cursor-image dimensions.
 
 A one-finger brush contact shows the fixed configured diameter as soon as the contact begins. The ring follows the finger while painting and disappears on release or cancellation. If a second contact makes navigation win, the ring disappears and no mask edit is created. Touchscreens and passive capacitive styluses provide no position before contact, so they cannot display a pre-contact preview.
 

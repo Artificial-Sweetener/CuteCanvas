@@ -95,7 +95,7 @@ class ExecutorSnapshot:
 
 
 class TaskRejected(RuntimeError):
-    """Raised when the executor refuses to queue a task because pending limits were exceeded."""
+    """Raised when the executor refuses to queue a task."""
 
     def __init__(
         self,
@@ -207,9 +207,13 @@ class _MainThreadInvoker(QObject):
         self._owner = owner
         self.invoke.connect(self._deliver, Qt.ConnectionType.QueuedConnection)
 
-    def queue(self, task_id: str) -> None:
-        """Request delivery of ``task_id`` on the main thread."""
-        self.invoke.emit(task_id)
+    def queue(self, task_id: str) -> bool:
+        """Request delivery of ``task_id`` while the Qt bridge remains alive."""
+        try:
+            self.invoke.emit(task_id)
+        except RuntimeError:
+            return False
+        return True
 
     def _deliver(self, task_id: str) -> None:
         """Forward ``task_id`` back to the owning executor on the GUI thread."""
@@ -250,6 +254,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         self._active_by_device: dict[tuple[str, str], int] = {}
         self._active_total = 0
         self._main_thread_invoker = _MainThreadInvoker(self)
+        self._shutdown = False
         self._pending_condition = threading.Condition(self._lock)
         self._pending_total_warned = False
         self._pending_category_warned: set[str] = set()
@@ -403,6 +408,9 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
             state="pending",
             callback=callback,
         )
+        with self._lock:
+            if self._shutdown:
+                return handle
         is_main_thread = self._is_gui_thread()
         self._queue_entry(handle, entry, is_main_thread=is_main_thread)
         return handle
@@ -560,6 +568,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
             wait: When True, block until the underlying pool reports completion.
         """
         with self._lock:
+            self._shutdown = True
             pending = list(self._pending_order)
             self._pending_order.clear()
             for task_id in pending:
@@ -578,7 +587,15 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
                         logger.exception(
                             "Error cancelling pending runnable %s", runnable
                         )
-            # active tasks continue running; caller controls cancellation
+            for task_id, entry in tuple(self._tasks.items()):
+                if entry.callback is None:
+                    continue
+                self._tasks.pop(task_id, None)
+                self._reschedule_logged.discard(task_id)
+                if entry.state == "active":
+                    self._decrement_active_locked(entry.handle)
+            self._pending_condition.notify_all()
+            # Active workers continue running; late UI dispatches are rejected.
         if wait and hasattr(self._pool, "waitForDone"):
             if self._is_pool_available():
                 try:
@@ -792,7 +809,14 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         if not entries:
             return
         for entry in entries:
-            self._main_thread_invoker.queue(entry.handle.task_id)
+            if not self._main_thread_invoker.queue(entry.handle.task_id):
+                self.mark_finished(
+                    entry.handle,
+                    TaskOutcome(
+                        success=False,
+                        error=RuntimeError("main-thread invoker is unavailable"),
+                    ),
+                )
 
     def _queue_entry(
         self,
@@ -803,6 +827,27 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
     ) -> None:
         """Register ``entry`` as pending and trigger dispatch attempts."""
         with self._lock:
+            if self._shutdown:
+                if entry.callback is not None:
+                    return
+                runnable = entry.runnable
+                if hasattr(runnable, "cancel"):
+                    try:
+                        runnable.cancel()  # type: ignore[call-arg]
+                    except Exception:  # pragma: no cover - defensive guard
+                        logger.debug(
+                            "Failed to cancel submission after shutdown",
+                            exc_info=True,
+                        )
+                raise TaskRejected(
+                    f"Executor {self._name} is shut down",
+                    category=handle.category,
+                    device=handle.device,
+                    limit_type="shutdown",
+                    limit_value=0,
+                    pending_total=len(self._pending_order),
+                    pending_category=self._queued_by_category.get(handle.category, 0),
+                )
             self._await_pending_capacity_locked(handle, is_main_thread=is_main_thread)
             self._tasks[handle.task_id] = entry
             self._pending_order.append(handle.task_id)
@@ -952,6 +997,8 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         with self._lock:
             entry = self._tasks.get(task_id)
             if entry is None or entry.callback is None:
+                if self._shutdown:
+                    return
                 logger.warning(
                     "Main-thread task %s missing callback; dropping invocation",
                     task_id,

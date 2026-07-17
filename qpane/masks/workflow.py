@@ -838,6 +838,12 @@ class Masks:
             else delegate.prefetch_mask_overlays(image_id, reason=reason)
         )
 
+    def prepare_catalog_image_removal(self, image_ids: tuple[uuid.UUID, ...]) -> None:
+        """Stop mask work before catalog mutation removes its source layers."""
+        service = self._ensure_mask_service()
+        if service is not None:
+            service.prepareCatalogImageRemoval(image_ids)
+
     def is_activation_pending(self, image_id: uuid.UUID | None) -> bool:
         """Return True when activation work is still pending for ``image_id``."""
         resolved_id = self._resolve_image_id(image_id)

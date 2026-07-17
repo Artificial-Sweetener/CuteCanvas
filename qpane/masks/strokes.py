@@ -58,7 +58,7 @@ class MaskStrokeDebugSnapshot:
     preview_state_ids: tuple[UUID, ...] = tuple()
     preview_tokens: dict[UUID, int] = field(default_factory=dict)
     pending_jobs: dict[UUID, tuple[TaskHandle, ...]] = field(default_factory=dict)
-    forced_drop_masks: tuple[UUID, ...] = tuple()
+    invalidated_job_tokens: tuple[tuple[UUID, int], ...] = tuple()
 
 
 @dataclass(frozen=True)
@@ -86,6 +86,10 @@ class _DecimatedStrokeState:
     def has_segments(self) -> bool:
         """Return True when the stroke has recorded paint operations."""
         return bool(self._segments)
+
+    def dirty_rect(self) -> QRect | None:
+        """Return a defensive copy of the provisional image-space bounds."""
+        return None if self._dirty_rect is None else QRect(self._dirty_rect)
 
     def preview_segment(
         self,
@@ -234,7 +238,8 @@ class MaskStrokePipeline:
         self._preview_states: dict[UUID, _DecimatedStrokeState] = {}
         self._preview_tokens: dict[UUID, int] = {}
         self._pending_jobs: dict[UUID, set[TaskHandle]] = {}
-        self._forced_drop_masks: set[UUID] = set()
+        self._pending_job_tokens: dict[TaskHandle, int] = {}
+        self._invalidated_job_tokens: set[tuple[UUID, int]] = set()
         self._job_token_counter = count(1)
         self._diagnostics = diagnostics
         self._idle_callback: Callable[[UUID], None] | None = None
@@ -286,7 +291,7 @@ class MaskStrokePipeline:
             preview_state_ids=tuple(self._preview_states.keys()),
             preview_tokens=dict(self._preview_tokens),
             pending_jobs=pending,
-            forced_drop_masks=tuple(self._forced_drop_masks),
+            invalidated_job_tokens=tuple(self._invalidated_job_tokens),
         )
 
     def reset_state(
@@ -301,8 +306,9 @@ class MaskStrokePipeline:
             self._preview_states
         )
         preview_tokens: MutableMapping[UUID, int] = self._preview_tokens
-        forced_drop_masks = self._forced_drop_masks
         pending_jobs = self._pending_jobs
+        pending_job_tokens = self._pending_job_tokens
+        invalidated_job_tokens = self._invalidated_job_tokens
         executor = self._executor
         service = self._service
         manager = getattr(service, "manager", None)
@@ -314,51 +320,64 @@ class MaskStrokePipeline:
             target_ids.update(pending_jobs.keys())
         else:
             target_ids.add(mask_id)
-        had_targets = bool(target_ids)
         for target in tuple(target_ids):
             had_state = False
             handles = pending_jobs.get(target)
+            had_pending_jobs = bool(handles)
             if handles:
                 had_state = True
-                if executor is not None and hasattr(executor, "cancel"):
-                    for handle in tuple(handles):
+                for handle in tuple(handles):
+                    job_token = pending_job_tokens.pop(handle, None)
+                    cancelled = False
+                    if executor is not None and hasattr(executor, "cancel"):
                         try:
-                            executor.cancel(handle)
+                            cancelled = bool(executor.cancel(handle))
                         except Exception:  # pragma: no cover - defensive guard
                             logger.debug(
                                 "Failed to cancel pending mask stroke job (mask=%s).",
                                 target,
                                 exc_info=True,
                             )
+                    if not cancelled and job_token is not None:
+                        invalidated_job_tokens.add((target, job_token))
                 handles.clear()
                 pending_jobs.pop(target, None)
             else:
                 pending_jobs.pop(target, None)
-            if target in preview_states:
+            preview_state = preview_states.pop(target, None)
+            preview_dirty_rect = (
+                None if preview_state is None else preview_state.dirty_rect()
+            )
+            if preview_state is not None:
                 had_state = True
-                preview_states.pop(target, None)
             if target in preview_tokens:
                 had_state = True
                 preview_tokens.pop(target, None)
             if had_state:
-                forced_drop_masks.add(target)
                 if request_redraw and manager is not None:
                     layer = manager.get_layer(target)
                     if layer is not None and not layer.mask_image.isNull():
-                        self._qpane.updateMaskRegion(layer.mask_image.rect(), layer)
+                        if had_pending_jobs or preview_dirty_rect is None:
+                            self._qpane.updateMaskRegion(layer.mask_image.rect(), layer)
+                        else:
+                            durable_region = layer.mask_image.copy(preview_dirty_rect)
+                            self._qpane.updateMaskRegion(
+                                preview_dirty_rect,
+                                layer,
+                                sub_mask_image=durable_region,
+                            )
                 if diagnostics is not None:
                     diagnostics.cancel_mask_jobs(target)
         if mask_id is None:
             pending_jobs.clear()
+            pending_job_tokens.clear()
             preview_states.clear()
             preview_tokens.clear()
-            if not had_targets:
-                forced_drop_masks.clear()
-            if clear_counter:
+            if clear_counter and not invalidated_job_tokens:
                 self._job_token_counter = count(1)
                 if diagnostics is not None:
                     diagnostics.reset()
-        elif clear_counter:
+        elif clear_counter and not invalidated_job_tokens:
             self._job_token_counter = count(1)
         for target in target_ids:
             self._notify_idle_if_clear(target)
@@ -459,6 +478,7 @@ class MaskStrokePipeline:
         if not completed["value"]:
             pending = pending_jobs.setdefault(spec.mask_id, set())
             pending.add(handle)
+            self._pending_job_tokens[handle] = job_token
         return True
 
     def _finalize_stroke_result(
@@ -485,6 +505,8 @@ class MaskStrokePipeline:
             result.metadata if isinstance(result.metadata, Mapping) else {}
         )
         job_token = metadata_mapping.get("job_token")
+        if handle is not None:
+            self._pending_job_tokens.pop(handle, None)
 
         def _clear_pending_token(target_mask_id: UUID, token_value: int | None) -> None:
             """Drop preview token if it matches the finalized job token."""
@@ -530,6 +552,17 @@ class MaskStrokePipeline:
         def _notify_idle() -> None:
             """Trigger idle callback when no pending work remains for mask."""
             self._notify_idle_if_clear(mask_id)
+
+        invalidated_token = (mask_id, job_token) if isinstance(job_token, int) else None
+        if (
+            invalidated_token is not None
+            and invalidated_token in self._invalidated_job_tokens
+        ):
+            self._invalidated_job_tokens.discard(invalidated_token)
+            _clear_pending_token(mask_id, job_token)
+            _record_drop("invalidated_job", detail="reset_state")
+            _notify_idle()
+            return
 
         mask_manager = service.manager
         if mask_manager is None:
@@ -614,13 +647,6 @@ class MaskStrokePipeline:
                 )
             self._notify_idle_if_clear(stale_job.mask_id)
 
-        if mask_id in self._forced_drop_masks:
-            self._forced_drop_masks.discard(mask_id)
-            _on_stale(job_result, reason="forced_drop", detail="reset_state")
-            if commit:
-                controller.commitStroke(job_result.mask_id)
-            _notify_idle()
-            return
         expected_token = self._preview_tokens.get(mask_id)
         if (
             job_token is not None

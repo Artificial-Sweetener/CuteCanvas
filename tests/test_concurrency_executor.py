@@ -19,8 +19,14 @@
 from __future__ import annotations
 import threading
 import pytest
-from PySide6.QtCore import QRunnable, QThreadPool
-from qpane.concurrency import QThreadPoolExecutor, TaskHandle, TaskOutcome, ThreadPolicy
+from PySide6.QtCore import QCoreApplication, QEvent, QRunnable, QThreadPool
+from qpane.concurrency import (
+    QThreadPoolExecutor,
+    TaskHandle,
+    TaskOutcome,
+    TaskRejected,
+    ThreadPolicy,
+)
 from qpane.concurrency.base_worker import BaseWorker
 from types import SimpleNamespace
 
@@ -150,6 +156,40 @@ class TestQThreadPoolExecutor:
         assert snapshot.pending_total == 0
         assert snapshot.active_total == 0
         assert executor.cancel(handle) is False
+        executor.shutdown()
+
+    def test_late_main_thread_dispatch_after_shutdown_is_dropped(self, qapp) -> None:
+        """Workers finishing after teardown must not enqueue deleted UI work."""
+        executor = QThreadPoolExecutor(pool=QThreadPool(), name="late-dispatch")
+        calls: list[str] = []
+
+        executor.shutdown(wait=False)
+        handle = executor.dispatch_to_main_thread(
+            lambda: calls.append("ran"), category="mask_prefetch_main"
+        )
+        qapp.processEvents()
+
+        assert calls == []
+        assert executor.cancel(handle) is False
+        assert executor.snapshot().pending_total == 0
+        with pytest.raises(TaskRejected, match="shut down"):
+            executor.submit(_CompletionWorker(), category="mask_prefetch")
+
+    def test_deleted_main_thread_invoker_drops_callback_cleanly(self, qapp) -> None:
+        """A deleted Qt bridge must turn dispatch into a failed completion."""
+        executor = QThreadPoolExecutor(pool=QThreadPool(), name="dead-invoker")
+        calls: list[str] = []
+        executor._main_thread_invoker.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+        handle = executor.dispatch_to_main_thread(
+            lambda: calls.append("ran"), category="mask_prefetch_main"
+        )
+        qapp.processEvents()
+
+        assert calls == []
+        assert executor.cancel(handle) is False
+        assert executor.snapshot().active_total == 0
         executor.shutdown()
 
     def test_callbacks_do_not_block_worker_capacity(self, qapp) -> None:

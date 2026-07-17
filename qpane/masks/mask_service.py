@@ -76,10 +76,10 @@ class _MaskPrefetchStats:
 
 @dataclass(frozen=True, slots=True)
 class _PrefetchHandle:
-    """Track the queued handle and mask count for a prefetch request."""
+    """Track one queued prefetch and the render revisions it owns."""
 
     handle: TaskHandle
-    mask_count: int
+    mask_revisions: Tuple[Tuple[uuid.UUID, int], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +87,7 @@ class PrefetchedOverlay:
     """Colourized overlay produced by the worker, with optional scaled variants."""
 
     mask_id: uuid.UUID
+    render_revision: int
     image: QImage
     scaled: Tuple[Tuple[float, QImage], ...] = tuple()
 
@@ -204,6 +205,19 @@ class MaskService:
         """Return a snapshot of pending preview/job state for tests."""
         return self._stroke_pipeline.debug_snapshot()
 
+    def hasPendingRenderWork(self) -> bool:
+        """Return whether mask pixels can still change from queued render work."""
+        stroke_snapshot = self._stroke_pipeline.debug_snapshot()
+        return bool(
+            stroke_snapshot.preview_state_ids
+            or stroke_snapshot.preview_tokens
+            or stroke_snapshot.pending_jobs
+            or self._snippet_handles
+            or self._prefetch_handles
+            or self._pending_prefetched_overlays
+            or self._mask_controller.has_pending_async_colorize()
+        )
+
     def configureStrokeDiagnostics(
         self, config: Config | MaskConfigSlice | None = None
     ) -> None:
@@ -276,6 +290,20 @@ class MaskService:
     def manager(self) -> MaskManager:
         """Expose the underlying MaskManager."""
         return self._mask_manager
+
+    def scene_provider_revision(self) -> tuple[object, ...]:
+        """Return mask order and render revisions for scene compilation."""
+        image_id = self._catalog.currentImageID()
+        if image_id is None:
+            return (None, tuple())
+        mask_revisions = tuple(
+            (
+                mask_id,
+                self._mask_controller.maskRenderRevision(mask_id),
+            )
+            for mask_id in self._mask_manager.get_mask_ids_for_image(image_id)
+        )
+        return (image_id, mask_revisions)
 
     def setSceneMutationCoordinator(
         self, coordinator: "SceneMutationCoordinator | None"
@@ -546,9 +574,14 @@ class MaskService:
             logger.exception("Failed to queue mask prefetch for image %s", image_id)
             return False
         worker.set_task_id(handle.task_id)
-        count = len(mask_ids)
+        mask_revisions = tuple(
+            (mask_id, self._mask_controller.maskRenderRevision(mask_id))
+            for mask_id in mask_ids
+        )
+        count = len(mask_revisions)
         self._prefetch_handles[image_id] = _PrefetchHandle(
-            handle=handle, mask_count=count
+            handle=handle,
+            mask_revisions=mask_revisions,
         )
         self._prefetch_stats.scheduled += count
         self._prefetch_stats.last_message = (
@@ -576,7 +609,8 @@ class MaskService:
         if handle_entry is None:
             return False
         handle = handle_entry.handle
-        mask_count = handle_entry.mask_count
+        mask_revisions = handle_entry.mask_revisions
+        mask_count = len(mask_revisions)
         executor = self._executor
         cancelled = False
         if executor is not None:
@@ -600,19 +634,32 @@ class MaskService:
             image_id,
             cancelled,
         )
-        if cancelled:
-            self._cancelled_prefetch_tasks.add(handle.task_id)
-            metrics = self._mask_controller.snapshot_metrics()
-            outstanding = metrics.prefetch_requested - (
-                metrics.prefetch_completed + metrics.prefetch_failed
+        self._cancelled_prefetch_tasks.add(handle.task_id)
+        metrics = self._mask_controller.snapshot_metrics()
+        outstanding = metrics.prefetch_requested - (
+            metrics.prefetch_completed + metrics.prefetch_failed
+        )
+        failed = min(mask_count, max(0, outstanding))
+        if failed > 0:
+            self._mask_controller.record_prefetch_completion(completed=0, failed=failed)
+            self._prefetch_stats.failed += failed
+        for mask_id, render_revision in mask_revisions:
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                render_revision,
             )
-            failed = min(mask_count, max(0, outstanding))
-            if failed > 0:
-                self._mask_controller.record_prefetch_completion(
-                    completed=0, failed=failed
-                )
-                self._prefetch_stats.failed += failed
         return cancelled
+
+    def prepareCatalogImageRemoval(self, image_ids: Sequence[uuid.UUID]) -> None:
+        """Cancel mask work before the catalog removes authoritative layers."""
+        for image_id in tuple(dict.fromkeys(image_ids)):
+            self.cancelPrefetch(image_id)
+            for mask_id in self._mask_manager.get_mask_ids_for_image(image_id):
+                self._invalidate_pending_mask_jobs(
+                    mask_id,
+                    reason="image_removal",
+                    request_redraw=False,
+                )
 
     def activateMask(self, mask_id: uuid.UUID | None) -> bool:
         """Select the mask to edit and keep caches in sync.
@@ -917,19 +964,6 @@ class MaskService:
             return
         mask_id = self._mask_manager.find_mask_id_for_layer(mask_layer)
         mask_image = getattr(mask_layer, "mask_image", None)
-        preview_stride = None
-        preview_provisional = False
-        if sub_mask_image is not None:
-            try:
-                preview_stride = int(sub_mask_image.text("qpane_preview_stride"))
-            except (TypeError, ValueError):
-                preview_stride = None
-            try:
-                preview_provisional = (
-                    sub_mask_image.text("qpane_preview_provisional") == "1"
-                )
-            except (TypeError, ValueError):
-                preview_provisional = False
         qpane = getattr(self, "_qpane", None)
         qpane_viewport = None
         if qpane is not None:
@@ -959,8 +993,6 @@ class MaskService:
             preview_image.setText("qpane_preview_stride", str(stride))
             preview_image.setText("qpane_preview_provisional", "1")
             sub_mask_image = preview_image
-            preview_stride = stride
-            preview_provisional = True
         snippet_source = sub_mask_image
         if (
             snippet_source is None
@@ -976,11 +1008,13 @@ class MaskService:
         )
         area = dirty_image_rect.width() * dirty_image_rect.height()
         should_request_async = (
-            (not preview_provisional or force_async_colorize)
-            and mask_id is not None
+            mask_id is not None
             and async_snippet_available
             and self._executor is not None
-            and (area > SNIPPET_ASYNC_THRESHOLD_PX or preview_stride is not None)
+            and (
+                force_async_colorize
+                or (sub_mask_image is None and area > SNIPPET_ASYNC_THRESHOLD_PX)
+            )
         )
         scheduled = False
         if should_request_async:
@@ -1113,8 +1147,12 @@ class MaskService:
         mask_layer: "MaskLayer",
     ) -> bool:
         """Queue asynchronous colorization for full-mask cache misses."""
+        render_revision = self._mask_controller.maskRenderRevision(mask_id)
         if mask_layer.mask_image.isNull():
-            self._mask_controller.notify_async_colorize_complete(mask_id)
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                render_revision,
+            )
             return False
         image_id = self._image_id_for_mask(mask_id)
         if image_id is not None:
@@ -1134,7 +1172,10 @@ class MaskService:
             snippet,
         )
         if not scheduled:
-            self._mask_controller.notify_async_colorize_complete(mask_id)
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                render_revision,
+            )
         return scheduled
 
     def _image_id_for_mask(self, mask_id: uuid.UUID | None) -> uuid.UUID | None:
@@ -1163,8 +1204,10 @@ class MaskService:
         executor = self._executor
         if executor is None:
             return False
+        render_revision = self._mask_controller.maskRenderRevision(mask_id)
         worker = MaskSnippetWorker(
             mask_id=mask_id,
+            render_revision=render_revision,
             dirty_rect=QRect(dirty_image_rect),
             snippet=snippet,
             color=mask_layer.color,
@@ -1191,6 +1234,7 @@ class MaskService:
         self,
         *,
         mask_id: uuid.UUID,
+        render_revision: int,
         handle: TaskHandle | None,
         dirty_rect: QRect,
         colorized_image: QImage | None,
@@ -1201,19 +1245,37 @@ class MaskService:
             if current is None or current.task_id != handle.task_id:
                 return
             self._snippet_handles.pop(mask_id, None)
+        if render_revision != self._mask_controller.maskRenderRevision(
+            mask_id
+        ) or self._stroke_pipeline.is_mask_busy(mask_id):
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                render_revision,
+            )
+            return
         mask_layer = self._mask_manager.get_layer(mask_id)
         if mask_layer is None:
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                render_revision,
+            )
             return
         if colorized_image is None or colorized_image.isNull():
             self._mask_controller.updateMaskRegion(dirty_rect, mask_layer)
-            self._mask_controller.notify_async_colorize_complete(mask_id)
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                render_revision,
+            )
             return
         self._mask_controller.updateMaskRegion(
             dirty_rect,
             mask_layer,
             colorized_image=colorized_image,
         )
-        self._mask_controller.notify_async_colorize_complete(mask_id)
+        self._mask_controller.notify_async_colorize_complete(
+            mask_id,
+            render_revision,
+        )
 
     def _consume_prefetch_results(
         self,
@@ -1226,6 +1288,17 @@ class MaskService:
         task_id: str | None = None,
     ) -> None:
         """Commit prefetched overlays and update diagnostics on the main thread."""
+        active_handle = self._prefetch_handles.get(image_id)
+        if task_id is not None and (
+            active_handle is None or active_handle.handle.task_id != task_id
+        ):
+            self._cancelled_prefetch_tasks.discard(task_id)
+            return
+        owned_revisions = (
+            dict(active_handle.mask_revisions)
+            if active_handle is not None
+            else {overlay.mask_id: overlay.render_revision for overlay in warmed}
+        )
         self._prefetch_handles.pop(image_id, None)
         if task_id is not None and task_id in self._cancelled_prefetch_tasks:
             self._cancelled_prefetch_tasks.discard(task_id)
@@ -1233,14 +1306,18 @@ class MaskService:
         failure_messages = dict(failures)
         completed = 0
         pipeline = self._stroke_pipeline
+        deferred_mask_ids: set[uuid.UUID] = set()
         for overlay in warmed:
             mask_id = overlay.mask_id
             layer = self._mask_manager.get_layer(mask_id)
             if layer is None or overlay.image.isNull():
                 failure_messages[mask_id] = "layer unavailable"
                 continue
+            if not self._prefetched_overlay_is_current(overlay):
+                continue
             if pipeline.is_mask_busy(mask_id):
                 self._pending_prefetched_overlays[mask_id] = overlay
+                deferred_mask_ids.add(mask_id)
                 completed += 1
                 continue
             self._mask_controller.commit_prefetched_mask(
@@ -1250,6 +1327,13 @@ class MaskService:
                 scaled=overlay.scaled,
             )
             completed += 1
+        for mask_id, render_revision in owned_revisions.items():
+            if mask_id in deferred_mask_ids:
+                continue
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                render_revision,
+            )
         if error is not None:
             failure_messages["worker"] = str(error)
         failure_count = len(failure_messages)
@@ -1309,16 +1393,30 @@ class MaskService:
         overlay = self._pending_prefetched_overlays.pop(mask_id, None)
         if overlay is None:
             return False
-        layer = self._mask_manager.get_layer(mask_id)
-        if layer is None or overlay.image.isNull():
-            return False
-        self._mask_controller.commit_prefetched_mask(
-            mask_id,
-            layer,
-            overlay.image,
-            scaled=overlay.scaled,
+        try:
+            if not self._prefetched_overlay_is_current(overlay):
+                return False
+            layer = self._mask_manager.get_layer(mask_id)
+            if layer is None or overlay.image.isNull():
+                return False
+            self._mask_controller.commit_prefetched_mask(
+                mask_id,
+                layer,
+                overlay.image,
+                scaled=overlay.scaled,
+            )
+            return True
+        finally:
+            self._mask_controller.notify_async_colorize_complete(
+                mask_id,
+                overlay.render_revision,
+            )
+
+    def _prefetched_overlay_is_current(self, overlay: PrefetchedOverlay) -> bool:
+        """Return whether an overlay still matches authoritative mask state."""
+        return overlay.render_revision == self._mask_controller.maskRenderRevision(
+            overlay.mask_id
         )
-        return True
 
     def _cancel_all_prefetches(self) -> None:
         """Cancel any queued mask prefetch work."""
@@ -1361,7 +1459,7 @@ class MaskService:
         reason: str,
         request_redraw: bool = True,
     ) -> None:
-        """Advance the mask generation and cancel any queued stroke jobs."""
+        """Cancel queued stroke work without changing durable mask identity."""
         if mask_id is None:
             logger.info(
                 "Skipped mask job invalidation because mask id was None (reason=%s)",
@@ -1375,7 +1473,6 @@ class MaskService:
             request_redraw,
         )
         self._pending_prefetched_overlays.pop(mask_id, None)
-        self._mask_controller.bumpMaskGeneration(mask_id, reason=reason)
         self._reset_pending_strokes(mask_id, request_redraw=request_redraw)
 
     def _diagnostics_provider(self, _: "QPane") -> Sequence[DiagnosticRecord]:
@@ -1629,7 +1726,6 @@ class MaskService:
                 self._invalidate_pending_mask_jobs(
                     previous_active, reason="mask_reordered"
                 )
-            self._mask_controller.bumpMaskGeneration(new_top, reason="mask_reordered")
             self._reset_pending_strokes(new_top, request_redraw=False)
             self._mask_controller.setActiveMaskID(new_top)
             self._record_status(
@@ -1673,9 +1769,6 @@ class MaskService:
                 else routed
             )
         if was_moved:
-            controller = self._mask_controller
-            if controller is not None:
-                controller.bumpMaskGeneration(mask_id, reason="mask_promoted")
             self._record_status(
                 f"Promoted mask {mask_id} to the top of the stack.", label="Mask"
             )
@@ -1800,6 +1893,7 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                 layer = self._mask_manager.get_layer(mask_id)
                 if layer is None or layer.mask_image.isNull():
                     continue
+                render_revision = self._controller.maskRenderRevision(mask_id)
                 try:
                     image = self._controller.prepare_colorized_mask(
                         layer, mask_id=mask_id
@@ -1826,6 +1920,7 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                     warmed.append(
                         PrefetchedOverlay(
                             mask_id=mask_id,
+                            render_revision=render_revision,
                             image=image,
                             scaled=tuple(scaled_outputs),
                         )
@@ -1887,6 +1982,7 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
         self,
         *,
         mask_id: uuid.UUID,
+        render_revision: int,
         dirty_rect: QRect,
         snippet: QImage,
         color: QColor,
@@ -1897,6 +1993,7 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
         QRunnable.__init__(self)
         BaseWorker.__init__(self, logger=logger.getChild("MaskSnippetWorker"))
         self._mask_id = mask_id
+        self._render_revision = render_revision
         self._dirty_rect = QRect(dirty_rect)
         self._snippet = snippet
         self._color = QColor(color)
@@ -1940,6 +2037,7 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
             return
         handle = getattr(self, "_handle", None)
         mask_id = self._mask_id
+        render_revision = self._render_revision
         rect = QRect(self._dirty_rect)
 
         def finalize() -> None:
@@ -1949,6 +2047,7 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
                 return
             svc._consume_snippet_result(
                 mask_id=mask_id,
+                render_revision=render_revision,
                 handle=handle,
                 dirty_rect=rect,
                 colorized_image=colorized_image,

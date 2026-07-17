@@ -764,6 +764,7 @@ class QPane(QWidget):
     def clearImages(self):
         """Reset the catalog, linked views, and caches before showing the configured placeholder."""
         catalog = self.catalog()
+        self._masks_controller.prepare_catalog_image_removal(tuple(catalog.imageIDs()))
         catalog.clearImages()
         if self.compositionService().clear():
             self._emit_composition_changed()
@@ -773,12 +774,14 @@ class QPane(QWidget):
     def removeImageByID(self, image_id: uuid.UUID):
         """Remove ``image_id`` when present; callers remain responsible for navigation."""
         catalog = self.catalog()
+        self._masks_controller.prepare_catalog_image_removal((image_id,))
         catalog.removeImageByID(image_id)
         self._sync_compositions_with_catalog()
 
     def removeImagesByID(self, image_ids: list[uuid.UUID]):
         """Remove the provided image IDs when present without selecting a fallback."""
         catalog = self.catalog()
+        self._masks_controller.prepare_catalog_image_removal(tuple(image_ids))
         catalog.removeImagesByID(image_ids)
         self._sync_compositions_with_catalog()
 

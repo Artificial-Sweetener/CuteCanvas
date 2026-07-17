@@ -182,7 +182,9 @@ class PointerSimulator:
         ).commit()
         self._touch_active = False
         self._process_events()
-        self._status.setText("Touch release: the stroke committed as one undo step.")
+        self._status.setText(
+            "Touch release: the stroke committed and the mouse brush cursor is ready."
+        )
 
     def two_finger_pan(self) -> None:
         """Run a short two-finger gesture that navigates without painting."""
@@ -206,7 +208,7 @@ class PointerSimulator:
         self._status.setText("Two fingers: navigation won and no brush mark was made.")
 
     def mouse_move(self) -> None:
-        """Simulate genuine mouse activity and restore the platform brush cursor."""
+        """Simulate application-generated mouse motion after direct input."""
         position = self._position()
         global_position = QPointF(self._viewer.mapToGlobal(position.toPoint()))
         event = QMouseEvent(
@@ -217,10 +219,10 @@ class PointerSimulator:
             Qt.MouseButton.NoButton,
             Qt.MouseButton.NoButton,
             Qt.KeyboardModifier.NoModifier,
-            Qt.MouseEventSource.MouseEventNotSynthesized,
+            Qt.MouseEventSource.MouseEventSynthesizedByApplication,
         )
         QApplication.sendEvent(self._viewer, event)
-        self._status.setText("Mouse activity: the normal brush cursor was restored.")
+        self._status.setText("Mouse activity: mouse ownership is active on the canvas.")
 
     def _send_tablet(
         self,

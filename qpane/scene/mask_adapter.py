@@ -147,6 +147,11 @@ class MaskServiceSceneProvider:
 
     service: object
 
+    def revision(self) -> object:
+        """Return the mask domain's authoritative scene contribution revision."""
+        revision_getter = getattr(self.service, "scene_provider_revision", None)
+        return revision_getter() if callable(revision_getter) else id(self.service)
+
     def scene_contribution(
         self,
         base_scene: SceneDescriptor,

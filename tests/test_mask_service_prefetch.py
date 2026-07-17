@@ -107,11 +107,16 @@ def test_consume_prefetch_results_stashes_when_busy(qpane_core):
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     overlay = PrefetchedOverlay(
         mask_id=mask_id,
+        render_revision=controller.maskRenderRevision(mask_id),
         image=QImage(32, 32, QImage.Format_ARGB32),
         scaled=tuple(),
     )
     image_id = uuid.uuid4()
-    service._prefetch_handles[image_id] = SimpleNamespace(handle=None, mask_count=1)
+    service._prefetch_handles[image_id] = SimpleNamespace(
+        handle=None,
+        mask_revisions=((mask_id, controller.maskRenderRevision(mask_id)),),
+    )
+    controller._async_colorize_pending[mask_id] = overlay.render_revision
     service._stroke_pipeline.is_mask_busy = lambda _mid: True
     service._consume_prefetch_results(
         image_id=image_id,
@@ -122,9 +127,265 @@ def test_consume_prefetch_results_stashes_when_busy(qpane_core):
         task_id=None,
     )
     assert mask_id in service._pending_prefetched_overlays
+    assert controller.has_pending_async_colorize(mask_id)
     service._stroke_pipeline.is_mask_busy = lambda _mid: False
     applied = service._maybe_apply_pending_prefetch(mask_id)
     assert applied is True
+    assert not controller.has_pending_async_colorize(mask_id)
+
+
+@pytest.mark.usefixtures("qapp")
+def test_deferred_prefetch_is_discarded_when_mask_revision_changes(qpane_core):
+    """A pre-stroke overlay must not publish under the post-stroke cache key."""
+    service, manager, controller = _build_service(qpane_core)
+    mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
+    overlay = PrefetchedOverlay(
+        mask_id=mask_id,
+        render_revision=controller.maskRenderRevision(mask_id),
+        image=QImage(32, 32, QImage.Format_ARGB32),
+    )
+    service._pending_prefetched_overlays[mask_id] = overlay
+    controller.bumpMaskGeneration(mask_id, reason="test-stroke")
+
+    applied = service._maybe_apply_pending_prefetch(mask_id)
+
+    assert applied is False
+    assert mask_id not in service._pending_prefetched_overlays
+    assert not controller._colorized_mask_cache
+
+
+@pytest.mark.usefixtures("qapp")
+def test_stale_prefetch_completion_preserves_replacement_handle(qpane_core):
+    """An old completion must not consume a newer request for the same image."""
+    service, _, _ = _build_service(qpane_core)
+    image_id = uuid.uuid4()
+    replacement = SimpleNamespace(
+        handle=SimpleNamespace(task_id="replacement"),
+        mask_revisions=tuple(),
+    )
+    service._prefetch_handles[image_id] = replacement
+
+    service._consume_prefetch_results(
+        image_id=image_id,
+        warmed=(),
+        failures={},
+        duration_ms=1.0,
+        error=None,
+        task_id="stale",
+    )
+
+    assert service._prefetch_handles[image_id] is replacement
+    assert service._prefetch_stats.completed == 0
+    assert service._prefetch_stats.failed == 0
+
+
+@pytest.mark.usefixtures("qapp")
+def test_prefetch_cancellation_balances_completed_worker_awaiting_ui(qpane_core):
+    """A removed request must terminate even when its worker already completed."""
+    service, manager, controller = _build_service(qpane_core)
+    image_id = uuid.uuid4()
+    mask_ids = tuple(
+        manager.create_mask(QImage(8, 8, QImage.Format_Grayscale8)) for _ in range(2)
+    )
+    handle = SimpleNamespace(task_id="worker-complete")
+    service._prefetch_handles[image_id] = SimpleNamespace(
+        handle=handle,
+        mask_revisions=tuple(
+            (mask_id, controller.maskRenderRevision(mask_id)) for mask_id in mask_ids
+        ),
+    )
+    controller.record_prefetch_request(2)
+    for mask_id in mask_ids:
+        controller._async_colorize_pending[mask_id] = controller.maskRenderRevision(
+            mask_id
+        )
+
+    cancelled = service.cancelPrefetch(image_id)
+
+    metrics = controller.snapshot_metrics()
+    assert cancelled is False
+    assert metrics.prefetch_requested == 2
+    assert metrics.prefetch_completed == 0
+    assert metrics.prefetch_failed == 2
+    assert handle.task_id in service._cancelled_prefetch_tasks
+    assert all(
+        not controller.has_pending_async_colorize(mask_id) for mask_id in mask_ids
+    )
+
+    service._consume_prefetch_results(
+        image_id=image_id,
+        warmed=(),
+        failures={},
+        duration_ms=1.0,
+        error=None,
+        task_id=handle.task_id,
+    )
+
+    metrics = controller.snapshot_metrics()
+    assert metrics.prefetch_failed == 2
+
+
+@pytest.mark.usefixtures("qapp")
+def test_pending_render_work_includes_every_mask_render_stage(qpane_core):
+    """Render-idle state must include stroke, snippet, and prefetch ownership."""
+    service, manager, controller = _build_service(qpane_core)
+    mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
+    image_id = uuid.uuid4()
+    handle = SimpleNamespace(task_id="pending")
+
+    assert service.hasPendingRenderWork() is False
+
+    service._snippet_handles[mask_id] = handle
+    assert service.hasPendingRenderWork() is True
+    service._snippet_handles.clear()
+
+    service._prefetch_handles[image_id] = SimpleNamespace(
+        handle=handle,
+        mask_revisions=((mask_id, controller.maskRenderRevision(mask_id)),),
+    )
+    assert service.hasPendingRenderWork() is True
+    service._prefetch_handles.clear()
+
+    service._pending_prefetched_overlays[mask_id] = PrefetchedOverlay(
+        mask_id=mask_id,
+        render_revision=0,
+        image=QImage(32, 32, QImage.Format_ARGB32),
+    )
+    assert service.hasPendingRenderWork() is True
+
+    service._pending_prefetched_overlays.clear()
+    revision = controller.maskRenderRevision(mask_id)
+    controller._async_colorize_pending[mask_id] = revision
+    assert service.hasPendingRenderWork() is True
+
+
+@pytest.mark.usefixtures("qapp")
+def test_successful_prefetch_clears_async_colorize_ownership(qpane_core):
+    """A committed prefetch must terminate the matching cache-miss lifecycle."""
+    service, manager, controller = _build_service(qpane_core)
+    mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
+    image_id = uuid.uuid4()
+    revision = controller.maskRenderRevision(mask_id)
+    controller._async_colorize_pending[mask_id] = revision
+    overlay = PrefetchedOverlay(
+        mask_id=mask_id,
+        render_revision=controller.maskRenderRevision(mask_id),
+        image=QImage(32, 32, QImage.Format_ARGB32),
+    )
+
+    service._consume_prefetch_results(
+        image_id=image_id,
+        warmed=(overlay,),
+        failures={},
+        duration_ms=1.0,
+        error=None,
+        task_id=None,
+    )
+
+    assert mask_id not in controller._async_colorize_pending
+
+
+@pytest.mark.usefixtures("qapp")
+def test_stale_prefetch_cannot_clear_newer_async_colorize_ownership(qpane_core):
+    """An old render completion must not finish a newer revision request."""
+    service, manager, controller = _build_service(qpane_core)
+    mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
+    stale_revision = controller.maskRenderRevision(mask_id)
+    controller.bumpMaskGeneration(mask_id, reason="newer-request")
+    current_revision = controller.maskRenderRevision(mask_id)
+    controller._async_colorize_pending[mask_id] = current_revision
+    stale_overlay = PrefetchedOverlay(
+        mask_id=mask_id,
+        render_revision=stale_revision,
+        image=QImage(32, 32, QImage.Format_ARGB32),
+    )
+
+    service._consume_prefetch_results(
+        image_id=uuid.uuid4(),
+        warmed=(stale_overlay,),
+        failures={},
+        duration_ms=1.0,
+        error=None,
+        task_id=None,
+    )
+
+    assert controller.has_pending_async_colorize(mask_id)
+    assert controller._async_colorize_pending[mask_id] == current_revision
+
+
+@pytest.mark.usefixtures("qapp")
+def test_failed_prefetch_clears_matching_async_colorize_ownership(qpane_core):
+    """A terminal overlay failure must release its matching render request."""
+    service, manager, controller = _build_service(qpane_core)
+    mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
+    revision = controller.maskRenderRevision(mask_id)
+    controller._async_colorize_pending[mask_id] = revision
+    failed_overlay = PrefetchedOverlay(
+        mask_id=mask_id,
+        render_revision=revision,
+        image=QImage(),
+    )
+
+    service._consume_prefetch_results(
+        image_id=uuid.uuid4(),
+        warmed=(failed_overlay,),
+        failures={mask_id: "colorization failed"},
+        duration_ms=1.0,
+        error=None,
+        task_id=None,
+    )
+
+    assert not controller.has_pending_async_colorize(mask_id)
+
+
+@pytest.mark.usefixtures("qapp")
+def test_snippet_result_is_discarded_while_stroke_preview_is_active(
+    qpane_core,
+    monkeypatch,
+):
+    """Background snippets must not overwrite a live provisional stroke."""
+    service, manager, controller = _build_service(qpane_core)
+    mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
+    updates: list[object] = []
+    monkeypatch.setattr(
+        service._stroke_pipeline,
+        "is_mask_busy",
+        lambda candidate: candidate == mask_id,
+    )
+    monkeypatch.setattr(
+        controller,
+        "updateMaskRegion",
+        lambda *args, **kwargs: updates.append((args, kwargs)),
+    )
+
+    service._consume_snippet_result(
+        mask_id=mask_id,
+        render_revision=controller.maskRenderRevision(mask_id),
+        handle=None,
+        dirty_rect=manager.get_layer(mask_id).mask_image.rect(),
+        colorized_image=QImage(32, 32, QImage.Format_ARGB32),
+    )
+
+    assert updates == []
+
+
+@pytest.mark.usefixtures("qapp")
+def test_missing_snippet_layer_clears_async_colorize_ownership(qpane_core):
+    """A removed mask must not retain snippet-render ownership."""
+    service, _manager, controller = _build_service(qpane_core)
+    mask_id = uuid.uuid4()
+    revision = controller.maskRenderRevision(mask_id)
+    controller._async_colorize_pending[mask_id] = revision
+
+    service._consume_snippet_result(
+        mask_id=mask_id,
+        render_revision=revision,
+        handle=None,
+        dirty_rect=QImage(4, 4, QImage.Format_Grayscale8).rect(),
+        colorized_image=QImage(4, 4, QImage.Format_ARGB32),
+    )
+
+    assert not controller.has_pending_async_colorize(mask_id)
 
 
 @pytest.mark.usefixtures("qapp")
@@ -206,7 +467,7 @@ def test_request_async_colorize_falls_back_to_snippet(qpane_core):
     layer = manager.get_layer(mask_id)
     assert layer is not None
     calls: list[uuid.UUID] = []
-    controller.notify_async_colorize_complete = lambda mid: calls.append(mid)
+    controller.notify_async_colorize_complete = lambda mid, _revision: calls.append(mid)
     service.prefetchColorizedMasks = lambda *_args, **_kwargs: False
     service._schedule_snippet_colorize = lambda *_args, **_kwargs: False
     scheduled = service._request_async_colorize(mask_id, layer)

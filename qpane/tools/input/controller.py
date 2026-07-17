@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt
 from PySide6.QtGui import (
+    QEnterEvent,
     QEventPoint,
     QInputDevice,
     QMouseEvent,
@@ -41,6 +42,9 @@ from .arena import TouchGestureArena, TouchGestureKind
 if TYPE_CHECKING:
     from ...qpane import QPane
 
+_SYNTHETIC_MOUSE_DEDUP_SECONDS = 0.35
+_SYNTHETIC_MOUSE_DEDUP_DISTANCE = 4.0
+
 
 class PointerInputController(QObject):
     """Normalize direct input and coordinate ownership of active sequences."""
@@ -49,12 +53,12 @@ class PointerInputController(QObject):
         self,
         qpane: "QPane",
         *,
-        on_modality_changed: Callable[[PointerDeviceKind], None] | None = None,
+        on_pointer_state_changed: Callable[[], None] | None = None,
     ) -> None:
         """Capture the pane and initialize empty input state."""
         super().__init__(qpane)
         self._qpane = qpane
-        self._on_modality_changed = on_modality_changed
+        self._on_pointer_state_changed = on_pointer_state_changed
         self._active_device = PointerDeviceKind.MOUSE
         self._active_touches: dict[int, QPointF] = {}
         self._touch_sequence_claimed = False
@@ -67,6 +71,8 @@ class PointerInputController(QObject):
         self._touch_divider_claimed = False
         self._touch_preview_allowed = False
         self._touch_tool_active = False
+        self._last_touch_position: QPointF | None = None
+        self._last_touch_ended_at: float | None = None
         self._last_navigation_tap_at: float | None = None
         self._last_navigation_tap_position: QPointF | None = None
         self._pen_last_seen_at: float | None = None
@@ -80,6 +86,20 @@ class PointerInputController(QObject):
     def active_device(self) -> PointerDeviceKind:
         """Return the physical modality that most recently owned interaction."""
         return self._active_device
+
+    @property
+    def touch_sequence_claimed(self) -> bool:
+        """Return whether QPane currently owns an active touch sequence."""
+        return self._touch_sequence_claimed
+
+    @property
+    def cursor_suppressed(self) -> bool:
+        """Return whether active direct input requires hiding QWidget's cursor."""
+        pen_owns_proximity = self._pen_in_proximity and self._active_device in {
+            PointerDeviceKind.PEN,
+            PointerDeviceKind.ERASER,
+        }
+        return self._touch_sequence_claimed or pen_owns_proximity
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """Observe application-level tablet proximity events for this pane."""
@@ -95,6 +115,7 @@ class PointerInputController(QObject):
         """Arbitrate and route one complete touchscreen frame."""
         if event.type() == QEvent.Type.TouchCancel:
             claimed = self._touch_sequence_claimed
+            self._remember_touch_end()
             if self._touch_divider_claimed:
                 self._qpane.comparisonDividerInteraction().cancel_drag()
             self._cancel_touch_tool()
@@ -120,6 +141,8 @@ class PointerInputController(QObject):
             if self._primary_touch_id is not None
             else None
         )
+        if primary_sample is not None:
+            self._last_touch_position = QPointF(primary_sample.position)
         active_after_frame = {
             point_id: position
             for point_id, position in frame_positions.items()
@@ -150,6 +173,7 @@ class PointerInputController(QObject):
             if kind is TouchGestureKind.NAVIGATION:
                 self._cancel_touch_tool()
                 self._clear_pointer_preview()
+                self._set_active_device(PointerDeviceKind.TOUCH)
             elif (
                 kind is TouchGestureKind.PENDING
                 and primary_sample is not None
@@ -179,6 +203,9 @@ class PointerInputController(QObject):
             if kind is TouchGestureKind.NAVIGATION and primary_sample is not None:
                 self._maybe_handle_navigation_tap(primary_sample)
                 self._navigation.finish()
+            self._remember_touch_end(
+                None if primary_sample is None else primary_sample.position
+            )
             self.cancel_touch_sequence()
         return True
 
@@ -217,14 +244,30 @@ class PointerInputController(QObject):
     def observe_mouse_event(self, event: QMouseEvent) -> bool:
         """Restore mouse ownership or reject a synthesized direct-input duplicate."""
         if event.source() == Qt.MouseEventSource.MouseEventNotSynthesized:
-            self._clear_pointer_preview()
-            self._set_active_device(PointerDeviceKind.MOUSE)
+            self._adopt_mouse_modality()
             return True
-        return self._active_device not in {
-            PointerDeviceKind.TOUCH,
+        if self._active_device is PointerDeviceKind.TOUCH:
+            if self._touch_sequence_claimed or not self._synthesized_mouse_is_distinct(
+                event
+            ):
+                return False
+            self._adopt_mouse_modality()
+            return True
+        if self._active_device in {
             PointerDeviceKind.PEN,
             PointerDeviceKind.ERASER,
-        }
+        }:
+            if self._synthesized_mouse_is_hover(event):
+                self._adopt_mouse_modality()
+                return True
+            return False
+        self._adopt_mouse_modality()
+        return True
+
+    def observe_enter_event(self, event: QEnterEvent) -> None:
+        """Adopt mouse ownership when a hover-capable pointer enters the pane."""
+        if self._pointing_event_uses_hover_device(event):
+            self._adopt_mouse_modality()
 
     def pen_suppresses_touch_paint(self) -> bool:
         """Return whether recent active-pen activity should reject a palm contact."""
@@ -247,7 +290,7 @@ class PointerInputController(QObject):
         self._touch_divider_claimed = False
         self._touch_preview_allowed = False
         self._touch_tool_active = False
-        self._touch_sequence_claimed = False
+        self._set_touch_sequence_claimed(False)
 
     def cancel_active_sequences(self) -> None:
         """Cancel captured touch or pen work before a tool lifecycle transition."""
@@ -309,15 +352,15 @@ class PointerInputController(QObject):
         """Capture a supported sequence and seed its arbitration state."""
         qpane = self._qpane
         if qpane._is_blank or not qpane.view().has_renderable_content():
-            self._touch_sequence_claimed = False
+            self._set_touch_sequence_claimed(False)
             return
         first_point = next(iter(event.points()), None)
         if first_point is None:
-            self._touch_sequence_claimed = False
+            self._set_touch_sequence_claimed(False)
             return
         divider = qpane.comparisonDividerInteraction()
         if divider.handle_touch_begin(first_point.position()):
-            self._touch_sequence_claimed = True
+            self._set_touch_sequence_claimed(True)
             self._touch_divider_claimed = True
             self._set_active_device(PointerDeviceKind.TOUCH)
             self._primary_touch_id = first_point.id()
@@ -334,14 +377,16 @@ class PointerInputController(QObject):
         smart_select_mode = mode == qpane.CONTROL_MODE_SMART_SELECT
         direct_tool_mode = brush_mode or smart_select_mode
         if not navigation_mode and not direct_tool_mode:
-            self._touch_sequence_claimed = False
+            self._set_touch_sequence_claimed(False)
             return
         if navigation_mode and not self._touch_navigation_allowed():
-            self._touch_sequence_claimed = False
+            self._set_touch_sequence_claimed(False)
             return
-        self._touch_sequence_claimed = True
+        self._set_touch_sequence_claimed(True)
         self._primary_touch_id = first_point.id()
         self._primary_touch_origin = QPointF(first_point.position())
+        self._last_touch_position = QPointF(first_point.position())
+        self._last_touch_ended_at = None
         self._primary_touch_begin = replace(
             self.touch_sample(first_point, event),
             phase=PointerPhase.BEGIN,
@@ -357,7 +402,8 @@ class PointerInputController(QObject):
             paint_allowed=paint_allowed,
         )
         self._touch_preview_allowed = brush_mode and paint_allowed
-        self._set_active_device(PointerDeviceKind.TOUCH)
+        if navigation_mode or paint_allowed:
+            self._set_active_device(PointerDeviceKind.TOUCH)
         if paint_allowed and self._primary_touch_begin is not None:
             handler = self._active_pointer_handler()
             self._touch_tool_active = bool(
@@ -417,13 +463,88 @@ class PointerInputController(QObject):
         handler = getattr(tool, "clear_pointer_preview", None)
         return bool(handler()) if callable(handler) else False
 
+    def _adopt_mouse_modality(self) -> None:
+        """Clear direct feedback and publish mouse cursor ownership."""
+        self._clear_pointer_preview()
+        self._set_active_device(PointerDeviceKind.MOUSE)
+
+    def _remember_touch_end(self, position: QPointF | None = None) -> None:
+        """Record the final contact position used to reject promoted mouse events."""
+        if position is not None:
+            self._last_touch_position = QPointF(position)
+        elif self._primary_touch_id is not None:
+            remembered = self._active_touches.get(self._primary_touch_id)
+            if remembered is not None:
+                self._last_touch_position = QPointF(remembered)
+        self._last_touch_ended_at = time.monotonic()
+
+    def _synthesized_mouse_is_distinct(self, event: QMouseEvent) -> bool:
+        """Return whether a synthesized event represents new mouse activity."""
+        if (
+            event.type() == QEvent.Type.MouseMove
+            and event.buttons() == Qt.MouseButton.NoButton
+        ):
+            return True
+        device = event.pointingDevice()
+        if device is not None:
+            if device.type() in {
+                QInputDevice.DeviceType.Mouse,
+                QInputDevice.DeviceType.TouchPad,
+            }:
+                return True
+            if device.type() in {
+                QInputDevice.DeviceType.TouchScreen,
+                QInputDevice.DeviceType.Stylus,
+            }:
+                return False
+        ended_at = self._last_touch_ended_at
+        touch_position = self._last_touch_position
+        if ended_at is None or touch_position is None:
+            return False
+        if time.monotonic() - ended_at > _SYNTHETIC_MOUSE_DEDUP_SECONDS:
+            return True
+        delta = event.position() - touch_position
+        return math.hypot(delta.x(), delta.y()) > _SYNTHETIC_MOUSE_DEDUP_DISTANCE
+
+    def _synthesized_mouse_is_hover(self, event: QMouseEvent) -> bool:
+        """Return whether a synthesized event is mouse or touchpad hover motion."""
+        return (
+            event.type() == QEvent.Type.MouseMove
+            and event.buttons() == Qt.MouseButton.NoButton
+            and self._pointing_event_uses_hover_device(event)
+        )
+
+    @staticmethod
+    def _pointing_event_uses_hover_device(
+        event: QMouseEvent | QEnterEvent,
+    ) -> bool:
+        """Return whether Qt identifies the source as a mouse-like device."""
+        device = event.pointingDevice()
+        if device is None:
+            return False
+        return device.type() in {
+            QInputDevice.DeviceType.Mouse,
+            QInputDevice.DeviceType.TouchPad,
+        }
+
     def _set_active_device(self, device: PointerDeviceKind) -> None:
-        """Publish one stable modality transition to cursor arbitration."""
+        """Publish one stable modality transition to pointer-state observers."""
         if device is self._active_device:
             return
         self._active_device = device
-        if self._on_modality_changed is not None:
-            self._on_modality_changed(device)
+        self._notify_pointer_state_changed()
+
+    def _set_touch_sequence_claimed(self, claimed: bool) -> None:
+        """Publish touch-contact cursor policy independently of last-device state."""
+        if claimed is self._touch_sequence_claimed:
+            return
+        self._touch_sequence_claimed = claimed
+        self._notify_pointer_state_changed()
+
+    def _notify_pointer_state_changed(self) -> None:
+        """Ask the interaction owner to reconcile cursor policy with input state."""
+        if self._on_pointer_state_changed is not None:
+            self._on_pointer_state_changed()
 
     def _handle_pen_proximity_leave(self) -> None:
         """Cancel incomplete pen work and remove feedback when the pen leaves range."""

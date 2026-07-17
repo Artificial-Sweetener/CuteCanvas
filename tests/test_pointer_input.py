@@ -23,13 +23,17 @@ import uuid
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import (
+    QEnterEvent,
+    QEventPoint,
     QImage,
     QInputDevice,
     QMouseEvent,
     QPointingDevice,
     QTabletEvent,
+    QTouchEvent,
 )
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QWidget
 
 from qpane import QPane
 from qpane.tools.input import (
@@ -37,6 +41,7 @@ from qpane.tools.input import (
     PointerInputController,
     PointerPhase,
 )
+from tests.harness import PointerTransitionProbe
 
 
 @pytest.fixture(scope="module")
@@ -620,7 +625,7 @@ def test_unrelated_pen_proximity_leave_does_not_clear_touch_preview(
         qapp.processEvents()
 
 
-def test_palm_rejected_touch_keeps_pen_hover_preview_without_painting(
+def test_palm_rejected_touch_preserves_pen_modality_until_proximity_leave(
     qapp,
     pen_device: QPointingDevice,
 ) -> None:
@@ -654,39 +659,541 @@ def test_palm_rejected_touch_keeps_pen_hover_preview_without_painting(
             0, QPoint(120, 120), viewer
         ).commit()
         qapp.processEvents()
+        qapp.sendEvent(
+            qapp,
+            _tablet_event(
+                pen_device,
+                QEvent.Type.TabletLeaveProximity,
+                0.0,
+                Qt.MouseButton.NoButton,
+            ),
+        )
+
+        assert tool.pointer_preview is None
     finally:
         viewer.deleteLater()
         qapp.processEvents()
 
 
-def test_genuine_mouse_activity_restores_brush_cursor_after_touch(qapp) -> None:
+@pytest.mark.parametrize(
+    "source",
+    (
+        Qt.MouseEventSource.MouseEventNotSynthesized,
+        Qt.MouseEventSource.MouseEventSynthesizedByQt,
+        Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+        Qt.MouseEventSource.MouseEventSynthesizedByApplication,
+    ),
+)
+def test_touch_release_restores_cursor_before_mouse_motion_adopts_modality(
+    qapp,
+    source: Qt.MouseEventSource,
+) -> None:
     viewer = _touch_mask_viewer(qapp)
     try:
         device = QTest.createTouchDevice()
         QTest.touchEvent(viewer, device).press(0, QPoint(100, 100), viewer).commit()
         QTest.touchEvent(viewer, device).release(0, QPoint(100, 100), viewer).commit()
         qapp.processEvents()
-        assert viewer.cursor().shape() == Qt.CursorShape.BlankCursor
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.TOUCH
+        )
 
         mouse_move = QMouseEvent(
             QEvent.Type.MouseMove,
-            QPointF(110.0, 100.0),
-            QPointF(110.0, 100.0),
-            QPointF(110.0, 100.0),
+            QPointF(100.0, 100.0),
+            QPointF(100.0, 100.0),
+            QPointF(100.0, 100.0),
             Qt.MouseButton.NoButton,
             Qt.MouseButton.NoButton,
             Qt.KeyboardModifier.NoModifier,
-            Qt.MouseEventSource.MouseEventNotSynthesized,
+            source,
         )
         qapp.sendEvent(viewer, mouse_move)
 
         assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.MOUSE
+        )
+        cursor_image = viewer.cursor().pixmap().toImage()
+        assert not cursor_image.isNull()
+        opaque_values = [
+            cursor_image.pixelColor(x_position, y_position).value()
+            for y_position in range(cursor_image.height())
+            for x_position in range(cursor_image.width())
+            if cursor_image.pixelColor(x_position, y_position).alpha() >= 128
+        ]
+        assert opaque_values
+        assert min(opaque_values) <= 32
+        assert max(opaque_values) >= 223
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.MOUSE
+        )
     finally:
         viewer.deleteLater()
         qapp.processEvents()
 
 
-def test_synthesized_mouse_press_after_touch_does_not_duplicate_stroke(qapp) -> None:
+@pytest.mark.parametrize(
+    "source",
+    (
+        Qt.MouseEventSource.MouseEventSynthesizedByQt,
+        Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+        Qt.MouseEventSource.MouseEventSynthesizedByApplication,
+    ),
+)
+@pytest.mark.parametrize("metadata", ("touchscreen", "unknown"))
+def test_hover_motion_after_touch_restores_cursor_with_stale_device_metadata(
+    qapp,
+    source: Qt.MouseEventSource,
+    metadata: str,
+) -> None:
+    """A post-contact no-button move must restore hover despite stale metadata."""
+    viewer = _touch_mask_viewer(qapp)
+    try:
+        touch_device = QTest.createTouchDevice()
+        event_device = (
+            touch_device
+            if metadata == "touchscreen"
+            else QPointingDevice(
+                "Unknown synthesized pointer",
+                702,
+                QInputDevice.DeviceType.Unknown,
+                QPointingDevice.PointerType.Generic,
+                QInputDevice.Capability.Position,
+                1,
+                1,
+            )
+        )
+        position = QPointF(100.0, 100.0)
+        QTest.touchEvent(viewer, touch_device).press(
+            0, position.toPoint(), viewer
+        ).commit()
+        QTest.touchEvent(viewer, touch_device).release(
+            0, position.toPoint(), viewer
+        ).commit()
+        qapp.processEvents()
+        promoted_move = QMouseEvent(
+            QEvent.Type.MouseMove,
+            position,
+            position,
+            position,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            source,
+            event_device,
+        )
+        qapp.sendEvent(viewer, promoted_move)
+
+        cursor = viewer.cursor()
+        cursor_image = cursor.pixmap().toImage()
+        assert cursor.shape() != Qt.CursorShape.BlankCursor
+        assert not cursor_image.isNull()
+        assert cursor.hotSpot() == QPoint(
+            cursor_image.width() // 2,
+            cursor_image.height() // 2,
+        )
+        opaque_values = [
+            cursor_image.pixelColor(x_position, y_position).value()
+            for y_position in range(cursor_image.height())
+            for x_position in range(cursor_image.width())
+            if cursor_image.pixelColor(x_position, y_position).alpha() >= 128
+        ]
+        assert opaque_values
+        assert min(opaque_values) <= 32
+        assert max(opaque_values) >= 223
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.MOUSE
+        )
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_transition_probe_records_touch_release_before_mouse_recovery(qapp) -> None:
+    """The probe must expose contact-only suppression and later mouse ownership."""
+    viewer = _touch_mask_viewer(qapp)
+    probe = PointerTransitionProbe(viewer)
+    touch_device = QTest.createTouchDevice()
+    position = QPointF(100.0, 100.0)
+    try:
+        touch_begin = probe.deliver(
+            QTouchEvent(
+                QEvent.Type.TouchBegin,
+                touch_device,
+                Qt.KeyboardModifier.NoModifier,
+                (
+                    QEventPoint(
+                        0,
+                        QEventPoint.State.Pressed,
+                        position,
+                        position,
+                    ),
+                ),
+            )
+        )
+        assert touch_begin.event_type == "TouchBegin"
+        assert touch_begin.device_type == "TouchScreen"
+        assert touch_begin.accepted_after is True
+        assert touch_begin.active_device == "touch"
+        assert touch_begin.touch_claimed is True
+        assert touch_begin.cursor_suppressed is True
+        assert touch_begin.cursor_shape == "BlankCursor"
+        assert touch_begin.effective_cursor_shape == "BlankCursor"
+
+        touch_end = probe.deliver(
+            QTouchEvent(
+                QEvent.Type.TouchEnd,
+                touch_device,
+                Qt.KeyboardModifier.NoModifier,
+                (
+                    QEventPoint(
+                        0,
+                        QEventPoint.State.Released,
+                        position,
+                        position,
+                    ),
+                ),
+            )
+        )
+        assert touch_end.event_type == "TouchEnd"
+        assert touch_end.accepted_after is True
+        assert touch_end.active_device == "touch"
+        assert touch_end.touch_claimed is False
+        assert touch_end.cursor_suppressed is False
+        assert touch_end.cursor_shape != "BlankCursor"
+        assert touch_end.effective_cursor_shape != "BlankCursor"
+        assert touch_end.cursor_size[0] > 0
+        assert touch_end.cursor_size[1] > 0
+
+        mouse_move = QMouseEvent(
+            QEvent.Type.MouseMove,
+            position,
+            position,
+            position,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+            touch_device,
+        )
+        mouse_observation = probe.deliver(mouse_move)
+
+        assert mouse_observation.event_type == "MouseMove"
+        assert mouse_observation.source == "MouseEventSynthesizedBySystem"
+        assert mouse_observation.device_type == "TouchScreen"
+        assert mouse_observation.active_device == "mouse"
+        assert mouse_observation.touch_claimed is False
+        assert mouse_observation.cursor_suppressed is False
+        assert mouse_observation.cursor_shape != "BlankCursor"
+        assert mouse_observation.effective_cursor_shape != "BlankCursor"
+        assert mouse_observation.cursor_size[0] > 0
+        assert mouse_observation.cursor_size[1] > 0
+        assert mouse_observation.cursor_hotspot == (
+            mouse_observation.cursor_size[0] // 2,
+            mouse_observation.cursor_size[1] // 2,
+        )
+    finally:
+        probe.close()
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_repeated_touch_contacts_suppress_cursor_only_while_claimed(qapp) -> None:
+    """Each touch must hide during contact and restore without a device change."""
+    viewer = _touch_mask_viewer(qapp)
+    touch_device = QTest.createTouchDevice()
+    try:
+        for point in (QPoint(80, 90), QPoint(140, 150), QPoint(200, 210)):
+            QTest.touchEvent(viewer, touch_device).press(0, point, viewer).commit()
+            qapp.processEvents()
+
+            assert viewer.cursor().shape() == Qt.CursorShape.BlankCursor
+            assert viewer.interaction._pointer_input.touch_sequence_claimed is True
+            assert (
+                viewer.interaction._pointer_input.active_device
+                is PointerDeviceKind.TOUCH
+            )
+
+            QTest.touchEvent(viewer, touch_device).release(0, point, viewer).commit()
+            qapp.processEvents()
+
+            cursor = viewer.cursor()
+            assert cursor.shape() != Qt.CursorShape.BlankCursor
+            assert not cursor.pixmap().isNull()
+            assert viewer.interaction._pointer_input.touch_sequence_claimed is False
+            assert (
+                viewer.interaction._pointer_input.active_device
+                is PointerDeviceKind.TOUCH
+            )
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_transition_probe_records_ignored_touch_on_blank_pane(qapp) -> None:
+    """Unsupported touch delivery must remain unclaimed and preserve cursor policy."""
+    viewer = _touch_mask_viewer(qapp)
+    probe = PointerTransitionProbe(viewer)
+    touch_device = QTest.createTouchDevice()
+    position = QPointF(100.0, 100.0)
+    try:
+        viewer.clearImages()
+        qapp.processEvents()
+        observation = probe.deliver(
+            QTouchEvent(
+                QEvent.Type.TouchBegin,
+                touch_device,
+                Qt.KeyboardModifier.NoModifier,
+                (
+                    QEventPoint(
+                        0,
+                        QEventPoint.State.Pressed,
+                        position,
+                        position,
+                    ),
+                ),
+            )
+        )
+
+        assert observation.event_type == "TouchBegin"
+        assert observation.device_type == "TouchScreen"
+        assert observation.accepted_after is False
+        assert observation.active_device == "unknown"
+        assert observation.touch_claimed is False
+        assert observation.cursor_shape != "BlankCursor"
+    finally:
+        probe.close()
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize("embedded", (False, True), ids=("top-level", "embedded"))
+@pytest.mark.parametrize(
+    "lifecycle_events",
+    (
+        (),
+        (QEvent.Type.FocusOut, QEvent.Type.FocusIn),
+        (QEvent.Type.GrabMouse, QEvent.Type.UngrabMouse),
+        (QEvent.Type.WindowDeactivate, QEvent.Type.WindowActivate),
+    ),
+    ids=("steady", "focus", "grab", "activation"),
+)
+def test_touch_mouse_recovery_survives_widget_lifecycle_and_hierarchy(
+    qapp,
+    embedded: bool,
+    lifecycle_events: tuple[QEvent.Type, ...],
+) -> None:
+    """Widget lifecycle transitions must not strand touch cursor ownership."""
+    viewer = _touch_mask_viewer(qapp)
+    container = QWidget() if embedded else None
+    touch_device = QTest.createTouchDevice()
+    position = QPointF(100.0, 100.0)
+    try:
+        if container is not None:
+            viewer.setParent(container)
+            container.resize(240, 240)
+            viewer.show()
+            container.show()
+            qapp.processEvents()
+        QTest.touchEvent(viewer, touch_device).press(
+            0, position.toPoint(), viewer
+        ).commit()
+        QTest.touchEvent(viewer, touch_device).release(
+            0, position.toPoint(), viewer
+        ).commit()
+        qapp.processEvents()
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.TOUCH
+        )
+
+        for event_type in lifecycle_events:
+            qapp.sendEvent(viewer, QEvent(event_type))
+        mouse_move = QMouseEvent(
+            QEvent.Type.MouseMove,
+            position,
+            position,
+            position,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+            touch_device,
+        )
+        qapp.sendEvent(viewer, mouse_move)
+
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.MOUSE
+        )
+    finally:
+        viewer.setParent(None)
+        viewer.deleteLater()
+        if container is not None:
+            container.deleteLater()
+        qapp.processEvents()
+
+
+def test_synthesized_hover_during_active_touch_remains_suppressed(qapp) -> None:
+    """A mouse-shaped compatibility move cannot steal an active touch sequence."""
+    viewer = _touch_mask_viewer(qapp)
+    touch_device = QTest.createTouchDevice()
+    position = QPointF(100.0, 100.0)
+    try:
+        QTest.touchEvent(viewer, touch_device).press(
+            0, position.toPoint(), viewer
+        ).commit()
+        qapp.processEvents()
+        compatibility_move = QMouseEvent(
+            QEvent.Type.MouseMove,
+            position,
+            position,
+            position,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+            touch_device,
+        )
+
+        qapp.sendEvent(viewer, compatibility_move)
+
+        assert viewer.cursor().shape() == Qt.CursorShape.BlankCursor
+        assert viewer.interaction._pointer_input.touch_sequence_claimed is True
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.TOUCH
+        )
+    finally:
+        QTest.touchEvent(viewer, touch_device).release(
+            0, position.toPoint(), viewer
+        ).commit()
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_hover_motion_restores_cursor_after_touch_cancel(qapp) -> None:
+    """Cancelled touch ownership must not strand the brush on BlankCursor."""
+    viewer = _touch_mask_viewer(qapp)
+    touch_device = QTest.createTouchDevice()
+    position = QPointF(100.0, 100.0)
+    try:
+        QTest.touchEvent(viewer, touch_device).press(
+            0, position.toPoint(), viewer
+        ).commit()
+        qapp.processEvents()
+        cancel_event = QTouchEvent(
+            QEvent.Type.TouchCancel,
+            touch_device,
+            Qt.KeyboardModifier.NoModifier,
+            (),
+        )
+        qapp.sendEvent(viewer, cancel_event)
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert viewer.interaction._pointer_input.touch_sequence_claimed is False
+        hover_event = QMouseEvent(
+            QEvent.Type.MouseMove,
+            position,
+            position,
+            position,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+            touch_device,
+        )
+
+        qapp.sendEvent(viewer, hover_event)
+
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert viewer.interaction._pointer_input.touch_sequence_claimed is False
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.MOUSE
+        )
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_mouse_enter_adopts_mouse_after_touch_cursor_is_restored(qapp) -> None:
+    """Touch release restores the brush before enter adopts mouse ownership."""
+    viewer = _touch_mask_viewer(qapp)
+    try:
+        touch_device = QTest.createTouchDevice()
+        point = QPoint(100, 100)
+        QTest.touchEvent(viewer, touch_device).press(0, point, viewer).commit()
+        QTest.touchEvent(viewer, touch_device).release(0, point, viewer).commit()
+        qapp.processEvents()
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.TOUCH
+        )
+
+        enter_event = QEnterEvent(QPointF(point), QPointF(point), QPointF(point))
+        qapp.sendEvent(viewer, enter_event)
+        qapp.processEvents()
+
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.MOUSE
+        )
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_stylus_promoted_mouse_motion_does_not_steal_pen_hover(
+    qapp,
+    pen_device: QPointingDevice,
+) -> None:
+    """Mouse-shaped tablet synthesis must preserve the active pen preview."""
+    viewer = _touch_mask_viewer(qapp)
+    try:
+        position = QPointF(100.0, 100.0)
+        qapp.sendEvent(
+            viewer,
+            _tablet_event(
+                pen_device,
+                QEvent.Type.TabletMove,
+                0.0,
+                Qt.MouseButton.NoButton,
+                position,
+            ),
+        )
+        promoted_move = QMouseEvent(
+            QEvent.Type.MouseMove,
+            position,
+            position,
+            position,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+            pen_device,
+        )
+
+        qapp.sendEvent(viewer, promoted_move)
+
+        assert viewer.cursor().shape() == Qt.CursorShape.BlankCursor
+        assert viewer.interaction._pointer_input.active_device is PointerDeviceKind.PEN
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        Qt.MouseEventSource.MouseEventSynthesizedByQt,
+        Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+        Qt.MouseEventSource.MouseEventSynthesizedByApplication,
+    ),
+)
+def test_synthesized_mouse_press_after_touch_does_not_duplicate_stroke(
+    qapp,
+    source: Qt.MouseEventSource,
+) -> None:
     viewer = _touch_mask_viewer(qapp)
     try:
         tool = viewer._tools_manager.get_active_tool()
@@ -718,12 +1225,186 @@ def test_synthesized_mouse_press_after_touch_does_not_duplicate_stroke(qapp) -> 
                 button,
                 buttons,
                 Qt.KeyboardModifier.NoModifier,
-                Qt.MouseEventSource.MouseEventSynthesizedByQt,
+                source,
+                device,
             )
             qapp.sendEvent(viewer, event)
 
         assert touch_segment_count == 1
         assert len(segments) == touch_segment_count
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.TOUCH
+        )
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    ("elapsed_seconds", "expected_extra_stroke"),
+    ((0.0, False), (1.0, True)),
+    ids=("immediate-duplicate", "delayed-mouse"),
+)
+def test_unknown_synthesized_press_uses_time_fallback_after_touch(
+    qapp,
+    elapsed_seconds: float,
+    expected_extra_stroke: bool,
+) -> None:
+    """Unknown button metadata must use the bounded compatibility-event window."""
+    viewer = _touch_mask_viewer(qapp)
+    position = QPointF(100.0, 100.0)
+    touch_device = QTest.createTouchDevice()
+    unknown_device = QPointingDevice(
+        "Unknown synthesized pointer",
+        704,
+        QInputDevice.DeviceType.Unknown,
+        QPointingDevice.PointerType.Generic,
+        QInputDevice.Capability.Position,
+        1,
+        1,
+    )
+    try:
+        tool = viewer._tools_manager.get_active_tool()
+        segments = []
+        tool.signals.stroke_applied.connect(segments.append)
+        QTest.touchEvent(viewer, touch_device).press(
+            0, position.toPoint(), viewer
+        ).commit()
+        QTest.touchEvent(viewer, touch_device).release(
+            0, position.toPoint(), viewer
+        ).commit()
+        qapp.processEvents()
+        touch_segment_count = len(segments)
+        pointer_input = viewer.interaction._pointer_input
+        assert pointer_input._last_touch_ended_at is not None
+        pointer_input._last_touch_ended_at -= elapsed_seconds
+
+        for event_type, button, buttons in (
+            (
+                QEvent.Type.MouseButtonPress,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseButtonRelease,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+            ),
+        ):
+            qapp.sendEvent(
+                viewer,
+                QMouseEvent(
+                    event_type,
+                    position,
+                    position,
+                    position,
+                    button,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                    Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+                    unknown_device,
+                ),
+            )
+
+        expected_count = touch_segment_count + int(expected_extra_stroke)
+        assert len(segments) == expected_count
+        expected_device = (
+            PointerDeviceKind.MOUSE
+            if expected_extra_stroke
+            else PointerDeviceKind.TOUCH
+        )
+        assert pointer_input.active_device is expected_device
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        Qt.MouseEventSource.MouseEventSynthesizedByQt,
+        Qt.MouseEventSource.MouseEventSynthesizedBySystem,
+        Qt.MouseEventSource.MouseEventSynthesizedByApplication,
+    ),
+)
+@pytest.mark.parametrize("metadata", ("mouse", "touchpad"))
+def test_genuine_synthesized_hover_device_press_after_touch_paints(
+    qapp,
+    source: Qt.MouseEventSource,
+    metadata: str,
+) -> None:
+    """Hover hardware metadata must win over the post-touch deduplication window."""
+    viewer = _touch_mask_viewer(qapp)
+    try:
+        tool = viewer._tools_manager.get_active_tool()
+        segments = []
+        tool.signals.stroke_applied.connect(segments.append)
+        touch_device = QTest.createTouchDevice()
+        position = QPointF(100.0, 100.0)
+        QTest.touchEvent(viewer, touch_device).press(
+            0, position.toPoint(), viewer
+        ).commit()
+        QTest.touchEvent(viewer, touch_device).release(
+            0, position.toPoint(), viewer
+        ).commit()
+        qapp.processEvents()
+        touch_segment_count = len(segments)
+        event_device = (
+            None
+            if metadata == "mouse"
+            else QPointingDevice(
+                "Synthetic touchpad",
+                703,
+                QInputDevice.DeviceType.TouchPad,
+                QPointingDevice.PointerType.Generic,
+                QInputDevice.Capability.Position
+                | QInputDevice.Capability.Hover
+                | QInputDevice.Capability.MouseEmulation,
+                1,
+                1,
+            )
+        )
+
+        for event_type, button, buttons in (
+            (
+                QEvent.Type.MouseButtonPress,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseButtonRelease,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+            ),
+        ):
+            arguments = (
+                event_type,
+                position,
+                position,
+                position,
+                button,
+                buttons,
+                Qt.KeyboardModifier.NoModifier,
+                source,
+            )
+            event = (
+                QMouseEvent(*arguments, event_device)
+                if event_device is not None
+                else QMouseEvent(*arguments)
+            )
+            assert event.pointingDevice().type() in {
+                QInputDevice.DeviceType.Mouse,
+                QInputDevice.DeviceType.TouchPad,
+            }
+            qapp.sendEvent(viewer, event)
+
+        assert touch_segment_count == 1
+        assert len(segments) == touch_segment_count + 1
+        assert viewer.cursor().shape() != Qt.CursorShape.BlankCursor
+        assert (
+            viewer.interaction._pointer_input.active_device is PointerDeviceKind.MOUSE
+        )
     finally:
         viewer.deleteLater()
         qapp.processEvents()

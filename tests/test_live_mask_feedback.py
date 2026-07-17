@@ -18,36 +18,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-import time
-import uuid
-
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, Qt
-from PySide6.QtGui import (
-    QColor,
-    QImage,
-    QInputDevice,
-    QMouseEvent,
-    QPointingDevice,
-    QTabletEvent,
-)
+from PySide6.QtGui import QInputDevice, QMouseEvent, QPointingDevice, QTabletEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from qpane import QPane
+from tests.harness import MountedQPaneHarness
 
 
-@dataclass(frozen=True, slots=True)
-class VisibleFeedbackMeasurement:
-    """Record presentation latency and the observed mounted-widget pixel."""
-
-    latency_ms: float | None
-    color: QColor
-
-
-class MountedMaskFeedbackProbe:
+class MountedMaskFeedbackProbe(MountedQPaneHarness):
     """Mount a real offscreen QPane and sample its composited widget pixels."""
 
     def __init__(
@@ -57,78 +38,18 @@ class MountedMaskFeedbackProbe:
         image_size: QSize = QSize(400, 400),
     ) -> None:
         """Create a shown brush-mode pane with one publicly created mask."""
+        super().__init__(qapp, image_size=image_size)
         self._qapp = qapp
-        self.viewer = QPane(features=("mask",))
-        self.viewer.resize(400, 400)
-        self.viewer.show()
-        image = QImage(image_size, QImage.Format.Format_ARGB32)
-        image.fill(Qt.GlobalColor.white)
-        image_id = uuid.uuid4()
-        self.viewer.setImagesByID(
-            self.viewer.imageMapFromLists([image], [None], [image_id]),
-            image_id,
-        )
-        assert self.viewer.createBlankMask(image.size()) is not None
-        self.viewer.setControlMode(self.viewer.CONTROL_MODE_DRAW_BRUSH)
-        self.viewer.setBrushSize(30)
-        self._qapp.processEvents()
-        QTest.qWait(5)
 
-    def close(self) -> None:
-        """Dispose the mounted pane and drain its queued Qt work."""
-        self.viewer.close()
-        self.viewer.deleteLater()
-        self._qapp.processEvents()
-
-    def wait_for_visible_paint(
-        self,
-        point: QPoint,
-        *,
-        timeout_ms: int = 150,
-    ) -> VisibleFeedbackMeasurement:
+    def wait_for_visible_paint(self, point: QPoint, *, timeout_ms: int = 150):
         """Measure time until the mask tint reaches ``point`` on the widget."""
-        return self._wait_for_color(point, self._is_mask_tint, timeout_ms=timeout_ms)
+        return self.wait_for_mask_tint(point, timeout_ms=timeout_ms)
 
-    def wait_for_white(
-        self,
-        point: QPoint,
-        *,
-        timeout_ms: int = 150,
-    ) -> VisibleFeedbackMeasurement:
+    def wait_for_white(self, point: QPoint, *, timeout_ms: int = 150):
         """Measure time until provisional paint is absent at ``point``."""
-        return self._wait_for_color(point, self._is_white, timeout_ms=timeout_ms)
+        return self.wait_for_background(point, timeout_ms=timeout_ms)
 
-    def _wait_for_color(
-        self,
-        point: QPoint,
-        predicate: Callable[[QColor], bool],
-        *,
-        timeout_ms: int,
-    ) -> VisibleFeedbackMeasurement:
-        """Poll real widget composition until ``predicate`` accepts its pixel."""
-        started_at = time.perf_counter()
-        deadline = started_at + timeout_ms / 1000.0
-        color = QColor()
-        while time.perf_counter() < deadline:
-            self._qapp.processEvents()
-            color = self.viewer.grab().toImage().pixelColor(point)
-            if predicate(color):
-                return VisibleFeedbackMeasurement(
-                    latency_ms=(time.perf_counter() - started_at) * 1000.0,
-                    color=color,
-                )
-            QTest.qWait(1)
-        return VisibleFeedbackMeasurement(latency_ms=None, color=color)
-
-    @staticmethod
-    def _is_mask_tint(color: QColor) -> bool:
-        """Return whether ``color`` contains the default red mask overlay."""
-        return color.red() - color.green() >= 40 and color.green() < 230
-
-    @staticmethod
-    def _is_white(color: QColor) -> bool:
-        """Return whether ``color`` is the unmasked white source image."""
-        return color.red() >= 250 and color.green() >= 250 and color.blue() >= 250
+    _is_mask_tint = staticmethod(MountedQPaneHarness.is_mask_tint)
 
 
 @pytest.mark.parametrize("image_size", [QSize(400, 400), QSize(1600, 1600)])
