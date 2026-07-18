@@ -58,7 +58,7 @@ def install_mask_feature(qpane: QPane) -> None:
     )
     mask_controller = MaskController(
         mask_manager,
-        image_to_panel_point=qpane.view().viewport.content_to_panel_point,
+        source_to_panel_point=qpane.activeMaskLayerCoordinates().source_to_panel,
         config=qpane.settings,
         mask_config=mask_config,
         stroke_diagnostics=diagnostics_tracker,

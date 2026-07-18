@@ -22,7 +22,10 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QImage
+
+from qpane import QPaneLayerInteractionPolicy
 
 pytest_plugins = ("tests.test_mask_workflows",)
 
@@ -66,11 +69,107 @@ def test_mask_info_normalizes_label_and_reads_layer_opacity(qpane_with_mask):
     assert info.label is None
     assert info.opacity == 0.5
     assert image_id in info.image_ids
+    assert info.scene_id is not None
+    assert info.layer_id == instance.layer_id
+    assert info.interaction == QPaneLayerInteractionPolicy()
+    movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+    assert qpane.setLayerInteractionPolicy(
+        info.scene_id,
+        info.layer_id,
+        movable,
+    )
+    moved_policy = masks.maskInfo(mask_id)
+    assert moved_policy is not None
+    assert moved_policy.interaction == movable
+    assert qpane.setLayerPlacement(
+        info.scene_id,
+        info.layer_id,
+        QRectF(3.0, 2.0, 4.0, 4.0),
+    )
+    moved_instance = service.layer_instance_for_mask(mask_id)
+    assert moved_instance is not None
+    assert moved_instance.placement.x == 3.0
+    assert moved_instance.placement.y == 2.0
+    assert qpane.undoSceneEdit()
+    restored_instance = service.layer_instance_for_mask(mask_id)
+    assert restored_instance is not None
+    assert restored_instance.placement.x == 0.0
+    assert restored_instance.placement.y == 0.0
     assert service.layers.store.update_label(image_id, instance.layer_id, "Layer 1")
     updated = masks.maskInfo(mask_id)
     assert updated is not None
     assert updated.label == "Layer 1"
     assert updated.opacity == 0.5
+
+
+@pytest.mark.usefixtures("qapp")
+def test_moved_mask_uses_layer_transform_for_edit_coordinates(
+    qpane_with_mask,
+    qapp,
+) -> None:
+    """Mask editing coordinates should follow its generic scene placement."""
+    qpane, manager, image_id = qpane_with_mask
+    service = qpane.mask_service
+    mask_image = QImage(8, 8, QImage.Format_Grayscale8)
+    mask_image.fill(255)
+    mask_id = manager.create_mask(mask_image)
+    manager.set_mask_image(mask_id, mask_image)
+    assert service.layers.attach(mask_id, image_id, color=QColor(255, 0, 0))
+    assert service.controller.setActiveMaskID(mask_id)
+    info = _masks(qpane).maskInfo(mask_id)
+    assert info is not None
+    assert qpane.setLayerInteractionPolicy(
+        info.scene_id,
+        info.layer_id,
+        QPaneLayerInteractionPolicy(selectable=True, movable=True),
+    )
+    assert qpane.setLayerPlacement(
+        info.scene_id,
+        info.layer_id,
+        QRectF(2.0, 1.0, 8.0, 8.0),
+    )
+    qpane._is_blank = False
+    qpane.show()
+    qapp.processEvents()
+    plan = qpane.view().calculateRenderPlan(is_blank=False)
+    assert plan is not None
+    mask_item = next(
+        item for item in plan.render_items if item.descriptor.layer_id == info.layer_id
+    )
+    assert mask_item.descriptor.interaction.selectable
+    assert manager.get_layer(mask_id).mask_image.pixelColor(3, 4).red() > 0
+    assert not qpane._is_blank
+    panel_point = mask_item.transform.map(QPointF(3.0, 4.0))
+
+    coordinates = qpane.activeMaskLayerCoordinates()
+    source_point = coordinates.panel_to_source(panel_point)
+
+    assert source_point is not None
+    assert source_point.x() == pytest.approx(3.0)
+    assert source_point.y() == pytest.approx(4.0)
+    assert coordinates.source_to_panel(source_point) == panel_point
+
+    target_panel_point = mask_item.transform.map(QPointF(5.0, 5.0))
+    selection_hit = qpane.view().scene_selection_hit_test(panel_point)
+    assert selection_hit is not None
+    assert selection_hit.layer_id == info.layer_id
+    movement = qpane.sceneLayerMovementInteraction()
+    assert movement.begin(panel_point)
+    assert movement.update(target_panel_point)
+    preview_plan = qpane.view().calculateRenderPlan(is_blank=False)
+    assert preview_plan is not None
+    preview_item = next(
+        item
+        for item in preview_plan.render_items
+        if item.descriptor.layer_id == info.layer_id
+    )
+    assert preview_item.placement.x == pytest.approx(4.0)
+    assert preview_item.placement.y == pytest.approx(2.0)
+    assert movement.finish(target_panel_point)
+    moved_instance = service.layer_instance_for_mask(mask_id)
+    assert moved_instance is not None
+    assert moved_instance.placement.x == pytest.approx(4.0)
+    assert moved_instance.placement.y == pytest.approx(2.0)
 
 
 @pytest.mark.usefixtures("qapp")

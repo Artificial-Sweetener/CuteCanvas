@@ -48,6 +48,7 @@ from qpane.scene.model import (
     BlendMode,
     LayerDescriptor,
     LayerHitTest,
+    LayerInteractionPolicy,
     LayerKind,
     LayerPlacement,
     SceneDescriptor,
@@ -450,11 +451,13 @@ class StubMaskService:
     ) -> tuple[CompositionLayerInstance, ...]:
         """Return a base layer followed by configured masks."""
         scene_id = default_scene_id(image_id)
+        base_placement = LayerPlacement(0.0, 0.0, 400.0, 200.0)
         return (
             CompositionLayerInstance(
                 layer_id=base_image_layer_id(image_id),
                 source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
                 source_id=image_id,
+                placement=base_placement,
                 role="base-image",
             ),
             *(
@@ -462,10 +465,16 @@ class StubMaskService:
                     layer_id=mask_layer_id(scene_id, mask_id),
                     source_kind=CompositionLayerSourceKind.MASK,
                     source_id=mask_id,
+                    placement=LayerPlacement(
+                        0.0,
+                        0.0,
+                        float(layer.mask_image.width()),
+                        float(layer.mask_image.height()),
+                    ),
                     opacity=0.25 + index * 0.5,
                     role="mask",
                 )
-                for index, (mask_id, _layer) in enumerate(self.assets._layers.items())
+                for index, (mask_id, layer) in enumerate(self.assets._layers.items())
             ),
         )
 
@@ -675,9 +684,89 @@ def test_presenter_render_plan_carries_mask_scene_layers(qapp):
         assert top_item.descriptor.source_revision == 9
         assert math.isclose(bottom_item.descriptor.opacity, 0.25)
         assert math.isclose(top_item.descriptor.opacity, 0.75)
+        assert bottom_item.descriptor.placement == LayerPlacement(
+            0.0,
+            0.0,
+            400.0,
+            200.0,
+        )
+        assert top_item.descriptor.placement == bottom_item.descriptor.placement
+        assert bottom_item.descriptor.interaction.selectable is False
+        assert top_item.descriptor.interaction.selectable is False
         assert bottom_item.transform == base_item.transform
         assert top_item.transform == base_item.transform
         assert service.calls == [(bottom_id, 0.5), (top_id, 0.5)]
+    finally:
+        _cleanup_qpane(harness.qpane, qapp)
+
+
+def test_selection_hit_test_falls_through_transparent_mask_pixels(qapp) -> None:
+    """Mask selection should use painted coverage instead of its bounding box."""
+    harness = PresenterHarness(qpane_size=(100, 100), image_size=(100, 100))
+    try:
+        image_id = harness.qpane._current_image_id
+        scene_id = default_scene_id(image_id)
+        mask_id = uuid.uuid4()
+        mask_image = QImage(100, 100, QImage.Format_Grayscale8)
+        mask_image.fill(0)
+        mask_image.setPixelColor(75, 50, Qt.white)
+        service = StubMaskService(
+            StubMaskAssets({mask_id: StubMaskLayer(mask_image)}),
+            StubMaskController({mask_id: 1}),
+        )
+        selectable = LayerInteractionPolicy(selectable=True, movable=True)
+
+        def layer_instances(_image_id: uuid.UUID):
+            return (
+                CompositionLayerInstance(
+                    layer_id=base_image_layer_id(image_id),
+                    source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
+                    source_id=image_id,
+                    placement=LayerPlacement(0.0, 0.0, 100.0, 100.0),
+                    role="base-image",
+                    interaction=selectable,
+                ),
+                CompositionLayerInstance(
+                    layer_id=mask_layer_id(scene_id, mask_id),
+                    source_kind=CompositionLayerSourceKind.MASK,
+                    source_id=mask_id,
+                    placement=LayerPlacement(0.0, 0.0, 100.0, 100.0),
+                    role="mask",
+                    interaction=selectable,
+                ),
+            )
+
+        harness.qpane.mask_service = service
+        harness.qpane._is_blank = False
+        harness.qpane.sceneProviderRegistry().register_geometry_adapter(
+            MaskCompositionSceneAdapter(
+                layer_instances=layer_instances,
+                revision_provider=service.scene_provider_revision,
+                assets=service.assets,
+                renders=service.controller.renders,
+            )
+        )
+        harness.qpane.layerSourceResolverRegistry().register(
+            MaskLayerSourceResolver(
+                assets=service.assets,
+                renders=service.controller.renders,
+            )
+        )
+        plan = harness.presenter.calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        base_item, mask_item = plan.render_items
+
+        transparent_hit = harness.presenter.scene_selection_hit_test(
+            base_item.transform.map(QPointF(25.0, 50.0))
+        )
+        painted_hit = harness.presenter.scene_selection_hit_test(
+            mask_item.transform.map(QPointF(75.0, 50.0))
+        )
+
+        assert transparent_hit is not None
+        assert transparent_hit.layer_id == base_image_layer_id(image_id)
+        assert painted_hit is not None
+        assert painted_hit.layer_id == mask_layer_id(scene_id, mask_id)
     finally:
         _cleanup_qpane(harness.qpane, qapp)
 
@@ -855,6 +944,7 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
                 layer_id=mask_layer_id(scene_id, mask_ids[0]),
                 source_kind=CompositionLayerSourceKind.MASK,
                 source_id=mask_ids[0],
+                placement=LayerPlacement(0.0, 0.0, 400.0, 200.0),
                 opacity=0.25,
                 role="mask",
             ),
@@ -862,12 +952,14 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
                 layer_id=base_image_layer_id(image_id),
                 source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
                 source_id=image_id,
+                placement=LayerPlacement(0.0, 0.0, 400.0, 200.0),
                 role="base-image",
             ),
             CompositionLayerInstance(
                 layer_id=mask_layer_id(scene_id, mask_ids[1]),
                 source_kind=CompositionLayerSourceKind.MASK,
                 source_id=mask_ids[1],
+                placement=LayerPlacement(0.0, 0.0, 400.0, 200.0),
                 opacity=0.75,
                 role="mask",
             ),

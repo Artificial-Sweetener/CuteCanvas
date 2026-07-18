@@ -38,6 +38,7 @@ Quick index to the QPane facade. Each entry includes a concise explainer; use th
 - QPane.setControlMode — Switch to a registered mode; unavailable mask/SAM modes are ignored while the placeholder is active, and unknown mode IDs raise `ValueError`.
 - QPane.CONTROL_MODE_CURSOR — Built-in inert cursor mode (no pan/zoom).
 - QPane.CONTROL_MODE_PANZOOM — Built-in pan/zoom mode for navigation.
+- QPane.CONTROL_MODE_MOVE — Built-in direct-manipulation mode for selectable, movable scene layers.
 
 See also: [Configuration](configuration.md) and [Interaction Modes](interaction-modes.md).
 
@@ -75,6 +76,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 - qpane.ControlMode — Built-in control mode identifiers for tool registration.
 	- ControlMode.CURSOR — Inert cursor mode (`cursor`).
 	- ControlMode.PANZOOM — Pan/zoom mode (`panzoom`).
+	- ControlMode.MOVE — Direct layer movement mode (`move`).
 	- ControlMode.DRAW_BRUSH — Mask painting mode (`draw-brush`).
 	- ControlMode.SMART_SELECT — SAM-based selection mode (`smart-select`).
 - qpane.ComparisonOrientation — Split direction for comparison rendering.
@@ -115,7 +117,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- CompositionSnapshot.compositions — Mapping of composition UUID to `CompositionEntry`.
 	- CompositionSnapshot.order — Composition UUIDs in browser order.
 	- CompositionSnapshot.current_composition_id — Active composition UUID, or None.
-- qpane.MaskInfo — Mask metadata shape returned by mask helpers.
+- qpane.MaskInfo — Mask metadata returned by mask helpers, including stable `scene_id`, `layer_id`, and `interaction` policy for generic scene-layer operations.
 - qpane.DiagnosticRecord — Label/value diagnostic entry used in overlays.
 - qpane.CatalogMutationEvent — Catalog mutation payload emitted on catalog changes.
 - qpane.CatalogSnapshot — Structured catalog state (catalog entries, linked groups, ordering, active IDs).
@@ -141,6 +143,10 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- QPaneCatalogImageLayerRequest.hit_test — Whether `QPane.sceneHitTest` can return this layer.
 	- QPaneCatalogImageLayerRequest.role — Host label carried into hits and overlays.
 	- QPaneCatalogImageLayerRequest.metadata — Opaque host metadata carried into hits and overlays.
+	- QPaneCatalogImageLayerRequest.interaction — `QPaneLayerInteractionPolicy` controlling selection and movement.
+- qpane.QPaneLayerInteractionPolicy — Host policy for direct layer interaction; `selectable` enables covered-pixel selection and `movable` permits placement changes.
+	- QPaneLayerInteractionPolicy.selectable — Allow direct tools to select the layer through covered source pixels.
+	- QPaneLayerInteractionPolicy.movable — Allow generic placement mutation and Move-tool dragging for the layer.
 - qpane.QPaneSceneTemplate — Host-owned reusable template for building scene composition requests.
 	- QPaneSceneTemplate.template_id — Stable template UUID owned by the host.
 	- QPaneSceneTemplate.bounds — Host-defined scene-coordinate bounds.
@@ -156,12 +162,13 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- QPaneTemplateLayer.hit_test — Whether `QPane.sceneHitTest` can return this layer.
 	- QPaneTemplateLayer.role — Host label carried into hits and overlays.
 	- QPaneTemplateLayer.metadata — Opaque host metadata merged into composed layers.
+	- QPaneTemplateLayer.interaction — Direct-interaction policy copied into each composed layer.
 - qpane.QPaneSceneTemplateBindings — Concrete catalog image bindings for a scene template.
 	- QPaneSceneTemplateBindings.composition_id — Optional composition UUID to create or replace.
 	- QPaneSceneTemplateBindings.title — Optional title overriding the template title.
 	- QPaneSceneTemplateBindings.catalog_images — Mapping of template source slots to catalog image UUIDs.
 	- QPaneSceneTemplateBindings.metadata — Optional source-slot metadata merged into composed layers.
-- qpane.QPaneScene — Public catalog-backed scene snapshot returned by QPane.
+- qpane.QPaneScene — Public scene snapshot for an active generated or host-authored composition.
 	- QPaneScene.composition_id — Stored composition UUID.
 	- QPaneScene.scene_id — Render scene UUID; layered scene compositions use the composition UUID.
 	- QPaneScene.title — Host-facing composition title.
@@ -177,6 +184,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- QPaneSceneLayer.hit_test — Whether `QPane.sceneHitTest` can return this layer.
 	- QPaneSceneLayer.role — Host label carried into hits and overlays.
 	- QPaneSceneLayer.metadata — Opaque host metadata carried into hits and overlays.
+	- QPaneSceneLayer.interaction — Current selection and movement policy for the layer.
 - qpane.QPaneSceneClip — Optional layer clip rectangle.
 	- QPaneSceneClip.coordinate_space — Coordinate system for `rect`: `"scene"`, `"normalized-scene"`, `"viewport"`, or `"normalized-viewport"`.
 	- QPaneSceneClip.rect — Clip rectangle in the selected coordinate space.
@@ -255,6 +263,12 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - QPane.registerSceneOverlay — Add a named scene overlay; order follows registration.
 - QPane.unregisterSceneOverlay — Remove a scene overlay; no-op if it is absent.
 - QPane.sceneOverlays — Return a read-only snapshot of registered scene overlays; use register/unregister helpers to change it.
+- QPane.setLayerInteractionPolicy — Replace selection and movement permissions for a layer through its scene owner.
+- QPane.setLayerPlacement — Set an absolute scene-space layer rectangle when movement policy permits it.
+- QPane.sceneEditUndoAvailable — Report whether the active scene has a placement change to undo.
+- QPane.sceneEditRedoAvailable — Report whether the active scene has a placement change to redo.
+- QPane.undoSceneEdit — Undo the active scene's latest committed layer placement.
+- QPane.redoSceneEdit — Redo the active scene's latest reverted layer placement.
 
 Layered scene compositions use catalog-backed layers only. QPane resolves those layers through the normal pyramid and tile rendering path. Hit testing is passive; calling `QPane.setCurrentImageID` after a scene hit opens the selected image's generated default composition.
 
@@ -402,6 +416,7 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - QPane.compositionChanged — `CompositionSnapshot` payload emitted after composition records change.
 - QPane.compositionSelectionChanged — Composition UUID or `None` payload emitted when selection changes.
 - QPane.sceneChanged — `QPaneScene` or `None` payload emitted when the normalized active render scene changes.
+- QPane.sceneEditHistoryChanged — Two booleans reporting active-scene placement undo and redo availability.
 
 ### View State
 - QPane.zoomChanged — Float payload emitted when viewport zoom changes; seeds once during initialization so listeners can prime UI without peeking at the viewport.

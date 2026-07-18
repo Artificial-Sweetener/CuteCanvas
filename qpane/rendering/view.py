@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize
@@ -167,6 +168,42 @@ class View:
     def scene_hit_test(self, panel_pos: QPoint) -> SceneLayerHitTestResult | None:
         """Expose internal scene hit testing for panel coordinates."""
         return self.presenter.scene_hit_test(panel_pos)
+
+    def scene_selection_hit_test(
+        self, panel_pos: QPoint | QPointF
+    ) -> SceneLayerHitTestResult | None:
+        """Return the top selectable layer with painted source coverage."""
+        return self.presenter.scene_selection_hit_test(panel_pos)
+
+    def panel_to_scene_point(self, panel_pos: QPoint | QPointF) -> QPointF | None:
+        """Project panel coordinates into active scene coordinates."""
+        return self.presenter.panel_to_scene_point(panel_pos)
+
+    def panel_to_layer_source_point(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        panel_pos: QPoint | QPointF,
+    ) -> QPointF | None:
+        """Project panel coordinates into one layer's source space."""
+        return self.presenter.panel_to_layer_source_point(
+            scene_id,
+            layer_id,
+            panel_pos,
+        )
+
+    def layer_source_to_panel_point(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        source_point: QPoint | QPointF,
+    ) -> QPointF | None:
+        """Project one layer's source coordinates into panel space."""
+        return self.presenter.layer_source_to_panel_point(
+            scene_id,
+            layer_id,
+            source_point,
+        )
 
     def image_to_panel_point(self, image_point: QPoint) -> QPointF | None:
         """Convert image coordinates to panel coordinates via the presenter."""

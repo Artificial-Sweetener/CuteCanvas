@@ -70,7 +70,7 @@ def build_default_catalog_scene(
         opacity=1.0,
         blend_mode=BlendMode.NORMAL,
         clip=None,
-        hit_test=LayerHitTest(enabled=True, selectable=False, role="base-image"),
+        hit_test=LayerHitTest(enabled=True, role="base-image"),
         source_revision=revision,
     )
     return SceneDescriptor(

@@ -39,6 +39,7 @@ from PySide6.QtWidgets import QApplication
 from .arena import TouchGestureArena, TouchGestureKind
 from .model import PointerDeviceKind, PointerPhase, PointerSample
 from .navigation import TouchNavigationSession
+from .profile import ToolInputProfile
 
 if TYPE_CHECKING:
     from ...qpane import QPane
@@ -181,7 +182,7 @@ class PointerInputController(QObject):
                 and self._touch_tool_active
                 and primary_sample.phase is PointerPhase.UPDATE
             ):
-                self._route_touch_paint(primary_sample, previous_kind)
+                self._route_touch_tool(primary_sample, previous_kind)
             elif (
                 kind is TouchGestureKind.PENDING
                 and primary_sample is not None
@@ -197,8 +198,8 @@ class PointerInputController(QObject):
                         default=None,
                     ),
                 )
-        elif kind is TouchGestureKind.PAINTING and primary_sample is not None:
-            self._route_touch_paint(primary_sample, previous_kind)
+        elif kind is TouchGestureKind.DIRECT_TOOL and primary_sample is not None:
+            self._route_touch_tool(primary_sample, previous_kind)
         self._active_touches = active_after_frame
         if event.type() == QEvent.Type.TouchEnd:
             if kind is TouchGestureKind.NAVIGATION and primary_sample is not None:
@@ -211,11 +212,15 @@ class PointerInputController(QObject):
         return True
 
     def handle_tablet_event(self, event: QTabletEvent) -> bool:
-        """Route active-pen samples directly to the mask brush when enabled."""
+        """Route active-pen samples to tools that declare tablet support."""
         qpane = self._qpane
-        if not qpane.settings.stylus_paint_enabled:
+        profile = self._active_input_profile()
+        if not profile.tablet:
             return False
-        if qpane._tools_manager.get_control_mode() != qpane.CONTROL_MODE_DRAW_BRUSH:
+        if (
+            profile.tablet_requires_host_enablement
+            and not qpane.settings.stylus_paint_enabled
+        ):
             return False
         sample = self.tablet_sample(event)
         self._pen_in_proximity = True
@@ -270,7 +275,7 @@ class PointerInputController(QObject):
         if self._pointing_event_uses_hover_device(event):
             self._adopt_mouse_modality()
 
-    def pen_suppresses_touch_paint(self) -> bool:
+    def pen_suppresses_touch_tool(self) -> bool:
         """Return whether recent active-pen activity should reject a palm contact."""
         if self._pen_contact_active:
             return True
@@ -372,11 +377,9 @@ class PointerInputController(QObject):
             )
             self._touch_max_contacts = len(event.points())
             return
-        mode = qpane._tools_manager.get_control_mode()
-        navigation_mode = mode == qpane.CONTROL_MODE_PANZOOM
-        brush_mode = mode == qpane.CONTROL_MODE_DRAW_BRUSH
-        smart_select_mode = mode == qpane.CONTROL_MODE_SMART_SELECT
-        direct_tool_mode = brush_mode or smart_select_mode
+        profile = self._active_input_profile()
+        navigation_mode = profile.navigation
+        direct_tool_mode = profile.touch
         if not navigation_mode and not direct_tool_mode:
             self._set_touch_sequence_claimed(False)
             return
@@ -393,19 +396,19 @@ class PointerInputController(QObject):
             phase=PointerPhase.BEGIN,
         )
         self._touch_max_contacts = len(event.points())
-        paint_allowed = (
-            direct_tool_mode
-            and (smart_select_mode or bool(qpane.settings.touch_paint_enabled))
-            and not self.pen_suppresses_touch_paint()
-        )
+        direct_tool_allowed = direct_tool_mode and not self.pen_suppresses_touch_tool()
+        if profile.touch_requires_host_enablement:
+            direct_tool_allowed = direct_tool_allowed and bool(
+                qpane.settings.touch_paint_enabled
+            )
         self._touch_arena.begin(
             navigation_mode=navigation_mode,
-            paint_allowed=paint_allowed,
+            direct_tool_allowed=direct_tool_allowed,
         )
-        self._touch_preview_allowed = brush_mode and paint_allowed
-        if navigation_mode or paint_allowed:
+        self._touch_preview_allowed = profile.touch_preview and direct_tool_allowed
+        if navigation_mode or direct_tool_allowed:
             self._set_active_device(PointerDeviceKind.TOUCH)
-        if paint_allowed and self._primary_touch_begin is not None:
+        if direct_tool_allowed and self._primary_touch_begin is not None:
             handler = self._active_pointer_handler()
             self._touch_tool_active = bool(
                 handler(self._primary_touch_begin) if handler is not None else False
@@ -418,12 +421,12 @@ class PointerInputController(QObject):
         delta = sample.position - self._primary_touch_origin
         return math.hypot(delta.x(), delta.y())
 
-    def _route_touch_paint(
+    def _route_touch_tool(
         self,
         sample: PointerSample,
         previous_kind: TouchGestureKind,
     ) -> None:
-        """Forward the winning primary touch to the active brush tool."""
+        """Forward the winning primary touch to the active direct tool."""
         handler = self._active_pointer_handler()
         if handler is None or self._primary_touch_begin is None:
             return
@@ -434,10 +437,10 @@ class PointerInputController(QObject):
         handler(sample)
 
     def _cancel_touch_tool(self) -> None:
-        """Notify the brush when a claimed painting sequence is cancelled."""
+        """Notify the active direct tool when its touch sequence is cancelled."""
         if (
             not self._touch_tool_active
-            and self._touch_arena.kind is not TouchGestureKind.PAINTING
+            and self._touch_arena.kind is not TouchGestureKind.DIRECT_TOOL
         ):
             return
         handler = self._active_pointer_handler()
@@ -451,6 +454,11 @@ class PointerInputController(QObject):
         tool = self._qpane._tools_manager.get_active_tool()
         handler = getattr(tool, "handle_pointer_sample", None)
         return handler if callable(handler) else None
+
+    def _active_input_profile(self):
+        """Return capability metadata declared by the active tool."""
+        tool = self._qpane._tools_manager.get_active_tool()
+        return getattr(tool, "input_profile", ToolInputProfile())
 
     def _preview_pointer_sample(self, sample: PointerSample) -> bool:
         """Ask the active built-in tool to show feedback without editing."""

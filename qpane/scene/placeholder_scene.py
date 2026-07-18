@@ -63,7 +63,7 @@ def build_placeholder_scene(
         opacity=1.0,
         blend_mode=BlendMode.NORMAL,
         clip=None,
-        hit_test=LayerHitTest(enabled=True, selectable=False, role="placeholder-image"),
+        hit_test=LayerHitTest(enabled=True, role="placeholder-image"),
         source_revision=revision,
     )
     return SceneDescriptor(

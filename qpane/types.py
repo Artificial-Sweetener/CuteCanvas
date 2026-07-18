@@ -49,6 +49,7 @@ __all__ = [
     "OverlayState",
     "PlaceholderScaleMode",
     "QPaneCatalogImageLayerRequest",
+    "QPaneLayerInteractionPolicy",
     "QPaneScene",
     "QPaneSceneClip",
     "QPaneSceneHit",
@@ -103,6 +104,7 @@ class ControlMode(str, Enum):
 
     CURSOR = "cursor"
     PANZOOM = "panzoom"
+    MOVE = "move"
     DRAW_BRUSH = "draw-brush"
     SMART_SELECT = "smart-select"
 
@@ -253,6 +255,14 @@ class QPaneSceneClip:
 
 
 @dataclass(frozen=True, slots=True)
+class QPaneLayerInteractionPolicy:
+    """Host-controlled permissions for direct scene-layer interaction."""
+
+    selectable: bool = False
+    movable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class QPaneCatalogImageLayerRequest:
     """Catalog-backed image layer requested for a stored scene composition."""
 
@@ -265,6 +275,7 @@ class QPaneCatalogImageLayerRequest:
     hit_test: bool = True
     role: str = "content"
     metadata: Mapping[str, object] = field(default_factory=dict)
+    interaction: QPaneLayerInteractionPolicy = QPaneLayerInteractionPolicy()
 
     def __post_init__(self) -> None:
         """Detach mutable geometry and protect request metadata."""
@@ -300,6 +311,7 @@ class QPaneTemplateLayer:
     hit_test: bool = True
     role: str = "content"
     metadata: Mapping[str, object] = field(default_factory=dict)
+    interaction: QPaneLayerInteractionPolicy = QPaneLayerInteractionPolicy()
 
     def __post_init__(self) -> None:
         """Detach mutable geometry and protect template metadata."""
@@ -361,6 +373,7 @@ class QPaneSceneLayer:
     hit_test: bool = True
     role: str = "content"
     metadata: Mapping[str, object] = field(default_factory=dict)
+    interaction: QPaneLayerInteractionPolicy = QPaneLayerInteractionPolicy()
 
     def __post_init__(self) -> None:
         """Normalize mutable public layer inputs into QPane-owned values."""
@@ -370,7 +383,7 @@ class QPaneSceneLayer:
 
 @dataclass(frozen=True, slots=True)
 class QPaneScene:
-    """Normalized public snapshot for an active stored scene composition."""
+    """Normalized public snapshot for the active renderable composition."""
 
     composition_id: uuid.UUID
     scene_id: uuid.UUID

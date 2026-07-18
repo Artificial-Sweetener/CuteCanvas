@@ -39,11 +39,14 @@ from .model import (
     LayerClip,
     LayerDescriptor,
     LayerHitTest,
+    LayerInteractionPolicy,
     LayerKind,
     LayerPlacement,
+    LayerPlacementChange,
     SceneDescriptor,
     SceneKind,
 )
+from .movement import LayerMoveSession, SceneLayerMovementController
 from .mutations import (
     BaseSceneMutationOwner,
     SceneMutationCoordinator,
@@ -52,12 +55,14 @@ from .mutations import (
     SceneMutationStatus,
 )
 from .placeholder_scene import build_placeholder_scene
+from .placement_preview import LayerPlacementPreview, SceneLayerPlacementPreview
 from .providers import SceneContribution, SceneProvider, SceneResolver
 from .registry import (
     CatalogLayerSourceResolver,
     LayerSourceResolver,
     LayerSourceResolverRegistry,
     SceneContributionProvider,
+    ScenePostProcessor,
     SceneProviderRegistry,
     SceneReplacementProvider,
 )
@@ -71,6 +76,7 @@ from .render_plan import (
     SceneRenderPlan,
     TileRenderData,
 )
+from .selection import SceneLayerSelection, SceneLayerSelectionController
 from .sources import (
     CatalogImageSource,
     LayerSource,
@@ -88,8 +94,12 @@ __all__ = [
     "LayerClip",
     "LayerDescriptor",
     "LayerHitTest",
+    "LayerInteractionPolicy",
     "LayerKind",
+    "LayerMoveSession",
     "LayerPlacement",
+    "LayerPlacementChange",
+    "LayerPlacementPreview",
     "LayerSource",
     "LayerSourceResolver",
     "LayerSourceResolverRegistry",
@@ -106,11 +116,16 @@ __all__ = [
     "SceneKind",
     "SceneLayerAssetKey",
     "SceneLayerHitTestResult",
+    "SceneLayerMovementController",
+    "SceneLayerPlacementPreview",
+    "SceneLayerSelection",
+    "SceneLayerSelectionController",
     "SceneLayerTileKey",
     "SceneMutationCoordinator",
     "SceneMutationOwner",
     "SceneMutationResult",
     "SceneMutationStatus",
+    "ScenePostProcessor",
     "SceneProvider",
     "SceneProviderRegistry",
     "SceneRenderItem",

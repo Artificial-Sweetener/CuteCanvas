@@ -35,11 +35,12 @@ from PySide6.QtGui import (
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
-from qpane import QPane
+from qpane import QPane, QPaneLayerInteractionPolicy
 from qpane.tools.input import (
     PointerDeviceKind,
     PointerInputController,
     PointerPhase,
+    ToolInputProfile,
 )
 from tests.harness import PointerTransitionProbe
 
@@ -260,6 +261,8 @@ def test_synthetic_tablet_event_reaches_active_brush_without_mouse(
     samples = []
 
     class _PointerTool:
+        input_profile = ToolInputProfile(tablet=True)
+
         @staticmethod
         def handle_pointer_sample(sample) -> bool:
             samples.append(sample)
@@ -367,6 +370,47 @@ def test_two_fingers_navigate_without_painting_in_brush_mode(qapp) -> None:
         assert mask_layer.mask_image.pixelColor(360, 380).red() == 0
         assert viewport.pan.x() > 0
         assert viewport.pan.y() > 0
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_single_finger_move_tool_translates_policy_enabled_layer(qapp) -> None:
+    """Move touch input should not depend on the host's brush enablement setting."""
+    viewer = QPane(features=())
+    try:
+        viewer.applySettings(touch_paint_enabled=False)
+        viewer.resize(200, 200)
+        viewer.show()
+        image = QImage(100, 100, QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.white)
+        image_id = uuid.uuid4()
+        viewer.setImagesByID(
+            viewer.imageMapFromLists([image], [None], [image_id]),
+            image_id,
+        )
+        scene = viewer.currentScene()
+        assert scene is not None
+        layer = scene.layers[0]
+        assert viewer.setLayerInteractionPolicy(
+            scene.scene_id,
+            layer.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
+        qapp.processEvents()
+        device = QTest.createTouchDevice()
+
+        QTest.touchEvent(viewer, device).press(0, QPoint(100, 100), viewer).commit()
+        QTest.touchEvent(viewer, device).move(0, QPoint(120, 110), viewer).commit()
+        QTest.touchEvent(viewer, device).release(0, QPoint(120, 110), viewer).commit()
+        qapp.processEvents()
+
+        moved = viewer.currentScene()
+        assert moved is not None
+        assert moved.layers[0].placement.x() > layer.placement.x()
+        assert moved.layers[0].placement.y() > layer.placement.y()
+        assert viewer.sceneEditUndoAvailable()
     finally:
         viewer.deleteLater()
         qapp.processEvents()

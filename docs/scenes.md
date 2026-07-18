@@ -73,6 +73,39 @@ Use `QPane.fillSceneRect` for cover-style layouts. It returns the smallest cente
 
 Use the optional layer controls as refinements instead of rebuilding the scene model. `QPaneCatalogImageLayerRequest.visible` hides a layer while keeping its definition in the stored scene. `QPaneCatalogImageLayerRequest.opacity` lets a host show transparent reference layers. `QPaneCatalogImageLayerRequest.clip` trims a layer to a clip rectangle, and `QPaneCatalogImageLayerRequest.hit_test` decides whether that layer can be returned from `QPane.sceneHitTest`.
 
+## Enable Direct Layer Movement
+
+Layers are locked by default. Set `QPaneCatalogImageLayerRequest.interaction` when composing a scene, or call `QPane.setLayerInteractionPolicy` later, to let the built-in Move tool select and translate a layer. Movement policy belongs to the layer instance, so the tool uses the same path for catalog images and masks.
+
+```python
+from qpane import QPaneLayerInteractionPolicy
+
+movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+layer = QPaneCatalogImageLayerRequest(
+    layer_id=uuid.uuid4(),
+    image_id=ids[0],
+    placement=QRectF(0, 0, 320, 320),
+    interaction=movable,
+)
+
+viewer.setControlMode(QPane.CONTROL_MODE_MOVE)
+```
+
+During a drag, QPane applies a transient render-geometry preview and commits one absolute placement on release. Source pixels and source revisions do not change. Call `QPane.undoSceneEdit` and `QPane.redoSceneEdit` for scene-scoped placement history, and use `QPane.sceneEditHistoryChanged` to keep Undo and Redo actions enabled correctly.
+
+Use `QPane.sceneEditUndoAvailable` and `QPane.sceneEditRedoAvailable` to seed action state before the first history signal arrives. `QPane.setLayerPlacement` applies the same absolute placement mutation used when the Move tool commits a drag.
+
+Hosts can change policy at any time:
+
+```python
+viewer.setLayerInteractionPolicy(scene_id, layer_id, movable)
+viewer.setLayerPlacement(scene_id, layer_id, QRectF(24, 12, 320, 320))
+```
+
+Selection respects actual source coverage. Transparent mask pixels fall through to covered layers, while painted mask pixels select the mask. Moving a mask also moves its brush, SAM selection, and component-adjustment coordinate space.
+
+`QPaneLayerInteractionPolicy.selectable` controls whether covered pixels participate in direct selection, and `QPaneLayerInteractionPolicy.movable` separately controls whether placement may change. The normalized `QPaneSceneLayer.interaction` value lets an inspector display the effective policy. Reusable layouts carry the same policy in `QPaneTemplateLayer.interaction`, so scenes composed from templates behave like directly authored scenes.
+
 `QPane.composeScene` stores the request as a layered scene composition and returns the composition UUID. With the default `activate=True`, QPane opens the new composition immediately and fits the scene bounds when `fit_view=True`. With `activate=False`, QPane stores the composition without changing selection; if the request replaces the already active scene composition, QPane still emits `QPane.sceneChanged` because the active normalized scene changed.
 
 QPane stores detached scene data. Later changes to the request objects passed to `QPane.composeScene` do not alter stored compositions. To update a stored scene, compose a replacement request with the same `QPaneSceneRequest.composition_id`.
@@ -148,7 +181,7 @@ Use `QPaneSceneClip` when a layer should render or hit-test through a rectangle.
 
 ## Update UI From The Active Scene
 
-Use `QPane.currentScene` when a sidebar, inspector, or status bar needs to describe the layered scene QPane is rendering right now. It returns a detached `QPaneScene` snapshot for the active layered scene composition, or `None` when the active composition is a generated or explicit image composition. The snapshot is read-only host information; hosts do not pass it back to compose a new scene.
+Use `QPane.currentScene` when a sidebar, inspector, or status bar needs to describe the scene QPane is rendering right now. It returns a detached `QPaneScene` snapshot for generated default image compositions and host-authored layered scenes, or `None` when no renderable composition is active. The snapshot is read-only host information; hosts do not pass it back to compose a new scene.
 
 ```python
 def refresh_scene_panel():

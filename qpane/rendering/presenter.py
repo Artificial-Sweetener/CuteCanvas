@@ -500,6 +500,82 @@ class RenderingPresenter:
                 return result
         return None
 
+    def scene_selection_hit_test(
+        self, panel_pos: QPoint | QPointF
+    ) -> SceneLayerHitTestResult | None:
+        """Return the top selectable layer with source coverage under a panel point."""
+        plan = self.calculateRenderPlan(
+            is_blank=getattr(self._qpane, "_is_blank", False)
+        )
+        if plan is None:
+            return None
+        panel_point = QPointF(panel_pos)
+        for item in reversed(plan.render_items):
+            if not item.descriptor.interaction.selectable:
+                continue
+            result = self._hit_test_render_item(plan, item, panel_point)
+            if result is not None and self._source_resolvers.selection_contains(
+                result.source,
+                result.source_point,
+            ):
+                return result
+        return None
+
+    def panel_to_scene_point(self, panel_pos: QPoint | QPointF) -> QPointF | None:
+        """Project a panel point into the active scene coordinate system."""
+        plan = self.calculateRenderPlan(
+            is_blank=getattr(self._qpane, "_is_blank", False)
+        )
+        if plan is None:
+            return None
+        scene_size = QSize(
+            max(1, round(plan.scene_bounds.width)),
+            max(1, round(plan.scene_bounds.height)),
+        )
+        transform = self.viewport.get_transform(
+            scene_size,
+            1.0,
+            pan_override=plan.current_pan,
+            content_snapshot=plan.content_snapshot,
+        )
+        inverse, invertible = transform.inverted()
+        if not invertible:
+            return None
+        local = inverse.map(QPointF(panel_pos))
+        return QPointF(
+            local.x() + plan.scene_bounds.x,
+            local.y() + plan.scene_bounds.y,
+        )
+
+    def panel_to_layer_source_point(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        panel_pos: QPoint | QPointF,
+    ) -> QPointF | None:
+        """Project a panel point into one layer's authoritative source space."""
+        item = self._render_item_for_layer(scene_id, layer_id)
+        if item is None:
+            return None
+        inverse, invertible = item.transform.inverted()
+        if not invertible:
+            return None
+        return self._original_source_point(item, inverse.map(QPointF(panel_pos)))
+
+    def layer_source_to_panel_point(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        source_point: QPoint | QPointF,
+    ) -> QPointF | None:
+        """Project authoritative layer-source coordinates into the panel."""
+        item = self._render_item_for_layer(scene_id, layer_id)
+        if item is None:
+            return None
+        scale = self._render_item_source_scale(item)
+        render_point = QPointF(source_point) * scale
+        return item.transform.map(render_point)
+
     def image_to_panel_point(self, image_point: QPoint) -> QPointF | None:
         """Project an image-space coordinate into the widget."""
         return self.viewport.content_to_panel_point(image_point)
@@ -1360,8 +1436,50 @@ class RenderingPresenter:
             source=descriptor.source,
             panel_point=QPointF(panel_point),
             scene_point=scene_point,
-            source_point=source_point,
-            selectable=descriptor.hit_test.selectable,
+            source_point=self._original_source_point(item, source_point),
+            selectable=descriptor.interaction.selectable,
+        )
+
+    @staticmethod
+    def _original_source_point(
+        item: SceneRenderItem,
+        render_source_point: QPointF,
+    ) -> QPointF:
+        """Convert best-fit render coordinates to authoritative source coordinates."""
+        scale = RenderingPresenter._render_item_source_scale(item)
+        return QPointF(
+            render_source_point.x() / scale,
+            render_source_point.y() / scale,
+        )
+
+    @staticmethod
+    def _render_item_source_scale(item: SceneRenderItem) -> float:
+        """Return render-source pixels per authoritative source pixel."""
+        scale = (
+            item.pyramid_scale
+            if isinstance(item, RasterLayerRenderItem)
+            else item.scale or 1.0
+        )
+        return scale if scale > 0.0 else 1.0
+
+    def _render_item_for_layer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> SceneRenderItem | None:
+        """Return the active render item matching stable scene/layer identity."""
+        plan = self.calculateRenderPlan(
+            is_blank=getattr(self._qpane, "_is_blank", False)
+        )
+        if plan is None or plan.scene_id != scene_id:
+            return None
+        return next(
+            (
+                item
+                for item in plan.render_items
+                if item.descriptor.layer_id == layer_id
+            ),
+            None,
         )
 
     def _source_point_inside_clip(

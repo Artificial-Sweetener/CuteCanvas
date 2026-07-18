@@ -91,6 +91,7 @@ def test_enum_values_match_facade_contract() -> None:
     assert {mode.value for mode in ControlMode} == {
         "cursor",
         "panzoom",
+        "move",
         "draw-brush",
         "smart-select",
     }

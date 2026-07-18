@@ -36,6 +36,7 @@ from qpane.tools.input.model import (
     PointerPhase,
     PointerSample,
 )
+from qpane.tools.input.profile import ToolInputProfile
 
 from .brush_preview import BrushPreview, BrushPreviewRenderer
 from .stroke_session import BrushStrokeSession
@@ -63,6 +64,14 @@ class BrushTool(BaseTool):
     - ``undo_state_push_requested()`` when a new stroke begins
     - ``brush_size_changed(size: int)`` when the user scrolls the wheel to resize the brush
     """
+
+    input_profile = ToolInputProfile(
+        touch=True,
+        tablet=True,
+        touch_requires_host_enablement=True,
+        tablet_requires_host_enablement=True,
+        touch_preview=True,
+    )
 
     def __init__(self):
         """Initialize brush state and default signal helpers."""
@@ -98,6 +107,12 @@ class BrushTool(BaseTool):
         self._image_to_panel_point: Callable[[QPoint | QPointF], QPointF | None] = (
             lambda point: None
         )
+        self._panel_to_active_mask_point: (
+            Callable[[QPoint | QPointF], QPointF | None] | None
+        ) = None
+        self._active_mask_to_panel_point: (
+            Callable[[QPoint | QPointF], QPointF | None] | None
+        ) = None
         self._is_point_in_widget: Callable[[QPoint], bool] = lambda point: True
         self._get_image_rect: Callable[[], QRect] = lambda: QRect()
         self._get_brush_increment: Callable[[], int] = lambda: 5
@@ -140,6 +155,12 @@ class BrushTool(BaseTool):
         )
         self._image_to_panel_point = dependencies.get(
             "image_to_panel_point", lambda point: None
+        )
+        self._panel_to_active_mask_point = dependencies.get(
+            "panel_to_active_mask_point"
+        )
+        self._active_mask_to_panel_point = dependencies.get(
+            "active_mask_to_panel_point"
         )
         self._is_point_in_widget = dependencies.get(
             "is_point_in_widget", lambda point: True
@@ -410,8 +431,9 @@ class BrushTool(BaseTool):
         start_point, end_point = self.get_preview_line_points()
         if not start_point or not end_point:
             return
-        p1 = self._image_to_panel_point(start_point)
-        p2 = self._image_to_panel_point(end_point)
+        mapper = self._active_mask_to_panel_point or self._image_to_panel_point
+        p1 = mapper(start_point)
+        p2 = mapper(end_point)
         if p1 is None or p2 is None:
             return
         painter.save()
@@ -456,6 +478,11 @@ class BrushTool(BaseTool):
         logical_point = QPointF(panel_point)
         if not self._is_point_in_widget(logical_point.toPoint()):
             return None
+        if self._panel_to_active_mask_point is not None:
+            source_point = self._panel_to_active_mask_point(logical_point)
+            if source_point is None:
+                return None
+            return self._stroke_point_from_source(source_point)
         if self._panel_hit_test_precise is not None:
             hit = self._panel_hit_test_precise(logical_point)
             if hit is None:
@@ -467,6 +494,28 @@ class BrushTool(BaseTool):
                 return None
             return self._stroke_point_from_hit(hit)
         return self._fallback_stroke_point(logical_point.toPoint())
+
+    def _stroke_point_from_source(self, raw_point: QPointF) -> _StrokePoint | None:
+        """Clamp an authoritative mask-source point with edge brush tolerance."""
+        image_rect = self._get_image_rect()
+        if image_rect.isNull() or image_rect.isEmpty():
+            return None
+        raw_x = float(raw_point.x())
+        raw_y = float(raw_point.y())
+        max_x = float(image_rect.width() - 1)
+        max_y = float(image_rect.height() - 1)
+        clamp_x = min(max(raw_x, 0.0), max_x)
+        clamp_y = min(max(raw_y, 0.0), max_y)
+        inside = (
+            0.0 <= raw_x < image_rect.width() and 0.0 <= raw_y < image_rect.height()
+        )
+        radius = max(0.5, float(self._get_brush_size()) / 2.0)
+        if not inside and math.hypot(raw_x - clamp_x, raw_y - clamp_y) > radius:
+            return None
+        return _StrokePoint(
+            raw=QPointF(raw_point),
+            clamped=QPoint(round(clamp_x), round(clamp_y)),
+        )
 
     def _stroke_point_from_hit(self, hit: PanelHitTest) -> _StrokePoint | None:
         """Convert a hit-test result into stroke points inside the image bounds."""

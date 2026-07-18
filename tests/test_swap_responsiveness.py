@@ -122,7 +122,7 @@ def swap_env(
     mask_manager = MaskAssetStore(undo_limit=mask_config.mask_undo_limit)
     mask_controller = MaskController(
         mask_manager,
-        image_to_panel_point=qpane.view().viewport.content_to_panel_point,
+        source_to_panel_point=qpane.view().viewport.content_to_panel_point,
         config=base_config,
         mask_config=mask_config,
     )

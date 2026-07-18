@@ -20,11 +20,19 @@ import uuid
 
 from PySide6.QtGui import QColor
 
+from qpane.composition.history import LayerPlacementHistory
 from qpane.composition.layers import (
     CompositionLayerInstance,
     CompositionLayerSourceKind,
     ImageSceneLayerStore,
 )
+from qpane.scene.model import (
+    LayerInteractionPolicy,
+    LayerPlacement,
+    LayerPlacementChange,
+)
+
+_PLACEMENT = LayerPlacement(0.0, 0.0, 100.0, 80.0)
 
 
 def _mask_instance(mask_id: uuid.UUID) -> CompositionLayerInstance:
@@ -33,6 +41,7 @@ def _mask_instance(mask_id: uuid.UUID) -> CompositionLayerInstance:
         layer_id=uuid.uuid4(),
         source_kind=CompositionLayerSourceKind.MASK,
         source_id=mask_id,
+        placement=_PLACEMENT,
         opacity=0.5,
         tint=QColor(255, 0, 0),
         role="mask",
@@ -42,6 +51,7 @@ def _mask_instance(mask_id: uuid.UUID) -> CompositionLayerInstance:
 def test_layers_reorder_across_source_kinds_and_preserve_instances():
     store = ImageSceneLayerStore()
     image_id = uuid.uuid4()
+    store.ensure_image(image_id, _PLACEMENT)
     first = _mask_instance(uuid.uuid4())
     second = _mask_instance(uuid.uuid4())
     assert store.add_layer(image_id, first)
@@ -61,6 +71,8 @@ def test_layer_removal_does_not_delete_other_instances_of_source():
     source_id = uuid.uuid4()
     first_image = uuid.uuid4()
     second_image = uuid.uuid4()
+    store.ensure_image(first_image, _PLACEMENT)
+    store.ensure_image(second_image, _PLACEMENT)
     first = _mask_instance(source_id)
     second = _mask_instance(source_id)
     store.add_layer(first_image, first)
@@ -75,6 +87,7 @@ def test_layer_removal_does_not_delete_other_instances_of_source():
 def test_presentation_updates_are_value_owned_by_layer_instance():
     store = ImageSceneLayerStore()
     image_id = uuid.uuid4()
+    store.ensure_image(image_id, _PLACEMENT)
     instance = _mask_instance(uuid.uuid4())
     store.add_layer(image_id, instance)
     assert store.update_presentation(
@@ -88,3 +101,67 @@ def test_presentation_updates_are_value_owned_by_layer_instance():
     assert updated.opacity == 0.25
     assert updated.tint == QColor(0, 255, 0)
     assert instance.opacity == 0.5
+
+
+def test_layer_instances_default_to_locked_scene_interaction():
+    """Existing composition layers should not opt into scene selection implicitly."""
+    store = ImageSceneLayerStore()
+    image_id = uuid.uuid4()
+    store.ensure_image(image_id, _PLACEMENT)
+    mask = _mask_instance(uuid.uuid4())
+    assert store.add_layer(image_id, mask)
+
+    base, stored_mask = store.layers_for_image(image_id)
+    assert base.interaction.selectable is False
+    assert base.interaction.movable is False
+    assert stored_mask.interaction.selectable is False
+    assert stored_mask.interaction.movable is False
+
+
+def test_layer_store_replaces_policy_and_placement_as_instance_state():
+    """Policy and placement updates should replace only the targeted instance."""
+    store = ImageSceneLayerStore()
+    image_id = uuid.uuid4()
+    store.ensure_image(image_id, _PLACEMENT)
+    mask = _mask_instance(uuid.uuid4())
+    assert store.add_layer(image_id, mask)
+    interaction = LayerInteractionPolicy(selectable=True, movable=True)
+    moved = LayerPlacement(12.0, 8.0, 100.0, 80.0)
+
+    assert store.update_interaction(image_id, mask.layer_id, interaction)
+    assert store.update_placement(image_id, mask.layer_id, moved)
+
+    updated = store.layer(image_id, mask.layer_id)
+    assert updated is not None
+    assert updated.interaction == interaction
+    assert updated.placement == moved
+    assert mask.interaction == LayerInteractionPolicy()
+    assert mask.placement == _PLACEMENT
+
+
+def test_placement_history_is_scoped_to_each_scene():
+    """Undo and redo branches should advance independently per scene."""
+    history = LayerPlacementHistory()
+    first_scene_id = uuid.uuid4()
+    second_scene_id = uuid.uuid4()
+    first_change = LayerPlacementChange(
+        scene_id=first_scene_id,
+        layer_id=uuid.uuid4(),
+        before=_PLACEMENT,
+        after=LayerPlacement(10.0, 0.0, 100.0, 80.0),
+    )
+    second_change = LayerPlacementChange(
+        scene_id=second_scene_id,
+        layer_id=uuid.uuid4(),
+        before=_PLACEMENT,
+        after=LayerPlacement(0.0, 10.0, 100.0, 80.0),
+    )
+
+    assert history.record(first_change)
+    assert history.record(second_change)
+    assert history.commit_undo(first_change)
+
+    assert history.undo_candidate(first_scene_id) is None
+    assert history.redo_candidate(first_scene_id) == first_change
+    assert history.undo_candidate(second_scene_id) == second_change
+    assert history.redo_candidate(second_scene_id) is None

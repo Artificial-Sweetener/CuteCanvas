@@ -7,6 +7,8 @@ Modes define the relationship between the pointer and the image. Whether you are
 ## Switching Modes
 Use `QPane.setControlMode` to switch tools. You can check which mode is active with `QPane.getControlMode` or see the full list of registered tools via `QPane.availableControlModes`.
 
+Activate `QPane.CONTROL_MODE_MOVE` when the pointer should directly translate policy-enabled scene layers without changing their pixels.
+
 ```python
 from qpane import QPane
 
@@ -15,6 +17,9 @@ viewer.setControlMode(QPane.CONTROL_MODE_PANZOOM)
 
 # Switch to a static cursor (good for read-only states)
 viewer.setControlMode(QPane.CONTROL_MODE_CURSOR)
+
+# Move any scene layer whose host policy permits movement
+viewer.setControlMode(QPane.CONTROL_MODE_MOVE)
 ```
 
 > **Heads-up:** `QPane.setControlMode` will ignore requests for mask or selection modes if the catalog is empty (check `QPane.placeholderActive()` to see if the placeholder is currently shown).
@@ -38,6 +43,7 @@ QPane comes with core navigation modes ready to use. You can refer to them via t
 
 * **Pan/Zoom (`ControlMode.PANZOOM`):** The default. Mouse users drag to pan and scroll to zoom. Touch users drag with one finger, pan and pinch simultaneously with two fingers, and double tap to toggle between fit and 1:1. Wheel steps snap to 100% when crossing it, so you never skip the native scale. Use `QPane.CONTROL_MODE_PANZOOM` when a toolbar or shortcut should return to normal navigation.
 * **Cursor (`ControlMode.CURSOR`):** "Look but don't touch." The viewport stays locked, and drag/scroll events are ignored. Use `QPane.CONTROL_MODE_CURSOR` for read-only states, kiosks, or hosts that handle pointer events outside the viewer.
+* **Move (`ControlMode.MOVE`):** Selects the top covered layer and previews its placement while dragging. Mouse, pen, and one-finger touch use the same movement path. The tool moves images and masks alike; `QPaneLayerInteractionPolicy` determines which layers are selectable and movable.
 
 When the mask feature is active, `ControlMode.DRAW_BRUSH` provides the raster mask brush. Applications using the SAM extra can also activate `ControlMode.SMART_SELECT` for box selection. These modes are unavailable when the catalog is empty. See [Masks and SAM](masks-and-sam.md) for details.
 
@@ -60,6 +66,7 @@ Want to know how deep you are? `QPane.currentZoom` tells you the current multipl
 * **Overlays:** Switching modes often changes the cursor and may show or hide overlays (like the brush circle).
 * **Validation:** `setControlMode` safely handles missing features (like trying to use Smart Select without SAM installed) by logging a warning and ignoring the request. However, it raises a `ValueError` if passed an unknown mode ID.
 * **Event Delivery:** Tools always expose the full Qt event surface via concrete no-op handlers, so dispatch is direct and predictable—override only what you need.
+* **Layer Policy:** Scene layers are locked by default. Hosts opt a layer into movement with `QPane.setLayerInteractionPolicy`; switching to Move mode never changes policy implicitly.
 ### Comparison Divider Interaction
 Split comparison uses the normal viewer modes and belongs to the active composition. QPane owns built-in split-boundary dragging as interaction chrome, not image content. QPane does not paint a divider line or handle; the visible boundary between the base and comparison images is the drag target.
 

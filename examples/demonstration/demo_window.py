@@ -75,7 +75,7 @@ from examples.demonstration.config.spec import (
 from examples.demonstration.custom_tool import build_custom_cursor_tool
 from examples.demonstration.hooks_editor import HookEditorWindow
 from examples.demonstration.workers import ImageLoaderWorker
-from qpane import ComparisonOrientation, Config, QPane
+from qpane import ComparisonOrientation, Config, QPane, QPaneLayerInteractionPolicy
 
 _DIAGNOSTIC_DOMAIN_FIELD = "diagnostics_domains_enabled"
 _SAM_CONFIG_FIELDS = ConfigDialog.SAM_FIELDS
@@ -547,6 +547,8 @@ class ExampleWindow(QMainWindow):
 
     def _set_control_mode(self, mode: str) -> None:
         """Switch control modes, enforcing mask readiness for brush-based modes."""
+        if mode == QPane.CONTROL_MODE_MOVE:
+            self._enable_current_scene_movement()
         if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
             if not self._mask_tools_available():
                 self._set_status("Brush mode unavailable in core demo.")
@@ -587,6 +589,7 @@ class ExampleWindow(QMainWindow):
         preferred_order: list[str] = [
             QPane.CONTROL_MODE_CURSOR,
             QPane.CONTROL_MODE_PANZOOM,
+            QPane.CONTROL_MODE_MOVE,
         ]
         if self._mask_tools_available():
             preferred_order.append(QPane.CONTROL_MODE_DRAW_BRUSH)
@@ -646,15 +649,36 @@ class ExampleWindow(QMainWindow):
             return "Cursor"
         if mode == QPane.CONTROL_MODE_PANZOOM:
             return "Pan / Zoom"
+        if mode == QPane.CONTROL_MODE_MOVE:
+            return "Move Layers"
         if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
             return "Brush"
         if mode == QPane.CONTROL_MODE_SMART_SELECT:
             return "Smart Select (SAM)"
         return mode
 
+    def _enable_current_scene_movement(self) -> None:
+        """Configure demo scene layers to teach host-controlled movement policy."""
+        scene = self.qpane.currentScene()
+        if scene is None:
+            return
+        movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+        for layer in scene.layers:
+            self.qpane.setLayerInteractionPolicy(
+                scene.scene_id, layer.layer_id, movable
+            )
+        if self._mask_tools_available():
+            for mask in self.qpane.listMasksForImage():
+                self.qpane.setLayerInteractionPolicy(
+                    mask.scene_id,
+                    mask.layer_id,
+                    movable,
+                )
+
     def _catalog_prefers_mask_selection(self) -> bool:
         """Return True when the catalog should highlight the active mask."""
         return self.qpane.getControlMode() in {
+            QPane.CONTROL_MODE_MOVE,
             QPane.CONTROL_MODE_DRAW_BRUSH,
             QPane.CONTROL_MODE_SMART_SELECT,
         }
@@ -664,6 +688,7 @@ class ExampleWindow(QMainWindow):
         current_mode = self.qpane.getControlMode()
         if kind == "mask":
             if current_mode in {
+                QPane.CONTROL_MODE_MOVE,
                 QPane.CONTROL_MODE_DRAW_BRUSH,
                 QPane.CONTROL_MODE_SMART_SELECT,
             }:
@@ -674,6 +699,7 @@ class ExampleWindow(QMainWindow):
             if current_mode in {
                 QPane.CONTROL_MODE_CURSOR,
                 QPane.CONTROL_MODE_PANZOOM,
+                QPane.CONTROL_MODE_MOVE,
             }:
                 return
             self._set_control_mode(QPane.CONTROL_MODE_PANZOOM)
@@ -1746,6 +1772,10 @@ class ExampleWindow(QMainWindow):
         self.mode_cursor_action.triggered.connect(
             lambda: self._set_control_mode(QPane.CONTROL_MODE_CURSOR)
         )
+        self.mode_move_action = QAction("Move Layers", self, checkable=True)
+        self.mode_move_action.triggered.connect(
+            lambda: self._set_control_mode(QPane.CONTROL_MODE_MOVE)
+        )
         self.mode_brush_action: QAction | None = None
         self.mode_smart_action: QAction | None = None
         self.cycle_mode_action: QAction | None = None
@@ -1790,7 +1820,11 @@ class ExampleWindow(QMainWindow):
                     lambda: self._set_control_mode(QPane.CONTROL_MODE_SMART_SELECT)
                 )
         # Only expose cycling when more than one mode is available.
-        available_modes = [self.mode_pan_action, self.mode_cursor_action]
+        available_modes = [
+            self.mode_pan_action,
+            self.mode_cursor_action,
+            self.mode_move_action,
+        ]
         if self.mode_brush_action:
             available_modes.append(self.mode_brush_action)
         if self.mode_smart_action:
@@ -1910,6 +1944,7 @@ class ExampleWindow(QMainWindow):
         mode_actions = [
             self.mode_cursor_action,
             self.mode_pan_action,
+            self.mode_move_action,
             self.mode_brush_action,
             self.mode_smart_action,
         ]
@@ -2072,6 +2107,7 @@ class ExampleWindow(QMainWindow):
         """Update mode toggle actions to reflect the current control mode."""
         self.mode_cursor_action.setChecked(mode == QPane.CONTROL_MODE_CURSOR)
         self.mode_pan_action.setChecked(mode == QPane.CONTROL_MODE_PANZOOM)
+        self.mode_move_action.setChecked(mode == QPane.CONTROL_MODE_MOVE)
         if self.mode_brush_action:
             self.mode_brush_action.setChecked(mode == QPane.CONTROL_MODE_DRAW_BRUSH)
         if self.mode_smart_action:
@@ -2122,6 +2158,7 @@ class ExampleWindow(QMainWindow):
 
         _enable(self.mode_pan_action, panzoom_enabled)
         self.mode_cursor_action.setEnabled(True)
+        _enable(self.mode_move_action, not placeholder_active)
         _enable(self.mode_brush_action, mask_enabled)
         _enable(self.mode_smart_action, sam_enabled)
         mask_actions = (
@@ -2144,6 +2181,9 @@ class ExampleWindow(QMainWindow):
         _enable(self._lens_tool_action, lens_mode_available)
         allowed_modes = {QPane.CONTROL_MODE_CURSOR}
         available_count = 1  # cursor
+        if not placeholder_active:
+            allowed_modes.add(QPane.CONTROL_MODE_MOVE)
+            available_count += 1
         if panzoom_enabled:
             allowed_modes.add(QPane.CONTROL_MODE_PANZOOM)
             available_count += 1

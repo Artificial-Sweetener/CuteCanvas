@@ -21,9 +21,15 @@ from ..composition.layers import (
     CompositionLayerSourceKind,
     ImageSceneLayerStore,
 )
-from ..composition.mutations import CompositionSceneMutationOwner
+from ..composition.mutations import ImageSceneMaskMutationOwner
 from ..scene.identity import default_scene_id, mask_layer_id
-from ..scene.model import LayerDescriptor, LayerKind, SceneDescriptor
+from ..scene.model import (
+    LayerDescriptor,
+    LayerInteractionPolicy,
+    LayerKind,
+    LayerPlacement,
+    SceneDescriptor,
+)
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.sources import MaskLayerSource
 from .mask import MaskAssetStore
@@ -49,7 +55,7 @@ class MaskLayerCoordinator:
         self._current_image_id = current_image_id
         self._remove_mask = remove_mask
         self._scene_mutations: SceneMutationCoordinator | None = None
-        self._scene_mutation_owner: CompositionSceneMutationOwner | None = None
+        self._scene_mutation_owner: ImageSceneMaskMutationOwner | None = None
 
     @property
     def store(self) -> ImageSceneLayerStore:
@@ -117,16 +123,28 @@ class MaskLayerCoordinator:
         opacity: float = 0.5,
     ) -> bool:
         """Create a mask layer instance without transferring asset ownership."""
+        asset = self._assets.get_layer(mask_id)
+        if asset is None or asset.mask_image.isNull():
+            return False
+        placement = LayerPlacement(
+            0.0,
+            0.0,
+            float(asset.mask_image.width()),
+            float(asset.mask_image.height()),
+        )
+        if not self._layers.layers_for_image(image_id):
+            self._layers.ensure_image(image_id, placement)
         return self._layers.add_layer(
             image_id,
             CompositionLayerInstance(
                 layer_id=mask_layer_id(default_scene_id(image_id), mask_id),
                 source_kind=CompositionLayerSourceKind.MASK,
                 source_id=mask_id,
+                placement=placement,
                 opacity=opacity,
                 tint=color,
                 hit_test=True,
-                selectable=False,
+                interaction=LayerInteractionPolicy(),
                 role="mask",
             ),
         )
@@ -200,7 +218,7 @@ class MaskLayerCoordinator:
         self._scene_mutation_owner = None
         if coordinator is None:
             return
-        owner = CompositionSceneMutationOwner(
+        owner = ImageSceneMaskMutationOwner(
             self._layers,
             self._current_image_id,
             remove_mask=self._remove_mask,

@@ -23,12 +23,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from PySide6.QtCore import QPoint, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QWheelEvent
 
 from qpane.tools import ToolDependencies
 from qpane.tools.base import BaseTool
 from qpane.tools.input.model import PointerPhase, PointerSample
+from qpane.tools.input.profile import ToolInputProfile
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,8 @@ class SmartSelectTool(BaseTool):
     tool manages the selection overlay and wheel-driven component adjustments.
     """
 
+    input_profile = ToolInputProfile(touch=True)
+
     def __init__(self):
         """Initialize selection state and reset dependency callbacks."""
         super().__init__()
@@ -74,6 +77,12 @@ class SmartSelectTool(BaseTool):
         self._image_to_panel_point: Callable[[QPoint], QPoint | None] = (
             lambda point: None
         )
+        self._panel_to_active_mask_point: (
+            Callable[[QPoint | QPointF], QPointF | None] | None
+        ) = None
+        self._active_mask_to_panel_point: (
+            Callable[[QPoint | QPointF], QPointF | None] | None
+        ) = None
         self._get_min_selection_size: Callable[[], int] = (
             lambda: DEFAULT_MIN_SELECTION_SIZE
         )
@@ -98,6 +107,12 @@ class SmartSelectTool(BaseTool):
         )
         self._image_to_panel_point = dependencies.get(
             "image_to_panel_point", lambda point: None
+        )
+        self._panel_to_active_mask_point = dependencies.get(
+            "panel_to_active_mask_point"
+        )
+        self._active_mask_to_panel_point = dependencies.get(
+            "active_mask_to_panel_point"
         )
         self._get_min_selection_size = dependencies.get(
             "get_min_selection_size", lambda: DEFAULT_MIN_SELECTION_SIZE
@@ -153,7 +168,7 @@ class SmartSelectTool(BaseTool):
 
     def wheelEvent(self, event: QWheelEvent):
         """Request mask component adjustments or absorb the gesture."""
-        image_point = self._panel_to_content_point(event.position().toPoint())
+        image_point = self._panel_to_mask_point(event.position().toPoint())
         if image_point is None:
             event.accept()
             return
@@ -177,8 +192,9 @@ class SmartSelectTool(BaseTool):
         start_point, end_point = self.get_selection_points()
         if start_point is None or end_point is None:
             return
-        p1 = self._image_to_panel_point(start_point)
-        p2 = self._image_to_panel_point(end_point)
+        mapper = self._active_mask_to_panel_point or self._image_to_panel_point
+        p1 = mapper(start_point)
+        p2 = mapper(end_point)
         if p1 is None or p2 is None:
             return
         painter.save()
@@ -196,7 +212,7 @@ class SmartSelectTool(BaseTool):
 
     def _begin_selection(self, panel_point: QPoint) -> bool:
         """Start a selection from one panel point."""
-        image_point = self._panel_to_content_point(panel_point)
+        image_point = self._panel_to_mask_point(panel_point)
         if image_point is None:
             return False
         self.is_selecting_region = True
@@ -209,7 +225,7 @@ class SmartSelectTool(BaseTool):
         """Move the endpoint of an active selection."""
         if not self.is_selecting_region:
             return False
-        image_point = self._panel_to_content_point(panel_point)
+        image_point = self._panel_to_mask_point(panel_point)
         if image_point is None:
             return False
         self.selection_end_point = image_point
@@ -219,7 +235,7 @@ class SmartSelectTool(BaseTool):
     def _finish_selection(self, panel_point: QPoint) -> None:
         """Emit a valid selection rectangle and clear transient state."""
         self.is_selecting_region = False
-        self.selection_end_point = self._panel_to_content_point(panel_point)
+        self.selection_end_point = self._panel_to_mask_point(panel_point)
         if (
             self.selection_start_point is not None
             and self.selection_end_point is not None
@@ -241,6 +257,13 @@ class SmartSelectTool(BaseTool):
                     erase_mode = self._is_alt_held()
                     self.signals.region_selected_for_masking.emit(bbox, erase_mode)
         self._clear_selection()
+
+    def _panel_to_mask_point(self, panel_point: QPoint) -> QPoint | None:
+        """Map panel coordinates into the active mask's source space."""
+        if self._panel_to_active_mask_point is None:
+            return self._panel_to_content_point(panel_point)
+        source_point = self._panel_to_active_mask_point(panel_point)
+        return None if source_point is None else source_point.toPoint()
 
     def _clear_selection(self) -> None:
         """Clear transient selection geometry and repaint the overlay."""

@@ -74,6 +74,23 @@ def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
         qapp.processEvents()
         assert window.qpane.getControlMode() == QPane.CONTROL_MODE_SMART_SELECT
 
+        window._set_control_mode(QPane.CONTROL_MODE_MOVE)
+        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+        scene = window.qpane.currentScene()
+        assert scene is not None
+        assert all(layer.interaction.movable for layer in scene.layers)
+        assert all(
+            mask.interaction.movable for mask in window.qpane.listMasksForImage()
+        )
+        mask_item, image_item = _items()
+        window.catalog_dock._handle_item_clicked(mask_item, 0)
+        qapp.processEvents()
+        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+        mask_item, image_item = _items()
+        window.catalog_dock._handle_item_clicked(image_item, 0)
+        qapp.processEvents()
+        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+
         window._set_control_mode(QPane.CONTROL_MODE_DRAW_BRUSH)
         mask_item, image_item = _items()
         window.catalog_dock._handle_item_clicked(image_item, 0)

@@ -53,6 +53,7 @@ def _cycle(qpane: QPane) -> None:
     preferred_order: list[str] = [
         QPane.CONTROL_MODE_CURSOR,
         QPane.CONTROL_MODE_PANZOOM,
+        QPane.CONTROL_MODE_MOVE,
     ]
     if mask_available:
         preferred_order.append(QPane.CONTROL_MODE_DRAW_BRUSH)
@@ -125,6 +126,8 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
         qpane.setControlMode(QPane.CONTROL_MODE_CURSOR)
         _cycle(qpane)
         assert qpane.getControlMode() == QPane.CONTROL_MODE_PANZOOM
+        _cycle(qpane)
+        assert qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
         _cycle(qpane)
         assert qpane.getControlMode() == QPane.CONTROL_MODE_DRAW_BRUSH
         _cycle(qpane)

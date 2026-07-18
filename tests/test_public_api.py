@@ -51,6 +51,7 @@ def test_public_api_symbols():
             "QPaneSceneLayer",
             "QPaneSceneRequest",
             "QPaneCatalogImageLayerRequest",
+            "QPaneLayerInteractionPolicy",
             "QPaneSceneTemplate",
             "QPaneTemplateLayer",
             "QPaneSceneTemplateBindings",

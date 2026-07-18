@@ -23,12 +23,14 @@ from typing import Any
 
 from .base import CursorTool, ExtensionTool, ExtensionToolSignals, PanZoomTool
 from .dependencies import ToolDependencies
+from .move import MoveTool
 from .tools import ToolManagerSignals, Tools
 
 __all__ = [
     "CursorTool",
     "ExtensionTool",
     "ExtensionToolSignals",
+    "MoveTool",
     "PanZoomTool",
     "ToolDependencies",
     "ToolManagerSignals",

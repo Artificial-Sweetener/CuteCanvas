@@ -26,6 +26,7 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 
 from .base import BaseTool, CursorTool, ExtensionTool, PanZoomTool
 from .dependencies import ToolDependencies
+from .move import MoveTool
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class Tools(QObject):
 
     CONTROL_MODE_PANZOOM = "panzoom"
     CONTROL_MODE_CURSOR = "cursor"
+    CONTROL_MODE_MOVE = "move"
     CONTROL_MODE_DRAW_BRUSH = "draw-brush"
     CONTROL_MODE_SMART_SELECT = "smart-select"
 
@@ -97,6 +99,7 @@ class Tools(QObject):
             on_connect=self._connect_cursor_signals,
             on_disconnect=self._disconnect_cursor_signals,
         )
+        self.registerTool(self.CONTROL_MODE_MOVE, MoveTool)
 
     def _ensure_tool(self, mode: str) -> ExtensionTool:
         """Instantiate and cache the tool for the requested mode."""

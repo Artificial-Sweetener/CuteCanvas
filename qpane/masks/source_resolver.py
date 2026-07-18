@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, QPixmap
 
 from ..scene.identity import SceneLayerAssetKey
@@ -80,3 +81,14 @@ class MaskLayerSourceResolver:
         scale = max(1e-6, float(target_width) / full_image.width())
         pixmap = self.renders.get_by_id(source.mask_id, scale=scale)
         return full_image if pixmap is None or pixmap.isNull() else pixmap.toImage()
+
+    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
+        """Select mask layers only where their authoritative pixels are painted."""
+        image = self.source_image(source)
+        if image is None or image.isNull():
+            return False
+        x = int(point.x())
+        y = int(point.y())
+        if x < 0 or y < 0 or x >= image.width() or y >= image.height():
+            return False
+        return image.pixelColor(x, y).red() > 0

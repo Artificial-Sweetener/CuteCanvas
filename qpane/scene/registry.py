@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage
 
 from .identity import SceneLayerAssetKey
@@ -90,6 +91,18 @@ class LayerSourceResolver(Protocol):
         """Return the best available raster for rendering ``source``."""
         ...
 
+    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
+        """Return whether source coverage permits selecting ``point``."""
+        ...
+
+
+class ScenePostProcessor(Protocol):
+    """Apply transient descriptor changes after complete scene assembly."""
+
+    def process_scene(self, scene: SceneDescriptor) -> SceneDescriptor:
+        """Return a processed scene descriptor."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class CatalogLayerSourceResolver:
@@ -134,6 +147,10 @@ class CatalogLayerSourceResolver:
                 return source_image
         return full_image
 
+    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
+        """Treat catalog image source bounds as fully selectable coverage."""
+        return True
+
 
 class SceneProviderRegistry:
     """Own ordered private scene providers registered by feature domains."""
@@ -143,6 +160,7 @@ class SceneProviderRegistry:
         self._replacement_providers: list[SceneReplacementProvider] = []
         self._geometry_adapters: list[SceneGeometryAdapter] = []
         self._contribution_providers: list[SceneContributionProvider] = []
+        self._post_processors: list[ScenePostProcessor] = []
         self._registration_revision = 0
 
     def register_replacement(
@@ -205,6 +223,26 @@ class SceneProviderRegistry:
         if len(self._contribution_providers) != previous_count:
             self._registration_revision += 1
 
+    def register_post_processor(
+        self, processor: ScenePostProcessor
+    ) -> ScenePostProcessor:
+        """Register a final scene processor if it is not already present."""
+        if processor not in self._post_processors:
+            self._post_processors.append(processor)
+            self._registration_revision += 1
+        return processor
+
+    def unregister_post_processor(self, processor: ScenePostProcessor) -> None:
+        """Remove a previously registered final scene processor."""
+        previous_count = len(self._post_processors)
+        self._post_processors = [
+            candidate
+            for candidate in self._post_processors
+            if candidate is not processor
+        ]
+        if len(self._post_processors) != previous_count:
+            self._registration_revision += 1
+
     def revision(self) -> tuple[object, ...]:
         """Return registry structure plus provider-owned dynamic revisions."""
         return (
@@ -221,7 +259,18 @@ class SceneProviderRegistry:
                 self._provider_revision(provider)
                 for provider in self._contribution_providers
             ),
+            tuple(
+                self._provider_revision(processor)
+                for processor in self._post_processors
+            ),
         )
+
+    def process_scene(self, scene: SceneDescriptor) -> SceneDescriptor:
+        """Apply registered final processors in stable registration order."""
+        processed = scene
+        for processor in self._post_processors:
+            processed = processor.process_scene(processed)
+        return processed
 
     def replacement_contributions(self) -> tuple[SceneContribution, ...]:
         """Return active replacement scene contributions."""
@@ -316,3 +365,8 @@ class LayerSourceResolverRegistry:
             full_image=full_image,
             target_width=target_width,
         )
+
+    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
+        """Return selection coverage through the authoritative source resolver."""
+        resolver = self.resolver_for(source)
+        return bool(resolver is not None and resolver.selection_contains(source, point))

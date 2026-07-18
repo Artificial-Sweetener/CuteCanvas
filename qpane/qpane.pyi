@@ -76,6 +76,7 @@ class ZoomMode(str, Enum):
 class ControlMode(str, Enum):
     CURSOR = "cursor"
     PANZOOM = "panzoom"
+    MOVE = "move"
     DRAW_BRUSH = "draw-brush"
     SMART_SELECT = "smart-select"
 
@@ -107,6 +108,10 @@ class QPaneSceneClip:
     coordinate_space: str
     rect: QRectF
 
+class QPaneLayerInteractionPolicy:
+    selectable: bool
+    movable: bool
+
 class QPaneSceneLayer:
     layer_id: uuid.UUID
     image_id: uuid.UUID
@@ -117,6 +122,7 @@ class QPaneSceneLayer:
     hit_test: bool
     role: str
     metadata: Mapping[str, object]
+    interaction: QPaneLayerInteractionPolicy
 
 class QPaneCatalogImageLayerRequest:
     layer_id: uuid.UUID
@@ -128,6 +134,7 @@ class QPaneCatalogImageLayerRequest:
     hit_test: bool
     role: str
     metadata: Mapping[str, object]
+    interaction: QPaneLayerInteractionPolicy
 
 class QPaneSceneRequest:
     composition_id: uuid.UUID | None
@@ -145,6 +152,7 @@ class QPaneTemplateLayer:
     hit_test: bool
     role: str
     metadata: Mapping[str, object]
+    interaction: QPaneLayerInteractionPolicy
 
 class QPaneSceneTemplate:
     template_id: uuid.UUID
@@ -269,6 +277,7 @@ class ExtensionTool:
 class QPane(QWidget):
     CONTROL_MODE_PANZOOM: str
     CONTROL_MODE_CURSOR: str
+    CONTROL_MODE_MOVE: str
     CONTROL_MODE_DRAW_BRUSH: str
     CONTROL_MODE_SMART_SELECT: str
 
@@ -287,6 +296,7 @@ class QPane(QWidget):
     compositionChanged: Signal
     compositionSelectionChanged: Signal
     sceneChanged: Signal
+    sceneEditHistoryChanged: Signal
     samCheckpointStatusChanged: Signal
     samCheckpointProgress: Signal
 
@@ -391,6 +401,22 @@ class QPane(QWidget):
     ) -> uuid.UUID: ...
     def currentScene(self) -> QPaneScene | None: ...
     def sceneHitTest(self, panel_pos: QPoint) -> QPaneSceneHit | None: ...
+    def setLayerInteractionPolicy(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        policy: QPaneLayerInteractionPolicy,
+    ) -> bool: ...
+    def setLayerPlacement(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        placement: QRectF,
+    ) -> bool: ...
+    def sceneEditUndoAvailable(self) -> bool: ...
+    def sceneEditRedoAvailable(self) -> bool: ...
+    def undoSceneEdit(self) -> bool: ...
+    def redoSceneEdit(self) -> bool: ...
     def registerSceneOverlay(
         self,
         name: str,

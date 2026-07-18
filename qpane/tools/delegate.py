@@ -299,6 +299,8 @@ class ToolInteractionDelegate:
                 "panel_hit_test_precise": viewport.panel_hit_test,
                 "panel_to_content_point": viewport.panel_to_content_point,
                 "image_to_panel_point": viewport.content_to_panel_point,
+                "panel_to_active_mask_point": qpane.activeMaskLayerCoordinates().panel_to_source,
+                "active_mask_to_panel_point": qpane.activeMaskLayerCoordinates().source_to_panel,
                 "is_pan_zoom_locked": viewport.is_locked,
                 "is_image_null": lambda: not qpane.view().has_renderable_content(),
                 "is_drag_out_allowed": qpane.isDragOutAllowed,
@@ -340,6 +342,10 @@ class ToolInteractionDelegate:
                     else None
                 ),
                 "request_overlay_update": qpane.update,
+                "begin_layer_move": qpane.sceneLayerMovementInteraction().begin,
+                "update_layer_move": qpane.sceneLayerMovementInteraction().update,
+                "finish_layer_move": qpane.sceneLayerMovementInteraction().finish,
+                "cancel_layer_move": qpane.sceneLayerMovementInteraction().cancel,
             }
         )
         if tools.get_control_mode() != mode:

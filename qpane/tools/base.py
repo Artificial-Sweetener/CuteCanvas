@@ -31,6 +31,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication
 
 from .dependencies import ToolDependencies
+from .input.profile import ToolInputProfile
 
 
 def _viewport_zoom_mode():
@@ -53,6 +54,7 @@ class ExtensionTool(abc.ABC):
     """Public interface for extension tools that handle input and overlays."""
 
     signals: ExtensionToolSignals
+    input_profile = ToolInputProfile()
 
     def __init__(self) -> None:
         """Create the shared ExtensionToolSignals instance available to subclasses."""
@@ -213,6 +215,7 @@ class PanZoomTool(BaseTool):
     """Default tool that handles drag panning, wheel zooming, and fit toggling."""
 
     _WHEEL_UNITS_PER_STEP = 120.0
+    input_profile = ToolInputProfile(navigation=True)
     _WHEEL_ZOOM_IN_FACTOR = 1.25
     _WHEEL_ZOOM_OUT_FACTOR = 0.8
 

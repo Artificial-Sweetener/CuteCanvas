@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Deterministic arbitration between touch painting and navigation."""
+"""Deterministic arbitration between direct tools and touch navigation."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class TouchGestureKind(str, Enum):
 
     PENDING = "pending"
     NAVIGATION = "navigation"
-    PAINTING = "painting"
+    DIRECT_TOOL = "direct-tool"
     REJECTED = "rejected"
 
 
@@ -37,16 +37,16 @@ class TouchGestureArena:
         """Initialize an idle arena with a logical-pixel movement threshold."""
         self._movement_threshold = max(0.0, float(movement_threshold))
         self._kind = TouchGestureKind.REJECTED
-        self._paint_allowed = False
+        self._direct_tool_allowed = False
 
     @property
     def kind(self) -> TouchGestureKind:
         """Return the current arbitration result."""
         return self._kind
 
-    def begin(self, *, navigation_mode: bool, paint_allowed: bool) -> None:
+    def begin(self, *, navigation_mode: bool, direct_tool_allowed: bool) -> None:
         """Start arbitration for one new sequence."""
-        self._paint_allowed = bool(paint_allowed)
+        self._direct_tool_allowed = bool(direct_tool_allowed)
         self._kind = (
             TouchGestureKind.NAVIGATION if navigation_mode else TouchGestureKind.PENDING
         )
@@ -63,10 +63,10 @@ class TouchGestureArena:
             return self._kind
         if contact_count >= 2:
             self._kind = TouchGestureKind.NAVIGATION
-        elif self._paint_allowed and (
+        elif self._direct_tool_allowed and (
             ending or primary_distance >= self._movement_threshold
         ):
-            self._kind = TouchGestureKind.PAINTING
+            self._kind = TouchGestureKind.DIRECT_TOOL
         elif ending:
             self._kind = TouchGestureKind.REJECTED
         return self._kind
@@ -74,4 +74,4 @@ class TouchGestureArena:
     def reset(self) -> None:
         """Return the arena to its idle state."""
         self._kind = TouchGestureKind.REJECTED
-        self._paint_allowed = False
+        self._direct_tool_allowed = False

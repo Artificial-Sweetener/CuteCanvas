@@ -24,7 +24,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
 
-from .model import LayerDescriptor, SceneDescriptor
+from .model import (
+    LayerDescriptor,
+    LayerInteractionPolicy,
+    LayerPlacement,
+    LayerPlacementChange,
+    SceneDescriptor,
+)
 
 
 class SceneMutationStatus(str, Enum):
@@ -36,6 +42,7 @@ class SceneMutationStatus(str, Enum):
     SCENE_MISMATCH = "scene-mismatch"
     LAYER_NOT_FOUND = "layer-not-found"
     INVALID_REQUEST = "invalid-request"
+    POLICY_DENIED = "policy-denied"
     UNSUPPORTED = "unsupported"
 
 
@@ -90,10 +97,52 @@ class SceneMutationOwner(Protocol):
         """Update layer opacity through the authoritative owner."""
         ...
 
+    def set_interaction(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        interaction: LayerInteractionPolicy,
+    ) -> SceneMutationResult:
+        """Update direct-interaction permissions through the authoritative owner."""
+        ...
+
+    def set_placement(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        placement: LayerPlacement,
+    ) -> SceneMutationResult:
+        """Update scene-space placement through the authoritative owner."""
+        ...
+
     def request_source_revision(
         self, scene: SceneDescriptor, layer: LayerDescriptor, reason: str
     ) -> SceneMutationResult:
         """Ask the source-domain owner to advance its render revision."""
+        ...
+
+
+class ScenePlacementHistory(Protocol):
+    """Composition-owned history used by scene placement mutation routing."""
+
+    def record(self, command: LayerPlacementChange) -> bool:
+        """Record one committed placement transition."""
+        ...
+
+    def undo_candidate(self, scene_id: uuid.UUID) -> LayerPlacementChange | None:
+        """Return the next placement transition to undo."""
+        ...
+
+    def redo_candidate(self, scene_id: uuid.UUID) -> LayerPlacementChange | None:
+        """Return the next placement transition to redo."""
+        ...
+
+    def commit_undo(self, command: LayerPlacementChange) -> bool:
+        """Advance one applied transition to the redo stack."""
+        ...
+
+    def commit_redo(self, command: LayerPlacementChange) -> bool:
+        """Advance one applied transition to the undo stack."""
         ...
 
 
@@ -130,6 +179,24 @@ class BaseSceneMutationOwner:
         """Reject source revision requests for unsupported owners."""
         return self._unsupported(scene, layer, "request source revision")
 
+    def set_interaction(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        interaction: LayerInteractionPolicy,
+    ) -> SceneMutationResult:
+        """Reject interaction updates for unsupported owners."""
+        return self._unsupported(scene, layer, "set interaction")
+
+    def set_placement(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        placement: LayerPlacement,
+    ) -> SceneMutationResult:
+        """Reject placement updates for unsupported owners."""
+        return self._unsupported(scene, layer, "set placement")
+
     def _unsupported(
         self, scene: SceneDescriptor, layer: LayerDescriptor, operation: str
     ) -> SceneMutationResult:
@@ -150,10 +217,12 @@ class SceneMutationCoordinator:
         self,
         scene_provider: Callable[[], SceneDescriptor | None],
         owners: tuple[SceneMutationOwner, ...] = (),
+        placement_history: ScenePlacementHistory | None = None,
     ) -> None:
         """Capture the active-scene provider and initial mutation owners."""
         self._scene_provider = scene_provider
         self._owners: list[SceneMutationOwner] = list(owners)
+        self._placement_history = placement_history
 
     def register_owner(self, owner: SceneMutationOwner) -> SceneMutationOwner:
         """Register ``owner`` for future mutation routing."""
@@ -229,6 +298,100 @@ class SceneMutationCoordinator:
         scene, layer, owner = resolved
         return owner.set_opacity(scene, layer, normalized_opacity)
 
+    def set_interaction(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        interaction: LayerInteractionPolicy,
+    ) -> SceneMutationResult:
+        """Route a layer interaction-policy update."""
+        if not isinstance(interaction, LayerInteractionPolicy):
+            return self._invalid_request(
+                scene_id,
+                layer_id,
+                "interaction must be LayerInteractionPolicy",
+            )
+        resolved = self._layer_for_ids(scene_id, layer_id)
+        if isinstance(resolved, SceneMutationResult):
+            return resolved
+        scene, layer, owner = resolved
+        return owner.set_interaction(scene, layer, interaction)
+
+    def set_placement(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        placement: LayerPlacement,
+    ) -> SceneMutationResult:
+        """Route a policy-authorized absolute placement update."""
+        if not isinstance(placement, LayerPlacement):
+            return self._invalid_request(
+                scene_id,
+                layer_id,
+                "placement must be LayerPlacement",
+            )
+        resolved = self._layer_for_ids(scene_id, layer_id)
+        if isinstance(resolved, SceneMutationResult):
+            return resolved
+        scene, layer, owner = resolved
+        if not layer.interaction.movable:
+            return SceneMutationResult(
+                status=SceneMutationStatus.POLICY_DENIED,
+                scene_id=scene_id,
+                layer_id=layer_id,
+                owner=owner.name,
+                message="layer interaction policy does not permit movement",
+            )
+        result = owner.set_placement(scene, layer, placement)
+        if result.changed and self._placement_history is not None:
+            self._placement_history.record(
+                LayerPlacementChange(
+                    scene_id=scene.scene_id,
+                    layer_id=layer.layer_id,
+                    before=layer.placement,
+                    after=placement,
+                )
+            )
+        return result
+
+    def can_undo_placement(self, scene_id: uuid.UUID) -> bool:
+        """Return whether the composition history has a placement undo."""
+        return bool(
+            self._placement_history is not None
+            and self._placement_history.undo_candidate(scene_id) is not None
+        )
+
+    def can_redo_placement(self, scene_id: uuid.UUID) -> bool:
+        """Return whether the composition history has a placement redo."""
+        return bool(
+            self._placement_history is not None
+            and self._placement_history.redo_candidate(scene_id) is not None
+        )
+
+    def undo_placement(self, scene_id: uuid.UUID) -> SceneMutationResult:
+        """Restore the previous placement from composition-owned history."""
+        if self._placement_history is None:
+            return self._history_unavailable(scene_id)
+        command = self._placement_history.undo_candidate(scene_id)
+        if command is None:
+            return self._history_unavailable(scene_id)
+        result = self._restore_placement(command, command.before)
+        if result.accepted:
+            self._placement_history.commit_undo(command)
+        return result
+
+    def redo_placement(self, scene_id: uuid.UUID) -> SceneMutationResult:
+        """Reapply the next placement from composition-owned history."""
+        if self._placement_history is None:
+            return self._history_unavailable(scene_id)
+        command = self._placement_history.redo_candidate(scene_id)
+        if command is None:
+            return self._history_unavailable(scene_id)
+        result = self._restore_placement(command, command.after)
+        if result.accepted:
+            self._placement_history.commit_redo(command)
+        return result
+
     def request_source_revision(
         self, scene_id: uuid.UUID, layer_id: uuid.UUID, reason: str
     ) -> SceneMutationResult:
@@ -294,6 +457,27 @@ class SceneMutationCoordinator:
             if owner.supports_layer(scene, layer):
                 return owner
         return None
+
+    def _restore_placement(
+        self,
+        command: LayerPlacementChange,
+        placement: LayerPlacement,
+    ) -> SceneMutationResult:
+        """Apply a history placement without recording another command."""
+        resolved = self._layer_for_ids(command.scene_id, command.layer_id)
+        if isinstance(resolved, SceneMutationResult):
+            return resolved
+        scene, layer, owner = resolved
+        return owner.set_placement(scene, layer, placement)
+
+    @staticmethod
+    def _history_unavailable(scene_id: uuid.UUID) -> SceneMutationResult:
+        """Return an unchanged result when no history command is available."""
+        return SceneMutationResult(
+            status=SceneMutationStatus.UNCHANGED,
+            scene_id=scene_id,
+            message="no layer placement history is available",
+        )
 
     @staticmethod
     def _invalid_request(

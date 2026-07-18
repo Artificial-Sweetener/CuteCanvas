@@ -13,20 +13,26 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from ..scene.model import LayerDescriptor, SceneDescriptor
+from ..scene.model import (
+    LayerDescriptor,
+    LayerInteractionPolicy,
+    LayerPlacement,
+    SceneDescriptor,
+)
 from ..scene.mutations import (
     BaseSceneMutationOwner,
     SceneMutationResult,
     SceneMutationStatus,
 )
-from ..scene.sources import MaskLayerSource
+from ..scene.sources import CatalogImageSource, MaskLayerSource
 from .layers import ImageSceneLayerStore
+from .service import CompositionService
 
 
-class CompositionSceneMutationOwner(BaseSceneMutationOwner):
-    """Apply structure and presentation changes to composition layer state."""
+class ImageSceneMaskMutationOwner(BaseSceneMutationOwner):
+    """Apply mask-source mutations to default image-scene layer state."""
 
-    name = "composition"
+    name = "image-scene-mask"
 
     def __init__(
         self,
@@ -59,7 +65,7 @@ class CompositionSceneMutationOwner(BaseSceneMutationOwner):
             and isinstance(source, MaskLayerSource)
             and self._remove_mask(image_id, source.mask_id)
         )
-        return self._result(scene, layer, changed, "layer removed")
+        return _mutation_result(self.name, scene, layer, changed, "layer removed")
 
     def reorder_layer(
         self,
@@ -73,7 +79,7 @@ class CompositionSceneMutationOwner(BaseSceneMutationOwner):
             image_id is not None
             and self._layers.reorder_layer(image_id, layer.layer_id, target_index)
         )
-        return self._result(scene, layer, changed, "layer reordered")
+        return _mutation_result(self.name, scene, layer, changed, "layer reordered")
 
     def set_opacity(
         self,
@@ -93,7 +99,49 @@ class CompositionSceneMutationOwner(BaseSceneMutationOwner):
         )
         if changed and isinstance(layer.source, MaskLayerSource):
             self._notify_mask_opacity(layer.source.mask_id)
-        return self._result(scene, layer, changed, "layer opacity updated")
+        return _mutation_result(
+            self.name, scene, layer, changed, "layer opacity updated"
+        )
+
+    def set_interaction(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        interaction: LayerInteractionPolicy,
+    ) -> SceneMutationResult:
+        """Update direct-interaction permissions for one mask instance."""
+        image_id = self._current_image_id()
+        changed = bool(
+            image_id is not None
+            and self._layers.update_interaction(
+                image_id,
+                layer.layer_id,
+                interaction,
+            )
+        )
+        return _mutation_result(
+            self.name, scene, layer, changed, "layer interaction updated"
+        )
+
+    def set_placement(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        placement: LayerPlacement,
+    ) -> SceneMutationResult:
+        """Update scene-space placement for one mask instance."""
+        image_id = self._current_image_id()
+        changed = bool(
+            image_id is not None
+            and self._layers.update_placement(
+                image_id,
+                layer.layer_id,
+                placement,
+            )
+        )
+        return _mutation_result(
+            self.name, scene, layer, changed, "layer placement updated"
+        )
 
     def request_source_revision(
         self,
@@ -107,24 +155,150 @@ class CompositionSceneMutationOwner(BaseSceneMutationOwner):
             source.mask_id,
             reason,
         )
-        return self._result(scene, layer, changed, "source revision requested")
+        return _mutation_result(
+            self.name, scene, layer, changed, "source revision requested"
+        )
 
-    def _result(
+
+class DefaultImageLayerMutationOwner(BaseSceneMutationOwner):
+    """Apply presentation mutations to default catalog-image layer instances."""
+
+    name = "default-image-layer"
+
+    def __init__(
+        self,
+        layers: ImageSceneLayerStore,
+        current_image_id: Callable[[], uuid.UUID | None],
+    ) -> None:
+        """Bind default image-scene state and active image identity."""
+        self._layers = layers
+        self._current_image_id = current_image_id
+
+    def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
+        """Return True for the active default catalog-image instance."""
+        image_id = self._current_image_id()
+        return bool(
+            image_id is not None
+            and isinstance(layer.source, CatalogImageSource)
+            and self._layers.layer(image_id, layer.layer_id) is not None
+        )
+
+    def set_interaction(
         self,
         scene: SceneDescriptor,
         layer: LayerDescriptor,
-        changed: bool,
-        message: str,
+        interaction: LayerInteractionPolicy,
     ) -> SceneMutationResult:
-        """Build a normalized mutation result."""
-        return SceneMutationResult(
-            status=(
-                SceneMutationStatus.APPLIED
-                if changed
-                else SceneMutationStatus.UNCHANGED
-            ),
-            scene_id=scene.scene_id,
-            layer_id=layer.layer_id,
-            owner=self.name,
-            message=message,
+        """Update direct-interaction permissions for the base image instance."""
+        image_id = self._current_image_id()
+        changed = bool(
+            image_id is not None
+            and self._layers.update_interaction(
+                image_id,
+                layer.layer_id,
+                interaction,
+            )
         )
+        return _mutation_result(
+            self.name, scene, layer, changed, "layer interaction updated"
+        )
+
+    def set_placement(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        placement: LayerPlacement,
+    ) -> SceneMutationResult:
+        """Update scene-space placement for the base image instance."""
+        image_id = self._current_image_id()
+        changed = bool(
+            image_id is not None
+            and self._layers.update_placement(
+                image_id,
+                layer.layer_id,
+                placement,
+            )
+        )
+        return _mutation_result(
+            self.name, scene, layer, changed, "layer placement updated"
+        )
+
+
+class StoredSceneLayerMutationOwner(BaseSceneMutationOwner):
+    """Apply placement and policy changes to host-authored scene records."""
+
+    name = "stored-scene-layer"
+
+    def __init__(self, compositions: CompositionService) -> None:
+        """Bind the authoritative stored-composition service."""
+        self._compositions = compositions
+
+    def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
+        """Return True when the active stored scene contains ``layer``."""
+        try:
+            record = self._compositions.record(scene.scene_id)
+        except (KeyError, TypeError):
+            return False
+        return bool(
+            record.scene is not None
+            and any(item.layer_id == layer.layer_id for item in record.scene.layers)
+        )
+
+    def set_interaction(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        interaction: LayerInteractionPolicy,
+    ) -> SceneMutationResult:
+        """Update direct-interaction permissions in one stored scene."""
+        changed = self._compositions.update_scene_layer_interaction(
+            scene.scene_id,
+            layer.layer_id,
+            interaction,
+        )
+        return _mutation_result(
+            self.name,
+            scene,
+            layer,
+            changed,
+            "layer interaction updated",
+        )
+
+    def set_placement(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        placement: LayerPlacement,
+    ) -> SceneMutationResult:
+        """Update scene-space placement in one stored scene."""
+        changed = self._compositions.update_scene_layer_placement(
+            scene.scene_id,
+            layer.layer_id,
+            placement,
+        )
+        return _mutation_result(
+            self.name,
+            scene,
+            layer,
+            changed,
+            "layer placement updated",
+        )
+
+
+def _mutation_result(
+    owner: str,
+    scene: SceneDescriptor,
+    layer: LayerDescriptor,
+    changed: bool,
+    message: str,
+) -> SceneMutationResult:
+    """Build a normalized mutation-owner result."""
+    return SceneMutationResult(
+        status=(
+            SceneMutationStatus.APPLIED if changed else SceneMutationStatus.UNCHANGED
+        ),
+        scene_id=scene.scene_id,
+        layer_id=layer.layer_id,
+        owner=owner,
+        message=message,
+    )

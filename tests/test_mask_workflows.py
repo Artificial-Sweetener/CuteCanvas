@@ -80,7 +80,7 @@ def _make_test_qpane(qapp):
     mask_manager = MaskAssetStore(undo_limit=mask_config.mask_undo_limit)
     controller = MaskController(
         mask_manager,
-        image_to_panel_point=_panel_point,
+        source_to_panel_point=_panel_point,
         config=base_config,
         mask_config=mask_config,
     )
@@ -301,7 +301,7 @@ def qpane_with_mask(qapp, monkeypatch):
         manager_box["manager"] = mask_manager
         controller = MaskController(
             mask_manager,
-            image_to_panel_point=_panel_point,
+            source_to_panel_point=_panel_point,
             config=qpane.settings,
         )
         service = MaskService(
@@ -429,7 +429,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
         mask_manager = MaskAssetStore(undo_limit=qpane.settings.mask_undo_limit)
         controller = MaskController(
             mask_manager,
-            image_to_panel_point=_panel_point,
+            source_to_panel_point=_panel_point,
             config=qpane.settings,
         )
         service = MaskService(

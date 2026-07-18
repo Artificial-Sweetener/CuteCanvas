@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import dataclass
 from enum import Enum
@@ -66,8 +67,22 @@ class LayerPlacement:
 
     def __post_init__(self) -> None:
         """Validate that placement dimensions are usable."""
+        if not all(
+            math.isfinite(value) for value in (self.x, self.y, self.width, self.height)
+        ):
+            raise ValueError("layer placement values must be finite")
         if self.width < 0 or self.height < 0:
             raise ValueError("layer placement dimensions must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
+class LayerPlacementChange:
+    """Describe one durable scene-layer placement transition."""
+
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    before: LayerPlacement
+    after: LayerPlacement
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +106,15 @@ class LayerHitTest:
     """Metadata controlling whether a layer participates in scene hit testing."""
 
     enabled: bool = True
-    selectable: bool = False
     role: str = "content"
+
+
+@dataclass(frozen=True, slots=True)
+class LayerInteractionPolicy:
+    """Host-controlled permissions for direct scene-layer interaction."""
+
+    selectable: bool = False
+    movable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +131,7 @@ class LayerDescriptor:
     blend_mode: BlendMode = BlendMode.NORMAL
     clip: LayerClip | None = None
     hit_test: LayerHitTest = LayerHitTest()
+    interaction: LayerInteractionPolicy = LayerInteractionPolicy()
     source_revision: int = 0
 
     def __post_init__(self) -> None:

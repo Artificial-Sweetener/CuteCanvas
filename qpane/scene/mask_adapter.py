@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from ..composition.layers import (
@@ -32,7 +32,6 @@ from .model import (
     LayerDescriptor,
     LayerHitTest,
     LayerKind,
-    LayerPlacement,
     SceneDescriptor,
 )
 from .sources import CatalogImageSource, MaskLayerSource
@@ -96,6 +95,18 @@ class MaskCompositionSceneAdapter:
         for instance in instances:
             if instance.source_kind == CompositionLayerSourceKind.CATALOG_IMAGE:
                 layer = base_by_source.get(instance.source_id)
+                if layer is not None:
+                    layer = replace(
+                        layer,
+                        placement=instance.placement,
+                        visible=instance.visible,
+                        opacity=instance.opacity,
+                        hit_test=LayerHitTest(
+                            enabled=instance.hit_test,
+                            role=instance.role,
+                        ),
+                        interaction=instance.interaction,
+                    )
             else:
                 layer = self._mask_descriptor(base_scene, instance)
             if layer is not None:
@@ -127,20 +138,15 @@ class MaskCompositionSceneAdapter:
             layer_id=instance.layer_id,
             kind=LayerKind.MASK,
             source=MaskLayerSource(mask_id=instance.source_id, revision=revision),
-            placement=LayerPlacement(
-                x=0.0,
-                y=0.0,
-                width=float(asset.mask_image.width()),
-                height=float(asset.mask_image.height()),
-            ),
+            placement=instance.placement,
             visible=instance.visible,
             opacity=instance.opacity,
             blend_mode=BlendMode.NORMAL,
             clip=None,
             hit_test=LayerHitTest(
                 enabled=instance.hit_test,
-                selectable=instance.selectable,
                 role=instance.role,
             ),
+            interaction=instance.interaction,
             source_revision=revision,
         )

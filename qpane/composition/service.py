@@ -20,16 +20,19 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QSize
 
+from ..scene.model import LayerInteractionPolicy, LayerPlacement
 from ..types import (
     ComparisonOrientation,
     ComparisonState,
     CompositionEntry,
     CompositionSnapshot,
     QPaneCatalogImageLayerRequest,
+    QPaneLayerInteractionPolicy,
     QPaneScene,
     QPaneSceneClip,
     QPaneSceneLayer,
@@ -37,6 +40,7 @@ from ..types import (
     QPaneSceneTemplate,
     QPaneSceneTemplateBindings,
 )
+from .history import LayerPlacementHistory
 from .layers import ImageSceneLayerStore
 from .model import (
     CompositionComparison,
@@ -68,24 +72,40 @@ class CompositionService:
         self._default_orientation = ComparisonOrientation.VERTICAL
         self._revision = 0
         self._image_layers = ImageSceneLayerStore()
+        self._placement_history = LayerPlacementHistory()
 
     @property
     def image_layers(self) -> ImageSceneLayerStore:
         """Return the focused owner of catalog image scene layer instances."""
         return self._image_layers
 
+    @property
+    def placement_history(self) -> LayerPlacementHistory:
+        """Return composition-scoped scene-layer placement history."""
+        return self._placement_history
+
     def sync_catalog(
         self,
         image_ids: Iterable[uuid.UUID],
         *,
         path_lookup: Callable[[uuid.UUID], Path | None],
+        size_lookup: Callable[[uuid.UUID], QSize],
     ) -> bool:
         """Synchronize generated default compositions with catalog images."""
         ordered_ids = tuple(image_ids)
         valid_ids = set(ordered_ids)
         changed = self._remove_invalid_catalog_references(valid_ids, touch=False)
         for index, image_id in enumerate(ordered_ids):
-            self._image_layers.ensure_image(image_id)
+            image_size = size_lookup(image_id)
+            self._image_layers.ensure_image(
+                image_id,
+                LayerPlacement(
+                    0.0,
+                    0.0,
+                    float(image_size.width()),
+                    float(image_size.height()),
+                ),
+            )
             if image_id in self._default_by_image_id:
                 continue
             composition_id = self.default_composition_id(image_id)
@@ -116,6 +136,7 @@ class CompositionService:
         self._order.clear()
         self._default_by_image_id.clear()
         self._image_layers.clear()
+        self._placement_history.clear()
         self._active_id = None
         self._touch()
         return True
@@ -181,6 +202,8 @@ class CompositionService:
         existing = self._records.get(record.composition_id)
         if existing is not None and existing.kind == CompositionKind.DEFAULT_IMAGE:
             raise ValueError("default catalog compositions cannot be replaced")
+        if existing is not None:
+            self._placement_history.clear_scene(record.composition_id)
         self._records[record.composition_id] = record
         if record.composition_id not in self._order:
             self._order.append(record.composition_id)
@@ -204,6 +227,40 @@ class CompositionService:
             activate=activate,
         )
 
+    def update_scene_layer_interaction(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        interaction: LayerInteractionPolicy,
+    ) -> bool:
+        """Replace interaction permissions for one stored scene layer."""
+        return self._update_stored_scene_layer(
+            scene_id,
+            layer_id,
+            lambda layer: replace(layer, interaction=interaction),
+        )
+
+    def update_scene_layer_placement(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        placement: LayerPlacement,
+    ) -> bool:
+        """Replace placement for one stored scene layer."""
+        return self._update_stored_scene_layer(
+            scene_id,
+            layer_id,
+            lambda layer: replace(
+                layer,
+                placement=QRectF(
+                    placement.x,
+                    placement.y,
+                    placement.width,
+                    placement.height,
+                ),
+            ),
+        )
+
     def open_composition(self, composition_id: uuid.UUID) -> CompositionRecord:
         """Activate and return an existing composition record."""
         record = self.record(composition_id)
@@ -225,6 +282,7 @@ class CompositionService:
         if record.kind == CompositionKind.DEFAULT_IMAGE:
             raise ValueError("default catalog compositions cannot be removed directly")
         self._records.pop(composition_id, None)
+        self._placement_history.clear_scene(composition_id)
         self._order = [item for item in self._order if item != composition_id]
         if self._active_id == composition_id:
             self._active_id = self._order[0] if self._order else None
@@ -464,6 +522,7 @@ class CompositionService:
             opacity=float(layer.opacity),
             clip=_copy_scene_clip(layer.clip),
             hit_test=bool(layer.hit_test),
+            interaction=_internal_interaction(layer.interaction),
             role=layer.role,
             metadata=dict(layer.metadata),
         )
@@ -517,6 +576,7 @@ class CompositionService:
                     opacity=layer.opacity,
                     clip=_copy_scene_clip(layer.clip),
                     hit_test=layer.hit_test,
+                    interaction=_public_interaction(layer.interaction),
                     role=layer.role,
                     metadata=metadata,
                 )
@@ -560,12 +620,14 @@ class CompositionService:
             self._default_by_image_id.pop(image_id, None)
             self._image_layers.remove_image(image_id)
             self._records.pop(composition_id, None)
+            self._placement_history.clear_scene(composition_id)
             changed = True
         for composition_id, record in list(self._records.items()):
             if record.kind == CompositionKind.DEFAULT_IMAGE:
                 continue
             if any(image_id not in valid_ids for image_id in record.source_image_ids):
                 self._records.pop(composition_id, None)
+                self._placement_history.clear_scene(composition_id)
                 changed = True
                 continue
             comparison = record.comparison
@@ -636,6 +698,7 @@ class CompositionService:
                     opacity=layer.opacity,
                     clip=_copy_scene_clip(layer.clip),
                     hit_test=layer.hit_test,
+                    interaction=_public_interaction(layer.interaction),
                     role=layer.role,
                     metadata=layer.metadata,
                 )
@@ -694,6 +757,40 @@ class CompositionService:
         """Advance the composition revision."""
         self._revision += 1
 
+    def _update_stored_scene_layer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        replacement_factory: Callable[[CompositionSceneLayer], CompositionSceneLayer],
+    ) -> bool:
+        """Replace one immutable layer inside a stored layered composition."""
+        record = self._records.get(scene_id)
+        if (
+            record is None
+            or record.kind != CompositionKind.LAYERED_SCENE
+            or record.scene is None
+        ):
+            return False
+        index = next(
+            (
+                position
+                for position, layer in enumerate(record.scene.layers)
+                if layer.layer_id == layer_id
+            ),
+            None,
+        )
+        if index is None:
+            return False
+        layers = list(record.scene.layers)
+        replacement = replacement_factory(layers[index])
+        if replacement == layers[index]:
+            return False
+        layers[index] = replacement
+        scene = replace(record.scene, layers=tuple(layers))
+        self._records[scene_id] = replace(record, scene=scene)
+        self._touch()
+        return True
+
     @staticmethod
     def _default_title(path: Path | None, index: int) -> str:
         """Return the generated title for a default image composition."""
@@ -728,4 +825,26 @@ def _copy_scene_clip(clip: QPaneSceneClip | None) -> QPaneSceneClip | None:
     return QPaneSceneClip(
         coordinate_space=clip.coordinate_space,
         rect=QRectF(clip.rect),
+    )
+
+
+def _internal_interaction(
+    policy: QPaneLayerInteractionPolicy,
+) -> LayerInteractionPolicy:
+    """Convert public interaction permissions to internal immutable state."""
+    if not isinstance(policy, QPaneLayerInteractionPolicy):
+        raise TypeError("layer interaction must be QPaneLayerInteractionPolicy")
+    return LayerInteractionPolicy(
+        selectable=bool(policy.selectable),
+        movable=bool(policy.movable),
+    )
+
+
+def _public_interaction(
+    policy: LayerInteractionPolicy,
+) -> QPaneLayerInteractionPolicy:
+    """Convert internal interaction permissions to a public snapshot."""
+    return QPaneLayerInteractionPolicy(
+        selectable=policy.selectable,
+        movable=policy.movable,
     )

@@ -61,6 +61,11 @@ from .compare import (
     ComparisonChangeKind,
 )
 from .composition import CompositionKind, CompositionRecord, CompositionService
+from .composition.image_scene_adapter import ImageSceneLayerAdapter
+from .composition.mutations import (
+    DefaultImageLayerMutationOwner,
+    StoredSceneLayerMutationOwner,
+)
 from .composition.scene_adapter import CompositionSceneAdapter
 from .concurrency import TaskExecutorProtocol, ThreadPolicy
 from .core import (
@@ -77,6 +82,7 @@ from .core import (
     ToolSignalBinder,
 )
 from .core.diagnostics_broker import Diagnostics
+from .masks.coordinates import ActiveMaskLayerCoordinates
 from .masks.source_resolver import MaskLayerSourceResolver
 from .masks.workflow import MaskActivationSyncResult, MaskInfo, Masks
 from .rendering import (
@@ -87,13 +93,18 @@ from .rendering import (
 from .rendering.coordinates import PanelHitTest
 from .scene.identity import base_image_layer_id
 from .scene.mask_adapter import MaskCompositionSceneAdapter
+from .scene.model import LayerInteractionPolicy, LayerPlacement
+from .scene.movement import SceneLayerMovementController
+from .scene.movement_interaction import SceneLayerMovementInteraction
 from .scene.mutations import SceneMutationCoordinator
+from .scene.placement_preview import SceneLayerPlacementPreview
 from .scene.registry import (
     CatalogLayerSourceResolver,
     LayerSourceResolverRegistry,
     SceneProviderRegistry,
 )
 from .scene.render_plan import RasterLayerRenderItem, SceneLayerHitTestResult
+from .scene.selection import SceneLayerSelectionController
 from .swap import SwapDelegate
 from .tools import Tools
 from .tools.base import ExtensionTool, ExtensionToolSignals
@@ -107,6 +118,7 @@ from .types import (
     CompositionSnapshot,
     DiagnosticsDomain,
     LinkedGroup,
+    QPaneLayerInteractionPolicy,
     QPaneScene,
     QPaneSceneHit,
     QPaneSceneLayer,
@@ -139,6 +151,7 @@ class QPane(QWidget):
     # ========================================================================
     CONTROL_MODE_PANZOOM = Tools.CONTROL_MODE_PANZOOM
     CONTROL_MODE_CURSOR = Tools.CONTROL_MODE_CURSOR
+    CONTROL_MODE_MOVE = Tools.CONTROL_MODE_MOVE
     CONTROL_MODE_DRAW_BRUSH = Tools.CONTROL_MODE_DRAW_BRUSH
     CONTROL_MODE_SMART_SELECT = Tools.CONTROL_MODE_SMART_SELECT
     imageLoaded: Signal = Signal(Path)
@@ -171,6 +184,8 @@ class QPane(QWidget):
     """Emit the active composition UUID or ``None`` when selection changes."""
     sceneChanged: Signal = Signal(object)
     """Emit the normalized active scene snapshot or ``None`` when it changes."""
+    sceneEditHistoryChanged: Signal = Signal(bool, bool)
+    """Emit scene placement undo and redo availability after history changes."""
     samCheckpointStatusChanged: Signal = Signal(str, object)
     """Emit checkpoint status and path updates for SAM readiness tracking.
     The payload is ``(status, path)``, where ``path`` is a ``Path`` and status
@@ -224,6 +239,11 @@ class QPane(QWidget):
         self._compare_interaction: CompareDividerInteraction | None = None
         self._composition_scene_adapter: CompositionSceneAdapter | None = None
         self._scene_mutations: SceneMutationCoordinator | None = None
+        self._scene_selection = SceneLayerSelectionController()
+        self._scene_placement_preview = SceneLayerPlacementPreview()
+        self._scene_movement: SceneLayerMovementController | None = None
+        self._scene_movement_interaction: SceneLayerMovementInteraction | None = None
+        self._active_mask_coordinates: ActiveMaskLayerCoordinates | None = None
         self._scene_provider_registry: SceneProviderRegistry | None = None
         self._source_resolver_registry: LayerSourceResolverRegistry | None = None
         self._mask_scene_provider: MaskCompositionSceneAdapter | None = None
@@ -673,6 +693,128 @@ class QPane(QWidget):
         if adapter is None:
             return None
         return adapter.hit_from_result(self.view().scene_hit_test(panel_pos))
+
+    def setLayerInteractionPolicy(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        policy: QPaneLayerInteractionPolicy,
+    ) -> bool:
+        """Set direct-interaction permissions for an active scene layer.
+
+        Args:
+            scene_id: Public or resolved identifier for the active scene.
+            layer_id: Stable identifier of the layer to update.
+            policy: Selection and movement permissions to apply.
+
+        Returns:
+            True when the policy changed.
+
+        Raises:
+            TypeError: If identifiers or policy use unsupported types.
+
+        Side effects:
+            Refreshes active scene rendering and emits sceneChanged after a change.
+        """
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        if not isinstance(policy, QPaneLayerInteractionPolicy):
+            raise TypeError("policy must be QPaneLayerInteractionPolicy")
+        coordinator = self.sceneMutationCoordinator()
+        result = coordinator.set_interaction(
+            self._resolve_public_scene_id(scene_id),
+            layer_id,
+            LayerInteractionPolicy(
+                selectable=policy.selectable,
+                movable=policy.movable,
+            ),
+        )
+        if result.changed:
+            self._handle_internal_scene_content_changed()
+            self._emit_scene_changed()
+        return result.changed
+
+    def setLayerPlacement(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        placement: QRectF,
+    ) -> bool:
+        """Set absolute scene-space placement for a movable active layer.
+
+        Args:
+            scene_id: Public or resolved identifier for the active scene.
+            layer_id: Stable identifier of the layer to move.
+            placement: New scene-space layer rectangle.
+
+        Returns:
+            True when placement changed and one history command was recorded.
+
+        Raises:
+            TypeError: If identifiers or placement use unsupported types.
+            ValueError: If placement dimensions or coordinates are invalid.
+
+        Side effects:
+            Refreshes scene rendering and emits scene/history signals after a change.
+        """
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        if not isinstance(placement, QRectF):
+            raise TypeError("placement must be a QRectF")
+        resolved_scene_id = self._resolve_public_scene_id(scene_id)
+        result = self.sceneMutationCoordinator().set_placement(
+            resolved_scene_id,
+            layer_id,
+            LayerPlacement(
+                placement.x(),
+                placement.y(),
+                placement.width(),
+                placement.height(),
+            ),
+        )
+        if result.changed:
+            self._publish_scene_placement_change()
+        return result.changed
+
+    def sceneEditUndoAvailable(self) -> bool:
+        """Return whether the active scene has a layer-placement undo command."""
+        scene_id = self._active_resolved_scene_id()
+        return bool(
+            scene_id is not None
+            and self.sceneMutationCoordinator().can_undo_placement(scene_id)
+        )
+
+    def sceneEditRedoAvailable(self) -> bool:
+        """Return whether the active scene has a layer-placement redo command."""
+        scene_id = self._active_resolved_scene_id()
+        return bool(
+            scene_id is not None
+            and self.sceneMutationCoordinator().can_redo_placement(scene_id)
+        )
+
+    def undoSceneEdit(self) -> bool:
+        """Undo the latest layer-placement change in the active scene."""
+        scene_id = self._active_resolved_scene_id()
+        if scene_id is None:
+            return False
+        result = self.sceneMutationCoordinator().undo_placement(scene_id)
+        if result.changed:
+            self._publish_scene_placement_change()
+        return result.changed
+
+    def redoSceneEdit(self) -> bool:
+        """Redo the next layer-placement change in the active scene."""
+        scene_id = self._active_resolved_scene_id()
+        if scene_id is None:
+            return False
+        result = self.sceneMutationCoordinator().redo_placement(scene_id)
+        if result.changed:
+            self._publish_scene_placement_change()
+        return result.changed
 
     def registerSceneOverlay(
         self,
@@ -1158,6 +1300,50 @@ class QPane(QWidget):
             )
         return coordinator
 
+    def sceneLayerMovementInteraction(self) -> SceneLayerMovementInteraction:
+        """Expose private panel-to-scene movement adaptation."""
+        interaction = self._scene_movement_interaction
+        if interaction is None:
+            raise AttributeError("Scene layer movement accessed before initialization")
+        return interaction
+
+    def activeMaskLayerCoordinates(self) -> ActiveMaskLayerCoordinates:
+        """Expose private active-mask layer coordinate mapping."""
+        coordinates = self._active_mask_coordinates
+        if coordinates is None:
+            raise AttributeError(
+                "Active mask coordinates accessed before initialization"
+            )
+        return coordinates
+
+    def _active_resolved_scene_id(self) -> uuid.UUID | None:
+        """Return the active internal scene identifier used for mutation routing."""
+        scene = self.sceneMutationCoordinator().active_scene()
+        return None if scene is None else scene.scene_id
+
+    def _resolve_public_scene_id(self, scene_id: uuid.UUID) -> uuid.UUID:
+        """Map a public default-composition ID to its resolved scene ID."""
+        active_scene = self.sceneMutationCoordinator().active_scene()
+        public_scene = self.currentScene()
+        if (
+            active_scene is not None
+            and active_scene.scene_id != scene_id
+            and public_scene is not None
+            and public_scene.scene_id == scene_id
+        ):
+            return active_scene.scene_id
+        return scene_id
+
+    def _publish_scene_placement_change(self) -> None:
+        """Refresh rendering and publish scene placement/history state."""
+        self._handle_internal_scene_content_changed()
+        self._emit_scene_changed()
+
+    def _refresh_scene_placement_preview(self) -> None:
+        """Invalidate scene pixels and schedule painting for transient placement."""
+        self.view().mark_dirty()
+        self.update()
+
     def sceneProviderRegistry(self) -> SceneProviderRegistry:
         """Expose private scene-provider registration for feature workflows."""
         registry = self._scene_provider_registry
@@ -1292,6 +1478,9 @@ class QPane(QWidget):
         self._state.cache_coordinator = self._state.build_cache_coordinator()
         self._state.cache_registry = CacheRegistry(self._state.cache_coordinator)
         self._scene_provider_registry = SceneProviderRegistry()
+        self._scene_provider_registry.register_post_processor(
+            self._scene_placement_preview
+        )
         self._source_resolver_registry = LayerSourceResolverRegistry()
         self._image_catalog = ImageCatalog(
             config=self.settings,
@@ -1301,6 +1490,13 @@ class QPane(QWidget):
         self.layerSourceResolverRegistry().register(
             CatalogLayerSourceResolver(self._image_catalog)
         )
+        self._composition_service = CompositionService()
+        self.sceneProviderRegistry().register_geometry_adapter(
+            ImageSceneLayerAdapter(
+                layer_instances=self._composition_service.image_layers.layers_for_image,
+                revision_provider=lambda: self._composition_service.image_layers.revision,
+            )
+        )
         view = View(
             qpane=self,
             state=self._state,
@@ -1309,7 +1505,28 @@ class QPane(QWidget):
         )
         self._view = view
         self._scene_mutations = SceneMutationCoordinator(
-            scene_provider=view.current_scene_descriptor
+            scene_provider=view.current_scene_descriptor,
+            placement_history=self._composition_service.placement_history,
+        )
+        self._scene_movement = SceneLayerMovementController(
+            self._scene_selection,
+            self._scene_placement_preview,
+            self._scene_mutations,
+        )
+        self._scene_movement_interaction = SceneLayerMovementInteraction(
+            movement=self._scene_movement,
+            hit_test=view.scene_selection_hit_test,
+            panel_to_scene=view.panel_to_scene_point,
+            publish_change=self._publish_scene_placement_change,
+            refresh_preview=self._refresh_scene_placement_preview,
+        )
+        self._active_mask_coordinates = ActiveMaskLayerCoordinates(
+            active_mask_id=lambda: (
+                None if self._masks is None else self._masks.active_mask_id()
+            ),
+            active_scene=self._scene_mutations.active_scene,
+            panel_to_layer=view.panel_to_layer_source_point,
+            layer_to_panel=view.layer_source_to_panel_point,
         )
         self._catalog = Catalog(
             catalog=self._image_catalog,
@@ -1318,7 +1535,15 @@ class QPane(QWidget):
             swap_delegate=view.swap_delegate,
             qpane=self,
         )
-        self._composition_service = CompositionService()
+        self.sceneMutationCoordinator().register_owner(
+            DefaultImageLayerMutationOwner(
+                self._composition_service.image_layers,
+                self._image_catalog.getCurrentId,
+            )
+        )
+        self.sceneMutationCoordinator().register_owner(
+            StoredSceneLayerMutationOwner(self._composition_service)
+        )
         self._composition_scene_adapter = CompositionSceneAdapter(
             compositions=self._composition_service,
             catalog=self._image_catalog,
@@ -2160,6 +2385,7 @@ class QPane(QWidget):
         changed = service.sync_catalog(
             self.catalog().imageIDs(),
             path_lookup=self.imagePath,
+            size_lookup=lambda image_id: self._image_catalog.getImage(image_id).size(),
         )
         active = service.active_record()
         current_id = self.catalog().currentImageID()
@@ -2246,6 +2472,11 @@ class QPane(QWidget):
     def _emit_scene_changed(self) -> None:
         """Emit the current normalized scene snapshot."""
         self.sceneChanged.emit(self._current_scene_snapshot())
+        if self._scene_mutations is not None:
+            self.sceneEditHistoryChanged.emit(
+                self.sceneEditUndoAvailable(),
+                self.sceneEditRedoAvailable(),
+            )
 
     def _current_scene_snapshot(self) -> QPaneScene | None:
         """Return a public scene snapshot for the active composition."""
@@ -2260,6 +2491,29 @@ class QPane(QWidget):
         if image is None or image.isNull():
             return None
         bounds = QRectF(0.0, 0.0, float(image.width()), float(image.height()))
+        base_layer_id = base_image_layer_id(record.primary_image_id)
+        base_instance = service.image_layers.layer(
+            record.primary_image_id,
+            base_layer_id,
+        )
+        placement = (
+            bounds
+            if base_instance is None
+            else QRectF(
+                base_instance.placement.x,
+                base_instance.placement.y,
+                base_instance.placement.width,
+                base_instance.placement.height,
+            )
+        )
+        interaction = (
+            QPaneLayerInteractionPolicy()
+            if base_instance is None
+            else QPaneLayerInteractionPolicy(
+                selectable=base_instance.interaction.selectable,
+                movable=base_instance.interaction.movable,
+            )
+        )
         return QPaneScene(
             composition_id=record.composition_id,
             scene_id=record.composition_id,
@@ -2267,15 +2521,16 @@ class QPane(QWidget):
             bounds=bounds,
             layers=(
                 QPaneSceneLayer(
-                    layer_id=base_image_layer_id(record.primary_image_id),
+                    layer_id=base_layer_id,
                     image_id=record.primary_image_id,
-                    placement=bounds,
+                    placement=placement,
                     visible=True,
                     opacity=1.0,
                     clip=None,
                     hit_test=True,
                     role="base-image",
                     metadata={},
+                    interaction=interaction,
                 ),
             ),
         )
@@ -2284,6 +2539,8 @@ class QPane(QWidget):
         self, dirty_rect: QRect | QRectF | None = None
     ) -> None:
         """Refresh rendering after private scene content changes."""
+        if self._scene_movement is not None and self._scene_mutations is not None:
+            self._scene_movement.synchronize_scene(self._scene_mutations.active_scene())
         try:
             self.view().mark_dirty(dirty_rect)
         except RuntimeError:  # pragma: no cover - deleted Qt object during teardown

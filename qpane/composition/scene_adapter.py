@@ -31,6 +31,7 @@ from ..scene.model import (
     LayerClip,
     LayerDescriptor,
     LayerHitTest,
+    LayerInteractionPolicy,
     LayerKind,
     LayerPlacement,
     SceneDescriptor,
@@ -39,7 +40,12 @@ from ..scene.model import (
 from ..scene.providers import SceneContribution
 from ..scene.render_plan import SceneLayerHitTestResult
 from ..scene.sources import CatalogImageSource
-from ..types import QPaneSceneClip, QPaneSceneHit, QPaneSceneLayer
+from ..types import (
+    QPaneLayerInteractionPolicy,
+    QPaneSceneClip,
+    QPaneSceneHit,
+    QPaneSceneLayer,
+)
 from .model import CompositionKind, CompositionRecord, CompositionSceneLayer
 from .service import CompositionService
 
@@ -135,6 +141,10 @@ class CompositionSceneAdapter:
             opacity=layer.opacity,
             clip=_copy_public_clip(layer.clip),
             hit_test=layer.hit_test,
+            interaction=QPaneLayerInteractionPolicy(
+                selectable=layer.interaction.selectable,
+                movable=layer.interaction.movable,
+            ),
             role=layer.role,
             metadata=layer.metadata,
         )
@@ -167,8 +177,11 @@ class CompositionSceneAdapter:
             clip=_internal_clip(layer.clip),
             hit_test=LayerHitTest(
                 enabled=layer.hit_test,
-                selectable=False,
                 role=layer.role,
+            ),
+            interaction=LayerInteractionPolicy(
+                selectable=layer.interaction.selectable,
+                movable=layer.interaction.movable,
             ),
             source_revision=revision,
         )

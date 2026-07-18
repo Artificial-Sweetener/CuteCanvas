@@ -19,12 +19,14 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from PySide6.QtGui import QColor
 
 from ..scene.identity import base_image_layer_id
+from ..scene.model import LayerInteractionPolicy, LayerPlacement
 
 
 class CompositionLayerSourceKind(str, Enum):
@@ -41,11 +43,12 @@ class CompositionLayerInstance:
     layer_id: uuid.UUID
     source_kind: CompositionLayerSourceKind
     source_id: uuid.UUID
+    placement: LayerPlacement
     visible: bool = True
     opacity: float = 1.0
     tint: QColor | None = None
     hit_test: bool = True
-    selectable: bool = False
+    interaction: LayerInteractionPolicy = field(default_factory=LayerInteractionPolicy)
     role: str = "content"
     label: str | None = None
 
@@ -73,7 +76,7 @@ class ImageSceneLayerStore:
         """Return the revision of ordered layer-instance state."""
         return self._revision
 
-    def ensure_image(self, image_id: uuid.UUID) -> None:
+    def ensure_image(self, image_id: uuid.UUID, placement: LayerPlacement) -> None:
         """Ensure an image scene begins with its catalog image layer."""
         if image_id in self._layers_by_image:
             return
@@ -81,6 +84,7 @@ class ImageSceneLayerStore:
             layer_id=base_image_layer_id(image_id),
             source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
             source_id=image_id,
+            placement=placement,
             role="base-image",
         )
         self._layers_by_image[image_id] = [instance]
@@ -158,7 +162,8 @@ class ImageSceneLayerStore:
         self, image_id: uuid.UUID, instance: CompositionLayerInstance
     ) -> bool:
         """Append a layer instance to an existing image scene."""
-        self.ensure_image(image_id)
+        if image_id not in self._layers_by_image:
+            return False
         layers = self._layers_by_image[image_id]
         if any(candidate.layer_id == instance.layer_id for candidate in layers):
             return False
@@ -247,6 +252,32 @@ class ImageSceneLayerStore:
         self._revision += 1
         return True
 
+    def update_interaction(
+        self,
+        image_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        interaction: LayerInteractionPolicy,
+    ) -> bool:
+        """Replace direct-interaction permissions for one layer instance."""
+        return self._replace_layer(
+            image_id,
+            layer_id,
+            lambda current: replace(current, interaction=interaction),
+        )
+
+    def update_placement(
+        self,
+        image_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        placement: LayerPlacement,
+    ) -> bool:
+        """Replace authoritative scene-space placement for one layer instance."""
+        return self._replace_layer(
+            image_id,
+            layer_id,
+            lambda current: replace(current, placement=placement),
+        )
+
     def update_label(
         self,
         image_id: uuid.UUID,
@@ -270,6 +301,35 @@ class ImageSceneLayerStore:
         normalized = label.strip() if isinstance(label, str) else None
         normalized = normalized or None
         replacement = replace(layers[index], label=normalized)
+        if replacement == layers[index]:
+            return False
+        layers[index] = replacement
+        self._revision += 1
+        return True
+
+    def _replace_layer(
+        self,
+        image_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        replacement_factory: Callable[
+            [CompositionLayerInstance], CompositionLayerInstance
+        ],
+    ) -> bool:
+        """Replace one immutable layer instance through ``replacement_factory``."""
+        layers = self._layers_by_image.get(image_id)
+        if not layers:
+            return False
+        index = next(
+            (
+                position
+                for position, instance in enumerate(layers)
+                if instance.layer_id == layer_id
+            ),
+            None,
+        )
+        if index is None:
+            return False
+        replacement = replacement_factory(layers[index])
         if replacement == layers[index]:
             return False
         layers[index] = replacement

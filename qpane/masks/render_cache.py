@@ -85,7 +85,7 @@ class MaskRenderCache:
     def __init__(
         self,
         assets: MaskAssetStore,
-        image_to_panel_point: Callable[[QPoint], QPoint | QPointF | None],
+        source_to_panel_point: Callable[[QPoint], QPoint | QPointF | None],
         config: Config,
         mask_config: MaskConfigSlice,
         *,
@@ -97,7 +97,7 @@ class MaskRenderCache:
     ) -> None:
         """Initialize derived-render state and injected domain lookups."""
         self._assets = assets
-        self._image_to_panel_point = image_to_panel_point
+        self._source_to_panel_point = source_to_panel_point
         self._config_source = config
         self._mask_config = mask_config
         self._active_mask_id = active_mask_id
@@ -795,8 +795,8 @@ class MaskRenderCache:
 
     def _emit_dirty_rect(self, mask_id: uuid.UUID, image_rect: QRect) -> None:
         """Convert one changed image region to panel coordinates."""
-        top_left = self._image_to_panel_point(image_rect.topLeft())
-        bottom_right = self._image_to_panel_point(image_rect.bottomRight())
+        top_left = self._source_to_panel_point(image_rect.topLeft())
+        bottom_right = self._source_to_panel_point(image_rect.bottomRight())
         if top_left is None or bottom_right is None:
             self._render_changed(mask_id, QRect())
             return

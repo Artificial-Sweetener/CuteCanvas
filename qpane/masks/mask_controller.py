@@ -44,7 +44,7 @@ class MaskController(QObject):
     def __init__(
         self,
         mask_manager: MaskAssetStore,
-        image_to_panel_point: Callable[[QPoint], QPoint | QPointF | None],
+        source_to_panel_point: Callable[[QPoint], QPoint | QPointF | None],
         config: Config,
         mask_config: MaskConfigSlice | None = None,
         stroke_diagnostics: MaskStrokeDiagnostics | None = None,
@@ -54,7 +54,7 @@ class MaskController(QObject):
 
         Args:
             mask_manager: Manager providing mask data for each image.
-            image_to_panel_point: Callable to convert image coordinates for UI updates.
+            source_to_panel_point: Callable to convert mask-source coordinates for UI updates.
             config: Feature-aware configuration providing cache budgets.
             mask_config: Optional mask slice override when the caller already
                 resolved the feature configuration.
@@ -63,8 +63,8 @@ class MaskController(QObject):
         """
         super().__init__()
         self._assets = mask_manager
-        self._image_to_panel_point: Callable[[QPoint], QPoint | QPointF | None] = (
-            image_to_panel_point
+        self._source_to_panel_point: Callable[[QPoint], QPoint | QPointF | None] = (
+            source_to_panel_point
         )
         self._config_source = config
         self._mask_config = mask_config or require_mask_config(config)
@@ -73,7 +73,7 @@ class MaskController(QObject):
         self._epochs = MaskEditEpochs()
         self._renders = MaskRenderCache(
             mask_manager,
-            image_to_panel_point,
+            source_to_panel_point,
             config,
             self._mask_config,
             active_mask_id=lambda: self._active_mask_id,

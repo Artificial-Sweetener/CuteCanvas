@@ -74,11 +74,13 @@ class SceneAssembly:
         )
         contributions = [SceneContribution(base_scene, order=0)]
         contributions.extend(self._providers.contributions_for(base_scene, image_id))
-        return self._resolve(tuple(contributions))
+        scene = self._resolve(tuple(contributions))
+        return None if scene is None else self._providers.process_scene(scene)
 
     def resolve_replacement(self) -> SceneDescriptor | None:
         """Resolve the active replacement scene when one is registered."""
-        return self._resolve(self._providers.replacement_contributions())
+        scene = self._resolve(self._providers.replacement_contributions())
+        return None if scene is None else self._providers.process_scene(scene)
 
     @staticmethod
     def _resolve(

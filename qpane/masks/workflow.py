@@ -38,7 +38,8 @@ from ..core import Config
 from ..masks import MaskDelegate
 from ..rendering import CoordinateContext
 from ..sam import SamDelegate
-from ..types import DiagnosticRecord
+from ..scene.identity import default_scene_id
+from ..types import DiagnosticRecord, QPaneLayerInteractionPolicy
 from .mask_diagnostics import (
     mask_brush_detail_provider,
     mask_job_detail_provider,
@@ -70,10 +71,13 @@ class MaskInfo:
     """Metadata describing a mask layer for host-facing presentation."""
 
     mask_id: uuid.UUID
+    scene_id: uuid.UUID | None
+    layer_id: uuid.UUID | None
     color: QColor | None
     label: str | None
     opacity: float | None
     image_ids: tuple[uuid.UUID, ...]
+    interaction: QPaneLayerInteractionPolicy
     is_active: bool
 
 
@@ -645,12 +649,32 @@ class Masks:
             opacity = float(opacity) if opacity is not None else None
         except (TypeError, ValueError):
             opacity = None
+        current_image_id = self._catalog.currentImageID()
+        scene_image_id = (
+            current_image_id
+            if current_image_id in image_ids
+            else next(iter(image_ids), None)
+        )
         return MaskInfo(
             mask_id=mask_id,
+            scene_id=(
+                default_scene_id(scene_image_id)
+                if instance is not None and scene_image_id is not None
+                else None
+            ),
+            layer_id=None if instance is None else instance.layer_id,
             color=None if instance is None else instance.tint,
             label=label,
             opacity=opacity,
             image_ids=image_ids,
+            interaction=(
+                QPaneLayerInteractionPolicy()
+                if instance is None
+                else QPaneLayerInteractionPolicy(
+                    selectable=instance.interaction.selectable,
+                    movable=instance.interaction.movable,
+                )
+            ),
             is_active=mask_id == self.active_mask_id(),
         )
 

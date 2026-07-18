@@ -25,6 +25,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QRectF
 
+from ..scene.model import LayerInteractionPolicy
 from ..types import ComparisonOrientation, QPaneSceneClip
 
 
@@ -70,6 +71,7 @@ class CompositionSceneLayer:
     opacity: float
     clip: QPaneSceneClip | None
     hit_test: bool
+    interaction: LayerInteractionPolicy
     role: str
     metadata: dict[str, object]
 

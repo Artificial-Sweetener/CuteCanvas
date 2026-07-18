@@ -67,7 +67,7 @@ def hit_test_items_for_scene(
             layer_id=layer.layer_id,
             bounds=layer.placement,
             enabled=layer.hit_test.enabled,
-            selectable=layer.hit_test.selectable,
+            selectable=layer.interaction.selectable,
             role=layer.hit_test.role,
             source=layer.source,
         )

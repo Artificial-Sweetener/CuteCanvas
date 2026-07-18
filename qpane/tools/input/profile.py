@@ -14,21 +14,18 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Device-neutral pointer input models and interaction coordination."""
+"""Input capability metadata declared by tools."""
 
-from .arena import TouchGestureArena, TouchGestureKind
-from .controller import PointerInputController
-from .model import PointerDeviceKind, PointerPhase, PointerSample
-from .navigation import TouchNavigationSession
-from .profile import ToolInputProfile
+from dataclasses import dataclass
 
-__all__ = (
-    "PointerDeviceKind",
-    "PointerInputController",
-    "PointerPhase",
-    "PointerSample",
-    "ToolInputProfile",
-    "TouchGestureArena",
-    "TouchGestureKind",
-    "TouchNavigationSession",
-)
+
+@dataclass(frozen=True, slots=True)
+class ToolInputProfile:
+    """Declare which normalized direct-input paths a tool supports."""
+
+    navigation: bool = False
+    touch: bool = False
+    tablet: bool = False
+    touch_requires_host_enablement: bool = False
+    tablet_requires_host_enablement: bool = False
+    touch_preview: bool = False

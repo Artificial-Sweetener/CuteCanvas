@@ -89,7 +89,7 @@ def _mask_swap_environment(
         mask_manager = MaskAssetStore(undo_limit=qpane.settings.mask_undo_limit)
         controller = MaskController(
             mask_manager,
-            image_to_panel_point=lambda pt: pt,
+            source_to_panel_point=lambda pt: pt,
             config=qpane.settings,
         )
         service = MaskService(

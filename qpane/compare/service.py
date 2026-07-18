@@ -251,7 +251,6 @@ class CompareService:
             clip=clip,
             hit_test=LayerHitTest(
                 enabled=True,
-                selectable=False,
                 role="comparison-image",
             ),
             source_revision=revision,

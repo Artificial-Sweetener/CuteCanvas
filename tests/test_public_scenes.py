@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from PySide6.QtCore import QPoint, QRectF, QSize
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, Qt
 
 from examples.demonstration import scene_composition
@@ -29,6 +29,7 @@ from qpane import (
     ComparisonOrientation,
     QPane,
     QPaneCatalogImageLayerRequest,
+    QPaneLayerInteractionPolicy,
     QPaneScene,
     QPaneSceneClip,
     QPaneSceneRequest,
@@ -37,6 +38,7 @@ from qpane import (
     QPaneTemplateLayer,
 )
 from qpane.scene.identity import default_catalog_asset_key
+from qpane.scene.model import LayerPlacement
 from qpane.scene.render_plan import RasterLayerRenderItem, RenderStrategy
 from tests.helpers.render_compare import rendered_overscanned_widget_frame
 
@@ -629,6 +631,231 @@ def test_scene_hit_test_returns_public_layer_metadata_without_selection(qapp) ->
         assert hit.metadata["slot"] == 1
         assert hit.role == "thumbnail"
         assert qpane.currentImageID() == before
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_scene_layer_interaction_policy_round_trips_and_updates_generically(
+    qapp,
+) -> None:
+    """Stored scene policy should survive normalization and generic mutation."""
+    qpane = QPane(features=())
+    qpane.resize(200, 100)
+    try:
+        first_id, second_id = _load_images(qpane)
+        request = _scene_request(first_id, second_id)
+        movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+        first = request.layers[0]
+        request = QPaneSceneRequest(
+            composition_id=request.composition_id,
+            title=request.title,
+            bounds=request.bounds,
+            layers=(
+                QPaneCatalogImageLayerRequest(
+                    layer_id=first.layer_id,
+                    image_id=first.image_id,
+                    placement=first.placement,
+                    role=first.role,
+                    metadata=first.metadata,
+                    interaction=movable,
+                ),
+                request.layers[1],
+            ),
+        )
+        composition_id = qpane.composeScene(request)
+
+        scene = qpane.currentScene()
+        assert scene is not None
+        assert scene.layers[0].interaction == movable
+        plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        assert plan.render_items[0].descriptor.interaction.selectable is True
+        assert plan.render_items[0].descriptor.interaction.movable is True
+
+        moved = QRectF(15.0, 10.0, 100.0, 100.0)
+        assert qpane.setLayerPlacement(composition_id, first.layer_id, moved)
+        moved_scene = qpane.currentScene()
+        assert moved_scene is not None
+        assert moved_scene.bounds == request.bounds
+        assert moved_scene.layers[0].placement == moved
+        assert qpane.sceneEditUndoAvailable()
+        assert not qpane.sceneEditRedoAvailable()
+        assert qpane.undoSceneEdit()
+        assert qpane.currentScene().layers[0].placement == first.placement
+        assert qpane.sceneEditRedoAvailable()
+        assert qpane.redoSceneEdit()
+        assert qpane.currentScene().layers[0].placement == moved
+
+        locked = QPaneLayerInteractionPolicy()
+        assert qpane.setLayerInteractionPolicy(
+            composition_id,
+            first.layer_id,
+            locked,
+        )
+        assert qpane.currentScene().layers[0].interaction == locked
+        assert not qpane.setLayerInteractionPolicy(
+            composition_id,
+            first.layer_id,
+            locked,
+        )
+        assert not qpane.setLayerPlacement(
+            composition_id,
+            first.layer_id,
+            QRectF(30.0, 20.0, 100.0, 100.0),
+        )
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_move_interaction_previews_then_commits_generic_layer_placement(qapp) -> None:
+    """Move interaction should preview geometry and commit one undoable placement."""
+    qpane = QPane(features=())
+    qpane.resize(200, 100)
+    try:
+        first_id, second_id = _load_images(qpane)
+        request = _scene_request(first_id, second_id)
+        first = request.layers[0]
+        request = QPaneSceneRequest(
+            composition_id=request.composition_id,
+            title=request.title,
+            bounds=request.bounds,
+            layers=(
+                QPaneCatalogImageLayerRequest(
+                    layer_id=first.layer_id,
+                    image_id=first.image_id,
+                    placement=first.placement,
+                    role=first.role,
+                    metadata=first.metadata,
+                    interaction=QPaneLayerInteractionPolicy(
+                        selectable=True,
+                        movable=True,
+                    ),
+                ),
+                request.layers[1],
+            ),
+        )
+        qpane.composeScene(request)
+        qpane.show()
+        qapp.processEvents()
+        initial_plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert initial_plan is not None
+        initial_item = initial_plan.render_items[0]
+        source_revision = initial_item.descriptor.source_revision
+        origin = initial_item.transform.map(QPointF(50.0, 50.0))
+        target = initial_item.transform.map(QPointF(70.0, 60.0))
+
+        movement = qpane.sceneLayerMovementInteraction()
+        assert movement.begin(origin)
+        assert movement.update(target)
+        preview_plan = qpane.view().calculateRenderPlan(is_blank=False)
+
+        assert preview_plan is not None
+        preview = preview_plan.render_items[0].descriptor
+        assert preview.placement == LayerPlacement(20.0, 10.0, 100.0, 100.0)
+        assert preview.source_revision == source_revision
+        assert qpane.currentScene().layers[0].placement == first.placement
+
+        assert movement.finish(target)
+        assert qpane.currentScene().layers[0].placement == QRectF(
+            20.0,
+            10.0,
+            100.0,
+            100.0,
+        )
+        assert qpane.sceneEditUndoAvailable()
+        assert qpane.undoSceneEdit()
+        assert qpane.currentScene().layers[0].placement == first.placement
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_move_interaction_paints_transient_placement_before_commit(qapp) -> None:
+    """Dragging should repaint moved scene pixels before durable placement changes."""
+    qpane = QPane(features=())
+    qpane.resize(100, 100)
+    try:
+        image_id = uuid.uuid4()
+        qpane.setImagesByID(
+            QPane.imageMapFromLists(
+                [_solid_image(50, 50, Qt.red)],
+                [None],
+                [image_id],
+            ),
+            image_id,
+        )
+        layer_id = uuid.uuid4()
+        qpane.composeScene(
+            QPaneSceneRequest(
+                composition_id=None,
+                title="Painted movement preview",
+                bounds=QRectF(0.0, 0.0, 100.0, 100.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=layer_id,
+                        image_id=image_id,
+                        placement=QRectF(0.0, 0.0, 50.0, 50.0),
+                        interaction=QPaneLayerInteractionPolicy(
+                            selectable=True,
+                            movable=True,
+                        ),
+                    ),
+                ),
+            )
+        )
+        qpane.show()
+        qapp.processEvents()
+        plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        item = plan.render_items[0]
+        origin = item.transform.map(QPointF(25.0, 25.0))
+        panel_delta = QPointF(25.0 * plan.zoom, 0.0)
+        old_only = item.transform.map(QPointF(10.0, 25.0)).toPoint()
+        new_only = (item.transform.map(QPointF(40.0, 25.0)) + panel_delta).toPoint()
+        initial_frame = qpane.grab().toImage()
+        assert initial_frame.pixelColor(old_only).red() > 200
+        assert initial_frame.pixelColor(new_only).red() < 200
+
+        movement = qpane.sceneLayerMovementInteraction()
+        assert movement.begin(origin)
+        assert movement.update(origin + panel_delta)
+        qapp.processEvents()
+        preview_frame = qpane.grab().toImage()
+
+        assert preview_frame.pixelColor(old_only).red() < 200
+        assert preview_frame.pixelColor(new_only).red() > 200
+        assert qpane.currentScene().layers[0].placement == QRectF(
+            0.0,
+            0.0,
+            50.0,
+            50.0,
+        )
+        assert movement.cancel()
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_generated_default_image_layer_uses_generic_movement_policy(qapp) -> None:
+    """Default catalog layers should use the same policy and placement mutation path."""
+    qpane = QPane(features=())
+    try:
+        _load_images(qpane)
+        scene = qpane.currentScene()
+        assert scene is not None
+        layer = scene.layers[0]
+        policy = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+
+        assert qpane.setLayerInteractionPolicy(scene.scene_id, layer.layer_id, policy)
+        assert qpane.setLayerPlacement(
+            scene.scene_id,
+            layer.layer_id,
+            QRectF(6.0, 4.0, layer.placement.width(), layer.placement.height()),
+        )
+
+        updated = qpane.currentScene()
+        assert updated is not None
+        assert updated.layers[0].interaction == policy
+        assert updated.layers[0].placement.x() == pytest.approx(6.0)
+        assert updated.layers[0].placement.y() == pytest.approx(4.0)
     finally:
         _cleanup_qpane(qpane, qapp)
 
