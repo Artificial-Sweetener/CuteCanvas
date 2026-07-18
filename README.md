@@ -133,12 +133,12 @@ QPane is designed to be the library I wish I had. It uses a **Facade Pattern** t
 
 ## Try the Demo
 
-The package includes a comprehensive demo application that lets you test the performance and features (including the AI tools) without writing any code. The demo launcher bootstraps a dedicated virtual environment and installs all necessary dependencies, so a working Python install is all you need to get started.
+The source repository includes a comprehensive demo application that lets you test the performance and features (including the AI tools) without writing any code. Clone the repository to run it; examples are intentionally excluded from the PyPI wheel. The demo launcher bootstraps a dedicated virtual environment and installs all necessary dependencies, so a working Python install is all you need to get started.
 
 Developers without touch or pen hardware can run `python -m examples.demonstration.touch_and_pen_simulator` to inspect finger feedback, pen and eraser hover, pressure changes, proximity leave, two-finger navigation, and touch-to-mouse cursor restoration through synthetic Qt events.
 
 ```bash
-# Run the interactive launcher
+# From the repository root, run the interactive launcher
 python -m examples.demo
 ```
 
