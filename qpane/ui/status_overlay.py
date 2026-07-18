@@ -173,6 +173,7 @@ class QPaneStatusOverlay(QLabel):
         self, rows: Sequence[tuple[str, str]], *, stale: bool, force: bool = False
     ) -> None:
         """Render rows onto the pixmap and update positioning/visibility."""
+        self.ensurePolished()
         parent = self.parentWidget()
         width_limit: int | None = None
         available_height: int | None = None
@@ -312,7 +313,7 @@ class QPaneStatusOverlay(QLabel):
         if width_limit is not None:
             bounding_rect = metrics.boundingRect(
                 QRect(0, 0, width_limit, 10_000),
-                Qt.TextWordWrap,
+                Qt.AlignLeft | Qt.AlignTop,
                 text,
             )
         else:

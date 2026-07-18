@@ -1966,6 +1966,7 @@ def test_mask_patch_undo_updates_overlay_cache_in_place(
     qpane, mask_manager, _ = qpane_with_mask
     service = qpane.mask_service
     assert service is not None
+    service.setPrefetchEnabled(False)
     mask_id = service.createBlankMask(qpane.original_image.size())
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)

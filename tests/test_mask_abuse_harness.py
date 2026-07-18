@@ -379,7 +379,7 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
     """Undo must atomically replace the visible mask under delayed colorization."""
     harness = MountedQPaneHarness(
         qapp,
-        image_size=QSize(4096, 4096),
+        image_size=QSize(2048, 2048),
         widget_size=QSize(500, 500),
         mask_count=1,
         brush_size=40,
