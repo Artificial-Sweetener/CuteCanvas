@@ -56,11 +56,11 @@ class QtStrokeDriver:
         """Send the first contact event for ``action``."""
         point = action.points[0].to_qpoint()
         if action.device is PointerKind.MOUSE:
-            QTest.mousePress(
-                self._harness.viewer,
-                Qt.MouseButton.LeftButton,
-                Qt.KeyboardModifier.NoModifier,
+            self._send_mouse(
+                QEvent.Type.MouseButtonPress,
                 point,
+                button=Qt.MouseButton.LeftButton,
+                buttons=Qt.MouseButton.LeftButton,
             )
         elif action.device is PointerKind.TOUCH:
             QTest.touchEvent(
@@ -80,7 +80,13 @@ class QtStrokeDriver:
         """Send one continued-contact sample from ``action``."""
         point = action.points[point_index].to_qpoint()
         if action.device is PointerKind.MOUSE:
-            QTest.mouseMove(self._harness.viewer, point, delay=action.step_delay_ms)
+            self._send_mouse(
+                QEvent.Type.MouseMove,
+                point,
+                button=Qt.MouseButton.NoButton,
+                buttons=Qt.MouseButton.LeftButton,
+            )
+            self._advance(action.step_delay_ms)
         elif action.device is PointerKind.TOUCH:
             QTest.touchEvent(
                 self._harness.viewer,
@@ -100,11 +106,11 @@ class QtStrokeDriver:
         """Release the active pointer, optionally preserving queued transition work."""
         point = action.points[-1].to_qpoint()
         if action.device is PointerKind.MOUSE:
-            QTest.mouseRelease(
-                self._harness.viewer,
-                Qt.MouseButton.LeftButton,
-                Qt.KeyboardModifier.NoModifier,
+            self._send_mouse(
+                QEvent.Type.MouseButtonRelease,
                 point,
+                button=Qt.MouseButton.LeftButton,
+                buttons=Qt.MouseButton.NoButton,
             )
         elif action.device is PointerKind.TOUCH:
             QTest.touchEvent(
@@ -238,6 +244,29 @@ class QtStrokeDriver:
             buttons,
         )
         self._harness.qapp.sendEvent(receiver or self._harness.viewer, event)
+
+    def _send_mouse(
+        self,
+        event_type: QEvent.Type,
+        point: QPoint,
+        *,
+        button: Qt.MouseButton,
+        buttons: Qt.MouseButton,
+    ) -> None:
+        """Deliver one deterministic physical-mouse sample to the mounted pane."""
+        position = QPointF(point)
+        global_position = QPointF(self._harness.viewer.mapToGlobal(point))
+        event = QMouseEvent(
+            event_type,
+            position,
+            position,
+            global_position,
+            button,
+            buttons,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.MouseEventSource.MouseEventNotSynthesized,
+        )
+        self._harness.qapp.sendEvent(self._harness.viewer, event)
 
     def _advance(self, delay_ms: int) -> None:
         """Advance Qt timers without replacing the normal event path."""

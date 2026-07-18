@@ -69,6 +69,35 @@ class _CursorChangeCounter(QObject):
         return False
 
 
+class _MouseSequenceProbe(QObject):
+    """Capture the mouse button lifecycle delivered to a mounted pane."""
+
+    def __init__(self) -> None:
+        """Initialize an empty sequence."""
+        super().__init__()
+        self.samples: list[
+            tuple[
+                QEvent.Type,
+                Qt.MouseButton,
+                Qt.MouseButton,
+                Qt.MouseEventSource,
+            ]
+        ] = []
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Record relevant mouse events without consuming them."""
+        del watched
+        if isinstance(event, QMouseEvent) and event.type() in {
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseMove,
+            QEvent.Type.MouseButtonRelease,
+        }:
+            self.samples.append(
+                (event.type(), event.button(), event.buttons(), event.source())
+            )
+        return False
+
+
 def test_abuse_actions_round_trip_through_replay_payload() -> None:
     """Every deterministic action must retain its meaning in a saved trace."""
     actions = deterministic_abuse_actions()
@@ -110,6 +139,49 @@ def test_failure_minimizer_removes_irrelevant_actions() -> None:
 
     assert minimized == (WaitAction(wait_ms=99),)
     assert report.violation is not None
+
+
+def test_mouse_stroke_driver_delivers_complete_physical_sequence(
+    qapp: QApplication,
+) -> None:
+    """The abuse driver must not depend on platform mouse injection state."""
+    harness = MountedQPaneHarness(qapp)
+    driver = QtStrokeDriver(harness)
+    probe = _MouseSequenceProbe()
+    stroke = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(120, 160), HarnessPoint(180, 160)),
+    )
+    harness.viewer.installEventFilter(probe)
+    try:
+        driver.begin(stroke)
+        driver.move(stroke, 1)
+        driver.end(stroke)
+
+        assert probe.samples == [
+            (
+                QEvent.Type.MouseButtonPress,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseEventSource.MouseEventNotSynthesized,
+            ),
+            (
+                QEvent.Type.MouseMove,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseEventSource.MouseEventNotSynthesized,
+            ),
+            (
+                QEvent.Type.MouseButtonRelease,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+                Qt.MouseEventSource.MouseEventNotSynthesized,
+            ),
+        ]
+        assert harness.wait_for_mask_undo_depth(harness.mask_ids[0], 1)
+    finally:
+        harness.viewer.removeEventFilter(probe)
+        harness.close()
 
 
 def test_mounted_qpane_survives_deterministic_cross_device_mask_abuse(
