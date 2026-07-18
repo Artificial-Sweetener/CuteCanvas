@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage
 
 from .identity import SceneLayerAssetKey
@@ -75,6 +75,10 @@ class LayerSourceResolver(Protocol):
         """Return full-resolution pixels for ``source``."""
         ...
 
+    def source_size(self, source: LayerSource) -> QSize | None:
+        """Return authoritative source dimensions without materializing pixels."""
+        ...
+
     def source_path(self, source: LayerSource) -> Path | None:
         """Return a path for ``source`` when one exists."""
         ...
@@ -85,9 +89,9 @@ class LayerSourceResolver(Protocol):
         *,
         asset_key: SceneLayerAssetKey,
         pyramid_asset_key: SceneLayerAssetKey,
-        full_image: QImage,
+        source_size: QSize,
         target_width: float,
-    ) -> QImage:
+    ) -> QImage | None:
         """Return the best available raster for rendering ``source``."""
         ...
 
@@ -123,6 +127,11 @@ class CatalogLayerSourceResolver:
             return None
         return image_getter(source.image_id)  # type: ignore[union-attr]
 
+    def source_size(self, source: LayerSource) -> QSize | None:
+        """Return catalog dimensions from its already-owned image reference."""
+        image = self.source_image(source)
+        return None if image is None or image.isNull() else image.size()
+
     def source_path(self, source: LayerSource) -> Path | None:
         """Return the catalog path for ``source``."""
         path_getter = getattr(self.catalog, "getPath", None)
@@ -136,16 +145,16 @@ class CatalogLayerSourceResolver:
         *,
         asset_key: SceneLayerAssetKey,
         pyramid_asset_key: SceneLayerAssetKey,
-        full_image: QImage,
+        source_size: QSize,
         target_width: float,
-    ) -> QImage:
+    ) -> QImage | None:
         """Return a catalog pyramid raster when available."""
         best_fit = getattr(self.catalog, "getBestFitImageForAsset", None)
         if callable(best_fit):
             source_image = best_fit(pyramid_asset_key, target_width)
             if source_image is not None and not source_image.isNull():
                 return source_image
-        return full_image
+        return self.source_image(source)
 
     def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
         """Treat catalog image source bounds as fully selectable coverage."""
@@ -345,24 +354,29 @@ class LayerSourceResolverRegistry:
         resolver = self.resolver_for(source)
         return None if resolver is None else resolver.source_path(source)
 
+    def source_size(self, source: LayerSource) -> QSize | None:
+        """Return source dimensions through the owning resolver."""
+        resolver = self.resolver_for(source)
+        return None if resolver is None else resolver.source_size(source)
+
     def best_fit_image(
         self,
         source: LayerSource,
         *,
         asset_key: SceneLayerAssetKey,
         pyramid_asset_key: SceneLayerAssetKey,
-        full_image: QImage,
+        source_size: QSize,
         target_width: float,
-    ) -> QImage:
+    ) -> QImage | None:
         """Return the best available raster through the owning resolver."""
         resolver = self.resolver_for(source)
         if resolver is None:
-            return full_image
+            return None
         return resolver.best_fit_image(
             source,
             asset_key=asset_key,
             pyramid_asset_key=pyramid_asset_key,
-            full_image=full_image,
+            source_size=source_size,
             target_width=target_width,
         )
 

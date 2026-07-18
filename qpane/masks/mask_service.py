@@ -36,18 +36,21 @@ from ..types import DiagnosticRecord, DiagnosticsDomain
 from .activation import MaskActivationController
 from .autosave_coordination import MaskAutosaveCoordinator
 from .component_adjustment import MaskComponentAdjustmentTool
+from .generated_edits import MaskGeneratedEditService
 from .layer_coordination import MaskLayerCoordinator
 from .layer_workflows import MaskLayerWorkflow
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_undo import MaskUndoProvider, MaskUndoState
+from .projection import MaskCanvasProjectionService
 from .render_coordination import (
     SNIPPET_ASYNC_THRESHOLD_PX,
     MaskRenderWorkCoordinator,
 )
 from .stroke_models import MaskStrokeSegmentPayload
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
+from .surface import MaskSurfaceSnapshot
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 
@@ -81,11 +84,21 @@ class MaskService:
         self._config_source = config
         self._config: MaskConfigSlice = mask_config
         self._executor = executor
+        self._projection = MaskCanvasProjectionService(
+            assets=mask_assets,
+            active_scene=qpane.sceneMutationCoordinator().active_scene,
+        )
+        self._generated_edits = MaskGeneratedEditService(
+            active_mask_id=mask_controller.get_active_mask_id,
+            projection=self._projection,
+            edits=mask_controller.edits,
+            renders=mask_controller.renders,
+        )
         self._autosave = MaskAutosaveCoordinator(
             qpane=qpane,
-            mask_assets=mask_assets,
             mask_controller=mask_controller,
             executor=executor,
+            snapshot_provider=self._projection.deferred,
             publish_status=self._record_status,
         )
         self._status_messages: deque[tuple[str, str]] = deque(maxlen=8)
@@ -187,7 +200,18 @@ class MaskService:
         segment: MaskStrokeSegmentPayload,
     ) -> None:
         """Handle a brush segment emitted by the tool manager."""
+        active_mask_id = self._mask_controller.get_active_mask_id()
+        if active_mask_id is not None and not self._stroke_pipeline.is_mask_busy(
+            active_mask_id
+        ):
+            self._render_work.prioritize_interaction(active_mask_id)
         self._stroke_pipeline.apply_stroke_segment(segment)
+
+    def prepareBrushInteraction(self) -> None:
+        """Stop derived render work that could compete with direct brush input."""
+        active_mask_id = self._mask_controller.get_active_mask_id()
+        if active_mask_id is not None:
+            self._render_work.prioritize_interaction(active_mask_id)
 
     def commitStroke(self) -> None:
         """Flush the currently recorded stroke to the controller."""
@@ -297,9 +321,9 @@ class MaskService:
 
     def adjust_mask_component(
         self, mask_id: uuid.UUID, point, *, grow: bool
-    ) -> QImage | None:
+    ) -> MaskSurfaceSnapshot | None:
         """Build a reusable connected-component edit for any mask-aware tool."""
-        return self._component_adjustment.adjusted_image(
+        return self._component_adjustment.adjusted_surface(
             mask_id,
             point,
             grow=grow,
@@ -308,6 +332,14 @@ class MaskService:
     def apply_mask_image(self, mask_id: uuid.UUID, image: QImage) -> bool:
         """Apply a complete image through the transactional edit owner."""
         return self._mask_controller.edits.apply_mask_image(mask_id, image)
+
+    def apply_mask_surface(
+        self,
+        mask_id: uuid.UUID,
+        snapshot: MaskSurfaceSnapshot,
+    ) -> bool:
+        """Apply complete raster structure through the transactional edit owner."""
+        return self._mask_controller.edits.apply_mask_surface(mask_id, snapshot)
 
     def scene_provider_revision(self) -> tuple[object, ...]:
         """Return mask order and render revisions for scene compilation."""
@@ -352,7 +384,8 @@ class MaskService:
 
     def getActiveMaskImage(self) -> QImage | None:
         """Get the rendered image backing the active mask layer."""
-        return self._mask_controller.getActiveMaskImage()
+        mask_id = self._mask_controller.get_active_mask_id()
+        return None if mask_id is None else self._projection.project(mask_id)
 
     def clearRenderCache(self) -> None:
         """Clear the cached colorized mask previews maintained by the controller."""
@@ -471,6 +504,7 @@ class MaskService:
         erase_mode: bool,
     ) -> None:
         """Merge a generated mask array into the active layer or clear stale overlays."""
+        del bbox
         catalog = self._catalog
         current_image_id = catalog.currentImageID() if catalog else None
         if not self.ensureTopMaskActiveForImage(current_image_id):
@@ -479,21 +513,15 @@ class MaskService:
                 current_image_id,
             )
             return
-        update = self._mask_controller.edits.apply_generated_mask(
+        update = self._generated_edits.apply(
             mask_array_uint8,
-            bbox,
-            erase_mode,
+            erase=erase_mode,
         )
         if update is None:
             return
-        if update.dirty_rect is not None and update.mask_layer is not None:
-            self.updateMaskRegion(
-                update.dirty_rect,
-                update.mask_layer,
-                force_async_colorize=True,
-            )
-        elif update.changed:
-            self._mask_controller.mask_updated.emit(update.mask_id, QRect())
+        mask_id, changed = update
+        if not changed:
+            self._mask_controller.mask_updated.emit(mask_id, QRect())
 
     def getColorizedMask(
         self, mask_layer: MaskLayer, *, scale: float | None = None

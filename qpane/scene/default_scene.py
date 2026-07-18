@@ -35,6 +35,7 @@ from .model import (
     SceneKind,
 )
 from .providers import SceneContribution
+from .raster import LayerTransform, RasterBounds
 from .sources import CatalogImageSource
 
 
@@ -55,6 +56,7 @@ def build_default_catalog_scene(
         width=float(image_size.width()),
         height=float(image_size.height()),
     )
+    raster_bounds = RasterBounds.from_size(image_size)
     source = CatalogImageSource(
         image_id=image_id,
         source_path=source_path,
@@ -72,6 +74,8 @@ def build_default_catalog_scene(
         clip=None,
         hit_test=LayerHitTest(enabled=True, role="base-image"),
         source_revision=revision,
+        raster_bounds=raster_bounds,
+        transform=LayerTransform.from_placement(raster_bounds, placement),
     )
     return SceneDescriptor(
         scene_id=scene_id,

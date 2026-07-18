@@ -25,10 +25,8 @@ import pytest
 from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QImage, Qt
 
-from qpane.catalog.image_utils import (
-    numpy_to_qimage_grayscale8,
-    qimage_to_numpy_grayscale8,
-)
+from qpane import RasterExtentPolicy
+from qpane.catalog.image_utils import numpy_to_qimage_grayscale8
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks import autosave_coordination
 from qpane.masks.autosave import AutosaveManager
@@ -36,6 +34,7 @@ from qpane.masks.combiner import MaskCombiner
 from qpane.masks.component_adjustment import MaskComponentAdjustmentTool
 from qpane.masks.layer_workflows import random_mask_color
 from qpane.masks.mask import MaskAssetStore
+from qpane.scene.raster import RasterBounds
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
 from tests.test_mask_workflows import (
@@ -205,7 +204,7 @@ def test_adjust_component_out_of_bounds_guard():
     layer.surface.fill(Qt.white)
     baseline_state = manager.get_undo_state(mask_id)
     assert baseline_state is not None
-    result = MaskComponentAdjustmentTool(manager).adjusted_image(
+    result = MaskComponentAdjustmentTool(manager).adjusted_surface(
         mask_id, QPoint(20, 20), grow=True
     )
     assert result is None
@@ -223,11 +222,11 @@ def test_adjust_component_uses_eight_connectivity_and_cross_dilation():
     source[3, 3] = 255
     source[5, 5] = 255
     manager.set_mask_image(mask_id, numpy_to_qimage_grayscale8(source))
-    result = MaskComponentAdjustmentTool(manager).adjusted_image(
+    result = MaskComponentAdjustmentTool(manager).adjusted_surface(
         mask_id, QPoint(2, 2), grow=True
     )
     assert result is not None
-    adjusted = qimage_to_numpy_grayscale8(result)
+    adjusted = result.pixels
     expected = source.copy()
     expected[1:4, 2] = 255
     expected[2, 1:4] = 255
@@ -245,15 +244,49 @@ def test_adjust_component_shrinks_only_selected_component():
     source[1:4, 1:4] = 255
     source[1:4, 5:8] = 255
     manager.set_mask_image(mask_id, numpy_to_qimage_grayscale8(source))
-    result = MaskComponentAdjustmentTool(manager).adjusted_image(
+    result = MaskComponentAdjustmentTool(manager).adjusted_surface(
         mask_id, QPoint(2, 2), grow=False
     )
     assert result is not None
-    adjusted = qimage_to_numpy_grayscale8(result)
+    adjusted = result.pixels
     expected = np.zeros_like(source)
     expected[2, 2] = 255
     expected[1:4, 5:8] = 255
     assert np.array_equal(adjusted, expected)
+
+
+def test_adjust_component_grows_storage_only_when_extent_policy_allows() -> None:
+    """Edge morphology should expand touched edges for expanding surfaces only."""
+    manager = MaskAssetStore()
+    image = QImage(4, 4, QImage.Format_Grayscale8)
+    image.fill(Qt.black)
+    mask_id = manager.create_mask(image)
+    layer = manager.get_layer(mask_id)
+    assert layer is not None
+    pixels = np.zeros((4, 4), dtype=np.uint8)
+    pixels[0, 0] = 255
+    layer.surface.replace_with_array(pixels)
+    layer.surface.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
+
+    result = MaskComponentAdjustmentTool(manager).adjusted_surface(
+        mask_id,
+        QPoint(0, 0),
+        grow=True,
+    )
+
+    assert result is not None
+    assert result.bounds == RasterBounds(-1, -1, 5, 5)
+    assert result.pixels[1, 0] == 255
+    assert result.pixels[0, 1] == 255
+
+    layer.surface.set_extent_policy(RasterExtentPolicy.FIXED)
+    fixed = MaskComponentAdjustmentTool(manager).adjusted_surface(
+        mask_id,
+        QPoint(0, 0),
+        grow=True,
+    )
+    assert fixed is not None
+    assert fixed.bounds == RasterBounds(0, 0, 4, 4)
 
 
 def test_async_strokes_sync_undo_and_autosave(monkeypatch, qapp):
@@ -327,7 +360,6 @@ class _DummySignal:
 def test_mask_autosave_coordinator_uses_shared_executor(monkeypatch) -> None:
     """Mask autosave coordination should wire the provided executor into AutosaveManager."""
     executor = StubExecutor()
-    mask_manager = SimpleNamespace(get_layer=lambda _mask_id: None)
     mask_controller = SimpleNamespace(
         mask_updated=_DummySignal(),
         active_mask_properties_changed=_DummySignal(),
@@ -364,9 +396,9 @@ def test_mask_autosave_coordinator_uses_shared_executor(monkeypatch) -> None:
     )
     coordinator = autosave_coordination.MaskAutosaveCoordinator(
         qpane=qpane,
-        mask_assets=mask_manager,
         mask_controller=mask_controller,
         executor=executor,
+        snapshot_provider=lambda _mask_id: None,
         publish_status=lambda *_args, **_kwargs: None,
     )
     coordinator.refresh()

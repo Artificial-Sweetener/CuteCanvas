@@ -20,9 +20,9 @@ from PySide6.QtGui import QImage
 
 from ..catalog.image_utils import (
     numpy_to_qimage_grayscale8,
-    qimage_to_numpy_view_grayscale8,
 )
 from ..concurrency import TaskExecutorProtocol, TaskHandle, TaskRejected
+from ..scene.raster import RasterBounds
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController
 from .workers import MaskPrefetchWorker, MaskSnippetWorker, PrefetchedOverlay
@@ -281,6 +281,19 @@ class MaskRenderWorkCoordinator:
             self._controller.renders.complete_async(mask_id, render_revision)
         return cancelled
 
+    def prioritize_interaction(self, mask_id: uuid.UUID) -> None:
+        """Cancel competing derived work before direct mask interaction begins."""
+        image_id = self._resolve_image_id(mask_id)
+        if image_id is not None:
+            self.cancel_prefetch(image_id)
+        handle = self._snippet_handles.pop(mask_id, None)
+        if handle is not None and self._executor is not None:
+            try:
+                self._executor.cancel(handle)
+            except Exception:
+                logger.debug("Mask snippet cancellation failed", exc_info=True)
+        self._controller.renders.cancel_async(mask_id)
+
     def update_region(
         self,
         dirty_image_rect: QRect,
@@ -293,28 +306,27 @@ class MaskRenderWorkCoordinator:
         if mask_layer is None or dirty_image_rect.isNull():
             return
         mask_id = mask_layer.mask_id
-        mask_image = mask_layer.mask_image
         zoom = self._current_zoom() or 1.0
         if zoom <= 0.0:
             zoom = 1.0
         stride = max(1, round(1.0 / max(zoom, 1e-6))) if zoom < 1.0 else 1
-        if sub_mask_image is None and stride > 1 and not mask_image.isNull():
-            y0 = dirty_image_rect.top()
-            x0 = dirty_image_rect.left()
-            y1 = dirty_image_rect.bottom() + 1
-            x1 = dirty_image_rect.right() + 1
-            mask_view, _ = qimage_to_numpy_view_grayscale8(mask_image)
-            preview_slice = mask_view[y0:y1:stride, x0:x1:stride].copy()
-            preview_image = numpy_to_qimage_grayscale8(preview_slice)
-            preview_image.setText("qpane_preview_stride", str(stride))
-            preview_image.setText("qpane_preview_provisional", "1")
-            sub_mask_image = preview_image
+        if sub_mask_image is None:
+            sub_mask_image = self._snapshot_region(
+                mask_layer,
+                dirty_image_rect,
+                stride=stride,
+            )
+            if sub_mask_image is not None and stride > 1:
+                sub_mask_image.setText("qpane_preview_stride", str(stride))
+                sub_mask_image.setText("qpane_preview_provisional", "1")
         snippet_source = sub_mask_image
-        if snippet_source is None and not mask_image.isNull():
-            snippet_source = mask_image.copy(dirty_image_rect)
         async_snippet = snippet_source
-        if force_async_colorize and not mask_image.isNull():
-            async_snippet = mask_image.copy(dirty_image_rect)
+        if force_async_colorize:
+            async_snippet = self._snapshot_region(
+                mask_layer,
+                dirty_image_rect,
+                stride=1,
+            )
         async_available = async_snippet is not None and not async_snippet.isNull()
         area = dirty_image_rect.width() * dirty_image_rect.height()
         should_request_async = (
@@ -344,7 +356,8 @@ class MaskRenderWorkCoordinator:
     def request_async_colorize(self, mask_id: uuid.UUID, mask_layer: MaskLayer) -> bool:
         """Queue asynchronous colorization for a full-mask cache miss."""
         render_revision = self._controller.renders.render_revision(mask_id)
-        if mask_layer.mask_image.isNull():
+        bounds = mask_layer.surface.bounds
+        if bounds is None:
             self._controller.renders.complete_async(mask_id, render_revision)
             return False
         image_id = self._resolve_image_id(mask_id)
@@ -356,13 +369,34 @@ class MaskRenderWorkCoordinator:
             return True
         scheduled = self.schedule_snippet(
             mask_id,
-            mask_layer.mask_image.rect(),
+            QRect(0, 0, bounds.width, bounds.height),
             mask_layer,
             mask_layer.mask_image.copy(),
         )
         if not scheduled:
             self._controller.renders.complete_async(mask_id, render_revision)
         return scheduled
+
+    @staticmethod
+    def _snapshot_region(
+        mask_layer: MaskLayer,
+        dirty_rect: QRect,
+        *,
+        stride: int,
+    ) -> QImage | None:
+        """Copy only a requested storage region for derived render work."""
+        bounds = mask_layer.surface.bounds
+        if bounds is None:
+            return None
+        storage_rect = QRect(0, 0, bounds.width, bounds.height)
+        region = dirty_rect.intersected(storage_rect)
+        if region.isNull() or region.isEmpty():
+            return None
+        pixels = mask_layer.surface.snapshot_storage_region(
+            RasterBounds.from_qrect(region),
+            stride=max(1, stride),
+        )
+        return numpy_to_qimage_grayscale8(pixels)
 
     def schedule_snippet(
         self,

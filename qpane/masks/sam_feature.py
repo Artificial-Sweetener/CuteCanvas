@@ -276,14 +276,17 @@ def install_sam_feature(qpane: QPane, device: str | None = None) -> None:
         active_mask_id = service.getActiveMaskId()
         if image_point is None or active_mask_id is None:
             return
-        new_image = service.adjust_mask_component(
+        mask_point = qpane.activeMaskLayerCoordinates().scene_to_source(image_point)
+        if mask_point is None:
+            return
+        new_surface = service.adjust_mask_component(
             active_mask_id,
-            image_point,
+            QPoint(mask_point),
             grow=grow,
         )
-        if new_image is None:
+        if new_surface is None:
             return
-        if not service.apply_mask_image(active_mask_id, new_image):
+        if not service.apply_mask_surface(active_mask_id, new_surface):
             return
         qpane.markDirty()
         qpane.update()

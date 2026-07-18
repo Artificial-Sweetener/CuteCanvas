@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from itertools import count
@@ -31,9 +30,9 @@ from PySide6.QtGui import QImage, QPainter
 
 from ..catalog.image_utils import (
     numpy_to_qimage_grayscale8,
-    qimage_to_numpy_view_grayscale8,
 )
 from ..concurrency import TaskExecutorProtocol, TaskHandle
+from ..scene.raster import RasterBounds
 from .mask import MaskAssetStore
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
@@ -43,6 +42,7 @@ from .stroke_models import (
     MaskStrokePayload,
     MaskStrokeSegmentPayload,
 )
+from .stroke_regions import MaskStrokeRegionPlanner
 from .stroke_render import paint_stroke_segment
 from .stroke_worker import MaskStrokeWorker
 
@@ -75,11 +75,13 @@ class _DecimatedStrokeState:
     stride: int
     _segments: list[MaskStrokeSegmentPayload] = field(default_factory=list)
     _dirty_rect: QRect | None = None
+    _preview_image: QImage | None = None
 
     def reset(self) -> None:
         """Clear recorded segments and tracked dirty bounds."""
         self._segments.clear()
         self._dirty_rect = None
+        self._preview_image = None
 
     def has_segments(self) -> bool:
         """Return True when the stroke has recorded paint operations."""
@@ -89,65 +91,110 @@ class _DecimatedStrokeState:
         """Return a defensive copy of the provisional image-space bounds."""
         return None if self._dirty_rect is None else QRect(self._dirty_rect)
 
+    def translate_storage(self, delta_x: int, delta_y: int) -> None:
+        """Rebase provisional storage coordinates after left/top expansion."""
+        if delta_x == 0 and delta_y == 0:
+            return
+        self._segments = [
+            segment.translated(float(delta_x), float(delta_y))
+            for segment in self._segments
+        ]
+        if self._dirty_rect is not None:
+            self._dirty_rect.translate(delta_x, delta_y)
+        self._preview_image = None
+
     def preview_segment(
         self,
         *,
         dirty_rect: QRect,
         segment: MaskStrokeSegmentPayload,
-        mask_view: np.ndarray,
+        snapshot_region: Callable[[QRect, int], np.ndarray],
     ) -> _MaskStrokePreview:
         """Record a segment and render its accumulated provisional mask."""
         self._segments.append(segment)
-        rect_copy = QRect(dirty_rect)
-        if self._dirty_rect is None:
-            self._dirty_rect = rect_copy
-        else:
-            self._dirty_rect = self._dirty_rect.united(rect_copy)
-        preview = self.current_preview(mask_view)
+        previous_rect = None if self._dirty_rect is None else QRect(self._dirty_rect)
+        combined = (
+            QRect(dirty_rect)
+            if previous_rect is None
+            else previous_rect.united(dirty_rect)
+        )
+        self._dirty_rect = self._aligned_preview_rect(combined)
+        previous_image = self._preview_image
+        rebuild = previous_image is None
+        if rebuild or previous_rect != self._dirty_rect:
+            preview_slice = snapshot_region(self._dirty_rect, max(1, self.stride))
+            self._preview_image = numpy_to_qimage_grayscale8(preview_slice)
+            if previous_image is not None and previous_rect is not None:
+                self._copy_previous_preview(previous_image, previous_rect)
+        self._paint_preview_segments(self._segments if rebuild else (segment,))
+        preview = self.current_preview(snapshot_region)
         if preview is None:
             raise RuntimeError("recorded stroke must produce a preview image")
         return preview
 
-    def current_preview(self, mask_view: np.ndarray) -> _MaskStrokePreview | None:
+    def current_preview(
+        self,
+        snapshot_region: Callable[[QRect, int], np.ndarray],
+    ) -> _MaskStrokePreview | None:
         """Render all recorded segments against the latest durable mask pixels."""
         if not self._segments or self._dirty_rect is None:
             return None
         rect_copy = QRect(self._dirty_rect)
         stride = max(1, self.stride)
-        y0 = rect_copy.top()
-        x0 = rect_copy.left()
-        y1 = rect_copy.bottom() + 1
-        x1 = rect_copy.right() + 1
-        preview_slice = mask_view[y0:y1:stride, x0:x1:stride].copy()
-        preview_image = numpy_to_qimage_grayscale8(preview_slice)
-        painter = QPainter(preview_image)
-        try:
-            for recorded in self._segments:
-                start_qpoint = QPoint(
-                    round(recorded.start[0]), round(recorded.start[1])
-                )
-                end_qpoint = QPoint(round(recorded.end[0]), round(recorded.end[1]))
-                segment_rect = QRect(start_qpoint, end_qpoint).normalized()
-                segment_margin = int(recorded.maximum_diameter / 2.0) + 2
-                segment_rect = segment_rect.adjusted(
-                    -segment_margin,
-                    -segment_margin,
-                    segment_margin,
-                    segment_margin,
-                )
-                if not segment_rect.intersects(rect_copy):
-                    continue
-                paint_stroke_segment(
-                    painter,
-                    rect_copy.topLeft(),
-                    recorded,
-                    stride=stride,
-                )
-        finally:
-            painter.end()
+        if self._preview_image is None:
+            preview_slice = snapshot_region(rect_copy, stride)
+            self._preview_image = numpy_to_qimage_grayscale8(preview_slice)
+            self._paint_preview_segments(self._segments)
+        preview_image = self._preview_image
         preview_image.setText("qpane_preview_stride", str(stride))
         preview_image.setText("qpane_preview_provisional", "1")
         return _MaskStrokePreview(rect=rect_copy, image=preview_image)
+
+    def _aligned_preview_rect(self, rect: QRect) -> QRect:
+        """Keep preview sampling anchored to the storage origin as bounds grow."""
+        stride = max(1, self.stride)
+        left = rect.left() - rect.left() % stride
+        top = rect.top() - rect.top() % stride
+        return QRect(left, top, rect.right() - left + 1, rect.bottom() - top + 1)
+
+    def _copy_previous_preview(self, image: QImage, rect: QRect) -> None:
+        """Overlay the prior provisional pixels into an enlarged preview image."""
+        preview = self._preview_image
+        dirty_rect = self._dirty_rect
+        if preview is None or dirty_rect is None:
+            return
+        stride = max(1, self.stride)
+        painter = QPainter(preview)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.drawImage(
+            QPoint(
+                (rect.left() - dirty_rect.left()) // stride,
+                (rect.top() - dirty_rect.top()) // stride,
+            ),
+            image,
+        )
+        painter.end()
+
+    def _paint_preview_segments(
+        self,
+        segments: tuple[MaskStrokeSegmentPayload, ...] | list[MaskStrokeSegmentPayload],
+    ) -> None:
+        """Paint only the supplied semantic segments into the cached preview."""
+        preview = self._preview_image
+        dirty_rect = self._dirty_rect
+        if preview is None or dirty_rect is None:
+            return
+        painter = QPainter(preview)
+        try:
+            for segment in segments:
+                paint_stroke_segment(
+                    painter,
+                    dirty_rect.topLeft(),
+                    segment,
+                    stride=max(1, self.stride),
+                )
+        finally:
+            painter.end()
 
     def _build_payload(self) -> MaskStrokePayload:
         """Return the recorded segments packaged for worker execution."""
@@ -245,6 +292,9 @@ class MaskStrokePipeline:
         self._mask_ids_for_image = mask_ids_for_image
         self._view = view
         self._update_region = update_region
+        self._region_planner = MaskStrokeRegionPlanner(
+            controller.edits.prepare_writable_region
+        )
         self._preview_states: dict[UUID, _DecimatedStrokeState] = {}
         self._preview_tokens: dict[UUID, int] = {}
         self._pending_jobs: dict[UUID, set[TaskHandle]] = {}
@@ -748,23 +798,24 @@ class MaskStrokePipeline:
                 active_mask_id,
             )
             return
-        if mask_layer.mask_image.isNull():
+        if mask_layer.surface.is_null():
             logger.warning(
                 "Brush stroke skipped: mask %s image is null.",
                 active_mask_id,
             )
             return
         controller = self._controller
-        mask_image = mask_layer.mask_image
-        mask_bounds = mask_image.rect()
-        start_point = QPoint(math.floor(segment.start[0]), math.floor(segment.start[1]))
-        end_point = QPoint(math.ceil(segment.end[0]), math.ceil(segment.end[1]))
-        stroke_rect = QRect(start_point, end_point).normalized()
-        margin = int(segment.maximum_diameter / 2.0) + 2
-        dirty_rect = stroke_rect.adjusted(-margin, -margin, margin, margin)
-        dirty_rect = dirty_rect.intersected(mask_bounds)
-        if dirty_rect.isNull() or dirty_rect.isEmpty():
+        prepared = self._region_planner.prepare(active_mask_id, mask_layer, segment)
+        if prepared is None:
             return
+        existing_state = self._preview_states.get(active_mask_id)
+        if existing_state is not None:
+            existing_state.translate_storage(
+                prepared.rebase_x,
+                prepared.rebase_y,
+            )
+        dirty_rect = prepared.dirty_rect
+        segment = prepared.segment
         try:
             view = self._view()
         except AttributeError:
@@ -774,7 +825,6 @@ class MaskStrokePipeline:
         zoom = getattr(viewport, "zoom", 1.0) or 1.0
         stride = controller.renders.preview_stride(active_mask_id, zoom)
         state = self._preview_states.get(active_mask_id)
-        view_array, _ = qimage_to_numpy_view_grayscale8(mask_image)
         if state is not None and state.stride != stride:
             logger.debug(
                 "flushing preview state due to stride change (mask=%s old_stride=%s new_stride=%s segments=%s)",
@@ -803,7 +853,12 @@ class MaskStrokePipeline:
         preview = state.preview_segment(
             dirty_rect=dirty_rect,
             segment=segment,
-            mask_view=view_array,
+            snapshot_region=lambda rect, preview_stride: (
+                mask_layer.surface.snapshot_storage_region(
+                    RasterBounds.from_qrect(rect),
+                    stride=preview_stride,
+                )
+            ),
         )
         self._update_region(
             preview.rect,
@@ -853,11 +908,15 @@ class MaskStrokePipeline:
         state = self._preview_states.get(mask_id)
         if state is None:
             return
-        mask_image = getattr(mask_layer, "mask_image", None)
-        if mask_image is None or mask_image.isNull():
+        surface = getattr(mask_layer, "surface", None)
+        if surface is None or surface.is_null():
             return
-        mask_view, _ = qimage_to_numpy_view_grayscale8(mask_image)
-        preview = state.current_preview(mask_view)
+        preview = state.current_preview(
+            lambda rect, preview_stride: surface.snapshot_storage_region(
+                RasterBounds.from_qrect(rect),
+                stride=preview_stride,
+            )
+        )
         if preview is None:
             return
         self._update_region(

@@ -31,6 +31,7 @@ from qpane.scene.model import (
     LayerPlacement,
     LayerPlacementChange,
 )
+from qpane.scene.raster import LayerTransform, RasterBounds
 
 _PLACEMENT = LayerPlacement(0.0, 0.0, 100.0, 80.0)
 
@@ -41,7 +42,6 @@ def _mask_instance(mask_id: uuid.UUID) -> CompositionLayerInstance:
         layer_id=uuid.uuid4(),
         source_kind=CompositionLayerSourceKind.MASK,
         source_id=mask_id,
-        placement=_PLACEMENT,
         opacity=0.5,
         tint=QColor(255, 0, 0),
         role="mask",
@@ -118,8 +118,8 @@ def test_layer_instances_default_to_locked_scene_interaction():
     assert stored_mask.interaction.movable is False
 
 
-def test_layer_store_replaces_policy_and_placement_as_instance_state():
-    """Policy and placement updates should replace only the targeted instance."""
+def test_layer_store_replaces_policy_and_transform_as_instance_state():
+    """Policy and transform updates should replace only the targeted instance."""
     store = ImageSceneLayerStore()
     image_id = uuid.uuid4()
     store.ensure_image(image_id, _PLACEMENT)
@@ -129,14 +129,15 @@ def test_layer_store_replaces_policy_and_placement_as_instance_state():
     moved = LayerPlacement(12.0, 8.0, 100.0, 80.0)
 
     assert store.update_interaction(image_id, mask.layer_id, interaction)
-    assert store.update_placement(image_id, mask.layer_id, moved)
+    transform = LayerTransform.from_placement(RasterBounds(0, 0, 100, 80), moved)
+    assert store.update_transform(image_id, mask.layer_id, transform)
 
     updated = store.layer(image_id, mask.layer_id)
     assert updated is not None
     assert updated.interaction == interaction
-    assert updated.placement == moved
+    assert updated.transform == transform
     assert mask.interaction == LayerInteractionPolicy()
-    assert mask.placement == _PLACEMENT
+    assert mask.transform == LayerTransform()
 
 
 def test_placement_history_is_scoped_to_each_scene():

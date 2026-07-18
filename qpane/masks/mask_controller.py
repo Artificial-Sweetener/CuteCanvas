@@ -49,6 +49,8 @@ class MaskController(QObject):
         mask_config: MaskConfigSlice | None = None,
         stroke_diagnostics: MaskStrokeDiagnostics | None = None,
         color_for_mask: Callable[[uuid.UUID], QColor | None] | None = None,
+        structure_changed: Callable[[], None] | None = None,
+        render_scale: Callable[[], float] | None = None,
     ):
         """Initialize mask caches, coordinate transforms, and diagnostics hooks.
 
@@ -60,6 +62,8 @@ class MaskController(QObject):
                 resolved the feature configuration.
             stroke_diagnostics: Optional diagnostics helper for stroke timing/counters.
             color_for_mask: Composition-owned mask appearance lookup.
+            structure_changed: Callback for source-bounds geometry changes.
+            render_scale: Current visible scale used for activation warming.
         """
         super().__init__()
         self._assets = mask_manager
@@ -69,6 +73,7 @@ class MaskController(QObject):
         self._config_source = config
         self._mask_config = mask_config or require_mask_config(config)
         self._color_for_mask = color_for_mask or (lambda _mask_id: DEFAULT_MASK_COLOR)
+        self._render_scale = render_scale or (lambda: 1.0)
         self._active_mask_id = None
         self._epochs = MaskEditEpochs()
         self._renders = MaskRenderCache(
@@ -89,6 +94,7 @@ class MaskController(QObject):
             active_mask_id=lambda: self._active_mask_id,
             mask_changed=lambda mask_id, rect: self.mask_updated.emit(mask_id, rect),
             undo_changed=self.undo_stack_changed.emit,
+            structure_changed=structure_changed,
             diagnostics=stroke_diagnostics,
         )
 
@@ -136,7 +142,11 @@ class MaskController(QObject):
             return False
         self._active_mask_id = mask_id
         if warm_cache:
-            self._renders.warm(mask_id)
+            scale = max(1e-6, float(self._render_scale()))
+            if abs(scale - 1.0) < 1e-3:
+                self._renders.warm(mask_id)
+            else:
+                self._renders.warm(mask_id, scale=scale)
         if emit_signals:
             self.emit_activation_signals(mask_id)
         return True

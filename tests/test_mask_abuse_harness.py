@@ -18,14 +18,17 @@
 
 from __future__ import annotations
 
+import os
 from itertools import product
+from time import perf_counter, process_time
 
 import pytest
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QCursor, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
+from qpane import QPaneLayerInteractionPolicy, RasterExtentPolicy
 from qpane.scene.render_plan import MaskLayerRenderItem
 from tests.harness.abuse_model import (
     AbuseAction,
@@ -51,6 +54,13 @@ from tests.harness.scenarios import (
     repeated_touch_mouse_cursor_actions,
     touch_mouse_mask_switch_actions,
 )
+
+
+def _interaction_clock() -> float:
+    """Measure dispatch work without xdist scheduler contention."""
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        return process_time()
+    return perf_counter()
 
 
 class _CursorChangeCounter(QObject):
@@ -181,6 +191,498 @@ def test_mouse_stroke_driver_delivers_complete_physical_sequence(
         assert harness.wait_for_mask_undo_depth(harness.mask_ids[0], 1)
     finally:
         harness.viewer.removeEventFilter(probe)
+        harness.close()
+
+
+def test_removing_final_mask_disarms_brush_mode_and_cursor(
+    qapp: QApplication,
+) -> None:
+    """A maskless mounted scene must not retain brush interaction feedback."""
+    harness = MountedQPaneHarness(qapp, mask_count=1)
+    try:
+        harness.viewer.refreshCursor()
+        assert harness.viewer.getControlMode() == harness.viewer.CONTROL_MODE_DRAW_BRUSH
+        assert harness.viewer.cursor().shape() == Qt.CursorShape.BitmapCursor
+
+        assert harness.viewer.removeMaskFromImage(
+            harness.image_id,
+            harness.mask_ids[0],
+        )
+        harness.drain_events(wait_ms=10)
+
+        assert harness.viewer.activeMaskID() is None
+        assert harness.viewer.maskIDsForImage(harness.image_id) == []
+        assert harness.viewer.getControlMode() == harness.viewer.CONTROL_MODE_PANZOOM
+        assert harness.viewer.cursor().shape() != Qt.CursorShape.BitmapCursor
+    finally:
+        harness.close()
+
+
+def test_moved_default_mask_keeps_fixed_image_sized_write_bounds(
+    qapp: QApplication,
+) -> None:
+    """Default masks should clip real brush input at their moved finite surface."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 400),
+        widget_size=QSize(400, 400),
+        mask_count=1,
+        brush_size=20,
+    )
+    mask_id = harness.mask_ids[0]
+    mask_info = harness.viewer.listMasksForImage()[0]
+    driver = QtStrokeDriver(harness)
+    outside_surface = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(40, 200), HarnessPoint(60, 200)),
+        brush_size=20,
+    )
+    inside_surface = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(140, 200), HarnessPoint(160, 200)),
+        brush_size=20,
+    )
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        assert harness.viewer.setLayerPlacement(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QRectF(100.0, 0.0, 400.0, 400.0),
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+
+        driver.begin(outside_surface)
+        driver.move(outside_surface, 1)
+        driver.end(outside_surface)
+        harness.drain_events(wait_ms=10)
+        state = harness.viewer.getMaskUndoState(mask_id)
+        assert state is not None
+        assert state.undo_depth == 0
+
+        driver.begin(inside_surface)
+        driver.move(inside_surface, 1)
+        driver.end(inside_surface)
+        assert harness.wait_for_mask_undo_depth(mask_id, 1)
+        exported = harness.viewer.getActiveMaskImage()
+        assert exported is not None
+        assert exported.size() == QSize(400, 400)
+        assert exported.pixelColor(50, 200).red() == 0
+        assert exported.pixelColor(150, 200).red() > 0
+        assert exported.pixelColor(350, 200).red() == 0
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize(
+    "pointer_kind",
+    (PointerKind.MOUSE, PointerKind.TOUCH, PointerKind.PEN),
+    ids=("mouse", "touch", "pen"),
+)
+def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
+    qapp: QApplication,
+    pointer_kind: PointerKind,
+) -> None:
+    """Every painting modality should grow and retain moved off-canvas content."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 400),
+        widget_size=QSize(400, 400),
+        mask_count=1,
+        brush_size=20,
+    )
+    mask_id = harness.mask_ids[0]
+    mask_info = harness.viewer.listMasksForImage()[0]
+    driver = QtStrokeDriver(harness)
+    off_surface = StrokeAction(
+        pointer_kind,
+        points=(HarnessPoint(40, 200), HarnessPoint(60, 200)),
+        brush_size=20,
+    )
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        assert harness.viewer.setLayerPlacement(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QRectF(100.0, 0.0, 400.0, 400.0),
+        )
+        assert harness.viewer.setRasterExtentPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+        structural_scenes: list[object] = []
+        harness.viewer.sceneChanged.connect(structural_scenes.append)
+
+        driver.begin(off_surface)
+        assert structural_scenes
+        preview = harness.wait_for_mask_tint(QPoint(40, 200), timeout_ms=1000)
+        assert preview.latency_ms is not None
+        driver.move(off_surface, 1)
+        driver.end(off_surface)
+        assert harness.wait_for_mask_undo_depth(mask_id, 1)
+
+        state = harness.viewer.rasterSurfaceState(
+            mask_info.scene_id,
+            mask_info.layer_id,
+        )
+        assert state is not None
+        assert state.bounds.x() < 0
+        assert state.bounds.width() > 400
+        layer = harness.viewer.mask_service.assets.get_layer(mask_id)
+        assert layer is not None
+        storage_x = -50 - state.bounds.x()
+        storage_y = 200 - state.bounds.y()
+        assert layer.surface.snapshot_array()[storage_y, storage_x] > 0
+
+        returned_translation_x = 300.0
+        assert harness.viewer.setLayerPlacement(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QRectF(
+                state.bounds.x() + returned_translation_x,
+                float(state.bounds.y()),
+                float(state.bounds.width()),
+                float(state.bounds.height()),
+            ),
+        )
+        harness.viewer.markDirty()
+        harness.viewer.update()
+        visible = harness.wait_for_mask_tint(QPoint(250, 200), timeout_ms=1000)
+        assert visible.latency_ms is not None
+
+        assert harness.viewer.undoMaskEdit()
+        restored = harness.viewer.rasterSurfaceState(
+            mask_info.scene_id,
+            mask_info.layer_id,
+        )
+        assert restored is not None
+        assert restored.bounds == QRect(0, 0, 400, 400)
+    finally:
+        harness.close()
+
+
+def test_expanding_mask_grows_every_edge_through_mounted_brush_input(
+    qapp: QApplication,
+) -> None:
+    """Real brush strokes should expand negative and positive local edges."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 400),
+        widget_size=QSize(400, 400),
+        mask_count=1,
+        brush_size=20,
+    )
+    mask_id = harness.mask_ids[0]
+    mask_info = harness.viewer.listMasksForImage()[0]
+    driver = QtStrokeDriver(harness)
+    edge_strokes = (
+        (100.0, 0.0, HarnessPoint(40, 200), HarnessPoint(60, 200)),
+        (-100.0, 0.0, HarnessPoint(340, 200), HarnessPoint(360, 200)),
+        (0.0, 100.0, HarnessPoint(200, 40), HarnessPoint(200, 60)),
+        (0.0, -100.0, HarnessPoint(200, 340), HarnessPoint(200, 360)),
+    )
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        assert harness.viewer.setRasterExtentPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+
+        for expected_depth, (translate_x, translate_y, start, end) in enumerate(
+            edge_strokes,
+            start=1,
+        ):
+            state = harness.viewer.rasterSurfaceState(
+                mask_info.scene_id,
+                mask_info.layer_id,
+            )
+            assert state is not None
+            assert harness.viewer.setLayerPlacement(
+                mask_info.scene_id,
+                mask_info.layer_id,
+                QRectF(
+                    state.bounds.x() + translate_x,
+                    state.bounds.y() + translate_y,
+                    state.bounds.width(),
+                    state.bounds.height(),
+                ),
+            )
+            stroke = StrokeAction(
+                PointerKind.MOUSE,
+                points=(start, end),
+                brush_size=20,
+            )
+            driver.begin(stroke)
+            driver.move(stroke, 1)
+            driver.end(stroke)
+            assert harness.wait_for_mask_undo_depth(mask_id, expected_depth)
+
+        state = harness.viewer.rasterSurfaceState(
+            mask_info.scene_id,
+            mask_info.layer_id,
+        )
+        assert state is not None
+        assert state.bounds.x() < 0
+        assert state.bounds.y() < 0
+        assert state.bounds.x() + state.bounds.width() > 400
+        assert state.bounds.y() + state.bounds.height() > 400
+        layer = harness.viewer.mask_service.assets.get_layer(mask_id)
+        assert layer is not None
+        pixels = layer.surface.snapshot_array()
+        for local_x, local_y in ((-50, 200), (450, 200), (200, -50), (200, 450)):
+            assert (
+                pixels[
+                    local_y - state.bounds.y(),
+                    local_x - state.bounds.x(),
+                ]
+                > 0
+            )
+    finally:
+        harness.close()
+
+
+def test_expanding_mask_continuous_edge_stroke_stays_interactive(
+    qapp: QApplication,
+) -> None:
+    """Large expanding masks must not stall or rebuild geometry per sample."""
+    size = 4096
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(size, size),
+        widget_size=QSize(500, 500),
+        mask_count=1,
+        brush_size=40,
+    )
+    mask_info = harness.viewer.listMasksForImage()[0]
+    points = tuple(
+        HarnessPoint(round(240 - index * 220 / 63), 250) for index in range(64)
+    )
+    stroke = StrokeAction(PointerKind.MOUSE, points=points, brush_size=40)
+    driver = QtStrokeDriver(harness)
+    dispatch_latencies_ms: list[float] = []
+    structural_scenes: list[object] = []
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        assert harness.viewer.setLayerPlacement(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QRectF(size * 0.5, 0.0, size, size),
+        )
+        assert harness.viewer.setRasterExtentPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+        harness.viewer.sceneChanged.connect(structural_scenes.append)
+
+        started = _interaction_clock()
+        driver.begin(stroke)
+        dispatch_latencies_ms.append((_interaction_clock() - started) * 1000.0)
+        for point_index in range(1, len(points)):
+            started = _interaction_clock()
+            driver.move(stroke, point_index)
+            dispatch_latencies_ms.append((_interaction_clock() - started) * 1000.0)
+        driver.end(stroke)
+
+        ordered = sorted(dispatch_latencies_ms)
+        percentile_95 = ordered[max(0, round(len(ordered) * 0.95) - 1)]
+        assert len(structural_scenes) <= 2
+        slow_samples = [
+            (index, round(duration, 2))
+            for index, duration in enumerate(dispatch_latencies_ms)
+            if duration >= 20.0
+        ]
+        assert percentile_95 < 20.0, slow_samples
+        assert max(dispatch_latencies_ms) < 35.0, slow_samples
+        assert harness.wait_for_mask_undo_depth(
+            harness.mask_ids[0],
+            1,
+            timeout_ms=5000,
+        )
+    finally:
+        harness.close()
+
+
+def test_expanding_mask_live_preview_never_flashes_painted_pixels(
+    qapp: QApplication,
+) -> None:
+    """An edge-crossing stroke must retain every already-presented painted pixel."""
+    size = 800
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(size, size),
+        widget_size=QSize(400, 400),
+        mask_count=1,
+        brush_size=32,
+    )
+    mask_info = harness.viewer.listMasksForImage()[0]
+    points = tuple(
+        HarnessPoint(round(190 - index * 150 / 31), 200) for index in range(32)
+    )
+    stroke = StrokeAction(PointerKind.MOUSE, points=points, brush_size=32)
+    driver = QtStrokeDriver(harness)
+    retained_point = QPoint(150, 200)
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        assert harness.viewer.setLayerPlacement(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QRectF(size * 0.5, 0.0, size, size),
+        )
+        assert harness.viewer.setRasterExtentPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+
+        with harness.observe_presented_frames() as frames:
+            driver.begin(stroke)
+            for point_index in range(1, len(points)):
+                driver.move(stroke, point_index)
+            driver.end(stroke)
+            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+            harness.viewer.repaint()
+
+        assert frames.frames
+        assert all(frame.mask_layer_count == 1 for frame in frames.frames)
+        retained_measurement = harness.wait_for_mask_tint(
+            retained_point,
+            timeout_ms=1000,
+        )
+        assert (
+            retained_measurement.latency_ms is not None
+        ), retained_measurement.color.getRgb()
+        first_tinted = next(
+            index
+            for index, frame in enumerate(frames.frames)
+            if harness.is_mask_tint(frame.color_at(retained_point))
+        )
+        assert all(
+            harness.is_mask_tint(frame.color_at(retained_point))
+            for frame in frames.frames[first_tinted:]
+        )
+        assert (
+            harness.wait_for_mask_tint(QPoint(60, 200), timeout_ms=1000).latency_ms
+            is not None
+        )
+    finally:
+        harness.close()
+
+
+def test_expanding_mask_structural_undo_never_flashes_retained_pixels(
+    qapp: QApplication,
+) -> None:
+    """Undoing growth must preserve earlier mask pixels in every presented frame."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 400),
+        widget_size=QSize(400, 400),
+        mask_count=1,
+        brush_size=20,
+    )
+    mask_id = harness.mask_ids[0]
+    mask_info = harness.viewer.listMasksForImage()[0]
+    driver = QtStrokeDriver(harness)
+    retained_point = QPoint(200, 200)
+    expanded_point = QPoint(40, 280)
+    retained = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(190, 200), HarnessPoint(210, 200)),
+        brush_size=20,
+    )
+    expanded = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(40, 280), HarnessPoint(60, 280)),
+        brush_size=20,
+    )
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        assert harness.viewer.setLayerPlacement(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QRectF(100.0, 0.0, 400.0, 400.0),
+        )
+        assert harness.viewer.setRasterExtentPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+
+        for expected_depth, stroke, point in (
+            (1, retained, retained_point),
+            (2, expanded, expanded_point),
+        ):
+            driver.begin(stroke)
+            driver.move(stroke, 1)
+            driver.end(stroke)
+            assert harness.wait_for_mask_undo_depth(mask_id, expected_depth)
+            assert (
+                harness.wait_for_mask_tint(point, timeout_ms=1000).latency_ms
+                is not None
+            )
+
+        with harness.observe_presented_frames() as frames:
+            assert harness.viewer.undoMaskEdit()
+            harness.viewer.repaint()
+            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+            harness.viewer.repaint()
+
+        assert frames.frames
+        assert all(frame.mask_layer_count == 1 for frame in frames.frames)
+        assert all(
+            harness.is_mask_tint(frame.color_at(retained_point))
+            for frame in frames.frames
+        )
+        assert (
+            harness.wait_for_background(
+                expanded_point,
+                timeout_ms=1000,
+            ).latency_ms
+            is not None
+        )
+    finally:
         harness.close()
 
 

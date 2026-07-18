@@ -38,6 +38,7 @@ from ..scene.model import (
     SceneKind,
 )
 from ..scene.providers import SceneContribution
+from ..scene.raster import LayerTransform, RasterBounds
 from ..scene.render_plan import SceneLayerHitTestResult
 from ..scene.sources import CatalogImageSource
 from ..types import (
@@ -161,6 +162,8 @@ class CompositionSceneAdapter:
         if image is None or image.isNull():
             return None
         revision = max(0, int(self._catalog.getRevision(layer.image_id) or 0))
+        raster_bounds = RasterBounds.from_size(image.size())
+        placement = _placement_from_rect(layer.placement)
         return LayerDescriptor(
             scene_id=record.composition_id,
             layer_id=layer.layer_id,
@@ -170,7 +173,7 @@ class CompositionSceneAdapter:
                 source_path=self._catalog.getPath(layer.image_id),
                 revision=revision,
             ),
-            placement=_placement_from_rect(layer.placement),
+            placement=placement,
             visible=layer.visible,
             opacity=layer.opacity,
             blend_mode=BlendMode.NORMAL,
@@ -184,6 +187,8 @@ class CompositionSceneAdapter:
                 movable=layer.interaction.movable,
             ),
             source_revision=revision,
+            raster_bounds=raster_bounds,
+            transform=LayerTransform.from_placement(raster_bounds, placement),
         )
 
     def _active_layered_record(self) -> CompositionRecord | None:

@@ -22,7 +22,6 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QRunnable
@@ -78,10 +77,8 @@ def test_concurrency_managers_operate_cleanly(tmp_path, monkeypatch, qapp) -> No
     tile_manager.tileReady.connect(tile_events.append)
     mask_image = QImage(16, 16, QImage.Format_ARGB32)
     mask_image.fill(QColor("black"))
-    mask_layer = SimpleNamespace(mask_image=mask_image)
-    mask_manager = SimpleNamespace(get_layer=lambda _mask_id: mask_layer)
     autosave_manager = AutosaveManager(
-        mask_manager=mask_manager,
+        snapshot_provider=lambda _mask_id: mask_image,
         settings=config,
         get_current_image_path=lambda: tmp_path / "image.png",
         executor=executor,

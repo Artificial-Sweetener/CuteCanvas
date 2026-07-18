@@ -60,6 +60,16 @@ class MaskStrokeSegmentPayload:
         """Return the widest endpoint diameter."""
         return max(1.0, float(self.start_diameter), float(self.end_diameter))
 
+    def translated(self, delta_x: float, delta_y: float) -> MaskStrokeSegmentPayload:
+        """Return this segment translated into another coordinate frame."""
+        return MaskStrokeSegmentPayload(
+            start=(self.start[0] + delta_x, self.start[1] + delta_y),
+            end=(self.end[0] + delta_x, self.end[1] + delta_y),
+            start_diameter=self.start_diameter,
+            end_diameter=self.end_diameter,
+            erase=self.erase,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class MaskStrokePayload:

@@ -24,6 +24,7 @@ from ..scene.mutations import (
     SceneMutationResult,
     SceneMutationStatus,
 )
+from ..scene.raster import LayerTransform
 from ..scene.sources import CatalogImageSource, MaskLayerSource
 from .layers import ImageSceneLayerStore
 from .service import CompositionService
@@ -133,10 +134,11 @@ class ImageSceneMaskMutationOwner(BaseSceneMutationOwner):
         image_id = self._current_image_id()
         changed = bool(
             image_id is not None
-            and self._layers.update_placement(
+            and layer.raster_bounds is not None
+            and self._layers.update_transform(
                 image_id,
                 layer.layer_id,
-                placement,
+                LayerTransform.from_placement(layer.raster_bounds, placement),
             )
         )
         return _mutation_result(
@@ -213,10 +215,11 @@ class DefaultImageLayerMutationOwner(BaseSceneMutationOwner):
         image_id = self._current_image_id()
         changed = bool(
             image_id is not None
-            and self._layers.update_placement(
+            and layer.raster_bounds is not None
+            and self._layers.update_transform(
                 image_id,
                 layer.layer_id,
-                placement,
+                LayerTransform.from_placement(layer.raster_bounds, placement),
             )
         )
         return _mutation_result(

@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING
 from ..concurrency import TaskExecutorProtocol
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from ..features import FeatureInstallError
-from .autosave import AutosaveManager
-from .mask import MaskAssetStore
+from .autosave import AutosaveManager, MaskImagePayload
 from .mask_controller import MaskController
 
 if TYPE_CHECKING:
@@ -34,16 +33,16 @@ class MaskAutosaveCoordinator:
         self,
         *,
         qpane: QPane,
-        mask_assets: MaskAssetStore,
         mask_controller: MaskController,
         executor: TaskExecutorProtocol,
+        snapshot_provider: Callable[[object], MaskImagePayload | None],
         publish_status: Callable[..., None],
     ) -> None:
         """Bind the feature collaborators required for autosave wiring."""
         self._qpane = qpane
-        self._mask_assets = mask_assets
         self._mask_controller = mask_controller
         self._executor = executor
+        self._snapshot_provider = snapshot_provider
         self._publish_status = publish_status
         self._connected_manager: AutosaveManager | None = None
         self._active_save_slot = None
@@ -65,7 +64,7 @@ class MaskAutosaveCoordinator:
         manager = self._qpane.autosaveManager()
         if not isinstance(manager, AutosaveManager):
             manager = AutosaveManager(
-                mask_manager=self._mask_assets,
+                snapshot_provider=self._snapshot_provider,
                 settings=require_mask_config(self._qpane.settings),
                 get_current_image_path=lambda: self._qpane.currentImagePath,
                 executor=self._executor,

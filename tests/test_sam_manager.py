@@ -29,8 +29,10 @@ from PySide6.QtGui import QColor, QImage
 
 from qpane import Config, sam
 from qpane.core.config_features import MaskConfigSlice
+from qpane.masks.generated_edits import MaskGeneratedEditService
 from qpane.masks.mask import MaskAssetStore, MaskLayer, MaskSurface
 from qpane.masks.mask_controller import MaskController
+from qpane.masks.projection import MaskCanvasProjectionService
 from qpane.sam.manager import SamManager, SamWorker
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
@@ -119,17 +121,19 @@ def test_mask_controller_handles_none_mask():
     controller._active_mask_id = mask_id
     emissions: list[tuple[uuid.UUID, object]] = []
     controller.mask_updated.connect(lambda mid, rect: emissions.append((mid, rect)))
-    bbox = np.array([0, 0, 2, 2])
-    update = controller.edits.apply_generated_mask(None, bbox, erase_mode=False)
-    assert update is not None
-    assert update.mask_id == mask_id
-    assert update.mask_layer is mask_manager.get_layer(mask_id)
-    assert not update.changed
-    assert update.dirty_rect is not None
-    assert update.dirty_rect.topLeft().x() == 0
-    assert update.dirty_rect.topLeft().y() == 0
-    assert update.dirty_rect.bottomRight().x() == 2
-    assert update.dirty_rect.bottomRight().y() == 2
+    generated = MaskGeneratedEditService(
+        active_mask_id=lambda: mask_id,
+        projection=MaskCanvasProjectionService(
+            assets=mask_manager,
+            active_scene=lambda: None,
+        ),
+        edits=controller.edits,
+        renders=controller.renders,
+    )
+
+    result = generated.apply(None, erase=False)
+
+    assert result == (mask_id, False)
     assert not emissions
 
 

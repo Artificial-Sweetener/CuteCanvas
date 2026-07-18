@@ -55,7 +55,12 @@ class RecordingMaskService:
             renders=types.SimpleNamespace(
                 render_revision=lambda _mask_id: 0,
                 get_by_id=lambda _mask_id, **_kwargs: None,
-            )
+            ),
+            edits=types.SimpleNamespace(
+                advance_epoch=lambda *_args, **_kwargs: 0,
+            ),
+            mask_updated=types.SimpleNamespace(emit=lambda *_args: None),
+            undo_stack_changed=types.SimpleNamespace(emit=lambda *_args: None),
         )
         self.connected_callback = None
         self.disconnected_callback = None

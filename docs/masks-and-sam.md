@@ -42,6 +42,52 @@ if viewer.maskFeatureAvailable():
 * **Active State:** `QPane.activeMaskID()` returns the UUID of the layer currently receiving edits. Use `QPane.setActiveMaskID(uuid)` to switch layers.
 * **Content:** `QPane.getActiveMaskImage()` returns the actual `QImage` data of the active mask (useful for custom processing).
 
+### Movement, Local Bounds, and Expanding Layers
+
+A mask has two independent pieces of geometry: a scene placement and integer raster bounds in the mask's own local coordinate space. Moving a mask changes only its scene placement. It does not translate, crop, or rewrite the stored pixels, so painted content can move outside the image canvas and return later.
+
+New masks use `RasterExtentPolicy.FIXED` and image-sized local bounds. Fixed masks clip brush, SAM, and component-adjustment writes at those bounds. Hosts that want an unbounded drawing experience can switch a mask to `RasterExtentPolicy.EXPAND_ON_WRITE`; edits then enlarge local storage only along the edges they reach. The local origin may become negative, while the scene placement continues to be controlled independently by the normal layer movement API.
+
+`RasterExtentPolicy` is the host-visible choice between those fixed and expanding write behaviors. `QPane.setRasterExtentPolicy` applies that choice to a supported layer without moving it or modifying its pixels.
+
+```python
+from qpane import RasterExtentPolicy
+
+mask = viewer.listMasksForImage()[0]
+if mask.scene_id is not None and mask.layer_id is not None:
+    viewer.setRasterExtentPolicy(
+        mask.scene_id,
+        mask.layer_id,
+        RasterExtentPolicy.EXPAND_ON_WRITE,
+    )
+```
+
+Use `QPane.rasterSurfaceState(scene_id, layer_id)` to inspect the current local `QRect`, policy, revisions, and pending bounds work. `QPane.requestRasterBounds` explicitly pads or crops storage on a worker thread. It returns a request UUID and later emits `QPane.rasterBoundsRequestCompleted`; a newer request for the same layer terminates the earlier request. Bounds changes participate in mask undo and redo without changing the layer's scene transform.
+
+The returned `QPaneRasterSurfaceState` is a detached snapshot that is safe for host UI inspection. `QPaneRasterSurfaceState.scene_id` and `QPaneRasterSurfaceState.layer_id` identify the queried scene instance, while `QPaneRasterSurfaceState.bounds` reports its current layer-local storage rectangle.
+
+`QPaneRasterSurfaceState.extent_policy` reports the active write rule. `QPaneRasterSurfaceState.content_revision` changes with pixels, `QPaneRasterSurfaceState.structure_revision` changes with bounds or policy, and `QPaneRasterSurfaceState.pending_request_id` identifies bounds work still in flight.
+
+```python
+from PySide6.QtCore import QRect
+
+state = viewer.rasterSurfaceState(mask.scene_id, mask.layer_id)
+if state is not None:
+    padded = QRect(
+        state.bounds.x() - 32,
+        state.bounds.y() - 32,
+        state.bounds.width() + 64,
+        state.bounds.height() + 64,
+    )
+    request_id = viewer.requestRasterBounds(
+        mask.scene_id,
+        mask.layer_id,
+        padded,
+    )
+```
+
+Mask export and autosave always produce an image-sized raster containing the intersection of the transformed mask with the image canvas. Pixels held outside that canvas remain in the authoring layer for later movement, but do not appear in that clipped export.
+
 ### Masks While A Layered Scene Is Active
 
 A layered scene can show several catalog images at once, so QPane does not treat it as a single active image for mask editing.

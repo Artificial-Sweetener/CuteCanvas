@@ -25,7 +25,7 @@ from .mask_undo import (
     MaskUndoProvider,
     MaskUndoState,
 )
-from .surface import MaskSurface
+from .surface import MaskSurface, MaskSurfaceSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,28 @@ class MaskAssetStore:
         self._history.initialize_mask(mask_id)
         return mask_id
 
+    def restore_mask(
+        self,
+        mask_id: uuid.UUID,
+        snapshot: MaskSurfaceSnapshot,
+    ) -> None:
+        """Install a validated durable mask snapshot with fresh edit history."""
+        if not isinstance(mask_id, uuid.UUID):
+            raise TypeError("mask_id must be a UUID")
+        if not isinstance(snapshot, MaskSurfaceSnapshot):
+            raise TypeError("snapshot must be MaskSurfaceSnapshot")
+        if mask_id in self._masks:
+            self._history.dispose_mask(mask_id)
+        self._masks[mask_id] = MaskLayer(
+            mask_id=mask_id,
+            surface=MaskSurface(
+                snapshot.pixels,
+                bounds=snapshot.bounds,
+                extent_policy=snapshot.extent_policy,
+            ),
+        )
+        self._history.initialize_mask(mask_id)
+
     def delete_mask(self, mask_id: uuid.UUID) -> bool:
         """Delete one asset and its independent history."""
         if mask_id not in self._masks:
@@ -159,6 +181,32 @@ class MaskAssetStore:
             before_image=before_image,
             notify=notify,
         )
+
+    def record_applied_surface(
+        self,
+        mask_id: uuid.UUID,
+        before: MaskSurfaceSnapshot,
+        after: MaskSurfaceSnapshot,
+        *,
+        notify: Callable[[uuid.UUID], None] | None = None,
+    ) -> bool:
+        """Record an already-applied structural surface transition."""
+        return self._history.record_applied_surface(
+            mask_id,
+            before,
+            after,
+            notify=notify,
+        )
+
+    def commit_mask_surface(
+        self,
+        mask_id: uuid.UUID,
+        snapshot: MaskSurfaceSnapshot,
+        *,
+        notify: Callable[[uuid.UUID], None] | None = None,
+    ) -> bool:
+        """Commit complete mask structure and pixels through history."""
+        return self._history.commit_surface(mask_id, snapshot, notify=notify)
 
     def undo_mask(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
         """Undo one asset edit."""

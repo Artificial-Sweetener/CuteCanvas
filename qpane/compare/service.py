@@ -39,6 +39,7 @@ from ..scene.model import (
     SceneDescriptor,
 )
 from ..scene.providers import SceneContribution
+from ..scene.raster import LayerTransform, RasterBounds
 from ..scene.sources import CatalogImageSource
 from ..types import ComparisonOrientation, ComparisonState
 
@@ -238,6 +239,10 @@ class CompareService:
         if source is None:
             return None
         source_id, layer_source, revision = source
+        source_image = self._catalog.getImage(source_id)
+        if source_image is None or source_image.isNull():
+            return None
+        raster_bounds = RasterBounds.from_size(source_image.size())
         clip = self._comparison_clip()
         layer = LayerDescriptor(
             scene_id=base_scene.scene_id,
@@ -254,6 +259,8 @@ class CompareService:
                 role="comparison-image",
             ),
             source_revision=revision,
+            raster_bounds=raster_bounds,
+            transform=LayerTransform.from_placement(raster_bounds, base_scene.bounds),
         )
         return SceneContribution(
             scene=SceneDescriptor(
@@ -362,7 +369,16 @@ class CompareService:
         )
         if not is_base_layer:
             return layer
-        return replace(layer, placement=authority_bounds)
+        if layer.raster_bounds is None:
+            return replace(layer, placement=authority_bounds)
+        return replace(
+            layer,
+            placement=authority_bounds,
+            transform=LayerTransform.from_placement(
+                layer.raster_bounds,
+                authority_bounds,
+            ),
+        )
 
     def _comparison_clip(self) -> LayerClip:
         """Return the normalized reveal clip for the current split."""

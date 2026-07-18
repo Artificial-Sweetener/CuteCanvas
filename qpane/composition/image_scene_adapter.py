@@ -64,10 +64,14 @@ class ImageSceneLayerAdapter:
             if instance is None:
                 layers.append(layer)
                 continue
+            if layer.raster_bounds is None:
+                layers.append(layer)
+                continue
             layers.append(
                 replace(
                     layer,
-                    placement=instance.placement,
+                    placement=instance.transform.map_bounds(layer.raster_bounds),
+                    transform=instance.transform,
                     visible=instance.visible,
                     opacity=instance.opacity,
                     hit_test=LayerHitTest(

@@ -55,6 +55,7 @@ from qpane.scene.model import (
     SceneKind,
 )
 from qpane.scene.providers import SceneContribution
+from qpane.scene.raster import RasterBounds
 from qpane.scene.registry import (
     CatalogLayerSourceResolver,
     LayerSourceResolverRegistry,
@@ -357,6 +358,25 @@ class StubMaskLayer:
 
     def __init__(self, image: QImage) -> None:
         self.mask_image = image
+        self.surface = StubMaskSurface(image)
+
+
+class StubMaskSurface:
+    """Expose mask geometry and point reads without production pixel ownership."""
+
+    def __init__(self, image: QImage) -> None:
+        self._image = image
+        self.bounds = RasterBounds.from_size(image.size())
+
+    def is_null(self) -> bool:
+        """Return whether the backing test image is null."""
+        return self._image.isNull()
+
+    def storage_value(self, x: int, y: int) -> int:
+        """Return one grayscale test pixel or zero outside storage."""
+        if x < 0 or y < 0 or x >= self._image.width() or y >= self._image.height():
+            return 0
+        return self._image.pixelColor(x, y).red()
 
 
 class StubMaskAssets:
@@ -451,13 +471,11 @@ class StubMaskService:
     ) -> tuple[CompositionLayerInstance, ...]:
         """Return a base layer followed by configured masks."""
         scene_id = default_scene_id(image_id)
-        base_placement = LayerPlacement(0.0, 0.0, 400.0, 200.0)
         return (
             CompositionLayerInstance(
                 layer_id=base_image_layer_id(image_id),
                 source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
                 source_id=image_id,
-                placement=base_placement,
                 role="base-image",
             ),
             *(
@@ -465,12 +483,6 @@ class StubMaskService:
                     layer_id=mask_layer_id(scene_id, mask_id),
                     source_kind=CompositionLayerSourceKind.MASK,
                     source_id=mask_id,
-                    placement=LayerPlacement(
-                        0.0,
-                        0.0,
-                        float(layer.mask_image.width()),
-                        float(layer.mask_image.height()),
-                    ),
                     opacity=0.25 + index * 0.5,
                     role="mask",
                 )
@@ -722,7 +734,6 @@ def test_selection_hit_test_falls_through_transparent_mask_pixels(qapp) -> None:
                     layer_id=base_image_layer_id(image_id),
                     source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
                     source_id=image_id,
-                    placement=LayerPlacement(0.0, 0.0, 100.0, 100.0),
                     role="base-image",
                     interaction=selectable,
                 ),
@@ -730,7 +741,6 @@ def test_selection_hit_test_falls_through_transparent_mask_pixels(qapp) -> None:
                     layer_id=mask_layer_id(scene_id, mask_id),
                     source_kind=CompositionLayerSourceKind.MASK,
                     source_id=mask_id,
-                    placement=LayerPlacement(0.0, 0.0, 100.0, 100.0),
                     role="mask",
                     interaction=selectable,
                 ),
@@ -944,7 +954,6 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
                 layer_id=mask_layer_id(scene_id, mask_ids[0]),
                 source_kind=CompositionLayerSourceKind.MASK,
                 source_id=mask_ids[0],
-                placement=LayerPlacement(0.0, 0.0, 400.0, 200.0),
                 opacity=0.25,
                 role="mask",
             ),
@@ -952,14 +961,12 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
                 layer_id=base_image_layer_id(image_id),
                 source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
                 source_id=image_id,
-                placement=LayerPlacement(0.0, 0.0, 400.0, 200.0),
                 role="base-image",
             ),
             CompositionLayerInstance(
                 layer_id=mask_layer_id(scene_id, mask_ids[1]),
                 source_kind=CompositionLayerSourceKind.MASK,
                 source_id=mask_ids[1],
-                placement=LayerPlacement(0.0, 0.0, 400.0, 200.0),
                 opacity=0.75,
                 role="mask",
             ),

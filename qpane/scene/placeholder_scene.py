@@ -32,6 +32,7 @@ from .model import (
     SceneDescriptor,
     SceneKind,
 )
+from .raster import LayerTransform, RasterBounds
 from .sources import PlaceholderImageSource
 
 
@@ -52,6 +53,7 @@ def build_placeholder_scene(
         width=float(image_size.width()),
         height=float(image_size.height()),
     )
+    raster_bounds = RasterBounds.from_size(image_size)
     source = PlaceholderImageSource(source_id=source_id, revision=revision)
     layer = LayerDescriptor(
         scene_id=scene_id,
@@ -65,6 +67,8 @@ def build_placeholder_scene(
         clip=None,
         hit_test=LayerHitTest(enabled=True, role="placeholder-image"),
         source_revision=revision,
+        raster_bounds=raster_bounds,
+        transform=LayerTransform.from_placement(raster_bounds, placement),
     )
     return SceneDescriptor(
         scene_id=scene_id,

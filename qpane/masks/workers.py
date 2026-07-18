@@ -94,10 +94,13 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                     error = RuntimeError("prefetch cancelled")
                     break
                 layer = self._mask_manager.get_layer(mask_id)
-                if layer is None or layer.mask_image.isNull():
+                if layer is None or layer.surface.is_null():
                     continue
                 render_revision = self._controller.renders.render_revision(mask_id)
                 try:
+                    if self.is_cancelled:
+                        error = RuntimeError("prefetch cancelled")
+                        break
                     image = self._controller.renders.prepare_image(
                         layer, mask_id=mask_id
                     )
@@ -107,6 +110,9 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                 if image is not None:
                     scaled_outputs: list[tuple[float, QImage]] = []
                     for scale_key in self._scales:
+                        if self.is_cancelled:
+                            error = RuntimeError("prefetch cancelled")
+                            break
                         target_size = self._controller.renders.target_scaled_size(
                             image.size(), scale_key
                         )
@@ -120,6 +126,8 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                         if scaled_image.isNull():
                             continue
                         scaled_outputs.append((scale_key, scaled_image))
+                    if error is not None:
+                        break
                     warmed.append(
                         PrefetchedOverlay(
                             mask_id=mask_id,

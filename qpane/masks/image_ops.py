@@ -93,6 +93,26 @@ def adjust_connected_component(
     return working
 
 
+def connected_component_extent(
+    mask: np.ndarray,
+    *,
+    x: int,
+    y: int,
+) -> tuple[int, int, int, int] | None:
+    """Return left, top, exclusive-right, and exclusive-bottom for a component."""
+    working = np.array(_grayscale_array(mask), copy=True, order="C")
+    height, width = working.shape
+    if x < 0 or y < 0 or x >= width or y >= height or working[y, x] == 0:
+        return None
+    spans = _extract_connected_spans(working, x=x, y=y)
+    return (
+        min(span_left for _, span_left, _ in spans),
+        min(span_y for span_y, _, _ in spans),
+        max(span_right for _, _, span_right in spans) + 1,
+        max(span_y for span_y, _, _ in spans) + 1,
+    )
+
+
 def outer_mask_border(mask: np.ndarray) -> np.ndarray:
     """Return the one-pixel outer border produced by a 3x3 square dilation."""
     source = _grayscale_array(mask)

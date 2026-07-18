@@ -22,6 +22,7 @@ import uuid
 from dataclasses import dataclass, replace
 
 from .model import LayerPlacement, SceneDescriptor
+from .raster import LayerTransform
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +82,21 @@ class SceneLayerPlacementPreview:
         layers = []
         for layer in scene.layers:
             if layer.layer_id == preview.layer_id:
-                layers.append(replace(layer, placement=preview.placement))
+                transform = (
+                    layer.transform
+                    if layer.raster_bounds is None
+                    else LayerTransform.from_placement(
+                        layer.raster_bounds,
+                        preview.placement,
+                    )
+                )
+                layers.append(
+                    replace(
+                        layer,
+                        placement=preview.placement,
+                        transform=transform,
+                    )
+                )
                 changed = True
             else:
                 layers.append(layer)

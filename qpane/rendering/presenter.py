@@ -523,28 +523,18 @@ class RenderingPresenter:
 
     def panel_to_scene_point(self, panel_pos: QPoint | QPointF) -> QPointF | None:
         """Project a panel point into the active scene coordinate system."""
-        plan = self.calculateRenderPlan(
-            is_blank=getattr(self._qpane, "_is_blank", False)
-        )
-        if plan is None:
+        geometry = self._active_scene_geometry()
+        if geometry is None:
             return None
-        scene_size = QSize(
-            max(1, round(plan.scene_bounds.width)),
-            max(1, round(plan.scene_bounds.height)),
-        )
-        transform = self.viewport.get_transform(
-            scene_size,
-            1.0,
-            pan_override=plan.current_pan,
-            content_snapshot=plan.content_snapshot,
-        )
+        compiled, frame = geometry
+        transform = self._scene_to_panel_transform(compiled, frame)
         inverse, invertible = transform.inverted()
         if not invertible:
             return None
         local = inverse.map(QPointF(panel_pos))
         return QPointF(
-            local.x() + plan.scene_bounds.x,
-            local.y() + plan.scene_bounds.y,
+            local.x() + compiled.scene.bounds.x,
+            local.y() + compiled.scene.bounds.y,
         )
 
     def panel_to_layer_source_point(
@@ -554,13 +544,26 @@ class RenderingPresenter:
         panel_pos: QPoint | QPointF,
     ) -> QPointF | None:
         """Project a panel point into one layer's authoritative source space."""
-        item = self._render_item_for_layer(scene_id, layer_id)
-        if item is None:
+        geometry = self._layer_coordinate_geometry(scene_id, layer_id)
+        if geometry is None:
             return None
-        inverse, invertible = item.transform.inverted()
-        if not invertible:
+        compiled, frame, layer = geometry
+        panel_transform = self._scene_to_panel_transform(compiled, frame)
+        inverse_panel, invertible = panel_transform.inverted()
+        if not invertible or layer.transform is None:
             return None
-        return self._original_source_point(item, inverse.map(QPointF(panel_pos)))
+        scene_point = inverse_panel.map(QPointF(panel_pos))
+        scene_point += QPointF(compiled.scene.bounds.x, compiled.scene.bounds.y)
+        local_point = layer.transform.inverse_map(scene_point)
+        if local_point is None:
+            return None
+        raster_bounds = layer.raster_bounds
+        if raster_bounds is None:
+            return local_point
+        return QPointF(
+            local_point.x() - raster_bounds.x,
+            local_point.y() - raster_bounds.y,
+        )
 
     def layer_source_to_panel_point(
         self,
@@ -569,12 +572,22 @@ class RenderingPresenter:
         source_point: QPoint | QPointF,
     ) -> QPointF | None:
         """Project authoritative layer-source coordinates into the panel."""
-        item = self._render_item_for_layer(scene_id, layer_id)
-        if item is None:
+        geometry = self._layer_coordinate_geometry(scene_id, layer_id)
+        if geometry is None:
             return None
-        scale = self._render_item_source_scale(item)
-        render_point = QPointF(source_point) * scale
-        return item.transform.map(render_point)
+        compiled, frame, layer = geometry
+        if layer.transform is None:
+            return None
+        local_point = QPointF(source_point)
+        raster_bounds = layer.raster_bounds
+        if raster_bounds is not None:
+            local_point += QPointF(raster_bounds.x, raster_bounds.y)
+        scene_point = layer.transform.map_point(local_point)
+        scene_local_point = scene_point - QPointF(
+            compiled.scene.bounds.x,
+            compiled.scene.bounds.y,
+        )
+        return self._scene_to_panel_transform(compiled, frame).map(scene_local_point)
 
     def image_to_panel_point(self, image_point: QPoint) -> QPointF | None:
         """Project an image-space coordinate into the widget."""
@@ -611,6 +624,11 @@ class RenderingPresenter:
     def current_scene_descriptor(self) -> SceneDescriptor | None:
         """Return the active scene descriptor without building render items."""
         compiled = self._compiled_render_scene()
+        return compiled.scene if compiled is not None else None
+
+    def coordinate_scene_descriptor(self) -> SceneDescriptor | None:
+        """Return scene geometry already resolved for the active input frame."""
+        compiled = self._cached_compiled_scene or self._compiled_render_scene()
         return compiled.scene if compiled is not None else None
 
     def invalidate_content_cache(self) -> None:
@@ -1462,24 +1480,51 @@ class RenderingPresenter:
         )
         return scale if scale > 0.0 else 1.0
 
-    def _render_item_for_layer(
+    def _active_scene_geometry(
+        self,
+    ) -> tuple[CompiledRenderScene, _FrameGeometry] | None:
+        """Resolve current scene geometry without resolving render-source pixels."""
+        if getattr(self._qpane, "_is_blank", False):
+            return None
+        compiled = self._cached_compiled_scene or self._compiled_render_scene()
+        if compiled is None:
+            return None
+        return compiled, self._frame_geometry_for(compiled, use_pan=None)
+
+    def _layer_coordinate_geometry(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-    ) -> SceneRenderItem | None:
-        """Return the active render item matching stable scene/layer identity."""
-        plan = self.calculateRenderPlan(
-            is_blank=getattr(self._qpane, "_is_blank", False)
-        )
-        if plan is None or plan.scene_id != scene_id:
+    ) -> tuple[CompiledRenderScene, _FrameGeometry, LayerDescriptor] | None:
+        """Resolve one layer and its current viewport geometry without raster work."""
+        geometry = self._active_scene_geometry()
+        if geometry is None:
             return None
-        return next(
-            (
-                item
-                for item in plan.render_items
-                if item.descriptor.layer_id == layer_id
-            ),
-            None,
+        compiled, frame = geometry
+        if compiled.scene.scene_id != scene_id:
+            return None
+        layer = next(
+            (item for item in compiled.scene.layers if item.layer_id == layer_id), None
+        )
+        if layer is None:
+            return None
+        return compiled, frame, layer
+
+    def _scene_to_panel_transform(
+        self,
+        compiled: CompiledRenderScene,
+        frame: _FrameGeometry,
+    ) -> QTransform:
+        """Return the authoritative scene-local to panel transform for one frame."""
+        scene_size = QSize(
+            max(1, round(compiled.scene.bounds.width)),
+            max(1, round(compiled.scene.bounds.height)),
+        )
+        return self.viewport.get_transform(
+            scene_size,
+            1.0,
+            pan_override=frame.current_pan,
+            content_snapshot=frame.content_snapshot,
         )
 
     def _source_point_inside_clip(
@@ -1604,16 +1649,18 @@ class RenderingPresenter:
                 mask_id=layer.source.mask_id,
                 revision=layer.source_revision,
             )
-            full_image = self._source_resolvers.source_image(layer.source)
-            if full_image is None or full_image.isNull():
+            source_size = self._source_resolvers.source_size(layer.source)
+            if source_size is None or source_size.isEmpty():
                 continue
             render_image = self._source_resolvers.best_fit_image(
                 layer.source,
                 asset_key=asset_key,
                 pyramid_asset_key=asset_key,
-                full_image=full_image,
-                target_width=full_image.width() * scale,
+                source_size=source_size,
+                target_width=source_size.width() * scale,
             )
+            if render_image is None or render_image.isNull():
+                continue
             pixmap = QPixmap.fromImage(render_image)
             transform = self._transform_for_placed_geometry(
                 scene=compiled.scene,
@@ -1700,7 +1747,7 @@ class RenderingPresenter:
             layer.source,
             asset_key=asset_key,
             pyramid_asset_key=pyramid_asset_key,
-            full_image=full_image,
+            source_size=full_image.size(),
             target_width=target_width,
         )
         if source_image is None or source_image.isNull():

@@ -31,6 +31,7 @@ from ..scene.model import (
     SceneDescriptor,
 )
 from ..scene.mutations import SceneMutationCoordinator
+from ..scene.raster import LayerTransform
 from ..scene.sources import MaskLayerSource
 from .mask import MaskAssetStore
 from .mask_controller import MaskController
@@ -126,11 +127,14 @@ class MaskLayerCoordinator:
         asset = self._assets.get_layer(mask_id)
         if asset is None or asset.mask_image.isNull():
             return False
+        bounds = asset.surface.bounds
+        if bounds is None:
+            return False
         placement = LayerPlacement(
-            0.0,
-            0.0,
-            float(asset.mask_image.width()),
-            float(asset.mask_image.height()),
+            float(bounds.x),
+            float(bounds.y),
+            float(bounds.width),
+            float(bounds.height),
         )
         if not self._layers.layers_for_image(image_id):
             self._layers.ensure_image(image_id, placement)
@@ -140,7 +144,7 @@ class MaskLayerCoordinator:
                 layer_id=mask_layer_id(default_scene_id(image_id), mask_id),
                 source_kind=CompositionLayerSourceKind.MASK,
                 source_id=mask_id,
-                placement=placement,
+                transform=LayerTransform(),
                 opacity=opacity,
                 tint=color,
                 hit_test=True,

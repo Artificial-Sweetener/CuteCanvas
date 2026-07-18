@@ -84,6 +84,10 @@ class ComparisonOrientation(str, Enum):
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
 
+class RasterExtentPolicy(str, Enum):
+    FIXED = "fixed"
+    EXPAND_ON_WRITE = "expand-on-write"
+
 class DiagnosticsDomain(str, Enum):
     CACHE: str
     SWAP: str
@@ -111,6 +115,15 @@ class QPaneSceneClip:
 class QPaneLayerInteractionPolicy:
     selectable: bool
     movable: bool
+
+class QPaneRasterSurfaceState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    bounds: QRect
+    extent_policy: RasterExtentPolicy
+    content_revision: int
+    structure_revision: int
+    pending_request_id: uuid.UUID | None
 
 class QPaneSceneLayer:
     layer_id: uuid.UUID
@@ -297,6 +310,7 @@ class QPane(QWidget):
     compositionSelectionChanged: Signal
     sceneChanged: Signal
     sceneEditHistoryChanged: Signal
+    rasterBoundsRequestCompleted: Signal
     samCheckpointStatusChanged: Signal
     samCheckpointProgress: Signal
 
@@ -413,6 +427,23 @@ class QPane(QWidget):
         layer_id: uuid.UUID,
         placement: QRectF,
     ) -> bool: ...
+    def rasterSurfaceState(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QPaneRasterSurfaceState | None: ...
+    def setRasterExtentPolicy(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        policy: RasterExtentPolicy,
+    ) -> bool: ...
+    def requestRasterBounds(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        bounds: QRect,
+    ) -> uuid.UUID | None: ...
     def sceneEditUndoAvailable(self) -> bool: ...
     def sceneEditRedoAvailable(self) -> bool: ...
     def undoSceneEdit(self) -> bool: ...

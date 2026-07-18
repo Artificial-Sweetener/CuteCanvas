@@ -496,25 +496,10 @@ class BrushTool(BaseTool):
         return self._fallback_stroke_point(logical_point.toPoint())
 
     def _stroke_point_from_source(self, raw_point: QPointF) -> _StrokePoint | None:
-        """Clamp an authoritative mask-source point with edge brush tolerance."""
-        image_rect = self._get_image_rect()
-        if image_rect.isNull() or image_rect.isEmpty():
-            return None
-        raw_x = float(raw_point.x())
-        raw_y = float(raw_point.y())
-        max_x = float(image_rect.width() - 1)
-        max_y = float(image_rect.height() - 1)
-        clamp_x = min(max(raw_x, 0.0), max_x)
-        clamp_y = min(max(raw_y, 0.0), max_y)
-        inside = (
-            0.0 <= raw_x < image_rect.width() and 0.0 <= raw_y < image_rect.height()
-        )
-        radius = max(0.5, float(self._get_brush_size()) / 2.0)
-        if not inside and math.hypot(raw_x - clamp_x, raw_y - clamp_y) > radius:
-            return None
+        """Keep the unbounded layer-local point accepted by canvas mapping."""
         return _StrokePoint(
             raw=QPointF(raw_point),
-            clamped=QPoint(round(clamp_x), round(clamp_y)),
+            clamped=QPoint(round(raw_point.x()), round(raw_point.y())),
         )
 
     def _stroke_point_from_hit(self, hit: PanelHitTest) -> _StrokePoint | None:

@@ -50,6 +50,7 @@ __all__ = [
     "PlaceholderScaleMode",
     "QPaneCatalogImageLayerRequest",
     "QPaneLayerInteractionPolicy",
+    "QPaneRasterSurfaceState",
     "QPaneScene",
     "QPaneSceneClip",
     "QPaneSceneHit",
@@ -60,6 +61,7 @@ __all__ = [
     "QPaneSceneTemplate",
     "QPaneSceneTemplateBindings",
     "QPaneTemplateLayer",
+    "RasterExtentPolicy",
     "ZoomMode",
 ]
 
@@ -107,6 +109,13 @@ class ControlMode(str, Enum):
     MOVE = "move"
     DRAW_BRUSH = "draw-brush"
     SMART_SELECT = "smart-select"
+
+
+class RasterExtentPolicy(str, Enum):
+    """Control whether raster writes may enlarge layer-local storage."""
+
+    FIXED = "fixed"
+    EXPAND_ON_WRITE = "expand-on-write"
 
 
 class ComparisonOrientation(str, Enum):
@@ -260,6 +269,23 @@ class QPaneLayerInteractionPolicy:
 
     selectable: bool = False
     movable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class QPaneRasterSurfaceState:
+    """Public raster storage state for one active scene layer."""
+
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    bounds: QRect
+    extent_policy: RasterExtentPolicy
+    content_revision: int
+    structure_revision: int
+    pending_request_id: uuid.UUID | None = None
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt bounds from the source domain."""
+        object.__setattr__(self, "bounds", QRect(self.bounds))
 
 
 @dataclass(frozen=True, slots=True)

@@ -125,6 +125,10 @@ class View:
         """Expose the active scene descriptor for internal mutation validation."""
         return self.presenter.current_scene_descriptor()
 
+    def coordinate_scene_descriptor(self) -> SceneDescriptor | None:
+        """Expose stable active-scene geometry for one input frame."""
+        return self.presenter.coordinate_scene_descriptor()
+
     def invalidate_content_cache(self) -> None:
         """Drop cached scene/content geometry in the presenter."""
         self.presenter.invalidate_content_cache()

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 try:
@@ -55,3 +56,28 @@ def test_examples_are_not_installed_as_package_modules() -> None:
     include_patterns = pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
 
     assert include_patterns == ["qpane", "qpane.*"]
+
+
+def test_runtime_source_and_dependencies_do_not_require_opencv() -> None:
+    """Keep mask processing on the existing Qt and NumPy runtime stack."""
+    pyproject = tomllib.loads((_PROJECT_ROOT / "pyproject.toml").read_text("utf-8"))
+    dependency_groups = [
+        pyproject["project"]["dependencies"],
+        *pyproject["project"]["optional-dependencies"].values(),
+    ]
+    declared = {
+        dependency.lower() for group in dependency_groups for dependency in group
+    }
+    imported_roots: set[str] = set()
+    for path in (_PROJECT_ROOT / "qpane").rglob("*.py"):
+        tree = ast.parse(path.read_text("utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_roots.update(
+                    alias.name.split(".", 1)[0] for alias in node.names
+                )
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_roots.add(node.module.split(".", 1)[0])
+
+    assert all("opencv" not in dependency for dependency in declared)
+    assert "cv2" not in imported_roots

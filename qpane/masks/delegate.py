@@ -276,7 +276,10 @@ class MaskDelegate:
                 mask_id,
             )
             return False
-        return service.removeMaskFromImage(image_id, mask_id)
+        removed = service.removeMaskFromImage(image_id, mask_id)
+        if removed and self._catalog().currentImageID() == image_id:
+            self.sync_mask_activation_for_image(image_id)
+        return removed
 
     def cycle_masks_forward(self) -> bool:
         """Promote the next mask in the stack, wrapping around when needed."""

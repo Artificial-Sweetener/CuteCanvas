@@ -93,9 +93,8 @@ def _build_manager(
     qpane_parent = QObject()
     dummy_layer = SimpleNamespace(mask_image=QImage(2, 2, QImage.Format_ARGB32))
     dummy_layer.mask_image.fill(Qt.white)
-    mask_manager = SimpleNamespace(get_layer=lambda _mask_id: dummy_layer)
     manager = AutosaveManager(
-        mask_manager=mask_manager,
+        snapshot_provider=lambda _mask_id: dummy_layer.mask_image,
         settings=settings,
         get_current_image_path=lambda: image_path or Path("/tmp/example.png"),
         executor=executor,
@@ -185,7 +184,7 @@ def test_save_blank_mask_emits_failure_when_encode_fails(monkeypatch, tmp_path, 
     settings.mask_autosave_path_template = str(tmp_path / "{image_name}-{mask_id}.png")
     executor = StubExecutor()
     manager = AutosaveManager(
-        mask_manager=SimpleNamespace(get_layer=lambda _mask_id: None),
+        snapshot_provider=lambda _mask_id: None,
         settings=settings,
         get_current_image_path=lambda: tmp_path / "image.png",
         executor=executor,
@@ -235,7 +234,7 @@ def test_blank_encode_rejection_queues_retry(tmp_path, qapp):
     settings.mask_autosave_enabled = True
     executor = StubExecutor()
     manager = AutosaveManager(
-        mask_manager=SimpleNamespace(get_layer=lambda _mask_id: None),
+        snapshot_provider=lambda _mask_id: None,
         settings=settings,
         get_current_image_path=lambda: tmp_path / "image.png",
         executor=executor,
@@ -279,18 +278,13 @@ def test_save_mask_to_path_emits_failure_payload(monkeypatch, tmp_path, qapp):
     manager, _ = _build_manager(settings, executor=executor)
 
     class FakeCopy:
-        def save(self, *_args, **_kwargs):
-            return False
-
-    class FakeMaskImage:
         def isNull(self):
             return False
 
-        def copy(self):
-            return FakeCopy()
+        def save(self, *_args, **_kwargs):
+            return False
 
-    mask_layer = SimpleNamespace(mask_image=FakeMaskImage())
-    manager._mask_manager = SimpleNamespace(get_layer=lambda _mask_id: mask_layer)
+    manager._snapshot_provider = lambda _mask_id: FakeCopy()
     failures: list[tuple[str, str, Exception]] = []
     manager.saveFailed.connect(
         lambda mask_id, path, exc: failures.append((mask_id, path, exc))
@@ -343,11 +337,9 @@ def test_autosave_manager_submits_io_task(tmp_path, qapp):
     settings.mask_autosave_enabled = True
     mask_image = QImage(4, 4, QImage.Format_ARGB32)
     mask_image.fill(Qt.white)
-    mask_layer = SimpleNamespace(mask_image=mask_image)
-    mask_manager = SimpleNamespace(get_layer=lambda _mask_id: mask_layer)
     executor = StubExecutor()
     manager = AutosaveManager(
-        mask_manager=mask_manager,
+        snapshot_provider=lambda _mask_id: mask_image,
         settings=settings,
         get_current_image_path=lambda: tmp_path / "image.png",
         executor=executor,
@@ -370,11 +362,9 @@ def test_cancel_pending_mask_requests_executor_cancellation(tmp_path):
     settings.mask_autosave_enabled = True
     mask_image = QImage(4, 4, QImage.Format_ARGB32)
     mask_image.fill(Qt.white)
-    mask_layer = SimpleNamespace(mask_image=mask_image)
-    mask_manager = SimpleNamespace(get_layer=lambda _mask_id: mask_layer)
     executor = StubExecutor()
     manager = AutosaveManager(
-        mask_manager=mask_manager,
+        snapshot_provider=lambda _mask_id: mask_image,
         settings=settings,
         get_current_image_path=lambda: tmp_path / "image.png",
         executor=executor,

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -32,59 +32,16 @@ from ..catalog.image_utils import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,
 )
-from .combiner import MaskCombiner
+from ..scene.raster import RasterBounds, RasterExtentPolicy
 from .mask import MaskAssetStore, MaskLayer
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_undo import MaskHistoryChange, MaskPatch
 from .render_cache import MaskRenderCache
+from .stroke_history import MaskStrokeHistorySession
 from .stroke_models import MaskStrokeJobResult, MaskStrokeJobSpec, MaskStrokePayload
+from .surface import MaskSurfaceSnapshot, WritableMaskRegion
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class MaskReadyUpdate:
-    """Describe a generated mask update awaiting overlay promotion."""
-
-    mask_id: uuid.UUID
-    dirty_rect: QRect | None
-    mask_layer: MaskLayer | None
-    changed: bool
-
-
-@dataclass(slots=True)
-class _StrokeAccumulator:
-    """Collect and merge mask patches produced during a stroke."""
-
-    _patches: list[MaskPatch]
-    _already_applied: bool | None
-
-    def __init__(self) -> None:
-        """Start with an empty patch list ready to capture strokes."""
-        self._patches = []
-        self._already_applied = None
-
-    def reset(self) -> None:
-        """Clear the recorded patches so a new stroke can begin."""
-        self._patches.clear()
-        self._already_applied = None
-
-    def add_patch(self, patch: MaskPatch, *, already_applied: bool) -> None:
-        """Append one patch while preserving application semantics."""
-        if (
-            self._already_applied is not None
-            and self._already_applied != already_applied
-        ):
-            raise ValueError("A stroke cannot mix applied and unapplied mask patches.")
-        self._already_applied = already_applied
-        self._patches.append(patch)
-
-    def consume(self) -> tuple[tuple[MaskPatch, ...], bool]:
-        """Return and clear the recorded patches."""
-        patches = tuple(self._patches)
-        already_applied = bool(self._already_applied)
-        self.reset()
-        return patches, already_applied
 
 
 class MaskEditEpochs:
@@ -121,18 +78,19 @@ class MaskEditService:
         active_mask_id: Callable[[], uuid.UUID | None],
         mask_changed: Callable[[uuid.UUID | None, QRect], None],
         undo_changed: Callable[[uuid.UUID], None],
+        structure_changed: Callable[[], None] | None = None,
         diagnostics: MaskStrokeDiagnostics | None = None,
     ) -> None:
         """Initialize editing with explicit state-owner collaborators."""
         self._assets = assets
-        self._combiner = MaskCombiner(assets)
         self._renders = renders
         self._epochs = epochs
         self._active_mask_id = active_mask_id
         self._mask_changed = mask_changed
         self._undo_changed = undo_changed
+        self._structure_changed = structure_changed or (lambda: None)
         self._diagnostics = diagnostics
-        self._stroke_accumulators: dict[uuid.UUID, _StrokeAccumulator] = {}
+        self._stroke_history = MaskStrokeHistorySession()
 
     def _get_layer(self, mask_id: uuid.UUID | None) -> MaskLayer | None:
         """Return the canonical layer for a source id."""
@@ -141,29 +99,12 @@ class MaskEditService:
     @staticmethod
     def _layer_is_empty(layer: MaskLayer | None) -> bool:
         """Return whether a layer lacks canonical pixels."""
-        return layer is None or layer.mask_image.isNull()
+        return layer is None or layer.surface.is_null()
 
     def _record_stroke_event(self, event: str) -> None:
         """Record edit diagnostics when configured."""
         if self._diagnostics is not None and event:
             self._diagnostics.record_generation_event(event)
-
-    def _ensure_stroke_accumulator(self, mask_id: uuid.UUID) -> _StrokeAccumulator:
-        """Return the accumulator for `mask_id`, creating it when missing."""
-        accumulator = self._stroke_accumulators.get(mask_id)
-        if accumulator is None:
-            accumulator = _StrokeAccumulator()
-            self._stroke_accumulators[mask_id] = accumulator
-        return accumulator
-
-    def _drain_stroke_patches(
-        self, mask_id: uuid.UUID
-    ) -> tuple[tuple[MaskPatch, ...], bool]:
-        """Return and clear recorded patches for ``mask_id``."""
-        accumulator = self._stroke_accumulators.pop(mask_id, None)
-        if accumulator is None:
-            return (), False
-        return accumulator.consume()
 
     def async_epoch(self, mask_id: uuid.UUID) -> int:
         """Return the async edit epoch used to reject stale work."""
@@ -184,7 +125,82 @@ class MaskEditService:
     def discard_source(self, mask_id: uuid.UUID) -> None:
         """Forget controller generation tracking for `mask_id`."""
         self._epochs.discard(mask_id)
+        self._stroke_history.discard(mask_id)
         self._renders.discard_source(mask_id)
+
+    def prepare_writable_region(
+        self,
+        mask_id: uuid.UUID,
+        requested: RasterBounds,
+    ) -> WritableMaskRegion | None:
+        """Apply source extent policy and capture structural stroke history."""
+        layer = self._get_layer(mask_id)
+        if layer is None:
+            return None
+        surface = layer.surface
+        current = surface.bounds
+        will_expand = bool(
+            surface.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
+            and (current is None or not current.contains(requested))
+        )
+        before = surface.snapshot() if will_expand else None
+        storage_request = (
+            self._reserved_stroke_bounds(current, requested)
+            if will_expand and current is not None
+            else requested
+        )
+        storage_write = surface.ensure_writable(storage_request)
+        writable = WritableMaskRegion(
+            requested=requested,
+            writable=(
+                requested
+                if storage_write.after_bounds is not None
+                and storage_write.after_bounds.contains(requested)
+                else storage_write.writable
+            ),
+            before_bounds=storage_write.before_bounds,
+            after_bounds=storage_write.after_bounds,
+        )
+        if writable.expanded and before is not None:
+            self._stroke_history.capture_structure(mask_id, before)
+            self.advance_epoch(mask_id, reason="stroke_surface_expanded")
+            self._renders.reframe_layer(
+                layer,
+                before=writable.before_bounds,
+                after=writable.after_bounds,
+            )
+            self._structure_changed()
+            self._mask_changed(mask_id, QRect())
+        return writable
+
+    @staticmethod
+    def _reserved_stroke_bounds(
+        current: RasterBounds,
+        requested: RasterBounds,
+    ) -> RasterBounds:
+        """Amortize interactive growth by reserving one current span per crossed edge."""
+        combined = current.united(requested)
+        left = (
+            min(combined.x, current.x - current.width)
+            if requested.x < current.x
+            else combined.x
+        )
+        top = (
+            min(combined.y, current.y - current.height)
+            if requested.y < current.y
+            else combined.y
+        )
+        right = (
+            max(combined.right, current.right + current.width)
+            if requested.right > current.right
+            else combined.right
+        )
+        bottom = (
+            max(combined.bottom, current.bottom + current.height)
+            if requested.bottom > current.bottom
+            else combined.bottom
+        )
+        return RasterBounds(left, top, right - left, bottom - top)
 
     def prepare_stroke_job(
         self,
@@ -199,17 +215,20 @@ class MaskEditService:
         if layer is None or self._layer_is_empty(layer):
             logger.warning("Cannot prepare stroke job for missing mask %s.", mask_id)
             return None
-        bounded = dirty_rect.normalized().intersected(layer.mask_image.rect())
+        surface_bounds = layer.surface.bounds
+        if surface_bounds is None:
+            return None
+        storage_rect = QRect(0, 0, surface_bounds.width, surface_bounds.height)
+        bounded = dirty_rect.normalized().intersected(storage_rect)
         if bounded.isNull() or bounded.isEmpty():
             return None
         top = bounded.top()
         left = bounded.left()
         height = bounded.height()
         width = bounded.width()
-        bottom = top + height
-        right = left + width
-        view = layer.surface.snapshot_array()
-        before_slice = np.array(view[top:bottom, left:right], copy=True)
+        before_slice = layer.surface.snapshot_storage_region(
+            RasterBounds(left, top, width, height)
+        )
         meta: MutableMapping[str, Any]
         if metadata is None:
             meta = {}
@@ -378,8 +397,8 @@ class MaskEditService:
         mask_slice = np.ascontiguousarray(
             diff_mask[min_y : max_y + 1, min_x : max_x + 1]
         )
-        accumulator = self._ensure_stroke_accumulator(mask_id)
-        accumulator.add_patch(
+        self._stroke_history.add_patch(
+            mask_id,
             MaskPatch(
                 rect=global_rect,
                 before=before_image,
@@ -400,6 +419,8 @@ class MaskEditService:
         already_applied: bool = False,
     ) -> bool:
         """Submit the recorded update and refresh caches."""
+        layer_before = self._get_layer(mask_id)
+        bounds_before = None if layer_before is None else layer_before.surface.bounds
         if patches:
             if already_applied:
                 success = self._assets.record_applied_mask_patches(
@@ -427,6 +448,8 @@ class MaskEditService:
         layer = self._get_layer(mask_id)
         if layer is not None and not preserve_cache:
             self._renders.invalidate_layer(layer)
+        if layer is not None and layer.surface.bounds != bounds_before:
+            self._structure_changed()
         self._undo_changed(mask_id)
         return True
 
@@ -437,6 +460,8 @@ class MaskEditService:
         mask_id = self._active_mask_id()
         if mask_id is None:
             return False
+        layer_before = self._get_layer(mask_id)
+        bounds_before = None if layer_before is None else layer_before.surface.bounds
         change = operator(mask_id)
         if change is None:
             return False
@@ -448,6 +473,8 @@ class MaskEditService:
             if mask_layer is not None:
                 self._renders.invalidate_layer(mask_layer)
             self._mask_changed(mask_id, QRect())
+        if mask_layer is not None and mask_layer.surface.bounds != bounds_before:
+            self._structure_changed()
         self._undo_changed(mask_id)
         return True
 
@@ -464,8 +491,7 @@ class MaskEditService:
         mask_id = self._active_mask_id()
         if mask_id is None:
             return False
-        accumulator = self._ensure_stroke_accumulator(mask_id)
-        accumulator.reset()
+        self._stroke_history.begin(mask_id)
         return True
 
     def update_stroke_image(
@@ -477,6 +503,7 @@ class MaskEditService:
             logger.warning("Cannot update stroke for missing mask %s.", mask_id)
             return None
         existing_image = layer.mask_image
+        bounds_before = layer.surface.bounds
         if not existing_image.isNull() and not image.isNull():
             if existing_image.size() == image.size():
                 before_np = qimage_to_numpy_grayscale8(existing_image)
@@ -514,15 +541,31 @@ class MaskEditService:
                 )
         self._assets.set_mask_image(mask_id, image)
         self.advance_epoch(mask_id, reason="update_stroke_image")
+        if layer.surface.bounds != bounds_before:
+            self._structure_changed()
         return layer
 
     def commit_stroke(self, mask_id: uuid.UUID) -> bool:
         """Finalize a stroke only when it accumulated an actual mask mutation."""
         if self._get_layer(mask_id) is None:
-            self._stroke_accumulators.pop(mask_id, None)
+            self._stroke_history.discard(mask_id)
             logger.warning("Cannot commit stroke %s: missing mask.", mask_id)
             return False
-        patches, already_applied = self._drain_stroke_patches(mask_id)
+        payload = self._stroke_history.consume(mask_id)
+        if payload.structural_before is not None:
+            layer = self._get_layer(mask_id)
+            if layer is None:
+                return False
+            changed = self._assets.record_applied_surface(
+                mask_id,
+                payload.structural_before,
+                layer.surface.snapshot(),
+            )
+            if changed:
+                self._undo_changed(mask_id)
+            return changed
+        patches = payload.patches
+        already_applied = payload.already_applied
         if patches:
             return self._commit_mask_update(
                 mask_id,
@@ -541,7 +584,9 @@ class MaskEditService:
         preserve_cache: bool = False,
     ) -> bool:
         """Submit an undoable command using patch data when available."""
-        patches, already_applied = self._drain_stroke_patches(mask_id)
+        payload = self._stroke_history.consume(mask_id)
+        patches = payload.patches
+        already_applied = payload.already_applied
         if patches:
             return self._commit_mask_update(
                 mask_id,
@@ -556,60 +601,22 @@ class MaskEditService:
             preserve_cache=preserve_cache,
         )
 
-    def apply_generated_mask(
+    def apply_mask_surface(
         self,
-        mask_array_uint8: np.ndarray | None,
-        bbox: np.ndarray,
-        erase_mode: bool,
-    ) -> MaskReadyUpdate | None:
-        """Process a generated mask from SAM and describe the resulting change."""
-        mask_id = self._active_mask_id()
-        if mask_id is None:
-            return None
-        mask_layer = self._get_layer(mask_id)
-        if mask_array_uint8 is None:
-            self._renders.invalidate(mask_id)
-            image_rect = QRect(
-                QPoint(int(bbox[0]), int(bbox[1])),
-                QPoint(int(bbox[2]), int(bbox[3])),
-            )
-            return MaskReadyUpdate(
-                mask_id=mask_id,
-                dirty_rect=image_rect,
-                mask_layer=mask_layer,
-                changed=False,
-            )
-        new_image = self._combiner.combine(
-            mask_id,
-            mask_array_uint8,
-            erase_mode=erase_mode,
-        )
-        if new_image is None:
-            return MaskReadyUpdate(
-                mask_id=mask_id,
-                dirty_rect=None,
-                mask_layer=mask_layer,
-                changed=False,
-            )
-        if not self.apply_mask_image(
-            mask_id,
-            new_image,
-            preserve_cache=True,
-        ):
-            return MaskReadyUpdate(
-                mask_id=mask_id,
-                dirty_rect=None,
-                mask_layer=mask_layer,
-                changed=False,
-            )
-        mask_layer = self._get_layer(mask_id)
-        image_rect = QRect(
-            QPoint(int(bbox[0]), int(bbox[1])),
-            QPoint(int(bbox[2]), int(bbox[3])),
-        )
-        return MaskReadyUpdate(
-            mask_id=mask_id,
-            dirty_rect=image_rect,
-            mask_layer=mask_layer,
-            changed=True,
-        )
+        mask_id: uuid.UUID,
+        snapshot: MaskSurfaceSnapshot,
+    ) -> bool:
+        """Commit one complete policy-aware surface edit and invalidate geometry."""
+        layer_before = self._get_layer(mask_id)
+        bounds_before = None if layer_before is None else layer_before.surface.bounds
+        if not self._assets.commit_mask_surface(mask_id, snapshot):
+            return False
+        self.advance_epoch(mask_id, reason="mask_surface_applied")
+        layer = self._get_layer(mask_id)
+        if layer is not None:
+            self._renders.invalidate_layer(layer)
+        if layer is not None and layer.surface.bounds != bounds_before:
+            self._structure_changed()
+        self._undo_changed(mask_id)
+        self._mask_changed(mask_id, QRect())
+        return True

@@ -62,6 +62,8 @@ def install_mask_feature(qpane: QPane) -> None:
         config=qpane.settings,
         mask_config=mask_config,
         stroke_diagnostics=diagnostics_tracker,
+        structure_changed=qpane._handle_raster_structure_changed,
+        render_scale=lambda: qpane.view().viewport.zoom,
     )
     service = MaskService(
         qpane=qpane,

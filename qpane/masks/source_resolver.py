@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage, QPixmap
 
 from ..scene.identity import SceneLayerAssetKey
@@ -62,6 +62,14 @@ class MaskLayerSourceResolver:
         image = layer.mask_image
         return None if image.isNull() else image
 
+    def source_size(self, source: LayerSource) -> QSize | None:
+        """Return mask storage dimensions without copying authoritative pixels."""
+        if not isinstance(source, MaskLayerSource):
+            return None
+        layer = self.assets.get_layer(source.mask_id)
+        bounds = None if layer is None else layer.surface.bounds
+        return None if bounds is None else QSize(bounds.width, bounds.height)
+
     def source_path(self, source: LayerSource) -> Path | None:
         """Return no path because mask assets are memory-backed."""
         return None
@@ -72,23 +80,23 @@ class MaskLayerSourceResolver:
         *,
         asset_key: SceneLayerAssetKey,
         pyramid_asset_key: SceneLayerAssetKey,
-        full_image: QImage,
+        source_size: QSize,
         target_width: float,
-    ) -> QImage:
+    ) -> QImage | None:
         """Return the controller-cached mask raster nearest ``target_width``."""
-        if not isinstance(source, MaskLayerSource) or full_image.width() <= 0:
-            return full_image
-        scale = max(1e-6, float(target_width) / full_image.width())
+        if not isinstance(source, MaskLayerSource) or source_size.width() <= 0:
+            return None
+        scale = max(1e-6, float(target_width) / source_size.width())
         pixmap = self.renders.get_by_id(source.mask_id, scale=scale)
-        return full_image if pixmap is None or pixmap.isNull() else pixmap.toImage()
+        return None if pixmap is None or pixmap.isNull() else pixmap.toImage()
 
     def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
         """Select mask layers only where their authoritative pixels are painted."""
-        image = self.source_image(source)
-        if image is None or image.isNull():
+        if not isinstance(source, MaskLayerSource):
+            return False
+        layer = self.assets.get_layer(source.mask_id)
+        if layer is None:
             return False
         x = int(point.x())
         y = int(point.y())
-        if x < 0 or y < 0 or x >= image.width() or y >= image.height():
-            return False
-        return image.pixelColor(x, y).red() > 0
+        return layer.surface.storage_value(x, y) > 0

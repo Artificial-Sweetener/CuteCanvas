@@ -147,6 +147,17 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 - qpane.QPaneLayerInteractionPolicy — Host policy for direct layer interaction; `selectable` enables covered-pixel selection and `movable` permits placement changes.
 	- QPaneLayerInteractionPolicy.selectable — Allow direct tools to select the layer through covered source pixels.
 	- QPaneLayerInteractionPolicy.movable — Allow generic placement mutation and Move-tool dragging for the layer.
+- qpane.RasterExtentPolicy — Write-boundary policy for raster layer storage.
+	- RasterExtentPolicy.FIXED — Clip edits to the layer's current local bounds.
+	- RasterExtentPolicy.EXPAND_ON_WRITE — Grow local storage when an edit reaches beyond its current bounds.
+- qpane.QPaneRasterSurfaceState — Detached storage snapshot for one active raster scene layer.
+	- QPaneRasterSurfaceState.scene_id — Scene UUID used to query the layer.
+	- QPaneRasterSurfaceState.layer_id — Stable raster layer UUID.
+	- QPaneRasterSurfaceState.bounds — Integer storage rectangle in layer-local coordinates; its origin may be negative.
+	- QPaneRasterSurfaceState.extent_policy — Current `RasterExtentPolicy` applied to edits.
+	- QPaneRasterSurfaceState.content_revision — Revision of authoritative raster pixels.
+	- QPaneRasterSurfaceState.structure_revision — Revision of bounds or policy state.
+	- QPaneRasterSurfaceState.pending_request_id — Active bounds request UUID, or `None`.
 - qpane.QPaneSceneTemplate — Host-owned reusable template for building scene composition requests.
 	- QPaneSceneTemplate.template_id — Stable template UUID owned by the host.
 	- QPaneSceneTemplate.bounds — Host-defined scene-coordinate bounds.
@@ -265,6 +276,9 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - QPane.sceneOverlays — Return a read-only snapshot of registered scene overlays; use register/unregister helpers to change it.
 - QPane.setLayerInteractionPolicy — Replace selection and movement permissions for a layer through its scene owner.
 - QPane.setLayerPlacement — Set an absolute scene-space layer rectangle when movement policy permits it.
+- QPane.rasterSurfaceState — Return local bounds, extent policy, and revisions for a supported active raster layer.
+- QPane.setRasterExtentPolicy — Choose whether writes clip to current local bounds or expand storage.
+- QPane.requestRasterBounds — Asynchronously pad or crop a supported raster layer to exact integer local bounds while preserving its scene transform.
 - QPane.sceneEditUndoAvailable — Report whether the active scene has a placement change to undo.
 - QPane.sceneEditRedoAvailable — Report whether the active scene has a placement change to redo.
 - QPane.undoSceneEdit — Undo the active scene's latest committed layer placement.
@@ -425,6 +439,7 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 ### Masks
 - QPane.maskSaved — `qpane.MaskSavedPayload` (`mask_id`, `path`) emitted after a mask autosave completes.
 - QPane.maskUndoStackChanged — Mask UUID (`uuid.UUID`) payload emitted when a mask undo stack mutates.
+- QPane.rasterBoundsRequestCompleted — `(request_id, scene_id, layer_id, succeeded, message)` emitted exactly once when a raster bounds request succeeds, is replaced, becomes stale, or fails.
 
 ### Diagnostics
 - QPane.diagnosticsOverlayToggled — Bool payload emitted when the diagnostics HUD visibility changes.

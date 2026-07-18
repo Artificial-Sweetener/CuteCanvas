@@ -207,6 +207,9 @@ def test_mask_delegates_stub(qapp, monkeypatch):
                 )
                 self._controller = SimpleNamespace(
                     renders=renders,
+                    edits=SimpleNamespace(advance_epoch=lambda *_args, **_kwargs: 0),
+                    mask_updated=SimpleNamespace(emit=lambda *_args: None),
+                    undo_stack_changed=SimpleNamespace(emit=lambda *_args: None),
                 )
 
             def setMaskProperties(self, mask_id, color, opacity):

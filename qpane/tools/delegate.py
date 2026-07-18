@@ -287,6 +287,9 @@ class ToolInteractionDelegate:
                         current_image_id,
                     )
                     mode = Tools.CONTROL_MODE_PANZOOM
+                else:
+                    mask_service.prepareBrushInteraction()
+                    qpane.view().coordinate_scene_descriptor()
         elif mode == Tools.CONTROL_MODE_SMART_SELECT:
             if not qpane.samFeatureAvailable():
                 qpane.featureFallbacks().get("sam", "setControlMode", default=None)

@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 _AUTOSAVE_RETRY_BASE_DELAY_MS = 100
 _AUTOSAVE_RETRY_MAX_DELAY_MS = 2000
 
+MaskImagePayload = QImage | bytes | Callable[[], QImage]
+
 
 class AutosaveManager(QObject):
     """Manage debounced autosaves of mask layers using background workers."""
@@ -57,7 +59,7 @@ class AutosaveManager(QObject):
 
     def __init__(
         self,
-        mask_manager,
+        snapshot_provider: Callable[[object], MaskImagePayload | None],
         settings: MaskConfigSlice,
         get_current_image_path: Callable,
         *,
@@ -68,7 +70,7 @@ class AutosaveManager(QObject):
         """Initialize the autosave manager and optional worker executor.
 
         Args:
-            mask_manager: Mask manager used to query/serialize layers.
+            snapshot_provider: Callable returning the canvas-projected mask image.
             settings: Mask configuration slice containing autosave preferences.
             get_current_image_path: Callable returning the active image path.
             executor: Shared executor instance used for autosave workers.
@@ -77,7 +79,7 @@ class AutosaveManager(QObject):
             parent: Optional QObject parent for Qt ownership.
         """
         super().__init__(parent)
-        self._mask_manager = mask_manager
+        self._snapshot_provider = snapshot_provider
         self._settings = settings
         self._executor: TaskExecutorProtocol | None = executor
         self._get_current_image_path = get_current_image_path
@@ -344,11 +346,14 @@ class AutosaveManager(QObject):
         if not mask_id or not path:
             return
         self._dirty_masks_for_autosave.discard(mask_id)
-        mask_layer = self._mask_manager.get_layer(mask_id)
-        if not mask_layer or mask_layer.mask_image.isNull():
+        image_payload = self._snapshot_provider(mask_id)
+        if image_payload is None:
             return
-        image_to_save = mask_layer.mask_image.copy()
-        self._queue_save_worker(mask_id, image_to_save, path)
+        if isinstance(image_payload, QImage):
+            if image_payload.isNull():
+                return
+            image_payload = image_payload.copy()
+        self._queue_save_worker(mask_id, image_payload, path)
 
     def pending_mask_count(self) -> int:
         """Return the number of masks waiting to be autosaved."""
@@ -420,13 +425,13 @@ class AutosaveManager(QObject):
             logger.debug("Autosave diagnostics dirty callback failed", exc_info=True)
 
     def _queue_save_worker(
-        self, mask_id: str, image_payload: QImage | bytes, path: str | Path
+        self, mask_id: str, image_payload: MaskImagePayload, path: str | Path
     ) -> None:
         """Queue a background worker to encode and write the mask to disk."""
         key = str(mask_id)
         normalized_path = Path(path)
 
-        def _submit(payload: tuple[QImage | bytes, Path], attempt: int):
+        def _submit(payload: tuple[MaskImagePayload, Path], attempt: int):
             """Submit a mask save worker to the executor."""
             payload_image, path2 = payload
             worker = _MaskSaveWorker(payload_image, path2, key)
@@ -450,8 +455,8 @@ class AutosaveManager(QObject):
             return handle
 
         def _coalesce(
-            old: tuple[QImage | bytes, Path], new: tuple[QImage | bytes, Path]
-        ) -> tuple[QImage | bytes, Path]:
+            old: tuple[MaskImagePayload, Path], new: tuple[MaskImagePayload, Path]
+        ) -> tuple[MaskImagePayload, Path]:
             """Prefer the most recent payload while keeping the mask marked dirty."""
             self._dirty_masks_for_autosave.add(key)
             return new
@@ -554,7 +559,7 @@ class _MaskSaveWorker(QObject, QRunnable, BaseWorker):
 
     finished = Signal(object)  # Emits its own instance upon completion
 
-    def __init__(self, image_payload: QImage | bytes, path: Path, mask_id: str):
+    def __init__(self, image_payload: MaskImagePayload, path: Path, mask_id: str):
         """Capture mask payload metadata for deferred disk writes."""
         QObject.__init__(self)
         QRunnable.__init__(self)
@@ -573,13 +578,18 @@ class _MaskSaveWorker(QObject, QRunnable, BaseWorker):
                 cancelled = True
                 return
             image_bytes: bytes | None
-            if isinstance(self.image_payload, bytes):
-                image_bytes = self.image_payload
+            image_payload = self.image_payload
+            if callable(image_payload):
+                image_payload = image_payload()
+            if isinstance(image_payload, bytes):
+                image_bytes = image_payload
             else:
+                if image_payload.isNull():
+                    raise RuntimeError("Mask projection returned a null image")
                 buffer = QBuffer()
                 if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
                     raise RuntimeError("QBuffer failed to open for writing")
-                if not self.image_payload.save(buffer, "PNG"):
+                if not image_payload.save(buffer, "PNG"):
                     raise RuntimeError("QImage.save returned False while encoding mask")
                 image_bytes = bytes(buffer.data())
             self.path.parent.mkdir(parents=True, exist_ok=True)

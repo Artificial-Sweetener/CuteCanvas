@@ -75,6 +75,7 @@ def _seed_mask_service(qpane: QPane) -> None:
     """Seed the mask service and catalog for SAM feature tests."""
     qpane.mask_service = types.SimpleNamespace(
         adjust_mask_component=lambda mask_id, point, *, grow: True,
+        apply_mask_surface=lambda *_args, **_kwargs: True,
         getActiveMaskId=lambda: "mask-1",
         refreshAutosavePolicy=lambda: None,
         get_latest_status_message=lambda *args: None,
@@ -93,6 +94,7 @@ def qpane_with_sam(monkeypatch, qapp):
     catalog = qpane.catalog()
     qpane.mask_service = types.SimpleNamespace(
         adjust_mask_component=lambda mask_id, point, *, grow: True,
+        apply_mask_surface=lambda *_args, **_kwargs: True,
         getActiveMaskId=lambda: "mask-1",
         refreshAutosavePolicy=lambda: None,
         get_latest_status_message=lambda *args: None,
@@ -102,6 +104,7 @@ def qpane_with_sam(monkeypatch, qapp):
     )
     raw_catalog = catalog.imageCatalog()
     raw_catalog.getCurrentPath = lambda: Path("image.png")
+    qpane.activeMaskLayerCoordinates().scene_to_source = lambda point: QPoint(point)
     try:
         assert qpane.currentImagePath == Path("image.png")
         yield qpane

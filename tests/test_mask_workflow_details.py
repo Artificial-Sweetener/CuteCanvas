@@ -88,13 +88,13 @@ def test_mask_info_normalizes_label_and_reads_layer_opacity(qpane_with_mask):
     )
     moved_instance = service.layer_instance_for_mask(mask_id)
     assert moved_instance is not None
-    assert moved_instance.placement.x == 3.0
-    assert moved_instance.placement.y == 2.0
+    assert moved_instance.transform.translate_x == 3.0
+    assert moved_instance.transform.translate_y == 2.0
     assert qpane.undoSceneEdit()
     restored_instance = service.layer_instance_for_mask(mask_id)
     assert restored_instance is not None
-    assert restored_instance.placement.x == 0.0
-    assert restored_instance.placement.y == 0.0
+    assert restored_instance.transform.translate_x == 0.0
+    assert restored_instance.transform.translate_y == 0.0
     assert service.layers.store.update_label(image_id, instance.layer_id, "Layer 1")
     updated = masks.maskInfo(mask_id)
     assert updated is not None
@@ -168,8 +168,8 @@ def test_moved_mask_uses_layer_transform_for_edit_coordinates(
     assert movement.finish(target_panel_point)
     moved_instance = service.layer_instance_for_mask(mask_id)
     assert moved_instance is not None
-    assert moved_instance.placement.x == pytest.approx(4.0)
-    assert moved_instance.placement.y == pytest.approx(2.0)
+    assert moved_instance.transform.translate_x == pytest.approx(4.0)
+    assert moved_instance.transform.translate_y == pytest.approx(2.0)
 
 
 @pytest.mark.usefixtures("qapp")

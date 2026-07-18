@@ -281,19 +281,19 @@ class MaskActivationController:
         next_layer = self._assets.get_layer(next_mask_id)
         if next_layer is None:
             return False
-        next_image = next_layer.mask_image
-        if next_image.isNull():
+        next_bounds = next_layer.surface.bounds
+        if next_bounds is None:
             return False
-        next_pixels = next_image.width() * next_image.height()
+        next_pixels = next_bounds.width * next_bounds.height
         if next_pixels <= 0:
             return False
         previous_layer = self._assets.get_layer(previous_mask_id)
         if previous_layer is None:
             return False
-        previous_image = previous_layer.mask_image
-        if previous_image.isNull():
+        previous_bounds = previous_layer.surface.bounds
+        if previous_bounds is None:
             return False
-        previous_pixels = previous_image.width() * previous_image.height()
+        previous_pixels = previous_bounds.width * previous_bounds.height
         if previous_pixels <= 0:
             return False
         if next_pixels >= previous_pixels:
@@ -304,11 +304,11 @@ class MaskActivationController:
             logger.info(
                 "Deferring mask activation signals: prev=%s (%dx%d) next=%s (%dx%d) ratio=%.3f threshold=%.2f",
                 previous_mask_id,
-                previous_image.width(),
-                previous_image.height(),
+                previous_bounds.width,
+                previous_bounds.height,
                 next_mask_id,
-                next_image.width(),
-                next_image.height(),
+                next_bounds.width,
+                next_bounds.height,
                 ratio,
                 _DEFER_ACTIVATION_RATIO,
             )

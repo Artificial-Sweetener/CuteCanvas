@@ -34,7 +34,7 @@ from qpane.catalog.image_utils import (
 )
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.autosave import AutosaveManager
-from qpane.masks.edit_service import MaskEditService, MaskReadyUpdate
+from qpane.masks.edit_service import MaskEditService
 from qpane.masks.mask import MaskAssetStore
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.mask_service import MaskService
@@ -401,7 +401,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
     class TrackingAutosaveManager(AutosaveManager):
         def __init__(
             self,
-            mask_manager,
+            snapshot_provider,
             settings,
             get_current_image_path,
             *,
@@ -409,7 +409,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
             parent=None,
         ):
             super().__init__(
-                mask_manager,
+                snapshot_provider,
                 settings,
                 get_current_image_path,
                 executor=executor,
@@ -441,7 +441,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
         )
         qpane.attachMaskService(service)
         manager = TrackingAutosaveManager(
-            mask_manager,
+            service.getActiveMaskImage,
             qpane.settings,
             lambda: catalog.currentImagePath(),
             executor=qpane.executor,
@@ -522,7 +522,7 @@ def test_mask_region_update_triggers_autosave(qpane_with_mask, monkeypatch):
             super().scheduleSave(mask_id, dirty_rect)
 
     manager = TrackingAutosaveManager(
-        mask_manager,
+        service.getActiveMaskImage,
         qpane.settings,
         lambda: qpane.catalog().currentImagePath(),
         executor=qpane.executor,
@@ -1444,7 +1444,7 @@ def test_mask_service_produces_preview_for_zoomed_out(qpane_with_mask, monkeypat
     np.testing.assert_array_equal(preview_view, expected_slice)
 
 
-def test_handle_generated_mask_requests_async_refresh_for_sam(
+def test_handle_generated_mask_routes_canvas_pixels_through_generated_edit_owner(
     qpane_with_mask, monkeypatch
 ):
     qpane, mask_manager, image_id = qpane_with_mask
@@ -1454,34 +1454,19 @@ def test_handle_generated_mask_requests_async_refresh_for_sam(
     mask_id = mask_manager.create_mask(mask_image)
     _attach_test_mask(service, mask_manager, mask_id, image_id)
     assert qpane.setActiveMaskID(mask_id)
-    layer = mask_manager.get_layer(mask_id)
-    assert layer is not None
     dirty_rect = QRect(0, 0, 12, 10)
-    mask_update = MaskReadyUpdate(
-        mask_id=mask_id,
-        dirty_rect=dirty_rect,
-        mask_layer=layer,
-        changed=True,
-    )
-    controller = service.controller
-    monkeypatch.setattr(
-        controller.edits,
-        "apply_generated_mask",
-        lambda *args, **kwargs: mask_update,
-    )
     captured: dict[str, object] = {}
 
-    def fake_update_region(
-        dirty_rect_arg,
-        mask_layer_arg,
-        *,
-        sub_mask_image=None,
-        force_async_colorize=False,
-    ):
-        captured["force_async"] = force_async_colorize
-        captured["rect"] = QRect(dirty_rect_arg)
+    def apply_generated(mask, *, erase):
+        captured["mask"] = mask
+        captured["erase"] = erase
+        return mask_id, True
 
-    monkeypatch.setattr(service, "updateMaskRegion", fake_update_region)
+    monkeypatch.setattr(
+        service._generated_edits,
+        "apply",
+        apply_generated,
+    )
     bbox = np.array(
         [
             dirty_rect.left(),
@@ -1493,8 +1478,8 @@ def test_handle_generated_mask_requests_async_refresh_for_sam(
     )
     mask_data = np.ones((dirty_rect.height(), dirty_rect.width()), dtype=np.uint8) * 255
     service.handleGeneratedMask(mask_data, bbox, erase_mode=False)
-    assert captured["rect"] == dirty_rect
-    assert captured["force_async"] is True
+    assert captured["mask"] is mask_data
+    assert captured["erase"] is False
 
 
 def test_update_mask_region_forces_async_colorize_uses_full_res(
@@ -2950,12 +2935,20 @@ def test_durable_worker_preview_matches_live_decimated_preview() -> None:
         ),
     )
     state = _DecimatedStrokeState(mask_id=uuid.uuid4(), stride=4)
+
+    def snapshot_region(rect: QRect, stride: int) -> np.ndarray:
+        """Return the requested durable preview slice from canonical storage."""
+        return mask_view[
+            rect.top() : rect.bottom() + 1 : stride,
+            rect.left() : rect.right() + 1 : stride,
+        ].copy()
+
     live_preview = None
     for segment in segments:
         live_preview = state.preview_segment(
             dirty_rect=dirty_rect,
             segment=segment,
-            mask_view=mask_view,
+            snapshot_region=snapshot_region,
         )
     assert live_preview is not None
     final_rect = state.dirty_rect()

@@ -27,6 +27,7 @@ from PySide6.QtGui import QColor
 
 from ..scene.identity import base_image_layer_id
 from ..scene.model import LayerInteractionPolicy, LayerPlacement
+from ..scene.raster import LayerTransform, RasterBounds
 
 
 class CompositionLayerSourceKind(str, Enum):
@@ -43,7 +44,7 @@ class CompositionLayerInstance:
     layer_id: uuid.UUID
     source_kind: CompositionLayerSourceKind
     source_id: uuid.UUID
-    placement: LayerPlacement
+    transform: LayerTransform = field(default_factory=LayerTransform)
     visible: bool = True
     opacity: float = 1.0
     tint: QColor | None = None
@@ -84,7 +85,15 @@ class ImageSceneLayerStore:
             layer_id=base_image_layer_id(image_id),
             source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
             source_id=image_id,
-            placement=placement,
+            transform=LayerTransform.from_placement(
+                RasterBounds(
+                    0,
+                    0,
+                    max(1, round(placement.width)),
+                    max(1, round(placement.height)),
+                ),
+                placement,
+            ),
             role="base-image",
         )
         self._layers_by_image[image_id] = [instance]
@@ -100,6 +109,41 @@ class ImageSceneLayerStore:
             self._unindex_source(image_id, instance)
         self._revision += 1
         return removed
+
+    def replace_image_layers(
+        self,
+        image_id: uuid.UUID,
+        instances: tuple[CompositionLayerInstance, ...],
+    ) -> None:
+        """Replace one image scene's complete validated ordered layer stack."""
+        if not instances:
+            raise ValueError("image layer stacks must not be empty")
+        if len({instance.layer_id for instance in instances}) != len(instances):
+            raise ValueError("image layer IDs must be unique")
+        source_keys = {
+            (instance.source_kind, instance.source_id) for instance in instances
+        }
+        if len(source_keys) != len(instances):
+            raise ValueError("image layer sources must be unique")
+        base_instances = [
+            instance
+            for instance in instances
+            if instance.source_kind is CompositionLayerSourceKind.CATALOG_IMAGE
+            and instance.source_id == image_id
+        ]
+        if len(base_instances) != 1:
+            raise ValueError(
+                "image layer stacks require exactly one matching base image"
+            )
+        previous = self._layers_by_image.get(image_id, [])
+        if tuple(previous) == instances:
+            return
+        for instance in previous:
+            self._unindex_source(image_id, instance)
+        self._layers_by_image[image_id] = list(instances)
+        for instance in instances:
+            self._index_source(image_id, instance)
+        self._revision += 1
 
     def clear(self) -> None:
         """Remove every image scene layer stack."""
@@ -265,17 +309,17 @@ class ImageSceneLayerStore:
             lambda current: replace(current, interaction=interaction),
         )
 
-    def update_placement(
+    def update_transform(
         self,
         image_id: uuid.UUID,
         layer_id: uuid.UUID,
-        placement: LayerPlacement,
+        transform: LayerTransform,
     ) -> bool:
-        """Replace authoritative scene-space placement for one layer instance."""
+        """Replace authoritative layer-to-scene transform for one instance."""
         return self._replace_layer(
             image_id,
             layer_id,
-            lambda current: replace(current, placement=placement),
+            lambda current: replace(current, transform=transform),
         )
 
     def update_label(

@@ -98,6 +98,11 @@ from .scene.movement import SceneLayerMovementController
 from .scene.movement_interaction import SceneLayerMovementInteraction
 from .scene.mutations import SceneMutationCoordinator
 from .scene.placement_preview import SceneLayerPlacementPreview
+from .scene.raster import RasterBounds
+from .scene.raster_mutations import (
+    RasterBoundsCompletion,
+    RasterLayerMutationCoordinator,
+)
 from .scene.registry import (
     CatalogLayerSourceResolver,
     LayerSourceResolverRegistry,
@@ -119,12 +124,14 @@ from .types import (
     DiagnosticsDomain,
     LinkedGroup,
     QPaneLayerInteractionPolicy,
+    QPaneRasterSurfaceState,
     QPaneScene,
     QPaneSceneHit,
     QPaneSceneLayer,
     QPaneSceneRequest,
     QPaneSceneTemplate,
     QPaneSceneTemplateBindings,
+    RasterExtentPolicy,
 )
 from .ui import (
     CursorBuilder,
@@ -186,6 +193,10 @@ class QPane(QWidget):
     """Emit the normalized active scene snapshot or ``None`` when it changes."""
     sceneEditHistoryChanged: Signal = Signal(bool, bool)
     """Emit scene placement undo and redo availability after history changes."""
+    rasterBoundsRequestCompleted: Signal = Signal(
+        uuid.UUID, uuid.UUID, uuid.UUID, bool, str
+    )
+    """Emit request, scene, layer, success, and message after a bounds request."""
     samCheckpointStatusChanged: Signal = Signal(str, object)
     """Emit checkpoint status and path updates for SAM readiness tracking.
     The payload is ``(status, path)``, where ``path`` is a ``Path`` and status
@@ -239,6 +250,9 @@ class QPane(QWidget):
         self._compare_interaction: CompareDividerInteraction | None = None
         self._composition_scene_adapter: CompositionSceneAdapter | None = None
         self._scene_mutations: SceneMutationCoordinator | None = None
+        self._raster_mutations: RasterLayerMutationCoordinator | None = None
+        self._mask_raster_mutation_owner = None
+        self._raster_request_public_scenes: dict[uuid.UUID, uuid.UUID] = {}
         self._scene_selection = SceneLayerSelectionController()
         self._scene_placement_preview = SceneLayerPlacementPreview()
         self._scene_movement: SceneLayerMovementController | None = None
@@ -732,6 +746,7 @@ class QPane(QWidget):
             ),
         )
         if result.changed:
+            self.view().invalidate_content_cache()
             self._handle_internal_scene_content_changed()
             self._emit_scene_changed()
         return result.changed
@@ -779,6 +794,124 @@ class QPane(QWidget):
         if result.changed:
             self._publish_scene_placement_change()
         return result.changed
+
+    def rasterSurfaceState(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QPaneRasterSurfaceState | None:
+        """Return source-owned raster storage state for an active scene layer.
+
+        Args:
+            scene_id: Public or resolved identifier for the active scene.
+            layer_id: Stable identifier of the raster layer to inspect.
+
+        Returns:
+            A detached raster state snapshot, or ``None`` for non-raster layers.
+
+        Raises:
+            TypeError: If either identifier is not a UUID.
+        """
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        coordinator = self._raster_mutations
+        if coordinator is None:
+            return None
+        state = coordinator.state(self._resolve_public_scene_id(scene_id), layer_id)
+        if state is None:
+            return None
+        return QPaneRasterSurfaceState(
+            scene_id=scene_id,
+            layer_id=state.layer_id,
+            bounds=state.bounds.to_qrect(),
+            extent_policy=state.extent_policy,
+            content_revision=state.content_revision,
+            structure_revision=state.structure_revision,
+            pending_request_id=state.pending_request_id,
+        )
+
+    def setRasterExtentPolicy(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        policy: RasterExtentPolicy,
+    ) -> bool:
+        """Set the write-extent policy for an active raster layer.
+
+        Args:
+            scene_id: Public or resolved identifier for the active scene.
+            layer_id: Stable identifier of the raster layer to update.
+            policy: Fixed or expand-on-write storage behavior.
+
+        Returns:
+            True when the source policy changed.
+
+        Raises:
+            TypeError: If identifiers or policy use unsupported types.
+
+        Side effects:
+            Emits ``sceneChanged`` without changing pixels, bounds, or placement.
+        """
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        if not isinstance(policy, RasterExtentPolicy):
+            raise TypeError("policy must be RasterExtentPolicy")
+        coordinator = self._raster_mutations
+        return bool(
+            coordinator is not None
+            and coordinator.set_extent_policy(
+                self._resolve_public_scene_id(scene_id),
+                layer_id,
+                policy,
+            )
+        )
+
+    def requestRasterBounds(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        bounds: QRect,
+    ) -> uuid.UUID | None:
+        """Request an asynchronous pad/crop of raster-local storage bounds.
+
+        Args:
+            scene_id: Public or resolved identifier for the active scene.
+            layer_id: Stable identifier of the raster layer to resize.
+            bounds: Positive integer bounds in layer-local coordinates.
+
+        Returns:
+            A request UUID when the source accepted work, otherwise ``None``.
+
+        Raises:
+            TypeError: If identifiers or bounds use unsupported types.
+            ValueError: If bounds do not have positive dimensions.
+
+        Side effects:
+            Emits ``rasterBoundsRequestCompleted`` after the request terminates.
+        """
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        if not isinstance(bounds, QRect):
+            raise TypeError("bounds must be a QRect")
+        if bounds.width() <= 0 or bounds.height() <= 0:
+            raise ValueError("bounds dimensions must be positive")
+        coordinator = self._raster_mutations
+        if coordinator is None:
+            return None
+        request_id = coordinator.request_bounds(
+            self._resolve_public_scene_id(scene_id),
+            layer_id,
+            RasterBounds.from_qrect(bounds),
+        )
+        if request_id is not None:
+            self._raster_request_public_scenes[request_id] = scene_id
+        return request_id
 
     def sceneEditUndoAvailable(self) -> bool:
         """Return whether the active scene has a layer-placement undo command."""
@@ -1336,6 +1469,7 @@ class QPane(QWidget):
 
     def _publish_scene_placement_change(self) -> None:
         """Refresh rendering and publish scene placement/history state."""
+        self.view().invalidate_content_cache()
         self._handle_internal_scene_content_changed()
         self._emit_scene_changed()
 
@@ -1520,12 +1654,15 @@ class QPane(QWidget):
             publish_change=self._publish_scene_placement_change,
             refresh_preview=self._refresh_scene_placement_preview,
         )
+        self._raster_mutations = RasterLayerMutationCoordinator(
+            view.current_scene_descriptor
+        )
         self._active_mask_coordinates = ActiveMaskLayerCoordinates(
             active_mask_id=lambda: (
                 None if self._masks is None else self._masks.active_mask_id()
             ),
-            active_scene=self._scene_mutations.active_scene,
-            panel_to_layer=view.panel_to_layer_source_point,
+            active_scene=view.coordinate_scene_descriptor,
+            panel_to_scene=view.panel_to_scene_point,
             layer_to_panel=view.layer_source_to_panel_point,
         )
         self._catalog = Catalog(
@@ -1700,6 +1837,21 @@ class QPane(QWidget):
         )
         self.layerSourceResolverRegistry().register(resolver)
         self._mask_source_resolver = resolver
+        from .masks.raster_mutations import MaskRasterMutationOwner
+
+        raster_owner = MaskRasterMutationOwner(
+            assets=service.assets,
+            edits=service.controller.edits,
+            renders=service.controller.renders,
+            executor=self.executor,
+            mask_changed=service.controller.mask_updated.emit,
+            undo_changed=service.controller.undo_stack_changed.emit,
+            scene_changed=self._handle_raster_structure_changed,
+            completed=self._handle_raster_bounds_completion,
+        )
+        if self._raster_mutations is not None:
+            self._raster_mutations.register_owner(raster_owner)
+        self._mask_raster_mutation_owner = raster_owner
         self._emit_catalog_mutation("maskServiceAttached", affected_ids=())
 
     def detachMaskService(self) -> None:
@@ -1708,6 +1860,10 @@ class QPane(QWidget):
         Side effects:
             Emits ``catalogChanged`` with ``maskServiceDetached``.
         """
+        raster_owner = self._mask_raster_mutation_owner
+        if raster_owner is not None and self._raster_mutations is not None:
+            self._raster_mutations.unregister_owner(raster_owner)
+        self._mask_raster_mutation_owner = None
         provider = self._mask_scene_provider
         if provider is not None:
             self.sceneProviderRegistry().unregister_geometry_adapter(provider)
@@ -2478,6 +2634,29 @@ class QPane(QWidget):
                 self.sceneEditRedoAvailable(),
             )
 
+    def _handle_raster_structure_changed(self) -> None:
+        """Refresh scene geometry and public state after a raster source change."""
+        self.view().invalidate_content_cache()
+        self._handle_internal_scene_content_changed()
+        self._emit_scene_changed()
+
+    def _handle_raster_bounds_completion(
+        self,
+        completion: RasterBoundsCompletion,
+    ) -> None:
+        """Map one internal completion to the public active-scene identifier."""
+        public_scene_id = self._raster_request_public_scenes.pop(
+            completion.request_id,
+            completion.scene_id,
+        )
+        self.rasterBoundsRequestCompleted.emit(
+            completion.request_id,
+            public_scene_id,
+            completion.layer_id,
+            completion.succeeded,
+            completion.message,
+        )
+
     def _current_scene_snapshot(self) -> QPaneScene | None:
         """Return a public scene snapshot for the active composition."""
         service = self.compositionService()
@@ -2496,16 +2675,13 @@ class QPane(QWidget):
             record.primary_image_id,
             base_layer_id,
         )
-        placement = (
-            bounds
-            if base_instance is None
-            else QRectF(
-                base_instance.placement.x,
-                base_instance.placement.y,
-                base_instance.placement.width,
-                base_instance.placement.height,
+        if base_instance is None:
+            placement = bounds
+        else:
+            mapped = base_instance.transform.map_bounds(
+                RasterBounds.from_size(image.size())
             )
-        )
+            placement = QRectF(mapped.x, mapped.y, mapped.width, mapped.height)
         interaction = (
             QPaneLayerInteractionPolicy()
             if base_instance is None

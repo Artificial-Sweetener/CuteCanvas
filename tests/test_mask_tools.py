@@ -118,6 +118,18 @@ def _pointer_sample(
     )
 
 
+def _snapshot_array_region(
+    pixels: np.ndarray,
+    region: QRect,
+    stride: int,
+) -> np.ndarray:
+    """Copy one zero-origin storage region at the requested preview stride."""
+    return pixels[
+        region.top() : region.bottom() + 1 : stride,
+        region.left() : region.right() + 1 : stride,
+    ].copy()
+
+
 def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
     state = _DecimatedStrokeState(mask_id=uuid.uuid4(), stride=2)
     mask_view = np.zeros((8, 8), dtype=np.uint8)
@@ -129,7 +141,9 @@ def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
         segment=MaskStrokeSegmentPayload.fixed(
             (start.x(), start.y()), (end.x(), end.y()), 4, False
         ),
-        mask_view=mask_view,
+        snapshot_region=lambda region, stride: _snapshot_array_region(
+            mask_view, region, stride
+        ),
     )
     assert state._dirty_rect == dirty_rect
     assert preview.rect == dirty_rect
@@ -146,7 +160,9 @@ def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
     accumulated_preview = state.preview_segment(
         dirty_rect=second_rect,
         segment=MaskStrokeSegmentPayload.fixed((2, 2), (4, 4), 4, True),
-        mask_view=mask_view,
+        snapshot_region=lambda region, stride: _snapshot_array_region(
+            mask_view, region, stride
+        ),
     )
     accumulated_rect = dirty_rect.united(second_rect)
     assert state._dirty_rect == accumulated_rect
@@ -167,7 +183,9 @@ def test_preview_matches_worker_single_point(brush_size):
         segment=MaskStrokeSegmentPayload.fixed(
             (start.x(), start.y()), (start.x(), start.y()), brush_size, False
         ),
-        mask_view=mask_view,
+        snapshot_region=lambda region, stride: _snapshot_array_region(
+            mask_view, region, stride
+        ),
     )
     preview_view, _ = qimage_to_numpy_view_grayscale8(preview.image)
     y0, x0 = dirty_rect.top(), dirty_rect.left()

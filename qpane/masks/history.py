@@ -29,6 +29,8 @@ from .mask_undo import (
     MaskUndoProvider,
     MaskUndoState,
 )
+from .surface import MaskSurfaceSnapshot
+from .surface_history import MaskSurfaceCommand
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,10 @@ class MaskSurfaceLike(Protocol):
 
     def mutate(self, mutator: Callable[[np.ndarray, QImage], None]) -> None:
         """Apply an in-place mutation under the surface lock."""
+        ...
+
+    def replace_with_snapshot(self, snapshot: MaskSurfaceSnapshot) -> None:
+        """Replace complete surface state."""
         ...
 
 
@@ -174,6 +180,61 @@ class MaskHistory:
         self._provider.submit(mask_id, command, self._undo_limit)
         return True
 
+    def record_applied_surface(
+        self,
+        mask_id: uuid.UUID,
+        before: MaskSurfaceSnapshot,
+        after: MaskSurfaceSnapshot,
+        *,
+        notify: Callable[[uuid.UUID], None] | None = None,
+    ) -> bool:
+        """Record an already-applied structural surface transition."""
+        if self._assets.get_layer(mask_id) is None:
+            return False
+        if (
+            before.bounds == after.bounds
+            and before.extent_policy is after.extent_policy
+            and np.array_equal(before.pixels, after.pixels)
+        ):
+            return False
+        command = MaskSurfaceCommand(
+            mask_id=mask_id,
+            before=before,
+            after=after,
+            apply=self._apply_surface,
+            notify=notify,
+        )
+        self._provider.record_applied(mask_id, command, self._undo_limit)
+        return True
+
+    def commit_surface(
+        self,
+        mask_id: uuid.UUID,
+        after: MaskSurfaceSnapshot,
+        *,
+        notify: Callable[[uuid.UUID], None] | None = None,
+    ) -> bool:
+        """Record and apply one complete structural surface transition."""
+        layer = self._assets.get_layer(mask_id)
+        if layer is None:
+            return False
+        before = layer.surface.snapshot()
+        if (
+            before.bounds == after.bounds
+            and before.extent_policy is after.extent_policy
+            and np.array_equal(before.pixels, after.pixels)
+        ):
+            return False
+        command = MaskSurfaceCommand(
+            mask_id=mask_id,
+            before=before,
+            after=after,
+            apply=self._apply_surface,
+            notify=notify,
+        )
+        self._provider.submit(mask_id, command, self._undo_limit)
+        return True
+
     def undo(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
         """Undo the latest command for one asset."""
         return self._provider.undo(mask_id)
@@ -251,6 +312,18 @@ class MaskHistory:
     def _apply_image(self, mask_id: uuid.UUID, image: QImage) -> None:
         """Replay a full-image history state."""
         self._assets.set_mask_image(mask_id, image)
+
+    def _apply_surface(
+        self,
+        mask_id: uuid.UUID,
+        snapshot: MaskSurfaceSnapshot,
+    ) -> None:
+        """Replay a complete structural surface history state."""
+        layer = self._assets.get_layer(mask_id)
+        if layer is None:
+            self._warn_missing(mask_id, "apply surface command")
+            return
+        layer.surface.replace_with_snapshot(snapshot)
 
     @staticmethod
     def _warn_missing(mask_id: uuid.UUID, action: str) -> None:

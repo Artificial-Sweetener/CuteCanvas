@@ -22,8 +22,12 @@ import math
 import uuid
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from .sources import LayerSource
+
+if TYPE_CHECKING:
+    from .raster import LayerTransform, RasterBounds
 
 
 class SceneKind(str, Enum):
@@ -133,6 +137,8 @@ class LayerDescriptor:
     hit_test: LayerHitTest = LayerHitTest()
     interaction: LayerInteractionPolicy = LayerInteractionPolicy()
     source_revision: int = 0
+    raster_bounds: RasterBounds | None = None
+    transform: LayerTransform | None = None
 
     def __post_init__(self) -> None:
         """Validate stable descriptor values."""

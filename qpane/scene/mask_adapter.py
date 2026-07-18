@@ -34,6 +34,7 @@ from .model import (
     LayerKind,
     SceneDescriptor,
 )
+from .raster import RasterBounds
 from .sources import CatalogImageSource, MaskLayerSource
 
 
@@ -41,8 +42,8 @@ class MaskLayerLike(Protocol):
     """Mask asset fields required to resolve source geometry."""
 
     @property
-    def mask_image(self):
-        """Expose grayscale source pixels for placement."""
+    def surface(self):
+        """Expose authoritative mask storage bounds."""
         ...
 
 
@@ -96,9 +97,13 @@ class MaskCompositionSceneAdapter:
             if instance.source_kind == CompositionLayerSourceKind.CATALOG_IMAGE:
                 layer = base_by_source.get(instance.source_id)
                 if layer is not None:
+                    raster_bounds = layer.raster_bounds
+                    if raster_bounds is None:
+                        continue
                     layer = replace(
                         layer,
-                        placement=instance.placement,
+                        placement=instance.transform.map_bounds(raster_bounds),
+                        transform=instance.transform,
                         visible=instance.visible,
                         opacity=instance.opacity,
                         hit_test=LayerHitTest(
@@ -127,7 +132,10 @@ class MaskCompositionSceneAdapter:
     ) -> LayerDescriptor | None:
         """Resolve one composition mask instance into a scene descriptor."""
         asset = self.assets.get_layer(instance.source_id)
-        if asset is None or asset.mask_image.isNull():
+        if asset is None or asset.surface.is_null():
+            return None
+        raster_bounds: RasterBounds | None = asset.surface.bounds
+        if raster_bounds is None:
             return None
         revision = max(
             0,
@@ -138,7 +146,7 @@ class MaskCompositionSceneAdapter:
             layer_id=instance.layer_id,
             kind=LayerKind.MASK,
             source=MaskLayerSource(mask_id=instance.source_id, revision=revision),
-            placement=instance.placement,
+            placement=instance.transform.map_bounds(raster_bounds),
             visible=instance.visible,
             opacity=instance.opacity,
             blend_mode=BlendMode.NORMAL,
@@ -149,4 +157,6 @@ class MaskCompositionSceneAdapter:
             ),
             interaction=instance.interaction,
             source_revision=revision,
+            raster_bounds=raster_bounds,
+            transform=instance.transform,
         )

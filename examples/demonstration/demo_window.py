@@ -74,6 +74,7 @@ from examples.demonstration.config.spec import (
 )
 from examples.demonstration.custom_tool import build_custom_cursor_tool
 from examples.demonstration.hooks_editor import HookEditorWindow
+from examples.demonstration.layer_inspector import RasterLayerInspector
 from examples.demonstration.workers import ImageLoaderWorker
 from qpane import ComparisonOrientation, Config, QPane, QPaneLayerInteractionPolicy
 
@@ -222,6 +223,7 @@ class ExampleWindow(QMainWindow):
         self._build_layout()
         self._build_status_bar()
         self._build_catalog_panel()
+        self._build_layer_inspector()
         self._ensure_global_event_filter()
         self._apply_detail_preferences({})
         self._connect_qpane_signals()
@@ -475,6 +477,14 @@ class ExampleWindow(QMainWindow):
         self._zoom_container_layout.addWidget(self._zoom_input)
         self.status.addPermanentWidget(self._zoom_container)
 
+    def _build_layer_inspector(self) -> None:
+        """Add the public-API raster layer inspector for mask-capable demos."""
+        self.layer_inspector: RasterLayerInspector | None = None
+        if not self._mask_tools_available():
+            return
+        self.layer_inspector = RasterLayerInspector(self.qpane, self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.layer_inspector)
+
     def _finalize_startup(self) -> None:
         """Complete the final step of demo initialization."""
         self._refresh_tool_enables()
@@ -548,7 +558,7 @@ class ExampleWindow(QMainWindow):
     def _set_control_mode(self, mode: str) -> None:
         """Switch control modes, enforcing mask readiness for brush-based modes."""
         if mode == QPane.CONTROL_MODE_MOVE:
-            self._enable_current_scene_movement()
+            self._apply_current_scene_movement_policy()
         if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
             if not self._mask_tools_available():
                 self._set_status("Brush mode unavailable in core demo.")
@@ -657,23 +667,35 @@ class ExampleWindow(QMainWindow):
             return "Smart Select (SAM)"
         return mode
 
-    def _enable_current_scene_movement(self) -> None:
-        """Configure demo scene layers to teach host-controlled movement policy."""
+    def _apply_current_scene_movement_policy(self) -> None:
+        """Make only the active mask directly movable in the demonstration host."""
         scene = self.qpane.currentScene()
-        if scene is None:
-            return
+        frozen = QPaneLayerInteractionPolicy()
         movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
-        for layer in scene.layers:
-            self.qpane.setLayerInteractionPolicy(
-                scene.scene_id, layer.layer_id, movable
-            )
-        if self._mask_tools_available():
-            for mask in self.qpane.listMasksForImage():
+        if scene is not None:
+            for layer in scene.layers:
                 self.qpane.setLayerInteractionPolicy(
-                    mask.scene_id,
-                    mask.layer_id,
-                    movable,
+                    scene.scene_id,
+                    layer.layer_id,
+                    frozen,
                 )
+        if not self._mask_tools_available():
+            return
+        active_mask_id = self.qpane.activeMaskID()
+        for mask in self.qpane.listMasksForImage():
+            if mask.scene_id is None or mask.layer_id is None:
+                continue
+            policy = movable if mask.mask_id == active_mask_id else frozen
+            self.qpane.setLayerInteractionPolicy(
+                mask.scene_id,
+                mask.layer_id,
+                policy,
+            )
+
+    def _refresh_current_scene_movement_policy(self, *_args: object) -> None:
+        """Follow active-layer changes while the demonstration is in Move mode."""
+        if self.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE:
+            self._apply_current_scene_movement_policy()
 
     def _catalog_prefers_mask_selection(self) -> bool:
         """Return True when the catalog should highlight the active mask."""
@@ -1015,12 +1037,22 @@ class ExampleWindow(QMainWindow):
         self.qpane.compositionSelectionChanged.connect(
             lambda _composition_id: self._refresh_tool_enables()
         )
+        self.qpane.compositionSelectionChanged.connect(
+            self._refresh_current_scene_movement_policy
+        )
         self.qpane.catalogChanged.connect(lambda _event: self._refresh_tool_enables())
+        self.qpane.catalogChanged.connect(self._refresh_current_scene_movement_policy)
         self.qpane.catalogSelectionChanged.connect(
             lambda _image_id: self._refresh_tool_enables()
         )
+        self.qpane.catalogSelectionChanged.connect(
+            self._refresh_current_scene_movement_policy
+        )
         self.qpane.currentImageChanged.connect(
             lambda _image_id: self._refresh_tool_enables()
+        )
+        self.qpane.currentImageChanged.connect(
+            self._refresh_current_scene_movement_policy
         )
         self.qpane.currentImageChanged.connect(
             lambda _image_id: self._update_image_size_readout()
@@ -1869,6 +1901,8 @@ class ExampleWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.catalog_panel_action)
+        if self.layer_inspector is not None:
+            view_menu.addAction(self.layer_inspector.toggleViewAction())
         view_menu.addAction(self.quick_reference_action)
         view_menu.addSeparator()
         view_menu.addAction(self.compare_next_action)

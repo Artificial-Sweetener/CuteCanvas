@@ -26,11 +26,13 @@ from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 
+from ..catalog.image_utils import numpy_to_qimage_grayscale8
 from ..core import CacheSettings, Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
+from ..scene.raster import RasterBounds
 from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
 from .rasterizer import MaskRasterizer
@@ -111,6 +113,7 @@ class MaskRenderCache:
         self._total_bytes = 0
         self._mask_index: dict[uuid.UUID, set[MaskRenderCacheKey]] = {}
         self._requested_scales: dict[uuid.UUID, float] = {}
+        self._live_preview_masks: set[uuid.UUID] = set()
         self._prefetched_images: OrderedDict[uuid.UUID, QImage] = OrderedDict()
         self._prefetched_scaled: OrderedDict[uuid.UUID, OrderedDict[float, QImage]] = (
             OrderedDict()
@@ -186,6 +189,7 @@ class MaskRenderCache:
         """Forget render state associated with a deleted source."""
         self.cancel_async(mask_id)
         self._requested_scales.pop(mask_id, None)
+        self._live_preview_masks.discard(mask_id)
         self.invalidate(mask_id)
 
     def set_cache_usage_callback(self, callback: Callable[[], None] | None) -> None:
@@ -333,6 +337,7 @@ class MaskRenderCache:
         """Invalidate every cached scale for a source."""
         if mask_id is None:
             return
+        self._live_preview_masks.discard(mask_id)
         self._forget_prefetched(mask_id)
         for key in list(self._mask_index.get(mask_id, ())):
             self._drop(key, reason=reason)
@@ -342,13 +347,53 @@ class MaskRenderCache:
         if layer is not None:
             self.invalidate(layer.mask_id)
 
-    def warm(self, mask_id: uuid.UUID | None) -> None:
-        """Generate the base cached raster for a source when present."""
+    def reframe_layer(
+        self,
+        layer: MaskLayer,
+        *,
+        before: RasterBounds | None,
+        after: RasterBounds | None,
+    ) -> None:
+        """Carry cached pixels into new storage geometry without recolorizing them."""
+        if before is None or after is None:
+            self.invalidate_layer(layer)
+            return
+        latest = self._latest_entries(layer.mask_id)
+        reframed: list[tuple[float | None, QPixmap]] = []
+        for scale_key, (_key, pixmap, _size) in latest.items():
+            scale = 1.0 if scale_key is None else scale_key
+            target_size = self.target_scaled_size(
+                QSize(after.width, after.height),
+                scale,
+            )
+            target = QPixmap(target_size)
+            target.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(target)
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.drawPixmap(
+                QPoint(
+                    round((before.x - after.x) * scale),
+                    round((before.y - after.y) * scale),
+                ),
+                pixmap,
+            )
+            painter.end()
+            reframed.append((scale_key, target))
+        self.invalidate(layer.mask_id, reason="surface_reframe")
+        for scale_key, pixmap in reframed:
+            self._insert(
+                self._key(layer.mask_id, scale_key),
+                pixmap,
+                mask_id=layer.mask_id,
+            )
+
+    def warm(self, mask_id: uuid.UUID | None, *, scale: float | None = None) -> None:
+        """Generate the currently useful cached raster for a source when present."""
         if mask_id is None:
             return
         layer = self._assets.get_layer(mask_id)
         if layer is not None:
-            self.get(layer)
+            self.get(layer, scale=scale)
 
     def get(self, layer: MaskLayer, *, scale: float | None = None) -> QPixmap | None:
         """Return a colorized cached raster for a layer."""
@@ -387,14 +432,16 @@ class MaskRenderCache:
             preview_provisional = (
                 sub_mask_image.text("qpane_preview_provisional") == "1"
             )
+        if preview_provisional:
+            self._live_preview_masks.add(mask_id)
+        else:
+            self._live_preview_masks.discard(mask_id)
         base_key = self._key(mask_id, None)
         base_pixmap = self._cache.get(base_key)
         if preview_stride is not None and preview_stride > 1:
             if base_pixmap is not None:
                 self._drop(base_key, reason="decimated_preview")
             base_pixmap = None
-        elif base_pixmap is None:
-            base_pixmap = self._get(layer)
         self._forget_prefetched(mask_id)
         region = sub_mask_image or layer.mask_image.copy(dirty_rect)
         colorized = colorized_image or self.colorize_image(
@@ -547,6 +594,7 @@ class MaskRenderCache:
         self._entry_bytes.clear()
         self._total_bytes = 0
         self._rejected_keys.clear()
+        self._live_preview_masks.clear()
         self._notify_usage()
 
     def drop_oldest(self, *, reason: str, exclude: set[uuid.UUID] | None = None) -> int:
@@ -599,6 +647,10 @@ class MaskRenderCache:
             self._cache.move_to_end(key)
             self._hits += 1
             return cached
+        live_preview = self._live_preview_pixmap(mask_id, scale_key)
+        if live_preview is not None:
+            self._hits += 1
+            return live_preview
         if scale_key is not None:
             stored = self._prefetched_scaled.get(mask_id, {}).get(scale_key)
             if stored is not None and not stored.isNull():
@@ -606,6 +658,14 @@ class MaskRenderCache:
                 result = QPixmap.fromImage(stored)
                 self._insert(key, result, mask_id=mask_id)
                 return result
+            base = self._cache.get(self._key(mask_id, None))
+            if base is not None:
+                result = base.scaled(self.target_scaled_size(base.size(), scale_key))
+            else:
+                result = self._scaled_surface_pixmap(layer, scale_key)
+            self._misses += 1
+            self._insert(key, result, mask_id=mask_id)
+            return result
         image = layer.mask_image
         if image.isNull():
             return None
@@ -633,18 +693,52 @@ class MaskRenderCache:
                 result = self._colorize_pixmap(image, mask_id, "cache_miss")
             else:
                 result = self._colorize_pixmap(image, mask_id, "cache_miss")
-        else:
-            base = self._cache.get(self._key(mask_id, None))
-            if base is not None:
-                result = base.scaled(self.target_scaled_size(base.size(), scale_key))
-            else:
-                scaled = image.scaled(self.target_scaled_size(image.size(), scale_key))
-                if scaled.format() != QImage.Format.Format_Grayscale8:
-                    scaled = scaled.convertToFormat(QImage.Format.Format_Grayscale8)
-                result = self._colorize_pixmap(scaled, mask_id, "scaled_cache_miss")
         self._misses += 1
         self._insert(key, result, mask_id=mask_id)
         return result
+
+    def _live_preview_pixmap(
+        self,
+        mask_id: uuid.UUID,
+        requested_scale: float | None,
+    ) -> QPixmap | None:
+        """Return the nearest cache containing an in-flight stroke preview."""
+        if mask_id not in self._live_preview_masks:
+            return None
+        target_scale = 1.0 if requested_scale is None else requested_scale
+        candidates = self._latest_entries(mask_id)
+        if not candidates:
+            return None
+        _, (_, pixmap, _) = min(
+            candidates.items(),
+            key=lambda item: abs((1.0 if item[0] is None else item[0]) - target_scale),
+        )
+        return pixmap
+
+    def _scaled_surface_pixmap(
+        self,
+        layer: MaskLayer,
+        scale: float,
+    ) -> QPixmap:
+        """Derive one scaled overlay without copying the full mask surface."""
+        bounds = layer.surface.bounds
+        if bounds is None:
+            return QPixmap()
+        source_size = QSize(bounds.width, bounds.height)
+        target_size = self.target_scaled_size(source_size, scale)
+        stride = max(1, int(1.0 / min(1.0, scale)))
+        pixels = layer.surface.snapshot_storage_region(
+            RasterBounds(0, 0, bounds.width, bounds.height),
+            stride=stride,
+        )
+        scaled = numpy_to_qimage_grayscale8(pixels)
+        if scaled.size() != target_size:
+            scaled = scaled.scaled(
+                target_size,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        return self._colorize_pixmap(scaled, layer.mask_id, "scaled_cache_miss")
 
     def _colorize_pixmap(
         self, image: QImage, mask_id: uuid.UUID, source: str
@@ -795,8 +889,16 @@ class MaskRenderCache:
 
     def _emit_dirty_rect(self, mask_id: uuid.UUID, image_rect: QRect) -> None:
         """Convert one changed image region to panel coordinates."""
-        top_left = self._source_to_panel_point(image_rect.topLeft())
-        bottom_right = self._source_to_panel_point(image_rect.bottomRight())
+        layer = self._assets.get_layer(mask_id)
+        bounds = None if layer is None else layer.surface.bounds
+        if bounds is None:
+            self._render_changed(mask_id, QRect())
+            return
+        local_offset = QPoint(bounds.x, bounds.y)
+        top_left = self._source_to_panel_point(image_rect.topLeft() + local_offset)
+        bottom_right = self._source_to_panel_point(
+            image_rect.bottomRight() + local_offset
+        )
         if top_left is None or bottom_right is None:
             self._render_changed(mask_id, QRect())
             return
