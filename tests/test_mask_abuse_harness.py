@@ -402,6 +402,7 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
     previous_prefetch_enabled = service._prefetch_enabled
     previous_async_handler = controller._async_colorize_handler
     previous_async_threshold = controller._async_colorize_threshold_px
+    service.setPrefetchEnabled(False)
     try:
         if zoom_mode == "one-to-one":
             harness.viewer.setZoom1To1(QPoint(250, 250))
@@ -419,7 +420,6 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
         assert harness.is_mask_tint(before.pixelColor(retained_point))
         assert harness.is_mask_tint(before.pixelColor(removed_point))
 
-        service.setPrefetchEnabled(False)
         controller.cancel_async_colorize(mask_id)
         controller.set_async_colorize_handler(
             lambda _mask_id, _layer: True,
