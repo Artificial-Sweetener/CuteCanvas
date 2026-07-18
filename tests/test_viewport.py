@@ -15,14 +15,15 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import pytest
-from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF
+from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF
 
 from qpane import Config
 from qpane.rendering import Viewport, ViewportZoomMode
 
 
-class DummyViewportHost:
+class DummyViewportHost(QObject):
     def __init__(self, width: int, height: int, dpr: float) -> None:
+        super().__init__()
         self._size = QSize(width, height)
         self._dpr = dpr
         self.viewport = None

@@ -23,6 +23,7 @@ from PySide6.QtGui import QImage
 
 from examples.demo import ExampleOptions, ExampleWindow
 from qpane import QPane
+from qpane.sam.manager import SamManager
 
 
 def _solid_image() -> QImage:
@@ -32,8 +33,13 @@ def _solid_image() -> QImage:
     return image
 
 
-def test_demo_catalog_clicks_drive_tool_focus(qapp) -> None:
+def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
     """Ensure catalog selections set the expected tool modes."""
+
+    def ignore_predictor_request(*_args, **_kwargs) -> None:
+        """Keep inference outside a catalog-focus test."""
+
+    monkeypatch.setattr(SamManager, "requestPredictor", ignore_predictor_request)
     window = ExampleWindow(ExampleOptions(feature_set="masksam"))
     try:
         image_id = uuid.uuid4()

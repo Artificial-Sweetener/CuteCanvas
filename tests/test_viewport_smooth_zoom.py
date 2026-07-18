@@ -128,6 +128,12 @@ def test_zoom_animation_timer_uses_precise_timer(viewport_setup):
     assert viewport._zoom_anim_timer.timerType() == Qt.TimerType.PreciseTimer
 
 
+def test_viewport_lifetime_is_owned_by_host_widget(viewport_setup):
+    """The host widget owns viewport timers and transient motion teardown."""
+    viewport, qpane = viewport_setup
+    assert viewport.parent() is qpane
+
+
 def test_smooth_zoom_clamping(viewport_setup):
     """Verify that animation finishes cleanly even if time jumps past duration."""
     viewport, _qpane = viewport_setup

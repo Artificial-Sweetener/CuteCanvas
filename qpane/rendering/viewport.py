@@ -76,7 +76,7 @@ class Viewport(QObject):
             qpane: Widget hosting the viewport.
             config: Configuration snapshot controlling zoom and expansion limits.
         """
-        super().__init__()
+        super().__init__(qpane)
         self.qpane = qpane
         self._config = config
         self.content_size = QSize()  # Dimensions of the content (e.g., the image)
