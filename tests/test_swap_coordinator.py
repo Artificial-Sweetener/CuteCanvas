@@ -40,18 +40,17 @@ from qpane.scene.identity import (
 from qpane.swap.coordinator import SwapCoordinator
 
 
-class RecordingMaskService:
-    """Minimal mask service stub that records prefetch and cancel requests."""
+class RecordingScenePrefetcher:
+    """Scene-source prefetch stub that records scheduling and cancellation."""
 
     def __init__(self) -> None:
         self.controller = object()
         self.prefetch_calls: list[tuple[uuid.UUID, str]] = []
         self.cancel_calls: list[uuid.UUID | None] = []
-        self.manager = type(
-            "MaskManagerStub",
-            (),
-            {"get_mask_ids_for_image": staticmethod(lambda _image_id: [])},
-        )()
+
+    def has_sources(self, _image_id: uuid.UUID) -> bool:
+        """Return False so predictor warming remains independent in tests."""
+        return False
 
     def connectUndoStackChanged(self, _callback) -> None:  # pragma: no cover - no-op
         return
@@ -76,7 +75,7 @@ class RecordingMaskService:
     def isActivationPending(self, _image_id: uuid.UUID | None) -> bool:
         return False
 
-    def prefetchColorizedMasks(
+    def prefetch(
         self,
         image_id: uuid.UUID | None,
         *,
@@ -88,7 +87,7 @@ class RecordingMaskService:
         self.prefetch_calls.append((image_id, reason))
         return True
 
-    def cancelPrefetch(self, image_id: uuid.UUID | None) -> bool:
+    def cancel(self, image_id: uuid.UUID | None) -> bool:
         self.cancel_calls.append(image_id)
         return image_id is not None
 
@@ -483,8 +482,8 @@ def harness():
 
 
 def test_set_current_image_prefetches_neighbors(harness):
-    mask_service = RecordingMaskService()
-    harness.coordinator.on_mask_service_attached(mask_service)
+    mask_service = RecordingScenePrefetcher()
+    harness.coordinator.on_scene_prefetcher_attached(mask_service)
     mask_calls: list[tuple[uuid.UUID | None, bool]] = []
     workflow = harness.qpane._masks_controller
     original_on_swap_applied = workflow.on_swap_applied
@@ -519,8 +518,8 @@ def test_set_current_image_prefetches_neighbors(harness):
 
 
 def test_set_current_image_cancels_only_irrelevant_work(harness):
-    mask_service = RecordingMaskService()
-    harness.coordinator.on_mask_service_attached(mask_service)
+    mask_service = RecordingScenePrefetcher()
+    harness.coordinator.on_scene_prefetcher_attached(mask_service)
     sam_manager = RecordingSamManager()
     harness.coordinator.on_sam_manager_attached(sam_manager)
     cache_settings = CacheSettings()
@@ -553,8 +552,8 @@ def test_set_current_image_cancels_only_irrelevant_work(harness):
 
 
 def test_set_current_image_reports_pending_activation(harness):
-    mask_service = RecordingMaskService()
-    harness.coordinator.on_mask_service_attached(mask_service)
+    mask_service = RecordingScenePrefetcher()
+    harness.coordinator.on_scene_prefetcher_attached(mask_service)
     first_id = harness.add_image(color=Qt.red, path=Path("first.png"))
     second_id = harness.add_image(color=Qt.blue, path=Path("second.png"))
     harness.set_current_image(first_id)

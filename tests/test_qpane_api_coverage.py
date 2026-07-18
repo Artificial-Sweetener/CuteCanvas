@@ -18,6 +18,7 @@
 
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtCore import QPoint, QRectF, QSize
@@ -195,11 +196,18 @@ def test_mask_delegates_stub(qapp, monkeypatch):
         class MockMaskService:
             def __init__(self):
                 self.calls = []
-                self.manager = type(
-                    "MaskManagerStub",
-                    (),
-                    {"get_mask_ids_for_image": staticmethod(lambda _image_id: ())},
-                )()
+                self.assets = SimpleNamespace(get_layer=lambda _mask_id: None)
+                renders = SimpleNamespace(
+                    cache_usage_bytes=0,
+                    render_revision=lambda _mask_id: 0,
+                    get_by_id=lambda _mask_id, **_kwargs: None,
+                    set_cache_usage_callback=lambda _callback: None,
+                    set_admission_guard=lambda _guard: None,
+                    drop_oldest=lambda **_kwargs: 0,
+                )
+                self._controller = SimpleNamespace(
+                    renders=renders,
+                )
 
             def setMaskProperties(self, mask_id, color, opacity):
                 self.calls.append(("setMaskProperties", mask_id, color, opacity))
@@ -211,6 +219,15 @@ def test_mask_delegates_stub(qapp, monkeypatch):
 
             def listMasksForImage(self, image_id):
                 return ("mask1",)
+
+            def mask_ids_for_image(self, image_id):
+                return ()
+
+            def layer_instances_for_image(self, image_id):
+                return ()
+
+            def scene_provider_revision(self):
+                return ()
 
             def prefetchColorizedMasks(
                 self,
@@ -246,16 +263,17 @@ def test_mask_delegates_stub(qapp, monkeypatch):
             def cancelPrefetch(self, image_id: uuid.UUID | None) -> bool:
                 return False
 
+            def prepareCatalogImageRemoval(self, image_ids):
+                pass
+
             def get_latest_status_message(self, *_args, **_kwargs):
                 return None
 
             @property
             def controller(self):
-                return None
+                return self._controller
 
         mock_service = MockMaskService()
-        # Mock catalog mask manager to ensure maskFeatureAvailable returns True
-        monkeypatch.setattr(qpane.catalog(), "maskManager", lambda: True)
         qpane.attachMaskService(mock_service)
         mask_id = uuid.uuid4()
         qpane.setMaskProperties(mask_id, opacity=0.8)

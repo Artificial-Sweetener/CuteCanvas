@@ -84,27 +84,29 @@ def test_safe_int_logs_once_for_invalid_values(caplog, monkeypatch) -> None:
     assert len(warnings) == 1
 
 
-def test_mask_overlay_consumer_trim_respects_exclude() -> None:
-    """Mask trims should exclude the active mask and stop when no bytes free."""
+def test_mask_overlay_consumer_delegates_protected_trim() -> None:
+    """Mask trims should let the cache owner protect active entries."""
 
     class _ControllerStub:
         def __init__(self) -> None:
             self.cache_usage_bytes = 10
-            self._active_mask_id = "active"
-            self.drop_calls: list[tuple[str, set[str] | None]] = []
+            self.drop_calls: list[str] = []
 
-        def drop_oldest_cached_mask(self, *, reason: str, exclude=None) -> int:
-            self.drop_calls.append((reason, set(exclude or [])))
+        def drop_oldest(self, *, reason: str) -> int:
+            self.drop_calls.append(reason)
             return 0
 
-        def get_active_mask_id(self):
-            return self._active_mask_id
+        def set_cache_usage_callback(self, callback) -> None:
+            self._usage_callback = callback
+
+        def set_admission_guard(self, guard) -> None:
+            self._admission_guard = guard
 
     controller = _ControllerStub()
     coordinator = CacheCoordinator(active_budget_bytes=1024)
     consumer = MaskOverlayCacheConsumer(controller, coordinator)
     consumer._trim_to(0)
-    assert controller.drop_calls == [("coordinator", {"active"})]
+    assert controller.drop_calls == ["coordinator"]
 
 
 def test_sam_predictor_consumer_trims_and_updates_usage() -> None:

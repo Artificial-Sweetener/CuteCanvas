@@ -26,10 +26,10 @@ from statistics import mean
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QColor, QImage
 
 from qpane import QPane
-from qpane.masks.mask import MaskManager
+from qpane.masks.mask import MaskAssetStore
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.mask_service import MaskService
 from tests.helpers.executor_stubs import StubExecutor
@@ -82,12 +82,11 @@ def _mask_swap_environment(
     from qpane.masks import install as mask
 
     executor = StubExecutor()
-    manager_box: dict[str, MaskManager] = {}
+    manager_box: dict[str, MaskAssetStore] = {}
     controller_box: dict[str, MaskController] = {}
 
     def install_mask_feature(qpane: QPane) -> None:
-        mask_manager = MaskManager(undo_limit=qpane.settings.mask_undo_limit)
-        qpane.catalog().setMaskManager(mask_manager)
+        mask_manager = MaskAssetStore(undo_limit=qpane.settings.mask_undo_limit)
         controller = MaskController(
             mask_manager,
             image_to_panel_point=lambda pt: pt,
@@ -95,7 +94,7 @@ def _mask_swap_environment(
         )
         service = MaskService(
             qpane=qpane,
-            mask_manager=mask_manager,
+            mask_assets=mask_manager,
             mask_controller=controller,
             config=qpane.settings,
             executor=qpane.executor,
@@ -142,8 +141,13 @@ def _mask_swap_environment(
                 mask_id = manager.create_mask(image)
                 layer = manager.get_layer(mask_id)
                 assert layer is not None
-                layer.mask_image.fill(fill_value)
-                manager.associate_mask_with_image(mask_id, image_id)
+                layer.surface.fill(fill_value)
+                assert mask_service.layers.attach(
+                    mask_id,
+                    image_id,
+                    color=QColor(255, 0, 0),
+                    opacity=0.5,
+                )
                 mask_pairs.append((image_id, mask_id))
             else:
                 mask_pairs.append((image_id, None))
@@ -197,7 +201,7 @@ def _exercise_and_assert_swaps(
     """Measure swaps in both directions and enforce the warm latency budget."""
     first_id, second_id = image_ids
     controller = qpane.mask_service.controller
-    baseline = controller.snapshot_metrics()
+    baseline = controller.renders.snapshot_metrics()
     prefetch_before = len(getattr(qpane, "_prefetch_spy", []))
     forward = _measure_swap(qpane, second_id, qapp=qapp, samples=_SWAP_SAMPLES)
     prefetch_after = len(getattr(qpane, "_prefetch_spy", []))
@@ -207,7 +211,7 @@ def _exercise_and_assert_swaps(
     _drain_executor(executor)
     assert forward < WARM_SWAP_THRESHOLD_MS
     assert backward < WARM_SWAP_THRESHOLD_MS
-    metrics = controller.snapshot_metrics()
+    metrics = controller.renders.snapshot_metrics()
     if require_cache_hit:
         assert metrics.hits >= baseline.hits + 1
     else:

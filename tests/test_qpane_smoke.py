@@ -868,7 +868,7 @@ def _assert_failed_mask_install_warning(monkeypatch, caplog, qapp) -> None:
     from qpane.masks import install as mask
 
     def failing_install(qpane):
-        raise FeatureInstallError("Requires OpenCV")
+        raise FeatureInstallError("Requires optional runtime")
 
     monkeypatch.setattr(mask, "install_mask_feature", failing_install)
     qpane = QPane(features=("mask",))
@@ -876,7 +876,9 @@ def _assert_failed_mask_install_warning(monkeypatch, caplog, qapp) -> None:
         caplog.clear()
         with caplog.at_level(logging.WARNING, logger="qpane.fallbacks"):
             assert not qpane.setActiveMaskID(uuid.uuid4())
-        assert any("Requires OpenCV" in record.message for record in caplog.records)
+        assert any(
+            "Requires optional runtime" in record.message for record in caplog.records
+        )
     finally:
         _cleanup_qpane(qpane, qapp)
 

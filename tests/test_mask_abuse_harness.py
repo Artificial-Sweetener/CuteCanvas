@@ -471,9 +471,9 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
     assert service is not None
     controller = service.controller
     mask_id = harness.mask_ids[0]
-    previous_prefetch_enabled = service._prefetch_enabled
-    previous_async_handler = controller._async_colorize_handler
-    previous_async_threshold = controller._async_colorize_threshold_px
+    previous_prefetch_enabled = service.render_work.enabled
+    previous_async_handler = controller.renders._async_handler
+    previous_async_threshold = controller.renders._async_threshold_px
     service.setPrefetchEnabled(False)
     retained_point = QPoint(150, 160)
     removed_point = QPoint(350, 340)
@@ -501,8 +501,8 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
         assert harness.is_mask_tint(before.pixelColor(retained_point))
         assert harness.is_mask_tint(before.pixelColor(removed_point))
 
-        controller.cancel_async_colorize(mask_id)
-        controller.set_async_colorize_handler(
+        controller.renders.cancel_async(mask_id)
+        controller.renders.set_async_handler(
             lambda _mask_id, _layer: True,
             threshold_px=1,
         )
@@ -529,8 +529,8 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
         assert harness.is_mask_tint(retained_color)
         assert not harness.is_mask_tint(removed_color)
     finally:
-        controller.cancel_async_colorize(mask_id)
-        controller.set_async_colorize_handler(
+        controller.renders.cancel_async(mask_id)
+        controller.renders.set_async_handler(
             previous_async_handler,
             threshold_px=previous_async_threshold,
         )

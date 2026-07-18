@@ -36,7 +36,6 @@ from .image_map import ImageMap, image_map_from_lists
 from .link import LinkManager
 
 if TYPE_CHECKING:  # pragma: no cover - typed during development only
-    from ..masks.mask import MaskManager
     from ..qpane import QPane
     from ..swap import SwapDelegate
 logger = logging.getLogger(__name__)
@@ -125,10 +124,6 @@ class Catalog:
         """Return the underlying LinkManager instance."""
         return self._link_manager
 
-    def maskManager(self) -> MaskManager | None:
-        """Expose the catalog's mask manager when available."""
-        return self._catalog.get_mask_manager()
-
     def pyramidManager(self):
         """Expose the pyramid manager used for diagnostics and prefetching."""
         return self._catalog.pyramid_manager
@@ -136,10 +131,6 @@ class Catalog:
     def imageCatalog(self) -> ImageCatalog:
         """Return the underlying ImageCatalog for low-level integrations."""
         return self._catalog
-
-    def setMaskManager(self, manager: MaskManager | None) -> None:
-        """Install or clear the catalog's mask manager instance."""
-        self._catalog.set_mask_manager(manager)
 
     def qpane(self) -> QPane | None:
         """Return the weakly referenced QPane when still alive."""

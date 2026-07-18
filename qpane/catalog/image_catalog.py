@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""In-memory catalog that tracks images, paths, and mask/pyramid state."""
+"""In-memory catalog that tracks image identity, paths, and pyramids."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
@@ -35,8 +34,6 @@ from ..types import CatalogEntry
 from .image_map import ImageMap
 from .image_utils import images_differ
 
-if TYPE_CHECKING:
-    from ..masks.mask import MaskManager
 logger = logging.getLogger(__name__)
 
 
@@ -69,7 +66,6 @@ class ImageCatalog(QObject):
         config: Config,
         executor: TaskExecutorProtocol,
         parent=None,
-        mask_manager: MaskManager | None = None,
     ):
         """Initialize the Qt-backed catalog and its managers.
 
@@ -77,14 +73,12 @@ class ImageCatalog(QObject):
             config: Active configuration snapshot for cache/pyramid policies.
             executor: Shared task executor powering pyramid generation.
             parent: Optional QObject parent used for Qt ownership.
-            mask_manager: Mask manager wired to catalog lifecycle events.
         """
         super().__init__(parent)
         self._config = config
         self._image_order: list[uuid.UUID] = []
         self._records_by_id: dict[uuid.UUID, _CatalogImageRecord] = {}
         self._current_id: uuid.UUID | None = None
-        self.mask_manager: MaskManager | None = mask_manager
         self.pyramid_manager = PyramidManager(
             config=config, parent=self, executor=executor
         )
@@ -106,14 +100,6 @@ class ImageCatalog(QObject):
             self.pyramid_manager.generate_pyramid_for_asset(
                 self._asset_key_for_record(current_id, record), record.image
             )
-
-    def set_mask_manager(self, mask_manager: MaskManager | None) -> None:
-        """Assign or replace the mask manager backend.
-
-        Args:
-            mask_manager: Manager responsible for responding to catalog events.
-        """
-        self.mask_manager = mask_manager
 
     def setImagesByID(
         self,
@@ -151,10 +137,6 @@ class ImageCatalog(QObject):
             formatted[iid] = self._ensureArgb32(entry.image)
         new_ids = set(image_map.keys())
         ids_to_remove = [iid for iid in self._image_order if iid not in new_ids]
-        mask_manager = self.mask_manager
-        for iid in ids_to_remove:
-            if mask_manager:
-                mask_manager.handle_image_removal(iid)
         ids_with_changed_content: list[uuid.UUID] = []
         ids_with_changed_paths: list[uuid.UUID] = []
         asset_keys_to_evict: list[SceneLayerAssetKey] = []
@@ -344,13 +326,11 @@ class ImageCatalog(QObject):
         """
         if image_id not in self._records_by_id:
             raise KeyError("image_id not found")
-        # Pyramid and mask cleanup
+        # Pyramid cleanup
         record = self._records_by_id[image_id]
         self.pyramid_manager.remove_pyramid(
             self._asset_key_for_record(image_id, record)
         )
-        if self.mask_manager:
-            self.mask_manager.handle_image_removal(image_id)
         # Remove from stores
         self._records_by_id.pop(image_id, None)
         if image_id in self._image_order:
@@ -368,8 +348,6 @@ class ImageCatalog(QObject):
             Clears pyramids, mask state, catalog ordering, and the active selection.
         """
         self.pyramid_manager.clear()
-        if self.mask_manager:
-            self.mask_manager.clear_all()
         self._image_order = []
         self._records_by_id = {}
         self._current_id = None
@@ -424,10 +402,6 @@ class ImageCatalog(QObject):
     def getCurrentRevision(self) -> int | None:
         """Return the content revision for the current catalog image."""
         return self.getRevision(self._current_id) if self._current_id else None
-
-    def get_mask_manager(self) -> MaskManager | None:
-        """Expose the mask manager currently associated with this catalog."""
-        return self.mask_manager
 
     def containsImage(self, image_id: uuid.UUID) -> bool:
         """Return True when the catalog stores an image for ``image_id``."""

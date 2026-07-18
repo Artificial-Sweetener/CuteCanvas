@@ -50,11 +50,23 @@ class DummyCacheRegistry:
 
 class RecordingMaskService:
     def __init__(self):
-        self.controller = object()
+        self.assets = types.SimpleNamespace(get_layer=lambda _mask_id: None)
+        self.controller = types.SimpleNamespace(
+            renders=types.SimpleNamespace(
+                render_revision=lambda _mask_id: 0,
+                get_by_id=lambda _mask_id, **_kwargs: None,
+            )
+        )
         self.connected_callback = None
         self.disconnected_callback = None
         self.refresh_calls = 0
         self.apply_calls = []
+
+    def layer_instances_for_image(self, _image_id):
+        return ()
+
+    def scene_provider_revision(self):
+        return ()
 
     def connectUndoStackChanged(self, callback):
         self.connected_callback = callback
@@ -139,16 +151,16 @@ def test_attach_and_detachMaskService_wires_hooks(qapp, monkeypatch):
         swap_delegate = qpane_view.swap_delegate
         monkeypatch.setattr(
             swap_delegate,
-            "on_mask_service_attached",
+            "on_scene_prefetcher_attached",
             types.MethodType(
-                lambda self, service: attached.append(service), swap_delegate
+                lambda self, prefetcher: attached.append(prefetcher), swap_delegate
             ),
         )
         monkeypatch.setattr(
             swap_delegate,
-            "on_mask_service_detached",
+            "on_scene_prefetcher_detached",
             types.MethodType(
-                lambda self: detached.append(True),
+                lambda self, prefetcher: detached.append(prefetcher),
                 swap_delegate,
             ),
         )
@@ -158,10 +170,11 @@ def test_attach_and_detachMaskService_wires_hooks(qapp, monkeypatch):
         assert qpane.mask_controller is service.controller
         assert service.connected_callback == undo_callback
         assert service.refresh_calls == 1
-        assert attached == [service]
-        assert qpane._state.cache_registry.mask_controller is service.controller
+        assert len(attached) == 1
+        assert attached[0].service is service
+        assert qpane._state.cache_registry.mask_controller is service.controller.renders
         qpane.detachMaskService()
-        assert detached == [True]
+        assert detached == attached
         assert service.disconnected_callback == undo_callback
         assert qpane.mask_service is None
         assert qpane.mask_controller is None

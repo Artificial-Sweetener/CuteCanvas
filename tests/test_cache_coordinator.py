@@ -31,7 +31,7 @@ from qpane.cache.coordinator import (
     CachePriority,
 )
 from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.mask import MaskManager
+from qpane.masks.mask import MaskAssetStore
 from qpane.masks.mask_controller import MaskController
 from tests.helpers.config import fixed_cache_config
 
@@ -304,7 +304,7 @@ def test_trim_handles_reentrant_usage_updates():
 
 @pytest.mark.usefixtures("qapp")
 def test_mask_overlay_consumer_uses_controller_callback():
-    manager = MaskManager()
+    manager = MaskAssetStore()
     controller = MaskController(
         manager,
         lambda pt: pt,
@@ -312,21 +312,19 @@ def test_mask_overlay_consumer_uses_controller_callback():
         mask_config=MaskConfigSlice(),
     )
     coordinator = CacheCoordinator(active_budget_bytes=8 * 1024 * 1024)
-    consumer = MaskOverlayCacheConsumer(controller, coordinator)
-    assert getattr(controller._get_colorized_mask, "__name__", "").endswith(
-        "_get_colorized_mask"
-    )
+    consumer = MaskOverlayCacheConsumer(controller.renders, coordinator)
+    assert getattr(controller.renders._get, "__name__", "") == "_get"
     mask_image = QImage(8, 8, QImage.Format_Grayscale8)
     mask_image.fill(Qt.white)
     mask_id = manager.create_mask(mask_image)
     layer = manager.get_layer(mask_id)
     assert layer is not None
-    layer.mask_image.fill(Qt.white)
-    assert controller.get_colorized_mask(layer) is not None
+    layer.surface.fill(Qt.white)
+    assert controller.renders.get(layer) is not None
     snapshot = coordinator.snapshot()
     usage = snapshot["consumers"]["mask_overlays"]["usage_bytes"]
     assert usage > 0
-    controller.clear_cache()
+    controller.renders.clear()
     snapshot_after = coordinator.snapshot()
     assert snapshot_after["consumers"]["mask_overlays"]["usage_bytes"] == 0
     assert consumer is not None
@@ -337,7 +335,7 @@ def test_mask_guard_rejects_oversized_item(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Mask overlays that exceed the hard budget should not be cached."""
-    manager = MaskManager()
+    manager = MaskAssetStore()
     controller = MaskController(
         manager,
         lambda pt: pt,
@@ -358,9 +356,9 @@ def test_mask_guard_rejects_oversized_item(
     oversized = QImage(800, 800, QImage.Format_ARGB32)
     oversized.fill(Qt.white)
     with caplog.at_level(logging.WARNING):
-        controller.commit_prefetched_mask(mask_id, layer, oversized)
-        controller.commit_prefetched_mask(mask_id, layer, oversized)
-    assert controller.cache_usage_bytes == 0
+        controller.renders.commit_prefetched(mask_id, layer, oversized)
+        controller.renders.commit_prefetched(mask_id, layer, oversized)
+    assert controller.renders.cache_usage_bytes == 0
     warnings = [record for record in caplog.records if "not cached" in record.message]
     assert len(warnings) == 1
 

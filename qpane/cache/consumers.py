@@ -21,13 +21,34 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from .coordinator import CacheConsumerCallbacks, CacheCoordinator, CachePriority
 
 logger = logging.getLogger(__name__)
 
 _MISSING_HOOK_LOGS: set[tuple[type, str]] = set()
+
+
+class MaskCacheController(Protocol):
+    """Typed cache operations consumed by the shared coordinator."""
+
+    @property
+    def cache_usage_bytes(self) -> int:
+        """Return current derived-raster cache usage."""
+        ...
+
+    def set_cache_usage_callback(self, callback: Callable[[], None] | None) -> None:
+        """Install a usage-change callback."""
+        ...
+
+    def set_admission_guard(self, guard: Callable[[int], bool] | None) -> None:
+        """Install a cache admission guard."""
+        ...
+
+    def drop_oldest(self, *, reason: str) -> int:
+        """Evict one derived raster and return freed bytes."""
+        ...
 
 
 class _BudgetedCacheConsumer:
@@ -331,7 +352,7 @@ class MaskOverlayCacheConsumer:
 
     def __init__(
         self,
-        controller: Any,
+        controller: MaskCacheController,
         coordinator: CacheCoordinator,
         *,
         consumer_id: str = "mask_overlays",
@@ -360,30 +381,14 @@ class MaskOverlayCacheConsumer:
             preferred_bytes=None,
         )
         _install_admission_guard(self._controller, coordinator.should_admit)
-        setter = getattr(controller, "set_cache_usage_callback", None)
-        if callable(setter):
-            try:
-                setter(self._notify)
-            except Exception:  # pragma: no cover - defensive
-                logger.exception("Failed to install mask cache usage callback")
-        else:
-            logger.warning(
-                "Mask controller missing set_cache_usage_callback; cache usage updates "
-                "may be delayed"
-            )
+        controller.set_cache_usage_callback(self._notify)
         self._notify()
 
     def _get_usage(self) -> int:
         """Estimate the number of bytes consumed by cached mask renders."""
-        usage_attr = getattr(self._controller, "cache_usage_bytes", None)
-        if usage_attr is None:
-            logger.error(
-                "Mask controller missing cache_usage_bytes; cannot report mask usage"
-            )
-            raise RuntimeError("cache_usage_bytes missing for mask cache consumer")
         try:
             return _safe_int(
-                usage_attr() if callable(usage_attr) else usage_attr,
+                self._controller.cache_usage_bytes,
                 label="mask_cache_usage_bytes",
             )
         except Exception:  # pragma: no cover - defensive
@@ -400,31 +405,9 @@ class MaskOverlayCacheConsumer:
         usage = self._get_usage()
         if usage <= target:
             return
-        drop = getattr(self._controller, "drop_oldest_cached_mask", None)
-        if not callable(drop):
-            logger.error(
-                "Mask controller missing drop_oldest_cached_mask; cannot trim mask cache"
-            )
-            raise RuntimeError(  # noqa: TRY004 - collaborator contract failure
-                "drop_oldest_cached_mask missing for mask cache consumer"
-            )
-        active_accessor = getattr(self._controller, "get_active_mask_id", None)
-        active_mask_id = None
-        if callable(active_accessor):
-            try:
-                active_mask_id = active_accessor()
-            except Exception:
-                logger.debug(
-                    "Active mask lookup failed during cache trim", exc_info=True
-                )
-                active_mask_id = None
-        exclude = {active_mask_id} if active_mask_id else set()
         while usage > target:
             freed = _safe_int(
-                drop(
-                    reason="coordinator",
-                    exclude=exclude or None,
-                ),
+                self._controller.drop_oldest(reason="coordinator"),
                 label="mask_trim_freed",
             )
             if freed <= 0:

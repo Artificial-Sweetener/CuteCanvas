@@ -77,6 +77,7 @@ from .core import (
     ToolSignalBinder,
 )
 from .core.diagnostics_broker import Diagnostics
+from .masks.source_resolver import MaskLayerSourceResolver
 from .masks.workflow import MaskActivationSyncResult, MaskInfo, Masks
 from .rendering import (
     RenderingPresenter,
@@ -85,7 +86,7 @@ from .rendering import (
 )
 from .rendering.coordinates import PanelHitTest
 from .scene.identity import base_image_layer_id
-from .scene.mask_adapter import MaskServiceSceneProvider
+from .scene.mask_adapter import MaskCompositionSceneAdapter
 from .scene.mutations import SceneMutationCoordinator
 from .scene.registry import (
     CatalogLayerSourceResolver,
@@ -225,7 +226,8 @@ class QPane(QWidget):
         self._scene_mutations: SceneMutationCoordinator | None = None
         self._scene_provider_registry: SceneProviderRegistry | None = None
         self._source_resolver_registry: LayerSourceResolverRegistry | None = None
-        self._mask_scene_provider: MaskServiceSceneProvider | None = None
+        self._mask_scene_provider: MaskCompositionSceneAdapter | None = None
+        self._mask_source_resolver: MaskLayerSourceResolver | None = None
         self._masks: Masks | None = None
         self._tools: Tools | None = None
         self._is_blank = False
@@ -757,6 +759,8 @@ class QPane(QWidget):
     ):
         """Replace the catalog contents and navigate to ``current_id`` via the facade."""
         catalog = self.catalog()
+        removed_image_ids = tuple(set(catalog.imageIDs()) - set(image_map))
+        self._masks_controller.prepare_catalog_image_removal(removed_image_ids)
         catalog.setImagesByID(image_map, current_id)
         self._sync_compositions_with_catalog()
         if current_id in self.catalog().imageIDs():
@@ -1457,9 +1461,20 @@ class QPane(QWidget):
             Emits ``catalogChanged`` with ``maskServiceAttached``.
         """
         self._masks_controller.attachMaskService(service)
-        provider = MaskServiceSceneProvider(service)
-        self.sceneProviderRegistry().register_contribution(provider)
+        provider = MaskCompositionSceneAdapter(
+            layer_instances=service.layer_instances_for_image,
+            revision_provider=service.scene_provider_revision,
+            assets=service.assets,
+            renders=service.controller.renders,
+        )
+        self.sceneProviderRegistry().register_geometry_adapter(provider)
         self._mask_scene_provider = provider
+        resolver = MaskLayerSourceResolver(
+            assets=service.assets,
+            renders=service.controller.renders,
+        )
+        self.layerSourceResolverRegistry().register(resolver)
+        self._mask_source_resolver = resolver
         self._emit_catalog_mutation("maskServiceAttached", affected_ids=())
 
     def detachMaskService(self) -> None:
@@ -1470,8 +1485,12 @@ class QPane(QWidget):
         """
         provider = self._mask_scene_provider
         if provider is not None:
-            self.sceneProviderRegistry().unregister_contribution(provider)
+            self.sceneProviderRegistry().unregister_geometry_adapter(provider)
             self._mask_scene_provider = None
+        resolver = self._mask_source_resolver
+        if resolver is not None:
+            self.layerSourceResolverRegistry().unregister(resolver)
+            self._mask_source_resolver = None
         self._masks_controller.detachMaskService()
         self._emit_catalog_mutation("maskServiceDetached", affected_ids=())
 

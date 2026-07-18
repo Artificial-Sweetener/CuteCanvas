@@ -21,12 +21,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from qpane.core.config_features import require_mask_config
-from qpane.features import FeatureInstallError
 
-from .mask import MaskManager, _require_cv2
+from .autosave_coordination import should_enable_mask_autosave
+from .mask import MaskAssetStore
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
-from .mask_service import MaskService, should_enable_mask_autosave
+from .mask_service import MaskService
 from .tools import BrushTool, connect_brush_signals, disconnect_brush_signals
 
 if TYPE_CHECKING:
@@ -40,22 +40,9 @@ __all__ = [
 def install_mask_feature(qpane: QPane) -> None:
     """Install mask management subsystems and tool wiring for a QPane."""
     hooks = qpane.hooks
-    try:
-        _require_cv2()
-    except RuntimeError as exc:  # pragma: no cover - optional dependency path
-        raise FeatureInstallError(
-            "Mask feature requires OpenCV.",
-            hint="Install the mask extras via 'pip install qpane[mask]' to enable it.",
-        ) from exc
     mask_config = require_mask_config(qpane.settings)
-    catalog_facade = qpane.catalog()
     diagnostics_manager = qpane.diagnostics()
-    mask_manager = catalog_facade.maskManager()
-    if mask_manager is None:
-        mask_manager = MaskManager(undo_limit=mask_config.mask_undo_limit)
-        catalog_facade.setMaskManager(mask_manager)
-    else:
-        mask_manager.set_undo_limit(mask_config.mask_undo_limit)
+    mask_manager = MaskAssetStore(undo_limit=mask_config.mask_undo_limit)
     try:
         hooks.registerTool(
             qpane.CONTROL_MODE_DRAW_BRUSH,
@@ -78,7 +65,7 @@ def install_mask_feature(qpane: QPane) -> None:
     )
     service = MaskService(
         qpane=qpane,
-        mask_manager=mask_manager,
+        mask_assets=mask_manager,
         mask_controller=mask_controller,
         config=qpane.settings,
         mask_config=mask_config,

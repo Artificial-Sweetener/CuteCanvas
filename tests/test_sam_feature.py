@@ -73,13 +73,8 @@ def _detachSamManager_keep_delegate(qpane: QPane) -> None:
 
 def _seed_mask_service(qpane: QPane) -> None:
     """Seed the mask service and catalog for SAM feature tests."""
-    catalog = qpane.catalog()
-    mask_manager = types.SimpleNamespace(
-        adjust_component_at_point=lambda mask_id, point, grow: True
-    )
-    catalog.setMaskManager(mask_manager)
     qpane.mask_service = types.SimpleNamespace(
-        manager=mask_manager,
+        adjust_mask_component=lambda mask_id, point, *, grow: True,
         getActiveMaskId=lambda: "mask-1",
         refreshAutosavePolicy=lambda: None,
         get_latest_status_message=lambda *args: None,
@@ -96,12 +91,8 @@ def qpane_with_sam(monkeypatch, qapp):
     qpane = QPane(features=("mask", "sam"), task_executor=executor)
     qpane.resize(64, 64)
     catalog = qpane.catalog()
-    mask_manager = types.SimpleNamespace(
-        adjust_component_at_point=lambda mask_id, point, grow: True
-    )
-    catalog.setMaskManager(mask_manager)
     qpane.mask_service = types.SimpleNamespace(
-        manager=mask_manager,
+        adjust_mask_component=lambda mask_id, point, *, grow: True,
         getActiveMaskId=lambda: "mask-1",
         refreshAutosavePolicy=lambda: None,
         get_latest_status_message=lambda *args: None,
@@ -149,11 +140,11 @@ def test_sam_feature_component_adjusts_mask(qpane_with_sam):
     qpane = qpane_with_sam
     adjustments = []
 
-    def adjust(mask_id, point, grow):
+    def adjust(mask_id, point, *, grow):
         adjustments.append((mask_id, point, grow))
         return True
 
-    qpane.mask_service.manager.adjust_component_at_point = adjust
+    qpane.mask_service.adjust_mask_component = adjust
     qpane._tools_manager.signals.mask_component_adjustment_requested.emit(
         QPoint(1, 2), True
     )

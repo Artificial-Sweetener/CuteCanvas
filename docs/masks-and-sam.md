@@ -2,19 +2,19 @@
 
 # Masks and SAM
 
-QPane provides a lightweight masking engine designed for AI inpainting, region selection, and image processing workflows. Whether you are preparing masks for inpainting, redacting sensitive data, marking defects for quality control, or refining segmentation datasets, QPane gives you pixel-perfect control. Unlike a dataset labeler, QPane does not store bounding boxes, text labels, or vector shapes. Instead, it produces high-fidelity 8-bit grayscale raster masks that you can hand off directly to PyTorch, OpenCV, or Stable Diffusion pipelines.
+QPane provides a lightweight masking engine designed for AI inpainting, region selection, and image processing workflows. Whether you are preparing masks for inpainting, redacting sensitive data, marking defects for quality control, or refining segmentation datasets, QPane gives you pixel-perfect control. Unlike a dataset labeler, QPane does not store bounding boxes, text labels, or vector shapes. Instead, it produces high-fidelity 8-bit grayscale raster masks for image-processing and generation pipelines.
 
 ## Setup and Availability
-These features are optional extras. You'll need to install them specifically:
+Mask editing is available in the normal QPane install. Install the SAM extra for AI segmentation:
 
 ```bash
-pip install "qpane[mask,sam]"
+pip install "qpane[sam]"
 ```
 
-If you want your application to be robust against missing dependencies or load failures, you can check availability at runtime:
+Applications can check feature availability at runtime:
 
-* **Check support:** `QPane.maskFeatureAvailable()` and `QPane.samFeatureAvailable()` return `True` if the libraries are installed and loaded.
-* **Graceful degradation:** If you request `features=("mask",)` but lack dependencies, QPane initializes safely but returns `False` for these checks.
+* **Check support:** `QPane.maskFeatureAvailable()` and `QPane.samFeatureAvailable()` report whether the requested features loaded successfully.
+* **Graceful degradation:** If an optional SAM dependency or model fails to load, QPane initializes safely and reports the feature as unavailable.
 
 ## The Mask Lifecycle
 QPane treats masks as independent 8-bit grayscale layers associated with an image. You can have multiple masks per image, but only one is "active" (editable) at a time. During painting, QPane renders masks as part of the image content stack so panning, zooming, cache warming, and diagnostics stay aligned with the displayed image.

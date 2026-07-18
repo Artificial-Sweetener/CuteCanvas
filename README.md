@@ -3,7 +3,7 @@
   <img src="assets/logos/logo-white.png#gh-dark-mode-only" alt="QPane" width="320">
 </p>
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE) [![semantic-release](https://img.shields.io/badge/semantic--release-angular-e10079?logo=semantic-release)](https://github.com/semantic-release/semantic-release) [![PyPI](https://img.shields.io/pypi/v/qpane.svg)](https://pypi.org/project/qpane/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/) [![PySide6](https://img.shields.io/badge/PySide6-6.7.3%2B-41CD52?logo=qt&logoColor=white)](https://pyside.org) [![OpenCV optional](https://img.shields.io/badge/OpenCV-optional%204.9%2B-5C3EE8?logo=opencv&logoColor=white)](https://opencv.org/) [![PyTorch optional](https://img.shields.io/badge/PyTorch-optional%202.1%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE) [![semantic-release](https://img.shields.io/badge/semantic--release-angular-e10079?logo=semantic-release)](https://github.com/semantic-release/semantic-release) [![PyPI](https://img.shields.io/pypi/v/qpane.svg)](https://pypi.org/project/qpane/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/) [![PySide6](https://img.shields.io/badge/PySide6-6.7.3%2B-41CD52?logo=qt&logoColor=white)](https://pyside.org) [![PyTorch optional](https://img.shields.io/badge/PyTorch-optional%202.1%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 
 **QPane** is a high-performance, **open-source (GPLv3 or later)** image viewer, raster canvas, and scene composition widget for PySide6.
 
@@ -17,7 +17,7 @@ Whether you are building a simple photo viewer or a mission-critical imaging sys
 *   **CPU-First Performance:** Renders massive images smoothly using system RAM, ensuring responsiveness on any hardware—from laptops to workstations.
 *   **Fluid Pan & Zoom Navigation:** Silky smooth zooming, panning, and tiling out of the box.
 *   **Scene Compositions:** Arrange catalog images into persistent review grids, contact sheets, two-up views, and layered scenes without flattening pixels.
-*   **Modular Dependencies:** A "pay-for-what-you-use" design means you never install heavy libraries (like Torch or OpenCV) unless you need them.
+*   **Modular Dependencies:** A "pay-for-what-you-use" design keeps heavyweight AI libraries such as Torch optional.
 *   **Advanced Raster Masking:** Features a full 8-bit masking engine with brush tools, undo/redo, and optional **Segment Anything (SAM)** integration.
 *   **Native High-DPI Support:** Automatically adapts to different monitor pixel densities and OS zoom levels for crisp rendering anywhere.
 
@@ -32,17 +32,15 @@ Whether you are building a simple photo viewer or a mission-critical imaging sys
 
 ## Installation
 
-QPane uses a "pay-for-what-you-use" model. Don't need AI? Don't install torch
+QPane includes its viewer and raster masking tools in the normal install. The
+SAM extra adds AI segmentation and its model runtime.
 
 ```bash
-# Core viewer only (lightweight)
+# Viewer and masking tools
 pip install qpane
 
-# With Masking tools (adds OpenCV)
-pip install "qpane[mask]"
-
-# With AI driven segment masking (adds Torch + SAM; requires everything from "mask")
-pip install "qpane[mask,sam]"
+# With AI-driven segmentation (adds Torch + SAM)
+pip install "qpane[sam]"
 ```
 
 ## The Gap in the Qt Ecosystem
@@ -120,7 +118,7 @@ QPane is designed to be the library I wish I had. It uses a **Facade Pattern** t
 *   **Native Qt Feel:** It's a `QWidget`. Add it to a layout, connect signals (`catalogSelectionChanged`, `maskSaved`), and it just works.
 *   **Snapshot-Style Config:** No global state spaghetti. Create a `Config` object, set your preferences (cache size, keybindings), and pass it in; QPane keeps its own copy for the widget.
 *   **Diagnostics HUD:** Easy to wire into your app. Bind your preferred shortcut to toggle the overlay and see memory usage, render times, and worker queues.
-*   **Lazy Loading:** Importing `qpane` is instant. Heavy dependencies like `cv2` (for masking) `torch` (for SAM) are only imported when you actually use those features.
+*   **Lazy Loading:** Importing `qpane` is instant. Heavy AI dependencies such as `torch` are imported only when their features are used.
 
 <p align="center">
   <img src="assets/videos/diagnostics.gif" alt="QPane diagnostics overlay demo" width="852" height="480">

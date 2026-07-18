@@ -6,9 +6,7 @@ This roadmap captures ideas on deck after the 1.0 release. It's not me making pr
 
 - Dependencies stay light. The core viewer remains PySide6-only, with `psutil` used
   solely for reactive cache logic when enabled.
-- OpenCV remains the primary dependency for editing workflows (already required
-  for masking), so new editing features should build on it rather than adding
-  heavy alternatives.
+- Editing workflows build on the Qt and NumPy runtime shared by the viewer.
 - Torch is always optional, reserved for SAM or other AI-backed tools, and never
   required by the core viewer.
 

@@ -721,16 +721,21 @@ class MaskAbuseRunner:
             return
         deadline = time.perf_counter() + self._feedback_timeout_ms / 1000.0
         image = self._harness.capture()
-        while time.perf_counter() < deadline:
+        missing = [
+            point
+            for point in points
+            if not self._harness.is_background(image.pixelColor(point))
+        ]
+        while missing and time.perf_counter() < deadline:
+            self._harness.drain_events(wait_ms=1)
+            image = self._harness.capture()
             missing = [
                 point
                 for point in points
                 if not self._harness.is_background(image.pixelColor(point))
             ]
-            if not missing:
-                return
-            self._harness.drain_events(wait_ms=1)
-            image = self._harness.capture()
+        if not missing:
+            return
         point = missing[0]
         self._fail(
             phase,

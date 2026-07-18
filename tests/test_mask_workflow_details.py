@@ -22,7 +22,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QColor, QImage
 
 pytest_plugins = ("tests.test_mask_workflows",)
 
@@ -47,23 +47,26 @@ def test_mask_workflow_resolve_image_id_prefers_navigation(qpane_with_mask):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_mask_info_normalizes_label_and_opacity(qpane_with_mask):
-    """MaskInfo should trim labels and coerce opacity values safely."""
+def test_mask_info_normalizes_label_and_reads_layer_opacity(qpane_with_mask):
+    """MaskInfo should trim labels and read composition presentation."""
     qpane, manager, image_id = qpane_with_mask
     masks = _masks(qpane)
+    service = qpane.mask_service
     mask_id = manager.create_mask(QImage(4, 4, QImage.Format_Grayscale8))
-    manager.associate_mask_with_image(mask_id, image_id)
     layer = manager.get_layer(mask_id)
     assert layer is not None
-    layer.label = "   "
-    layer.opacity = "bad"
+    assert service.layers.attach(
+        mask_id, image_id, color=QColor(255, 0, 0), opacity=0.5
+    )
+    instance = service.layer_instance_for_mask(mask_id)
+    assert instance is not None
+    assert not service.layers.store.update_label(image_id, instance.layer_id, "   ")
     info = masks.maskInfo(mask_id)
     assert info is not None
     assert info.label is None
-    assert info.opacity is None
+    assert info.opacity == 0.5
     assert image_id in info.image_ids
-    layer.label = "Layer 1"
-    layer.opacity = "0.5"
+    assert service.layers.store.update_label(image_id, instance.layer_id, "Layer 1")
     updated = masks.maskInfo(mask_id)
     assert updated is not None
     assert updated.label == "Layer 1"
@@ -75,11 +78,15 @@ def test_mask_ids_and_listing_filter_by_image(qpane_with_mask):
     """Mask listings should only include masks associated with the target image."""
     qpane, manager, image_id = qpane_with_mask
     masks = _masks(qpane)
+    service = qpane.mask_service
     other_id = uuid.uuid4()
     first = manager.create_mask(QImage(4, 4, QImage.Format_Grayscale8))
     second = manager.create_mask(QImage(4, 4, QImage.Format_Grayscale8))
-    manager.associate_mask_with_image(first, image_id)
-    manager.associate_mask_with_image(second, other_id)
+    first_layer = manager.get_layer(first)
+    second_layer = manager.get_layer(second)
+    assert first_layer is not None and second_layer is not None
+    assert service.layers.attach(first, image_id, color=QColor(255, 0, 0))
+    assert service.layers.attach(second, other_id, color=QColor(255, 0, 0))
     assert masks.maskIDsForImage(image_id) == [first]
     listed = masks.listMasksForImage(image_id)
     assert [info.mask_id for info in listed] == [first]

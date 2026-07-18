@@ -37,6 +37,7 @@ from ..types import (
     QPaneSceneTemplate,
     QPaneSceneTemplateBindings,
 )
+from .layers import ImageSceneLayerStore
 from .model import (
     CompositionComparison,
     CompositionKind,
@@ -66,6 +67,12 @@ class CompositionService:
         self._default_split_position = 0.5
         self._default_orientation = ComparisonOrientation.VERTICAL
         self._revision = 0
+        self._image_layers = ImageSceneLayerStore()
+
+    @property
+    def image_layers(self) -> ImageSceneLayerStore:
+        """Return the focused owner of catalog image scene layer instances."""
+        return self._image_layers
 
     def sync_catalog(
         self,
@@ -78,6 +85,7 @@ class CompositionService:
         valid_ids = set(ordered_ids)
         changed = self._remove_invalid_catalog_references(valid_ids, touch=False)
         for index, image_id in enumerate(ordered_ids):
+            self._image_layers.ensure_image(image_id)
             if image_id in self._default_by_image_id:
                 continue
             composition_id = self.default_composition_id(image_id)
@@ -107,6 +115,7 @@ class CompositionService:
         self._records.clear()
         self._order.clear()
         self._default_by_image_id.clear()
+        self._image_layers.clear()
         self._active_id = None
         self._touch()
         return True
@@ -549,6 +558,7 @@ class CompositionService:
             if image_id in valid_ids:
                 continue
             self._default_by_image_id.pop(image_id, None)
+            self._image_layers.remove_image(image_id)
             self._records.pop(composition_id, None)
             changed = True
         for composition_id, record in list(self._records.items()):

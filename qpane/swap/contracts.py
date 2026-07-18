@@ -99,32 +99,25 @@ class PyramidPrefetchManager(Protocol):
 
 
 @runtime_checkable
-class MaskManagerView(Protocol):
-    """Minimal mask manager surface needed for swap prefetch checks."""
+class SceneSourcePrefetcher(Protocol):
+    """Feature-neutral source warming used during scene navigation."""
 
-    def get_mask_ids_for_image(self, image_id: uuid.UUID) -> Sequence[uuid.UUID]:
-        """Return mask identifiers associated with ``image_id``."""
+    def has_sources(self, image_id: uuid.UUID) -> bool:
+        """Return whether one image scene has prefetchable sources."""
         ...
 
-
-@runtime_checkable
-class MaskPrefetchService(Protocol):
-    """Capabilities required for mask prefetch scheduling and cancellation."""
-
-    manager: MaskManagerView
-
-    def prefetchColorizedMasks(
+    def prefetch(
         self,
         image_id: uuid.UUID,
         *,
         reason: str = "navigation",
         scales: Sequence[float] | None = None,
     ) -> bool:
-        """Warm colorized mask renders for ``image_id`` on a background executor."""
+        """Warm feature-owned scene sources for ``image_id``."""
         ...
 
-    def cancelPrefetch(self, image_id: uuid.UUID | None) -> bool:
-        """Cancel queued mask prefetch for ``image_id`` (or all when ``None``)."""
+    def cancel(self, image_id: uuid.UUID | None) -> bool:
+        """Cancel queued source prefetch for one or every scene."""
         ...
 
 

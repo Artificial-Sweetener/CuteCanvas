@@ -49,9 +49,9 @@ The `QPane` widget acts as a **Facade**, delegating all logic to specialized sub
 
 - **Catalog (`qpane/catalog/`)**: Host-facing facade and data model for images, paths, and navigation. [`Catalog`](docs/catalog-and-navigation.md) sequences host mutations; `CatalogController` and `ImageCatalog` perform the underlying cache/pyramid updates and navigation bookkeeping.
 - **Scene (`qpane/scene/`)**: Internal scene and layer descriptors, typed layer sources, placement, hit-test metadata, scene/layer identity, provider/resolver contracts, internal scene mutation routing, private multi-image layout state, scene-layer selection state, and future render-plan snapshots.
-- **Rendering (`qpane/rendering/`)**: `RenderingPresenter` owns the draw pipeline and render-work planning, while `Viewport` owns pan/zoom state and transforms. Visibility planning owns layer-visible source geometry used to cull tile work before painting.
+- **Rendering (`qpane/rendering/`)**: `SceneAssembly` owns complete ordered scene construction. `RenderingPresenter` consumes assembled scenes for the draw pipeline and render-work planning, while registered layer-source resolvers supply source pixels and derived rasters. `Viewport` owns pan/zoom state and transforms. Visibility planning owns layer-visible source geometry used to cull tile work before painting.
 - **Tools (`qpane/tools/`)**: `ToolInteractionDelegate` handles widget input and cursor/overlay plumbing. [Tool logic](docs/extensibility.md) lives in isolated Tool classes that activate with injected `ToolDependencies`.
-- **Masks (`qpane/masks/`)**: [`MaskService`](docs/masks-and-sam.md) is the domain facade, coordinating mask operations, async work, autosave, and undo integration.
+- **Masks and composition (`qpane/masks/`, `qpane/composition/`)**: `MaskAssetStore` and `MaskSurface` own mask identities and pixels, while `MaskHistory` owns undo/redo. `MaskEditService` owns transactional edits, `MaskRenderCache` owns derived overlays, `MaskRenderWorkCoordinator` owns asynchronous render work, and `MaskActivationController` owns editable-layer activation. `MaskLayerCoordinator` routes composition-owned layer instances and scene mutations, `MaskLayerWorkflow` owns complete layer lifecycle commands, and `MaskAutosaveCoordinator` owns autosave wiring. [`MaskService`](docs/masks-and-sam.md) is the host-facing facade that wires and delegates to these owners. `ImageSceneLayerStore` owns mask layer instances alongside every other layer kind, including exact z-order, presentation, and display metadata.
 - **SAM (`qpane/sam/`)**: MobileSAM lifecycle and predictor management. `SamManager` handles background predictor preparation; inference is invoked via `qpane/sam/service.py` by the mask workflow.
 - **Compare (`qpane/compare/`)**: Catalog-backed comparison workflow state, split settings, source revisions, and compare scene contributions.
 - **Swap (`qpane/swap/`)**: Navigation/prefetch orchestration for pyramids, tiles, masks, and SAM predictors. `SwapCoordinator` tracks pending work and `SwapDelegate` bridges QPane callbacks.
@@ -260,7 +260,7 @@ The `type` must be one of the following:
 
 *   **`build`**: Changes that affect the build system or external dependencies.
     *   *Use when:* Updating `pyproject.toml`, `setup.py`, or dependencies.
-    *   *Example:* `build: update opencv-python dependency`
+    *   *Example:* `build: update optional runtime dependency`
 
 *   **`ci`**: Changes to our CI configuration files and scripts.
     *   *Use when:* Modifying GitHub Actions workflows or hooks.

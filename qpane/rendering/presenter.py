@@ -27,10 +27,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF
-from PySide6.QtGui import QImage, QPainter, Qt, QTransform
+from PySide6.QtGui import QImage, QPainter, QPixmap, Qt, QTransform
 from PySide6.QtWidgets import QWidget
 
-from ..scene.default_scene import DefaultCatalogSceneProvider
+from ..scene.assembly import SceneAssembly
 from ..scene.identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
@@ -49,7 +49,6 @@ from ..scene.model import (
     SceneKind,
 )
 from ..scene.placeholder_scene import build_placeholder_scene
-from ..scene.providers import SceneContribution, SceneResolver
 from ..scene.render_plan import (
     MaskLayerRenderItem,
     RasterLayerRenderItem,
@@ -84,17 +83,6 @@ if TYPE_CHECKING:
     from ..core import OverlayDrawFn, SceneOverlayDrawFn
     from ..qpane import QPane
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class _StaticSceneProvider:
-    """Return a prebuilt scene contribution to the resolver."""
-
-    contribution: SceneContribution
-
-    def scene_contribution(self) -> SceneContribution:
-        """Return the stored contribution."""
-        return self.contribution
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +191,7 @@ class RenderingPresenter:
             cache_registry.attach_tile_manager(self.tile_manager)
         self.renderer = Renderer(qpane)
         self._scene_providers = qpane.sceneProviderRegistry()
+        self._scene_assembly = SceneAssembly(self._scene_providers)
         self._source_resolvers = qpane.layerSourceResolverRegistry()
         self._last_view_size = QSize()
         self._last_device_pixel_ratio = float(qpane.devicePixelRatioF())
@@ -231,10 +220,18 @@ class RenderingPresenter:
             return None
         frame = self._frame_geometry_for(compiled, use_pan=use_pan)
         raster_items = self._build_frame_raster_items(compiled, frame)
-        if not raster_items:
-            return None
         base_item = self._base_raster_item_from_items(raster_items)
-        mask_items = self._build_frame_mask_items(compiled, base_item)
+        mask_items = self._build_frame_mask_items(compiled, base_item, frame)
+        items_by_layer_id = {
+            item.descriptor.layer_id: item for item in (*raster_items, *mask_items)
+        }
+        render_items = tuple(
+            items_by_layer_id[layer.layer_id]
+            for layer in compiled.scene.layers
+            if layer.layer_id in items_by_layer_id
+        )
+        if not render_items:
+            return None
         return SceneRenderPlan(
             scene_id=compiled.scene.scene_id,
             scene_bounds=compiled.scene.bounds,
@@ -244,7 +241,7 @@ class RenderingPresenter:
             current_pan=frame.current_pan,
             qpane_rect=frame.qpane_rect,
             physical_viewport_rect=frame.physical_viewport_rect,
-            render_items=(*raster_items, *mask_items),
+            render_items=render_items,
             hit_test_items=compiled.hit_test_items,
         )
 
@@ -978,33 +975,12 @@ class RenderingPresenter:
         source_revision: int,
     ) -> SceneDescriptor | None:
         """Resolve the current catalog image through the default scene provider."""
-        provider = DefaultCatalogSceneProvider(
+        return self._scene_assembly.resolve_catalog_image(
             image_id=image_id,
             image_size=image_size,
             source_path=source_path,
-            revision=source_revision,
+            source_revision=source_revision,
         )
-        base_contribution = provider.scene_contribution()
-        if base_contribution is None:
-            return None
-        replacements = self._scene_providers.replacement_contributions()
-        if replacements:
-            return SceneResolver(
-                providers=tuple(_StaticSceneProvider(item) for item in replacements)
-            ).resolve()
-        base_scene = self._scene_providers.adapt_base_scene(
-            base_contribution.scene,
-            image_id,
-        )
-        providers = [_StaticSceneProvider(SceneContribution(base_scene, order=0))]
-        providers.extend(
-            _StaticSceneProvider(contribution)
-            for contribution in self._scene_providers.contributions_for(
-                base_scene,
-                image_id,
-            )
-        )
-        return SceneResolver(providers=tuple(providers)).resolve()
 
     def _build_frame_raster_items(
         self, compiled: CompiledRenderScene, frame: _FrameGeometry
@@ -1479,23 +1455,24 @@ class RenderingPresenter:
         self,
         compiled: CompiledRenderScene,
         base_item: RasterLayerRenderItem | None,
+        frame: _FrameGeometry,
     ) -> tuple[MaskLayerRenderItem, ...]:
         """Build mask render items from resolved mask layer descriptors."""
-        service = self._mask_service()
         base_layer = next(
             (layer for layer in compiled.layers if layer.is_base_raster),
             None,
         )
         if (
-            service is None
-            or base_item is None
-            or base_layer is None
-            or base_layer.full_image.width() <= 0
+            base_item is not None
+            and base_layer is not None
+            and base_layer.full_image.width() <= 0
         ):
             return ()
-        scale = base_item.source_image.width() / base_layer.full_image.width()
-        if scale <= 0:
-            scale = 1.0
+        scale = 1.0
+        if base_item is not None and base_layer is not None:
+            scale = base_item.source_image.width() / base_layer.full_image.width()
+            if scale <= 0:
+                scale = 1.0
         items: list[MaskLayerRenderItem] = []
         for layer in compiled.mask_layers:
             if (
@@ -1504,22 +1481,40 @@ class RenderingPresenter:
                 or not isinstance(layer.source, MaskLayerSource)
             ):
                 continue
-            pixmap = service.getColorizedMaskById(layer.source.mask_id, scale=scale)
-            if pixmap is None or pixmap.isNull():
+            asset_key = mask_layer_asset_key(
+                scene_id=compiled.scene.scene_id,
+                mask_id=layer.source.mask_id,
+                revision=layer.source_revision,
+            )
+            full_image = self._source_resolvers.source_image(layer.source)
+            if full_image is None or full_image.isNull():
                 continue
+            render_image = self._source_resolvers.best_fit_image(
+                layer.source,
+                asset_key=asset_key,
+                pyramid_asset_key=asset_key,
+                full_image=full_image,
+                target_width=full_image.width() * scale,
+            )
+            pixmap = QPixmap.fromImage(render_image)
+            transform = self._transform_for_placed_geometry(
+                scene=compiled.scene,
+                layer=layer,
+                source_size=pixmap.size(),
+                content_snapshot=frame.content_snapshot,
+                current_pan=frame.current_pan,
+            )
             items.append(
                 MaskLayerRenderItem(
                     descriptor=layer,
                     pixmap=pixmap,
-                    asset_key=mask_layer_asset_key(
-                        scene_id=compiled.scene.scene_id,
-                        mask_id=layer.source.mask_id,
-                        revision=layer.source_revision,
-                    ),
-                    transform=base_item.transform,
+                    asset_key=asset_key,
+                    transform=transform,
                     placement=layer.placement,
                     clip=layer.clip,
-                    render_hint_enabled=base_item.render_hint_enabled,
+                    render_hint_enabled=(
+                        base_item.render_hint_enabled if base_item is not None else True
+                    ),
                     scale=scale,
                 )
             )
@@ -1661,22 +1656,41 @@ class RenderingPresenter:
 
     def _resolve_replacement_scene_content(self) -> _ActiveSceneContent | None:
         """Resolve an active replacement scene without requiring catalog selection."""
-        replacements = self._scene_providers.replacement_contributions()
-        if not replacements:
-            return None
-        scene = SceneResolver(
-            providers=tuple(_StaticSceneProvider(item) for item in replacements)
-        ).resolve()
+        scene = self._scene_assembly.resolve_replacement()
         if scene is None:
             return None
         layer = self._first_image_layer(scene)
+        source_image = None if layer is None else self._source_image_for_layer(layer)
         if layer is None:
-            return None
-        source_image = self._source_image_for_layer(layer)
+            layer = next(
+                (
+                    candidate
+                    for candidate in scene.layers
+                    if candidate.visible
+                    and candidate.kind == LayerKind.MASK
+                    and isinstance(candidate.source, MaskLayerSource)
+                ),
+                None,
+            )
+            source_image = (
+                None
+                if layer is None
+                else self._source_resolvers.source_image(layer.source)
+            )
         if source_image is None or source_image.isNull():
             return None
-        asset_key = self._render_asset_key_for_image_layer(scene, layer)
-        pyramid_asset_key = self._pyramid_asset_key_for_image_layer(scene, layer)
+        if layer is None:
+            return None
+        if isinstance(layer.source, MaskLayerSource):
+            asset_key = mask_layer_asset_key(
+                scene_id=scene.scene_id,
+                mask_id=layer.source.mask_id,
+                revision=layer.source_revision,
+            )
+            pyramid_asset_key = asset_key
+        else:
+            asset_key = self._render_asset_key_for_image_layer(scene, layer)
+            pyramid_asset_key = self._pyramid_asset_key_for_image_layer(scene, layer)
         if pyramid_asset_key is None:
             return None
         image_id = (
@@ -1720,8 +1734,6 @@ class RenderingPresenter:
         """Compile stable scene graph metadata for render planning."""
         content_snapshot = self._content_snapshot_for_active_content(active_content)
         base_layer = self._first_image_layer(active_content.scene)
-        if base_layer is None:
-            return None
         image_layers: list[CompiledRenderLayer] = []
         mask_layers: list[LayerDescriptor] = []
         for layer in active_content.scene.layers:
@@ -1732,6 +1744,8 @@ class RenderingPresenter:
                 continue
             if layer.kind != LayerKind.IMAGE:
                 continue
+            if base_layer is None:
+                continue
             compiled_layer = self._compile_render_layer(
                 active_content=active_content,
                 base_layer=base_layer,
@@ -1739,7 +1753,7 @@ class RenderingPresenter:
             )
             if compiled_layer is not None:
                 image_layers.append(compiled_layer)
-        if not image_layers:
+        if not image_layers and not mask_layers:
             return None
         return CompiledRenderScene(
             scene=active_content.scene,
@@ -1892,11 +1906,6 @@ class RenderingPresenter:
         """Return catalog-owned placeholder content when a provider is installed."""
         provider = self._placeholder_content_provider
         return provider() if provider is not None else None
-
-    def _mask_service(self) -> object | None:
-        """Return the active mask service when installed."""
-        service = getattr(self._qpane, "mask_service", None)
-        return service
 
     @staticmethod
     def _first_image_layer(scene: SceneDescriptor) -> LayerDescriptor | None:

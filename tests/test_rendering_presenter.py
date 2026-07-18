@@ -25,7 +25,12 @@ from PySide6.QtGui import QImage, QPixmap, Qt
 from PySide6.QtWidgets import QWidget
 
 import qpane.rendering.presenter as presenter_module
+from qpane.composition.layers import (
+    CompositionLayerInstance,
+    CompositionLayerSourceKind,
+)
 from qpane.core import CacheSettings
+from qpane.masks.source_resolver import MaskLayerSourceResolver
 from qpane.rendering import (
     RenderingPresenter,
     ViewportZoomMode,
@@ -36,9 +41,19 @@ from qpane.scene.identity import (
     base_image_layer_id,
     default_catalog_asset_key,
     default_scene_id,
+    mask_layer_id,
 )
-from qpane.scene.mask_adapter import MaskServiceSceneProvider
-from qpane.scene.model import LayerKind
+from qpane.scene.mask_adapter import MaskCompositionSceneAdapter
+from qpane.scene.model import (
+    BlendMode,
+    LayerDescriptor,
+    LayerHitTest,
+    LayerKind,
+    LayerPlacement,
+    SceneDescriptor,
+    SceneKind,
+)
+from qpane.scene.providers import SceneContribution
 from qpane.scene.registry import (
     CatalogLayerSourceResolver,
     LayerSourceResolverRegistry,
@@ -339,20 +354,15 @@ class StubTileManager:
 class StubMaskLayer:
     """Small mask layer stand-in for presenter planning tests."""
 
-    def __init__(self, image: QImage, *, opacity: float) -> None:
+    def __init__(self, image: QImage) -> None:
         self.mask_image = image
-        self.opacity = opacity
 
 
-class StubMaskManager:
-    """Expose mask order and layer lookup for scene adapter tests."""
+class StubMaskAssets:
+    """Expose mask asset lookup for scene adapter tests."""
 
     def __init__(self, layers: dict[uuid.UUID, StubMaskLayer]) -> None:
         self._layers = layers
-
-    def get_mask_ids_for_image(self, _image_id: uuid.UUID) -> list[uuid.UUID]:
-        """Return masks in visual order."""
-        return list(self._layers)
 
     def get_layer(self, mask_id: uuid.UUID) -> StubMaskLayer | None:
         """Return a configured mask layer."""
@@ -364,10 +374,21 @@ class StubMaskController:
 
     def __init__(self, revisions: dict[uuid.UUID, int]) -> None:
         self._revisions = revisions
+        self._pixmap_resolver = None
 
-    def maskRenderRevision(self, mask_id: uuid.UUID) -> int:
+    @property
+    def renders(self):
+        """Expose derived-raster revision lookup."""
+        return self
+
+    def render_revision(self, mask_id: uuid.UUID) -> int:
         """Return the configured render revision for ``mask_id``."""
         return self._revisions[mask_id]
+
+    def get_by_id(self, mask_id: uuid.UUID, *, scale: float | None = None) -> QPixmap:
+        """Resolve a derived test raster through the configured service stub."""
+        assert self._pixmap_resolver is not None
+        return self._pixmap_resolver(mask_id, scale=scale)
 
 
 def _old_qpane_visible_tile_range(
@@ -416,19 +437,48 @@ class StubMaskService:
 
     def __init__(
         self,
-        manager: StubMaskManager,
+        manager: StubMaskAssets,
         controller: StubMaskController,
     ) -> None:
-        self.manager = manager
+        self.assets = manager
         self.controller = controller
+        controller._pixmap_resolver = self.getColorizedMaskById
         self.calls: list[tuple[uuid.UUID, float | None]] = []
+
+    def layer_instances_for_image(
+        self, image_id: uuid.UUID
+    ) -> tuple[CompositionLayerInstance, ...]:
+        """Return a base layer followed by configured masks."""
+        scene_id = default_scene_id(image_id)
+        return (
+            CompositionLayerInstance(
+                layer_id=base_image_layer_id(image_id),
+                source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
+                source_id=image_id,
+                role="base-image",
+            ),
+            *(
+                CompositionLayerInstance(
+                    layer_id=mask_layer_id(scene_id, mask_id),
+                    source_kind=CompositionLayerSourceKind.MASK,
+                    source_id=mask_id,
+                    opacity=0.25 + index * 0.5,
+                    role="mask",
+                )
+                for index, (mask_id, _layer) in enumerate(self.assets._layers.items())
+            ),
+        )
+
+    def scene_provider_revision(self) -> tuple[object, ...]:
+        """Return stable test scene state."""
+        return tuple(self.assets._layers)
 
     def getColorizedMaskById(
         self, mask_id: uuid.UUID, *, scale: float | None = None
     ) -> QPixmap:
         """Return a pixmap representing the requested mask render."""
         self.calls.append((mask_id, scale))
-        source = self.manager.get_layer(mask_id)
+        source = self.assets.get_layer(mask_id)
         assert source is not None
         size = source.mask_image.size()
         if scale is not None:
@@ -436,6 +486,18 @@ class StubMaskService:
         image = QImage(size, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.magenta)
         return QPixmap.fromImage(image)
+
+
+class _ReplacementSceneProvider:
+    """Return one replacement scene for render-planning tests."""
+
+    def __init__(self, scene: SceneDescriptor) -> None:
+        """Store the replacement scene."""
+        self._scene = scene
+
+    def scene_contribution(self) -> SceneContribution:
+        """Return the stored replacement contribution."""
+        return SceneContribution(self._scene)
 
 
 def test_presenter_calculate_render_plan_blank_returns_none(qapp):
@@ -573,17 +635,28 @@ def test_presenter_render_plan_carries_mask_scene_layers(qapp):
         top_id = uuid.uuid4()
         mask_image = QImage(400, 200, QImage.Format_Grayscale8)
         mask_image.fill(255)
-        manager = StubMaskManager(
+        manager = StubMaskAssets(
             {
-                bottom_id: StubMaskLayer(mask_image, opacity=0.25),
-                top_id: StubMaskLayer(mask_image, opacity=0.75),
+                bottom_id: StubMaskLayer(mask_image),
+                top_id: StubMaskLayer(mask_image),
             }
         )
         controller = StubMaskController({bottom_id: 4, top_id: 9})
         service = StubMaskService(manager, controller)
         harness.qpane.mask_service = service
-        harness.qpane.sceneProviderRegistry().register_contribution(
-            MaskServiceSceneProvider(service)
+        harness.qpane.sceneProviderRegistry().register_geometry_adapter(
+            MaskCompositionSceneAdapter(
+                layer_instances=service.layer_instances_for_image,
+                revision_provider=service.scene_provider_revision,
+                assets=service.assets,
+                renders=service.controller.renders,
+            )
+        )
+        harness.qpane.layerSourceResolverRegistry().register(
+            MaskLayerSourceResolver(
+                assets=service.assets,
+                renders=service.controller.renders,
+            )
         )
 
         plan = harness.presenter.calculateRenderPlan(is_blank=False)
@@ -754,6 +827,122 @@ def test_calculate_render_plan_reuses_compiled_hit_test_projection(qapp, monkeyp
 
         assert third is not None
         assert len(calls) == 2
+    finally:
+        _cleanup_qpane(harness.qpane, qapp)
+
+
+def test_presenter_preserves_cross_kind_composition_order(qapp):
+    harness = PresenterHarness(qpane_size=(300, 200), image_size=(400, 200))
+    try:
+        image_id = harness.catalog.getCurrentId()
+        assert image_id is not None
+        mask_ids = (uuid.uuid4(), uuid.uuid4())
+        mask_image = QImage(400, 200, QImage.Format_Grayscale8)
+        mask_image.fill(255)
+        manager = StubMaskAssets(
+            {
+                mask_ids[0]: StubMaskLayer(mask_image),
+                mask_ids[1]: StubMaskLayer(mask_image),
+            }
+        )
+        service = StubMaskService(
+            manager,
+            StubMaskController({mask_ids[0]: 1, mask_ids[1]: 2}),
+        )
+        scene_id = default_scene_id(image_id)
+        service.layer_instances_for_image = lambda _image_id: (
+            CompositionLayerInstance(
+                layer_id=mask_layer_id(scene_id, mask_ids[0]),
+                source_kind=CompositionLayerSourceKind.MASK,
+                source_id=mask_ids[0],
+                opacity=0.25,
+                role="mask",
+            ),
+            CompositionLayerInstance(
+                layer_id=base_image_layer_id(image_id),
+                source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
+                source_id=image_id,
+                role="base-image",
+            ),
+            CompositionLayerInstance(
+                layer_id=mask_layer_id(scene_id, mask_ids[1]),
+                source_kind=CompositionLayerSourceKind.MASK,
+                source_id=mask_ids[1],
+                opacity=0.75,
+                role="mask",
+            ),
+        )
+        harness.qpane.mask_service = service
+        harness.qpane.sceneProviderRegistry().register_geometry_adapter(
+            MaskCompositionSceneAdapter(
+                layer_instances=service.layer_instances_for_image,
+                revision_provider=service.scene_provider_revision,
+                assets=service.assets,
+                renders=service.controller.renders,
+            )
+        )
+        harness.qpane.layerSourceResolverRegistry().register(
+            MaskLayerSourceResolver(
+                assets=service.assets,
+                renders=service.controller.renders,
+            )
+        )
+        plan = harness.presenter.calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        assert [item.descriptor.kind for item in plan.render_items] == [
+            LayerKind.MASK,
+            LayerKind.IMAGE,
+            LayerKind.MASK,
+        ]
+    finally:
+        _cleanup_qpane(harness.qpane, qapp)
+
+
+def test_presenter_builds_mask_only_replacement_scene(qapp):
+    harness = PresenterHarness(qpane_size=(300, 200), image_size=(400, 200))
+    try:
+        scene_id = uuid.uuid4()
+        mask_id = uuid.uuid4()
+        layer_id = mask_layer_id(scene_id, mask_id)
+        placement = LayerPlacement(0.0, 0.0, 400.0, 200.0)
+        scene = SceneDescriptor(
+            scene_id=scene_id,
+            kind=SceneKind.EXPLICIT,
+            bounds=placement,
+            layers=(
+                LayerDescriptor(
+                    scene_id=scene_id,
+                    layer_id=layer_id,
+                    kind=LayerKind.MASK,
+                    source=MaskLayerSource(mask_id=mask_id, revision=3),
+                    placement=placement,
+                    opacity=0.5,
+                    blend_mode=BlendMode.NORMAL,
+                    hit_test=LayerHitTest(enabled=True, role="mask"),
+                    source_revision=3,
+                ),
+            ),
+        )
+        mask_image = QImage(400, 200, QImage.Format_Grayscale8)
+        mask_image.fill(255)
+        service = StubMaskService(
+            StubMaskAssets({mask_id: StubMaskLayer(mask_image)}),
+            StubMaskController({mask_id: 3}),
+        )
+        harness.qpane.mask_service = service
+        harness.qpane.sceneProviderRegistry().register_replacement(
+            _ReplacementSceneProvider(scene)
+        )
+        harness.qpane.layerSourceResolverRegistry().register(
+            MaskLayerSourceResolver(
+                assets=service.assets,
+                renders=service.controller.renders,
+            )
+        )
+        plan = harness.presenter.calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        assert [item.descriptor.kind for item in plan.render_items] == [LayerKind.MASK]
+        assert plan.base_raster_item is None
     finally:
         _cleanup_qpane(harness.qpane, qapp)
 

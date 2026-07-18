@@ -114,10 +114,6 @@ def test_registry_logs_provider_failures_once(qapp, caplog):
 
 
 def test_mask_summary_provider_summarises_state():
-    mask_manager = SimpleNamespace(
-        get_mask_ids_for_image=lambda _: ["mask-1", "mask-2", "mask-3"]
-    )
-
     class FakeCatalog:
         def __init__(self):
             self._current_id = "image-1"
@@ -125,12 +121,9 @@ def test_mask_summary_provider_summarises_state():
         def currentImageID(self):
             return self._current_id
 
-        def maskManager(self):
-            return mask_manager
-
     class FakeMaskService:
-        def __init__(self):
-            self.manager = mask_manager
+        def mask_ids_for_image(self, _image_id):
+            return ["mask-1", "mask-2", "mask-3"]
 
         def getActiveMaskId(self):
             return "mask-2"
@@ -351,6 +344,10 @@ def test_swap_progress_provider_compact(qapp):
         )
 
         class MaskStub:
+            @property
+            def renders(self):
+                return self
+
             def snapshot_metrics(self):
                 return SimpleNamespace(
                     cache_bytes=3 * mb,

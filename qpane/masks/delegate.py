@@ -31,6 +31,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .mask import MaskLayer
     from .mask_service import MaskService
     from .mask_undo import MaskUndoState
+    from .prefetch_adapter import MaskScenePrefetcher
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +43,7 @@ class MaskDelegate:
         self._qpane = qpane
         self._catalog_cache = None
         self._mask_undo_slot = None
+        self._scene_prefetcher: MaskScenePrefetcher | None = None
 
     def _catalog(self):
         """Return the cached catalog, fetching it from the QPane on first use."""
@@ -57,9 +59,8 @@ class MaskDelegate:
 
     # Mask service lifecycle
     def mask_feature_available(self) -> bool:
-        """Return True when both a mask manager and service are wired up."""
-        mask_manager = self._catalog().maskManager()
-        return self._mask_service is not None and mask_manager is not None
+        """Return True when the mask feature service is wired up."""
+        return self._mask_service is not None
 
     def sync_mask_activation_for_image(self, image_id: uuid.UUID | None) -> bool:
         """Ensure a mask is active for ``image_id`` before brush usage."""
@@ -97,7 +98,11 @@ class MaskDelegate:
             service, "setSceneMutationCoordinator"
         ):
             service.setSceneMutationCoordinator(scene_mutations())
-        qpane.swapDelegate.on_mask_service_attached(service)
+        from .prefetch_adapter import MaskScenePrefetcher
+
+        prefetcher = MaskScenePrefetcher(service)
+        qpane.swapDelegate.on_scene_prefetcher_attached(prefetcher)
+        self._scene_prefetcher = prefetcher
         workflow = qpane._masks_controller
         undo_slot = workflow.on_mask_undo_stack_changed
         service.connectUndoStackChanged(undo_slot)
@@ -106,7 +111,7 @@ class MaskDelegate:
         registry = qpane._state.cache_registry
         controller = qpane.mask_controller
         if registry is not None and controller is not None:
-            registry.attach_mask_controller(controller)
+            registry.attach_mask_controller(controller.renders)
         qpane.applyCacheSettings()
 
     def detachMaskService(self) -> None:
@@ -117,7 +122,9 @@ class MaskDelegate:
             return
         if hasattr(service, "setSceneMutationCoordinator"):
             service.setSceneMutationCoordinator(None)
-        qpane.swapDelegate.on_mask_service_detached()
+        if self._scene_prefetcher is not None:
+            qpane.swapDelegate.on_scene_prefetcher_detached(self._scene_prefetcher)
+            self._scene_prefetcher = None
         try:
             if self._mask_undo_slot is not None:
                 service.disconnectUndoStackChanged(self._mask_undo_slot)

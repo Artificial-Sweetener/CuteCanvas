@@ -42,7 +42,6 @@ class FakeCatalog:
     def __init__(self) -> None:
         self.images: dict[uuid.UUID, CatalogEntry] = {}
         self.current_id: uuid.UUID | None = None
-        self.mask_manager = None
 
     def setImagesByID(self, image_map, current_id):
         self.images = dict(image_map)
@@ -94,12 +93,6 @@ class FakeCatalog:
     def getPath(self, image_id):
         entry = self.images.get(image_id)
         return entry.path if entry else None
-
-    def set_mask_manager(self, mask_manager):
-        self.mask_manager = mask_manager
-
-    def get_mask_manager(self):
-        return self.mask_manager
 
 
 class StubCatalogController:
@@ -383,18 +376,6 @@ def test_copy_current_image_to_clipboard_delegates(catalog_components):
     controller.copy_result = False
     assert catalog_api.copyCurrentImageToClipboard() is False
     assert controller.calls[-1][0] == "copyCurrentImageToClipboard"
-
-
-def test_mask_manager_helpers_delegate_to_catalog(catalog_components):
-    catalog_api, image_catalog, _, _ = catalog_components
-
-    class DummyManager:
-        pass
-
-    manager = DummyManager()
-    catalog_api.setMaskManager(manager)
-    assert image_catalog.mask_manager is manager
-    assert catalog_api.maskManager() is manager
 
 
 def test_navigation_hook_invokes_interaction_suspension():

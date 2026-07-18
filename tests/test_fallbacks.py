@@ -22,8 +22,8 @@ from qpane.core import FeatureFailure, FeatureFallbacks
 def test_warning_then_debug_for_additional_context(caplog):
     fallbacks = FeatureFallbacks()
     failure = FeatureFailure(
-        message="Mask feature requires OpenCV.",
-        hint="Install the mask extras via 'pip install qpane[mask]' to enable it.",
+        message="Optional feature dependency is unavailable.",
+        hint="Install the requested feature extra to enable it.",
     )
     fallbacks.record_failure("mask", failure)
     with caplog.at_level(logging.DEBUG, logger="qpane.core.fallbacks"):

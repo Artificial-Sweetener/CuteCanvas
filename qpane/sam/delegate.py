@@ -125,6 +125,15 @@ class SamDelegate:
         """Drop any predictor cached for the current image."""
         self._active_predictor = None
 
+    def predict_mask_from_box(self, bbox: np.ndarray) -> np.ndarray | None:
+        """Run box inference through the SAM service boundary."""
+        predictor = self._active_predictor
+        if predictor is None:
+            return None
+        from .service import predict_mask_from_box
+
+        return predict_mask_from_box(predictor, bbox)
+
     def _on_predictor_ready(self, predictor, image_id: uuid.UUID) -> None:
         """Activate the predictor when it aligns with the current image and refresh the view."""
         qpane = self._qpane

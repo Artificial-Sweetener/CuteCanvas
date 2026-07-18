@@ -40,10 +40,9 @@ from ..scene.identity import (
     default_catalog_asset_key,
 )
 from .contracts import (
-    MaskManagerView,
-    MaskPrefetchService,
     PyramidPrefetchManager,
     SamPredictorManager,
+    SceneSourcePrefetcher,
     TilePrefetchManager,
 )
 
@@ -79,7 +78,7 @@ class SwapCoordinator:
         viewport: Viewport,
         tile_manager: TilePrefetchManager,
         prefetch_settings: PrefetchSettings | None = None,
-        mask_service: MaskPrefetchService | None = None,
+        scene_prefetchers: Sequence[SceneSourcePrefetcher] = (),
         sam_manager: SamPredictorManager | None = None,
     ) -> None:
         """Wire collaborators needed to manage swaps and their background work.
@@ -90,7 +89,7 @@ class SwapCoordinator:
             viewport: Viewport supplying view state for prefetch sizing.
             tile_manager: Tile manager notified about prefetch and cancellation.
             prefetch_settings: Optional overrides for pyramid/tile/mask/predictor depth.
-            mask_service: Optional mask service used for activation and prefetch hooks.
+            scene_prefetchers: Feature-owned scene source warming collaborators.
             sam_manager: Optional SAM manager used to warm predictors alongside swaps.
 
         Side effects:
@@ -103,7 +102,7 @@ class SwapCoordinator:
         if not isinstance(tile_manager, TilePrefetchManager):
             raise TypeError("tile_manager must implement TilePrefetchManager")
         self._tile_manager: TilePrefetchManager = tile_manager
-        self._mask_service: MaskPrefetchService | None = None
+        self._scene_prefetchers: list[SceneSourcePrefetcher] = []
         self._sam_manager: SamPredictorManager | None = None
         self._navigation_history: deque[uuid.UUID] = deque(maxlen=16)
         self._pending_mask_prefetch_ids: set[uuid.UUID] = set()
@@ -132,8 +131,8 @@ class SwapCoordinator:
             )
         self._pyramid_manager: PyramidPrefetchManager = pyramid_manager
         self._pyramid_manager.pyramidReady.connect(self._on_pyramid_ready)
-        if mask_service is not None:
-            self.on_mask_service_attached(mask_service)
+        for prefetcher in scene_prefetchers:
+            self.on_scene_prefetcher_attached(prefetcher)
         if sam_manager is not None:
             self.on_sam_manager_attached(sam_manager)
 
@@ -177,15 +176,11 @@ class SwapCoordinator:
         neighbor_ids = self._candidate_prefetch_ids(image_id)
         skip_ids = set(neighbor_ids) | {image_id}
         skip_predictor_ids: set[uuid.UUID] = {image_id}
-        service = self._mask_service
-        mask_manager: MaskManagerView | None = (
-            service.manager if service is not None else None
-        )
-        if mask_manager is not None:
-            for candidate_id in neighbor_ids:
-                mask_ids = mask_manager.get_mask_ids_for_image(candidate_id)
-                if not mask_ids:
-                    continue
+        for candidate_id in neighbor_ids:
+            if any(
+                prefetcher.has_sources(candidate_id)
+                for prefetcher in self._scene_prefetchers
+            ):
                 skip_predictor_ids.add(candidate_id)
         self._cancel_mask_prefetches(reason="navigation", skip=skip_ids)
         self._cancel_pending_predictors(
@@ -323,18 +318,23 @@ class SwapCoordinator:
         self._maybe_prefetch_tiles(image_id, neighbor_ids)
         self._mark_diagnostics_dirty()
 
-    def on_mask_service_attached(self, service: MaskPrefetchService) -> None:
-        """Attach the mask service and refresh neighbor prefetching."""
-        if not isinstance(service, MaskPrefetchService):
-            raise TypeError("mask_service must implement MaskPrefetchService")
-        self._mask_service = service
+    def on_scene_prefetcher_attached(self, prefetcher: SceneSourcePrefetcher) -> None:
+        """Register a feature-neutral scene source prefetcher."""
+        if not isinstance(prefetcher, SceneSourcePrefetcher):
+            raise TypeError("prefetcher must implement SceneSourcePrefetcher")
+        if prefetcher not in self._scene_prefetchers:
+            self._scene_prefetchers.append(prefetcher)
         if self._current_image_id is not None:
             self.prefetch_neighbors(self._current_image_id)
 
-    def on_mask_service_detached(self) -> None:
-        """Detach the mask service and cancel queued mask prefetch work."""
-        self._cancel_mask_prefetches(reason="mask-detached")
-        self._mask_service = None
+    def on_scene_prefetcher_detached(self, prefetcher: SceneSourcePrefetcher) -> None:
+        """Unregister one prefetcher and cancel its queued scene work."""
+        self._cancel_mask_prefetches(reason="scene-prefetcher-detached")
+        self._scene_prefetchers = [
+            candidate
+            for candidate in self._scene_prefetchers
+            if candidate is not prefetcher
+        ]
         self._pending_mask_prefetch_ids.clear()
 
     def on_sam_manager_attached(self, manager: SamPredictorManager) -> None:
@@ -515,21 +515,25 @@ class SwapCoordinator:
     def _cancel_mask_prefetches(
         self, *, reason: str, skip: Collection[uuid.UUID] | None = None
     ) -> None:
-        """Cancel queued mask prefetches except those listed in ``skip``."""
-        service = self._mask_service
+        """Cancel scene-source prefetches except those listed in ``skip``."""
         skip_set = set(skip or ())
-        if service is None:
+        if not self._scene_prefetchers:
             self._pending_mask_prefetch_ids = skip_set
             return
-        self._pending_mask_prefetch_ids = self._cancel_pending_items(
-            pending=self._pending_mask_prefetch_ids,
-            skip=skip_set,
-            cancel_fn=service.cancelPrefetch,
-            reason=reason,
-            log_name="Mask prefetch",
-            item_label="image_id",
-            missing_hint="mask service missing cancelPrefetch",
-        )
+        pending = set(self._pending_mask_prefetch_ids)
+        for image_id in pending - skip_set:
+            for prefetcher in self._scene_prefetchers:
+                try:
+                    prefetcher.cancel(image_id)
+                except Exception:
+                    logger.exception(
+                        "Scene source prefetch cancellation failed "
+                        "(image_id=%s, reason=%s)",
+                        image_id,
+                        reason,
+                    )
+            pending.discard(image_id)
+        self._pending_mask_prefetch_ids = pending
         self._mark_diagnostics_dirty()
 
     def _cancel_pending_predictors(
@@ -685,10 +689,9 @@ class SwapCoordinator:
         )
 
     def _prefetch_neighbor_masks(self, candidates: Sequence[uuid.UUID]) -> None:
-        """Submit mask prefetch jobs for likely navigation targets respecting depth limits."""
-        service = self._mask_service
+        """Submit feature-neutral scene prefetch jobs within the depth limit."""
         self._pending_mask_prefetch_ids.clear()
-        if service is None:
+        if not self._scene_prefetchers:
             return
         depth = self._mask_prefetch_depth
         candidate_list = list(candidates)
@@ -697,14 +700,21 @@ class SwapCoordinator:
         if depth > 0:
             candidate_list = candidate_list[:depth]
         for candidate in candidate_list:
-            try:
-                scheduled = service.prefetchColorizedMasks(candidate, reason="neighbor")
-            except Exception:
-                logger.exception(
-                    "Mask prefetch failed (image_id=%s)",
-                    candidate,
-                )
-                scheduled = False
+            scheduled = False
+            for prefetcher in self._scene_prefetchers:
+                try:
+                    scheduled = (
+                        prefetcher.prefetch(
+                            candidate,
+                            reason="neighbor",
+                        )
+                        or scheduled
+                    )
+                except Exception:
+                    logger.exception(
+                        "Scene source prefetch failed (image_id=%s)",
+                        candidate,
+                    )
             if scheduled:
                 self._pending_mask_prefetch_ids.add(candidate)
 

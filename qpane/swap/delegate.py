@@ -145,13 +145,13 @@ class SwapDelegate:
         """Forward configuration changes to the coordinator."""
         self._coordinator.apply_config(config)
 
-    def on_mask_service_attached(self, service) -> None:
-        """Forward mask service attachment to the coordinator."""
-        self._coordinator.on_mask_service_attached(service)
+    def on_scene_prefetcher_attached(self, prefetcher) -> None:
+        """Register a feature-neutral scene source prefetcher."""
+        self._coordinator.on_scene_prefetcher_attached(prefetcher)
 
-    def on_mask_service_detached(self) -> None:
-        """Forward mask service removal to the coordinator."""
-        self._coordinator.on_mask_service_detached()
+    def on_scene_prefetcher_detached(self, prefetcher) -> None:
+        """Unregister a feature-neutral scene source prefetcher."""
+        self._coordinator.on_scene_prefetcher_detached(prefetcher)
 
     def on_sam_manager_attached(self, manager) -> None:
         """Provide the SAM manager to the coordinator."""

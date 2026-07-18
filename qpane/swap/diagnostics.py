@@ -140,7 +140,7 @@ def _format_mask_metrics(qpane: QPane) -> str:
     if controller is None:
         return ""
     snapshot = _safe_snapshot(
-        controller, label="mask", message="Mask metrics snapshot failed"
+        controller.renders, label="mask", message="Mask metrics snapshot failed"
     )
     if snapshot is None:
         return ""

@@ -28,23 +28,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mask = ["opencv-python>=4.9"]
+mask = []
 sam = [
-  "opencv-python>=4.9",
   "torch>=2.1",
   "mobilesam-mirror>=1.0.0",
   "timm>=0.9"
 ]
 full = [
   # Full should remain the union of all optional features (mask + sam + future extras).
-  "opencv-python>=4.9",
   "torch>=2.1",
   "mobilesam-mirror>=1.0.0",
   "timm>=0.9"
 ]
 dev = [
   # Development installs include optional runtime features plus tooling.
-  "opencv-python>=4.9",
   "torch>=2.1",
   "mobilesam-mirror>=1.0.0",
   "timm>=0.9",

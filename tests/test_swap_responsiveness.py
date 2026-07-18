@@ -26,13 +26,13 @@ from types import MethodType
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
 from qpane import Config, QPane, sam
 from qpane.core.config_features import MaskConfigSlice
 from qpane.features import FeatureInstallError
-from qpane.masks.mask import MaskManager
+from qpane.masks.mask import MaskAssetStore
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.mask_service import MaskService
 from qpane.rendering import TileGeneratorWorker
@@ -50,7 +50,7 @@ class SwapEnvironment:
     """Bundle swap orchestration dependencies for stress testing."""
 
     qpane: QPane
-    mask_manager: MaskManager
+    mask_manager: MaskAssetStore
     mask_controller: MaskController
     mask_service: MaskService
     sam_manager: SamManager
@@ -119,8 +119,7 @@ def swap_env(
     qpane.resize(_QPANE_EDGE_PX, _QPANE_EDGE_PX)
     base_config = Config()
     mask_config = MaskConfigSlice()
-    mask_manager = MaskManager(undo_limit=mask_config.mask_undo_limit)
-    qpane.catalog().setMaskManager(mask_manager)
+    mask_manager = MaskAssetStore(undo_limit=mask_config.mask_undo_limit)
     mask_controller = MaskController(
         mask_manager,
         image_to_panel_point=qpane.view().viewport.content_to_panel_point,
@@ -129,7 +128,7 @@ def swap_env(
     )
     mask_service = MaskService(
         qpane=qpane,
-        mask_manager=mask_manager,
+        mask_assets=mask_manager,
         mask_controller=mask_controller,
         config=base_config,
         mask_config=mask_config,
@@ -201,10 +200,10 @@ def test_swap_responsiveness_under_contention(
         original_tile_run(self)
 
     monkeypatch.setattr(TileGeneratorWorker, "run", _delayed_tile_run)
-    original_prepare = mask_controller.prepare_colorized_mask
+    original_prepare = mask_controller.renders.prepare_image
 
     def _delayed_prepare(
-        self: MaskController,
+        self: object,
         mask_layer: object,
         *,
         mask_id: uuid.UUID | None = None,
@@ -214,9 +213,9 @@ def test_swap_responsiveness_under_contention(
         time.sleep(_WORKER_DELAY_SECONDS)
         return original_prepare(mask_layer, mask_id=mask_id, source=source)
 
-    mask_controller.prepare_colorized_mask = MethodType(
+    mask_controller.renders.prepare_image = MethodType(
         _delayed_prepare,
-        mask_controller,
+        mask_controller.renders,
     )
     mask_prefetch_calls: list[tuple[uuid.UUID | None, str, bool]] = []
     mask_cancelled: list[uuid.UUID | None] = []
@@ -280,8 +279,13 @@ def test_swap_responsiveness_under_contention(
         mask_id = mask_manager.create_mask(image)
         layer = mask_manager.get_layer(mask_id)
         assert layer is not None
-        layer.mask_image.fill(64 + len(mask_ids) * 32)
-        mask_manager.associate_mask_with_image(mask_id, image_id)
+        layer.surface.fill(64 + len(mask_ids) * 32)
+        assert mask_service.layers.attach(
+            mask_id,
+            image_id,
+            color=QColor(255, 0, 0),
+            opacity=0.5,
+        )
         mask_ids.append(mask_id)
     mask_controller.setActiveMaskID(mask_ids[0])
     mask_service.ensureTopMaskActiveForImage(image_ids[0])
@@ -306,7 +310,7 @@ def test_swap_responsiveness_under_contention(
             masks, predictors = _parse_prefetch_counts(row_value)
             if (masks and masks > 0) or (predictors and predictors > 0):
                 observed_pending_during_stress = True
-        mask_snapshot = mask_controller.snapshot_metrics()
+        mask_snapshot = mask_controller.renders.snapshot_metrics()
         last_source = getattr(mask_snapshot, "colorize_last_source", None)
         if last_source:
             colorize_sources_seen.add(last_source)
@@ -320,7 +324,7 @@ def test_swap_responsiveness_under_contention(
     _wait_for_executor(qpane, qapp)
     qapp.processEvents()
     final_metrics = qpane.view().swap_delegate.snapshot_metrics()
-    snapshot_after = mask_controller.snapshot_metrics()
+    snapshot_after = mask_controller.renders.snapshot_metrics()
     last_source_after = getattr(snapshot_after, "colorize_last_source", None)
     if last_source_after:
         colorize_sources_seen.add(last_source_after)

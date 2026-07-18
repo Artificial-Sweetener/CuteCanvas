@@ -14,15 +14,19 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Adapt mask-domain state into internal scene layer descriptors."""
+"""Adapt composition-owned mask layer instances into internal scenes."""
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from .identity import mask_layer_id
+from ..composition.layers import (
+    CompositionLayerInstance,
+    CompositionLayerSourceKind,
+)
 from .model import (
     BlendMode,
     LayerDescriptor,
@@ -31,151 +35,112 @@ from .model import (
     LayerPlacement,
     SceneDescriptor,
 )
-from .providers import SceneContribution
-from .sources import MaskLayerSource
+from .sources import CatalogImageSource, MaskLayerSource
 
 
 class MaskLayerLike(Protocol):
-    """Mask layer fields needed by the scene adapter."""
-
-    opacity: float
+    """Mask asset fields required to resolve source geometry."""
 
     @property
     def mask_image(self):
-        """Expose the grayscale mask image for placement."""
+        """Expose grayscale source pixels for placement."""
         ...
 
 
-class MaskManagerLike(Protocol):
-    """Mask manager methods consumed by scene adaptation."""
-
-    def get_mask_ids_for_image(self, image_id: uuid.UUID) -> list[uuid.UUID]:
-        """Return mask identifiers in visual order."""
-        ...
+class MaskAssetLookup(Protocol):
+    """Resolve mask assets without owning composition state."""
 
     def get_layer(self, mask_id: uuid.UUID) -> MaskLayerLike | None:
-        """Return the mask layer for ``mask_id`` when present."""
+        """Return the mask asset for one identifier."""
         ...
 
 
-class MaskRenderRevisionProvider(Protocol):
-    """Provide cache/render revisions for mask render sources."""
+class MaskRenderRevisionLookup(Protocol):
+    """Provide source revisions for mask rendering."""
 
-    def maskRenderRevision(self, mask_id: uuid.UUID) -> int:
-        """Return the current render revision for ``mask_id``."""
+    def render_revision(self, mask_id: uuid.UUID) -> int:
+        """Return the current render revision for one mask asset."""
         ...
 
 
-def mask_layers_for_image(
-    *,
-    scene: SceneDescriptor,
-    image_id: uuid.UUID,
-    manager: MaskManagerLike,
-    revision_provider: MaskRenderRevisionProvider,
-) -> tuple[LayerDescriptor, ...]:
-    """Return mask layer descriptors for ``image_id`` in render order."""
-    descriptors: list[LayerDescriptor] = []
-    for mask_id in manager.get_mask_ids_for_image(image_id):
-        layer = manager.get_layer(mask_id)
-        if layer is None:
-            continue
-        mask_image = layer.mask_image
-        if mask_image is None or mask_image.isNull():
-            continue
-        revision = max(0, int(revision_provider.maskRenderRevision(mask_id)))
-        placement = LayerPlacement(
-            x=0.0,
-            y=0.0,
-            width=float(mask_image.width()),
-            height=float(mask_image.height()),
-        )
-        descriptors.append(
-            LayerDescriptor(
-                scene_id=scene.scene_id,
-                layer_id=mask_layer_id(scene.scene_id, mask_id),
-                kind=LayerKind.MASK,
-                source=MaskLayerSource(mask_id=mask_id, revision=revision),
-                placement=placement,
-                visible=True,
-                opacity=_clamped_opacity(getattr(layer, "opacity", 1.0)),
-                blend_mode=BlendMode.NORMAL,
-                clip=None,
-                hit_test=LayerHitTest(
-                    enabled=True,
-                    selectable=False,
-                    role="mask",
-                ),
-                source_revision=revision,
-            )
-        )
-    return tuple(descriptors)
-
-
 @dataclass(frozen=True, slots=True)
-class MaskSceneProvider:
-    """Provide scene contributions for masks associated with a catalog image."""
+class MaskCompositionSceneAdapter:
+    """Insert mask assets according to composition-owned cross-kind z-order."""
 
-    base_scene: SceneDescriptor
-    image_id: uuid.UUID
-    manager: MaskManagerLike
-    revision_provider: MaskRenderRevisionProvider
-
-    def scene_contribution(self) -> SceneContribution | None:
-        """Return mask layers for the active scene, or None when inactive."""
-        layers = mask_layers_for_image(
-            scene=self.base_scene,
-            image_id=self.image_id,
-            manager=self.manager,
-            revision_provider=self.revision_provider,
-        )
-        if not layers:
-            return None
-        return SceneContribution(
-            scene=SceneDescriptor(
-                scene_id=self.base_scene.scene_id,
-                kind=self.base_scene.kind,
-                bounds=self.base_scene.bounds,
-                layers=layers,
-            ),
-            order=10,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class MaskServiceSceneProvider:
-    """Adapt an installed mask service into the scene provider registry."""
-
-    service: object
+    layer_instances: Callable[[uuid.UUID], tuple[CompositionLayerInstance, ...]]
+    revision_provider: Callable[[], object]
+    assets: MaskAssetLookup
+    renders: MaskRenderRevisionLookup
 
     def revision(self) -> object:
-        """Return the mask domain's authoritative scene contribution revision."""
-        revision_getter = getattr(self.service, "scene_provider_revision", None)
-        return revision_getter() if callable(revision_getter) else id(self.service)
+        """Return the mask and composition scene revision."""
+        return self.revision_provider()
 
-    def scene_contribution(
+    def adapt_base_scene(
         self,
         base_scene: SceneDescriptor,
         image_id: uuid.UUID | None,
-    ) -> SceneContribution | None:
-        """Return mask scene content for ``image_id`` when masks are available."""
+    ) -> SceneDescriptor:
+        """Return a complete image scene ordered by composition instances."""
         if image_id is None:
-            return None
-        manager = getattr(self.service, "manager", None)
-        controller = getattr(self.service, "controller", None)
-        if manager is None or controller is None:
-            return None
-        return MaskSceneProvider(
-            base_scene=base_scene,
-            image_id=image_id,
-            manager=manager,
-            revision_provider=controller,
-        ).scene_contribution()
+            return base_scene
+        instances = self.layer_instances(image_id)
+        if not instances:
+            return base_scene
+        base_by_source = {
+            layer.source.image_id: layer
+            for layer in base_scene.layers
+            if isinstance(layer.source, CatalogImageSource)
+        }
+        layers: list[LayerDescriptor] = []
+        for instance in instances:
+            if instance.source_kind == CompositionLayerSourceKind.CATALOG_IMAGE:
+                layer = base_by_source.get(instance.source_id)
+            else:
+                layer = self._mask_descriptor(base_scene, instance)
+            if layer is not None:
+                layers.append(layer)
+        if not layers:
+            return base_scene
+        return SceneDescriptor(
+            scene_id=base_scene.scene_id,
+            kind=base_scene.kind,
+            bounds=base_scene.bounds,
+            layers=tuple(layers),
+        )
 
-
-def _clamped_opacity(value: object) -> float:
-    """Return ``value`` constrained to the descriptor opacity range."""
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return 1.0
-    return min(1.0, max(0.0, numeric))
+    def _mask_descriptor(
+        self,
+        scene: SceneDescriptor,
+        instance: CompositionLayerInstance,
+    ) -> LayerDescriptor | None:
+        """Resolve one composition mask instance into a scene descriptor."""
+        asset = self.assets.get_layer(instance.source_id)
+        if asset is None or asset.mask_image.isNull():
+            return None
+        revision = max(
+            0,
+            int(self.renders.render_revision(instance.source_id)),
+        )
+        return LayerDescriptor(
+            scene_id=scene.scene_id,
+            layer_id=instance.layer_id,
+            kind=LayerKind.MASK,
+            source=MaskLayerSource(mask_id=instance.source_id, revision=revision),
+            placement=LayerPlacement(
+                x=0.0,
+                y=0.0,
+                width=float(asset.mask_image.width()),
+                height=float(asset.mask_image.height()),
+            ),
+            visible=instance.visible,
+            opacity=instance.opacity,
+            blend_mode=BlendMode.NORMAL,
+            clip=None,
+            hit_test=LayerHitTest(
+                enabled=instance.hit_test,
+                selectable=instance.selectable,
+                role=instance.role,
+            ),
+            source_revision=revision,
+        )

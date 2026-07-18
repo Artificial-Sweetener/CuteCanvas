@@ -4,15 +4,14 @@
 QPane is a PySide6 widget for fast, CPU-first tiled image viewing. It slots into your Qt app without leaning on the GPU, handling large images and smooth zooming right out of the box.
 
 ## Install and Import
-Install the core package to get the viewer. If you need advanced tools like mask editing or Segment Anything (SAM), grab the extras now or add them later.
+Install QPane to get the viewer and raster mask editing. Add the SAM extra when your application uses AI segmentation.
 
 ```bash
-# Core viewer only
+# Viewer and mask editing
 pip install qpane
 
-# Optional extras
-pip install "qpane[mask]"      # For mask editing
-pip install "qpane[mask,sam]"  # For AI segmentation
+# AI segmentation
+pip install "qpane[sam]"
 pip install "qpane[full]"      # Installs all current and future extras
 ```
 

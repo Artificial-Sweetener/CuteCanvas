@@ -32,11 +32,7 @@ from .identity import (
     placeholder_source_id,
     scene_image_asset_key,
 )
-from .mask_adapter import (
-    MaskSceneProvider,
-    MaskServiceSceneProvider,
-    mask_layers_for_image,
-)
+from .mask_adapter import MaskCompositionSceneAdapter
 from .model import (
     BlendMode,
     ClipCoordinateSpace,
@@ -97,10 +93,9 @@ __all__ = [
     "LayerSource",
     "LayerSourceResolver",
     "LayerSourceResolverRegistry",
+    "MaskCompositionSceneAdapter",
     "MaskLayerRenderItem",
     "MaskLayerSource",
-    "MaskSceneProvider",
-    "MaskServiceSceneProvider",
     "PlaceholderImageSource",
     "RasterLayerRenderItem",
     "RenderStrategy",
@@ -130,7 +125,6 @@ __all__ = [
     "default_scene_id",
     "mask_layer_asset_key",
     "mask_layer_id",
-    "mask_layers_for_image",
     "placeholder_layer_id",
     "placeholder_scene_id",
     "placeholder_source_id",

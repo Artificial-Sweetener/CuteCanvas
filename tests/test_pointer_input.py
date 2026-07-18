@@ -362,7 +362,7 @@ def test_two_fingers_navigate_without_painting_in_brush_mode(qapp) -> None:
         ).commit()
         qapp.processEvents()
 
-        mask_layer = service.manager.get_layer(mask_id)
+        mask_layer = service.assets.get_layer(mask_id)
         assert mask_layer is not None
         assert mask_layer.mask_image.pixelColor(360, 380).red() == 0
         assert viewport.pan.x() > 0

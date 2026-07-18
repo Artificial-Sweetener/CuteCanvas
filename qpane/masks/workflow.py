@@ -278,7 +278,7 @@ class _SamWorkflow:
             )
             return False
         try:
-            mask_array_bool = service.predict_mask_from_box(predictor, bbox)
+            mask_array_bool = delegate.predict_mask_from_box(bbox)
         except ValueError as exc:
             logger.warning(
                 "generate_and_apply_mask aborted: bounding box invalid (image_path=%s, bbox=%s, erase_mode=%s, reason=%s)",
@@ -612,11 +612,10 @@ class Masks:
         if resolved_id is None:
             return []
         service = self._ensure_mask_service()
-        manager = getattr(service, "manager", None)
-        if manager is None:
+        if service is None:
             return []
         try:
-            return list(manager.get_mask_ids_for_image(resolved_id))
+            return list(service.mask_ids_for_image(resolved_id))
         except Exception:  # pragma: no cover - defensive guard
             logger.exception("Failed to fetch mask ids for image %s", resolved_id)
             return []
@@ -624,32 +623,31 @@ class Masks:
     def maskInfo(self, mask_id: uuid.UUID) -> MaskInfo | None:
         """Return metadata for ``mask_id`` suitable for UI display."""
         service = self._ensure_mask_service()
-        manager = getattr(service, "manager", None)
-        if manager is None:
+        if service is None:
             return None
+        assets = service.assets
         try:
-            layer = manager.get_layer(mask_id)
+            layer = assets.get_layer(mask_id)
         except Exception:  # pragma: no cover - defensive guard
             logger.exception("Failed to fetch mask layer for %s", mask_id)
             return None
         if layer is None:
             return None
         try:
-            image_ids = tuple(manager.get_images_for_mask(mask_id))
+            image_ids = tuple(service.image_ids_for_mask(mask_id))
         except Exception:  # pragma: no cover - defensive guard
             logger.exception("Failed to fetch image ids for mask %s", mask_id)
             image_ids = ()
-        label = getattr(layer, "label", None)
-        if isinstance(label, str):
-            label = label.strip() or None
-        opacity = getattr(layer, "opacity", None)
+        instance = service.layer_instance_for_mask(mask_id)
+        label = None if instance is None else instance.label
+        opacity = None if instance is None else instance.opacity
         try:
             opacity = float(opacity) if opacity is not None else None
         except (TypeError, ValueError):
             opacity = None
         return MaskInfo(
             mask_id=mask_id,
-            color=getattr(layer, "color", None),
+            color=None if instance is None else instance.tint,
             label=label,
             opacity=opacity,
             image_ids=image_ids,

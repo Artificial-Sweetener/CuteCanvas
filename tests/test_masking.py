@@ -22,13 +22,13 @@ from PySide6.QtCore import QRect
 
 from qpane import Config
 from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.mask import MaskManager
+from qpane.masks.mask import MaskAssetStore
 from qpane.masks.mask_controller import MaskController
 
 
 def test_mask_updated_accepts_uuid(qapp):
     controller = MaskController(
-        MaskManager(),
+        MaskAssetStore(),
         lambda pt: pt,
         Config(),
         mask_config=MaskConfigSlice(),

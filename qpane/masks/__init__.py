@@ -17,26 +17,25 @@
 """Mask domain delegates for the QPane widget."""
 
 from .autosave import AutosaveManager
+from .autosave_coordination import should_enable_mask_autosave
 from .delegate import MaskDelegate
-from .mask import MaskLayer, MaskManager, _require_cv2
-from .mask_controller import MaskController, Masking
+from .mask import MaskAssetStore, MaskLayer
+from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
-from .mask_service import MaskService, should_enable_mask_autosave
+from .mask_service import MaskService
 from .mask_undo import MaskPatch, MaskUndoState
 from .workflow import Masks
 
 __all__ = (
     "AutosaveManager",
+    "MaskAssetStore",
     "MaskController",
     "MaskDelegate",
     "MaskLayer",
-    "MaskManager",
     "MaskPatch",
     "MaskService",
     "MaskStrokeDiagnostics",
     "MaskUndoState",
-    "Masking",
     "Masks",
-    "_require_cv2",
     "should_enable_mask_autosave",
 )

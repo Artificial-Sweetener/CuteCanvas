@@ -390,12 +390,11 @@ def mask_summary_provider(qpane: QPane) -> tuple[DiagnosticRecord, ...]:
     except AttributeError:
         logger.warning("Mask diagnostics requested before catalog initialization")
         catalog_facade = None
-    mask_manager = service.manager
     current_id = catalog_facade.currentImageID() if catalog_facade is not None else None
     mask_ids: list = []
-    if mask_manager is not None and current_id is not None:
+    if current_id is not None:
         try:
-            mask_ids = mask_manager.get_mask_ids_for_image(current_id) or []
+            mask_ids = service.mask_ids_for_image(current_id) or []
         except Exception:
             logger.debug("Mask ID enumeration failed", exc_info=True)
             mask_ids = []

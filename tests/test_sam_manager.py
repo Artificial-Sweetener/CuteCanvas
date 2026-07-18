@@ -29,7 +29,7 @@ from PySide6.QtGui import QColor, QImage
 
 from qpane import Config, sam
 from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.mask import MaskLayer, MaskManager, MaskSurface
+from qpane.masks.mask import MaskAssetStore, MaskLayer, MaskSurface
 from qpane.masks.mask_controller import MaskController
 from qpane.sam.manager import SamManager, SamWorker
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
@@ -103,7 +103,7 @@ def test_worker_error_emits_failure_signal():
 
 @pytest.mark.usefixtures("qapp")
 def test_mask_controller_handles_none_mask():
-    mask_manager = MaskManager()
+    mask_manager = MaskAssetStore()
     controller = MaskController(
         mask_manager,
         lambda point: point,
@@ -114,13 +114,13 @@ def test_mask_controller_handles_none_mask():
     mask_image.fill(0)
     mask_id = uuid.uuid4()
     mask_manager._masks[mask_id] = MaskLayer(
-        surface=MaskSurface.from_qimage(mask_image)
+        mask_id=mask_id, surface=MaskSurface.from_qimage(mask_image)
     )
     controller._active_mask_id = mask_id
     emissions: list[tuple[uuid.UUID, object]] = []
     controller.mask_updated.connect(lambda mid, rect: emissions.append((mid, rect)))
     bbox = np.array([0, 0, 2, 2])
-    update = controller.handle_mask_ready(None, bbox, erase_mode=False)
+    update = controller.edits.apply_generated_mask(None, bbox, erase_mode=False)
     assert update is not None
     assert update.mask_id == mask_id
     assert update.mask_layer is mask_manager.get_layer(mask_id)

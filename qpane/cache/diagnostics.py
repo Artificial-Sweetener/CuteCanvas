@@ -207,7 +207,8 @@ def _bundle_metrics(qpane: QPane, consumer_id: str) -> _CacheMetricsBundle:
     elif consumer_id == "pyramids":
         manager = _catalog_pyramid_manager(qpane)
     elif consumer_id == "mask_overlays":
-        manager = qpane.mask_controller
+        controller = qpane.mask_controller
+        manager = None if controller is None else controller.renders
     elif consumer_id == "predictors":
         manager = qpane.samManager()
     else:  # pragma: no cover - defensive guard
@@ -234,7 +235,7 @@ def _bundle_metrics(qpane: QPane, consumer_id: str) -> _CacheMetricsBundle:
 def _coerce_metrics(snapshot: object) -> _CacheMetricsBundle:
     """Convert snapshot objects into a unified cache metrics bundle."""
     try:
-        from ..masks.mask_controller import MaskOverlayMetrics
+        from ..masks.render_cache import MaskOverlayMetrics
         from ..rendering.cache_metrics import CacheManagerMetrics
         from ..sam.manager import SamPredictorMetrics
     except ImportError:

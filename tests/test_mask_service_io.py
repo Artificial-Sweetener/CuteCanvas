@@ -25,10 +25,17 @@ import pytest
 from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QImage, Qt
 
+from qpane.catalog.image_utils import (
+    numpy_to_qimage_grayscale8,
+    qimage_to_numpy_grayscale8,
+)
 from qpane.core.config_features import MaskConfigSlice
-from qpane.masks import mask_service
-from qpane.masks.mask import MaskManager
-from qpane.masks.mask_service import _random_mask_color
+from qpane.masks import autosave_coordination
+from qpane.masks.autosave import AutosaveManager
+from qpane.masks.combiner import MaskCombiner
+from qpane.masks.component_adjustment import MaskComponentAdjustmentTool
+from qpane.masks.layer_workflows import random_mask_color
+from qpane.masks.mask import MaskAssetStore
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
 from tests.test_mask_workflows import (
@@ -42,7 +49,7 @@ pytest_plugins = ("tests.test_mask_workflows",)
 
 
 def test_mask_service_load_mask_records_success(qpane_with_mask, tmp_path):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, _mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
     service._status_messages.clear()
     grayscale = QImage(8, 8, QImage.Format_Grayscale8)
@@ -51,7 +58,7 @@ def test_mask_service_load_mask_records_success(qpane_with_mask, tmp_path):
     assert grayscale.save(str(mask_path))
     mask_id = service.loadMaskFromPath(str(mask_path))
     assert mask_id is not None
-    assert mask_id in mask_manager.get_mask_ids_for_image(image_id)
+    assert mask_id in service.mask_ids_for_image(image_id)
     label, message = service._status_messages[-1]
     assert label == "Mask"
     assert str(mask_path) in message
@@ -90,54 +97,75 @@ def test_mask_service_update_mask_missing_layer(qpane_with_mask, tmp_path):
 
 
 def test_random_mask_color_is_deterministic():
-    hues = [_random_mask_color(i).hue() for i in range(5)]
+    hues = [random_mask_color(i).hue() for i in range(5)]
     assert hues[:3] == [0, 221, 84]
     assert len(set(hues[:3])) == 3
 
 
 def test_createBlankMask_assigns_sequential_colors(qpane_with_mask):
-    qpane, mask_manager, _ = qpane_with_mask
+    qpane, _mask_manager, _ = qpane_with_mask
     service = _mask_service(qpane)
     base_image = qpane.catalog().currentImage()
     assert base_image is not None
     first_id = service.createBlankMask(base_image.size())
     second_id = service.createBlankMask(base_image.size())
     assert first_id is not None and second_id is not None
-    first_layer = mask_manager.get_layer(first_id)
-    second_layer = mask_manager.get_layer(second_id)
-    assert first_layer is not None and second_layer is not None
-    assert first_layer.color != second_layer.color
-    assert first_layer.color.hue() == _random_mask_color(0).hue()
-    assert second_layer.color.hue() == _random_mask_color(1).hue()
+    first_instance = service.layer_instance_for_mask(first_id)
+    second_instance = service.layer_instance_for_mask(second_id)
+    assert first_instance is not None and second_instance is not None
+    assert first_instance.tint != second_instance.tint
+    assert first_instance.tint.hue() == random_mask_color(0).hue()
+    assert second_instance.tint.hue() == random_mask_color(1).hue()
 
 
 def test_combine_with_numpy_mask_resizes_mismatched_shapes():
-    manager = MaskManager()
+    manager = MaskAssetStore()
     base_image = QImage(8, 8, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
     small_mask = np.zeros((4, 2), dtype=np.uint8)
     small_mask[:, 0] = 255
-    result = manager.combine_with_numpy_mask(mask_id, small_mask)
-    assert result.changed
-    assert result.image is not None
-    manager.commit_mask_image(mask_id, result.image)
+    result = MaskCombiner(manager).combine(mask_id, small_mask)
+    assert result is not None
+    manager.commit_mask_image(mask_id, result)
     combined = manager.get_mask_image_as_numpy(mask_id)
     assert combined.shape == (8, 8)
     assert np.all(combined[:, :4] == 255)
 
 
+def test_combine_resize_preserves_nearest_sampling_contract():
+    manager = MaskAssetStore()
+    base_image = QImage(5, 4, QImage.Format_Grayscale8)
+    base_image.fill(Qt.black)
+    mask_id = manager.create_mask(base_image)
+    source = np.arange(6, dtype=np.uint8).reshape(2, 3)
+    result = MaskCombiner(manager).combine(mask_id, source)
+    assert result is not None
+    manager.commit_mask_image(mask_id, result)
+    assert np.array_equal(
+        manager.get_mask_image_as_numpy(mask_id),
+        np.array(
+            [
+                [0, 0, 1, 1, 2],
+                [0, 0, 1, 1, 2],
+                [3, 3, 4, 4, 5],
+                [3, 3, 4, 4, 5],
+            ],
+            dtype=np.uint8,
+        ),
+    )
+
+
 def test_combine_with_numpy_mask_coerces_bool_arrays():
-    manager = MaskManager()
+    manager = MaskAssetStore()
     base_image = QImage(4, 4, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
     bool_mask = np.zeros((4, 4), dtype=bool)
     bool_mask[1, 2] = True
-    result = manager.combine_with_numpy_mask(mask_id, bool_mask)
-    assert result.changed
-    assert result.image is not None
-    manager.commit_mask_image(mask_id, result.image)
+    result = MaskCombiner(manager).combine(mask_id, bool_mask)
+    assert result is not None
+    manager.commit_mask_image(mask_id, result)
     stored = manager.get_mask_image_as_numpy(mask_id)
     assert stored is not None
     assert stored.dtype == np.uint8
@@ -146,7 +174,7 @@ def test_combine_with_numpy_mask_coerces_bool_arrays():
 
 
 def test_combine_with_numpy_mask_erase_clears_null_layer():
-    manager = MaskManager()
+    manager = MaskAssetStore()
     base_image = QImage(4, 4, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -155,10 +183,9 @@ def test_combine_with_numpy_mask_erase_clears_null_layer():
     assert layer is not None
     assert layer.mask_image.isNull()
     erase_mask = np.ones((4, 4), dtype=np.uint8) * 255
-    result = manager.combine_with_numpy_mask(mask_id, erase_mask, erase_mode=True)
-    assert result.changed
-    assert result.image is not None
-    manager.commit_mask_image(mask_id, result.image)
+    result = MaskCombiner(manager).combine(mask_id, erase_mask, erase_mode=True)
+    assert result is not None
+    manager.commit_mask_image(mask_id, result)
     updated_layer = manager.get_layer(mask_id)
     assert updated_layer is not None
     assert not updated_layer.mask_image.isNull()
@@ -169,61 +196,64 @@ def test_combine_with_numpy_mask_erase_clears_null_layer():
 
 
 def test_adjust_component_out_of_bounds_guard():
-    manager = MaskManager()
+    manager = MaskAssetStore()
     base_image = QImage(8, 8, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
     layer = manager.get_layer(mask_id)
     assert layer is not None
-    layer.mask_image.fill(Qt.white)
+    layer.surface.fill(Qt.white)
     baseline_state = manager.get_undo_state(mask_id)
     assert baseline_state is not None
-    result = manager.adjust_component_at_point(mask_id, QPoint(20, 20), grow=True)
+    result = MaskComponentAdjustmentTool(manager).adjusted_image(
+        mask_id, QPoint(20, 20), grow=True
+    )
     assert result is None
     assert manager.get_undo_state(mask_id) == baseline_state
     assert layer.mask_image.pixelColor(0, 0).value() == 255
 
 
-def test_cycle_updates_mask_order():
-    manager = MaskManager()
-    base_image = QImage(4, 4, QImage.Format_Grayscale8)
-    base_image.fill(Qt.black)
-    first_mask = manager.create_mask(base_image)
-    second_mask = manager.create_mask(base_image)
-    image_id = uuid.uuid4()
-    manager.associate_mask_with_image(first_mask, image_id)
-    manager.associate_mask_with_image(second_mask, image_id)
-    assert manager.get_mask_ids_for_image(image_id) == [
-        first_mask,
-        second_mask,
-    ]
-    manager.reorder_mask(image_id, first_mask, 1)
-    assert manager.get_mask_ids_for_image(image_id) == [
-        second_mask,
-        first_mask,
-    ]
-    manager.reorder_mask(image_id, second_mask, 1)
-    assert manager.get_mask_ids_for_image(image_id) == [
-        first_mask,
-        second_mask,
-    ]
-
-
-def test_handle_image_removal_prunes_unreferenced_masks():
-    manager = MaskManager()
-    base_image = QImage(4, 4, QImage.Format_Grayscale8)
+def test_adjust_component_uses_eight_connectivity_and_cross_dilation():
+    manager = MaskAssetStore()
+    base_image = QImage(7, 7, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
-    first_image = uuid.uuid4()
-    second_image = uuid.uuid4()
-    manager.associate_mask_with_image(mask_id, first_image)
-    manager.associate_mask_with_image(mask_id, second_image)
-    manager.handle_image_removal(first_image)
-    assert manager.get_layer(mask_id) is not None
-    assert manager.get_mask_ids_for_image(second_image) == [mask_id]
-    manager.handle_image_removal(second_image)
-    assert manager.get_layer(mask_id) is None
-    assert manager.get_mask_ids_for_image(second_image) == []
+    source = np.zeros((7, 7), dtype=np.uint8)
+    source[2, 2] = 255
+    source[3, 3] = 255
+    source[5, 5] = 255
+    manager.set_mask_image(mask_id, numpy_to_qimage_grayscale8(source))
+    result = MaskComponentAdjustmentTool(manager).adjusted_image(
+        mask_id, QPoint(2, 2), grow=True
+    )
+    assert result is not None
+    adjusted = qimage_to_numpy_grayscale8(result)
+    expected = source.copy()
+    expected[1:4, 2] = 255
+    expected[2, 1:4] = 255
+    expected[2:5, 3] = 255
+    expected[3, 2:5] = 255
+    assert np.array_equal(adjusted, expected)
+
+
+def test_adjust_component_shrinks_only_selected_component():
+    manager = MaskAssetStore()
+    base_image = QImage(8, 6, QImage.Format_Grayscale8)
+    base_image.fill(Qt.black)
+    mask_id = manager.create_mask(base_image)
+    source = np.zeros((6, 8), dtype=np.uint8)
+    source[1:4, 1:4] = 255
+    source[1:4, 5:8] = 255
+    manager.set_mask_image(mask_id, numpy_to_qimage_grayscale8(source))
+    result = MaskComponentAdjustmentTool(manager).adjusted_image(
+        mask_id, QPoint(2, 2), grow=False
+    )
+    assert result is not None
+    adjusted = qimage_to_numpy_grayscale8(result)
+    expected = np.zeros_like(source)
+    expected[2, 2] = 255
+    expected[1:4, 5:8] = 255
+    assert np.array_equal(adjusted, expected)
 
 
 def test_async_strokes_sync_undo_and_autosave(monkeypatch, qapp):
@@ -235,9 +265,9 @@ def test_async_strokes_sync_undo_and_autosave(monkeypatch, qapp):
     mask_id = service.createBlankMask(image.size())
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)
-    layer = service.manager.get_layer(mask_id)
+    layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.mask_image.fill(0)
+    layer.surface.fill(0)
     qpane.interaction.brush_size = 5
     autosave_manager = qpane.autosaveManager()
     assert autosave_manager is not None
@@ -251,22 +281,22 @@ def test_async_strokes_sync_undo_and_autosave(monkeypatch, qapp):
         _queue_pending_stroke(qpane, QPoint(4, 4))
         pending, tokens = drain_mask_jobs(qpane, executor=executor)
         assert not pending and not tokens
-        state = service.manager.get_undo_state(mask_id)
+        state = service.assets.get_undo_state(mask_id)
         assert state is not None and state.undo_depth == 1
         assert autosave_calls and autosave_calls[-1] == str(mask_id)
         first_autosave_count = len(autosave_calls)
-        assert service.manager.undo_mask(mask_id) is not None
+        assert service.assets.undo_mask(mask_id) is not None
         undone_snapshot = snapshot_mask_layer(layer)
         assert not np.any(undone_snapshot)
         _queue_pending_stroke(qpane, QPoint(9, 9))
-        assert service.manager.redo_mask(mask_id) is not None
+        assert service.assets.redo_mask(mask_id) is not None
         pending_after_redo = service.strokeDebugSnapshot().pending_jobs
         assert mask_id in pending_after_redo
         drain_mask_jobs(qpane, executor=executor)
         final_snapshot = snapshot_mask_layer(layer)
         assert final_snapshot[4, 4] == 255
         assert final_snapshot[9, 9] == 255
-        state = service.manager.get_undo_state(mask_id)
+        state = service.assets.get_undo_state(mask_id)
         assert state is not None and state.undo_depth == 2
         assert len(autosave_calls) >= first_autosave_count + 1
     finally:
@@ -330,16 +360,17 @@ def test_mask_autosave_coordinator_uses_shared_executor(monkeypatch) -> None:
 
     qpane = _QPane()
     monkeypatch.setattr(
-        mask_service, "should_enable_mask_autosave", lambda _qpane: True
+        autosave_coordination, "should_enable_mask_autosave", lambda _qpane: True
     )
-    coordinator = mask_service.MaskAutosaveCoordinator(
+    coordinator = autosave_coordination.MaskAutosaveCoordinator(
         qpane=qpane,
-        mask_manager=mask_manager,
+        mask_assets=mask_manager,
         mask_controller=mask_controller,
         executor=executor,
+        publish_status=lambda *_args, **_kwargs: None,
     )
     coordinator.refresh()
-    assert isinstance(qpane.autosaveManager(), mask_service.AutosaveManager)
+    assert isinstance(qpane.autosaveManager(), AutosaveManager)
     assert qpane.autosaveManager()._executor is executor
     qpane.autosaveManager().shutdown()
     coordinator._disconnect(force=True)

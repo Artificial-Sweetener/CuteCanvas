@@ -64,10 +64,10 @@ def test_attach_and_detach_mask_service_wires_state() -> None:
             self.attached = False
             self.detached = False
 
-        def on_mask_service_attached(self, _service) -> None:
+        def on_scene_prefetcher_attached(self, _prefetcher) -> None:
             self.attached = True
 
-        def on_mask_service_detached(self) -> None:
+        def on_scene_prefetcher_detached(self, _prefetcher) -> None:
             self.detached = True
 
     class _ServiceStub:
