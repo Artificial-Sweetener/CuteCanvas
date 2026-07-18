@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint
+from PySide6.QtGui import QColor, QImage
 
 from qpane import Config, QPane
 from qpane.features import FeatureInstallError
@@ -157,6 +158,36 @@ def test_sam_feature_component_adjusts_mask(qpane_with_sam):
         QPoint(1, 2), True
     )
     assert adjustments == [("mask-1", QPoint(1, 2), True)]
+
+
+def test_detach_sam_manager_cancels_pending_predictor_work(
+    qpane_with_sam, monkeypatch, tmp_path
+) -> None:
+    """Detaching SAM cancels work before its executor can outlive the feature."""
+    qpane = qpane_with_sam
+    manager = qpane.samManager()
+    assert manager is not None
+    monkeypatch.setattr(manager, "checkpointReady", lambda: True)
+    image = QImage(8, 8, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    image_id = uuid.uuid4()
+    executor = qpane.executor
+    existing_handles = {record.handle for record in executor.pending_tasks()}
+
+    manager.requestPredictor(image, image_id, source_path=tmp_path / "image.png")
+    predictor_handles = {
+        record.handle
+        for record in executor.pending_tasks()
+        if record.handle not in existing_handles
+    }
+    assert len(predictor_handles) == 1
+    predictor_handle = predictor_handles.pop()
+
+    qpane.detachSamManager()
+
+    assert predictor_handle in executor.cancelled
+    assert all(record.handle != predictor_handle for record in executor.pending_tasks())
+    assert manager.activePredictorLoads() == 0
 
 
 def test_sam_providers_report_additional_metrics():

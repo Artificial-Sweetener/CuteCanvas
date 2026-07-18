@@ -217,7 +217,7 @@ class _SamWorkflow:
         self._owner._sam_delegate = delegate
 
     def detach_manager(self) -> None:
-        """Detach the SAM manager from the QPane and delegate."""
+        """Detach the SAM manager and cancel work owned by the attachment."""
         qpane = self._owner._qpane
         manager = qpane.samManager()
         if manager is None:
@@ -227,6 +227,7 @@ class _SamWorkflow:
             delegate.detachManager()
         qpane._set_sam_manager(None)
         self._owner._sam_delegate = None
+        manager.shutdown()
 
     def reset_active_predictor(self) -> None:
         """Clear the active SAM predictor if one is attached."""

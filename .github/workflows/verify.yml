@@ -25,6 +25,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      - name: Install Linux Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libegl1
+
       - name: Install development dependencies
         run: |
           python -m pip install "pip==${{ env.PIP_VERSION }}"

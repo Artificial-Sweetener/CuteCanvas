@@ -174,6 +174,7 @@ def swap_env(
         )
     finally:
         qpane.detachSamManager()
+        _wait_for_executor(qpane, qapp)
         qpane.detachMaskService()
         qpane.deleteLater()
         qapp.processEvents()
