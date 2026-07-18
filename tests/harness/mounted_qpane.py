@@ -246,6 +246,23 @@ class MountedQPaneHarness:
             QTest.qWait(1)
         return False
 
+    def wait_for_mask_undo_depth(
+        self,
+        mask_id: uuid.UUID,
+        expected_depth: int,
+        *,
+        timeout_ms: int = 3000,
+    ) -> bool:
+        """Wait until durable mask history reaches ``expected_depth``."""
+        deadline = time.perf_counter() + timeout_ms / 1000.0
+        while time.perf_counter() < deadline:
+            self.qapp.processEvents()
+            state = self.viewer.getMaskUndoState(mask_id)
+            if state is not None and state.undo_depth == expected_depth:
+                return True
+            QTest.qWait(1)
+        return False
+
     def save_capture(self, path: Path) -> None:
         """Save the current composited widget image or raise on failure."""
         path.parent.mkdir(parents=True, exist_ok=True)

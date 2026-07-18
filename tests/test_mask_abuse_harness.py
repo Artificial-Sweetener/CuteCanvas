@@ -403,19 +403,28 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
     previous_async_handler = controller._async_colorize_handler
     previous_async_threshold = controller._async_colorize_threshold_px
     service.setPrefetchEnabled(False)
+    retained_point = QPoint(150, 160)
+    removed_point = QPoint(350, 340)
     try:
         if zoom_mode == "one-to-one":
             harness.viewer.setZoom1To1(QPoint(250, 250))
             harness.drain_events(wait_ms=10)
-        for stroke in (retained_stroke, removed_stroke):
+        for expected_depth, stroke, probe_point in (
+            (1, retained_stroke, retained_point),
+            (2, removed_stroke, removed_point),
+        ):
             driver.begin(stroke)
             driver.move(stroke, 1)
             driver.end(stroke)
-            assert harness.wait_for_mask_render_idle(timeout_ms=5000)
+            assert harness.wait_for_mask_undo_depth(
+                mask_id,
+                expected_depth,
+                timeout_ms=5000,
+            )
+            tint = harness.wait_for_mask_tint(probe_point, timeout_ms=5000)
+            assert tint.latency_ms is not None
             harness.drain_events(wait_ms=5)
 
-        retained_point = QPoint(150, 160)
-        removed_point = QPoint(350, 340)
         before = harness.capture()
         assert harness.is_mask_tint(before.pixelColor(retained_point))
         assert harness.is_mask_tint(before.pixelColor(removed_point))
