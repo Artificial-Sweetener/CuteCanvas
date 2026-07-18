@@ -110,6 +110,8 @@ config = {
     "concurrency": {  # Executor tuning (threads, priorities, and limits).
         "max_workers": 2,  # Max worker threads in the background executor.
         "category_priorities": {  # Higher numbers run sooner within the queue.
+            "mask_stroke": 60,
+            "mask_snippet": 50,
             "tiles_visible": 40,
             "pyramid": 30,
             "tiles_prefetch": 20,

@@ -92,6 +92,22 @@ class _RecordingWorker(QRunnable, BaseWorker):
         self.emit_finished(True, payload="completed")
 
 
+class _OrderedWorker(QRunnable, BaseWorker):
+    """Append a label when scheduled so queue ordering is observable."""
+
+    def __init__(self, label: str, order: list[str]) -> None:
+        """Capture the shared execution order."""
+        QRunnable.__init__(self)
+        BaseWorker.__init__(self)
+        self._label = label
+        self._order = order
+
+    def run(self) -> None:
+        """Record execution and report completion."""
+        self._order.append(self._label)
+        self.emit_finished(True)
+
+
 class _TimerBackedSignals(QObject):
     """Signal bridge with a timer that exposes wrong-thread destruction."""
 
@@ -154,6 +170,30 @@ class TestQThreadPoolExecutor:
         assert snapshot.active_total == 0
         assert snapshot.pending_total == 0
         assert executor.cancel(pending_handle) is False
+        executor.shutdown()
+
+    def test_pending_workers_run_by_priority_then_submission_order(self) -> None:
+        """Interactive work must overtake queued background work without reordering peers."""
+        pool = QThreadPool()
+        policy = ThreadPolicy(
+            max_workers=1,
+            category_priorities={"background": 10, "interactive": 50},
+        )
+        executor = QThreadPoolExecutor(policy=policy, pool=pool, name="priority")
+        release = threading.Event()
+        started = threading.Event()
+        blocker = _BlockingWorker(release=release, started=started)
+        executor.submit(blocker, category="background")
+        assert started.wait(timeout=5), "Blocking worker failed to start"
+        order: list[str] = []
+        executor.submit(_OrderedWorker("background-1", order), category="background")
+        executor.submit(_OrderedWorker("interactive", order), category="interactive")
+        executor.submit(_OrderedWorker("background-2", order), category="background")
+
+        release.set()
+        assert pool.waitForDone(5_000)
+
+        assert order == ["interactive", "background-1", "background-2"]
         executor.shutdown()
 
     def test_drops_tasks_when_pool_deleted(self, qapp, caplog) -> None:

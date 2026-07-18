@@ -56,5 +56,7 @@ def test_core_defaults_clone_mutable_members() -> None:
     assert first is not second
     first.concurrency["max_workers"] = 99
     assert second.concurrency["max_workers"] == 2
+    assert second.concurrency["category_priorities"]["mask_stroke"] == 60
+    assert second.concurrency["category_priorities"]["mask_snippet"] == 50
     first.cache.headroom_cap_mb = 1
     assert second.cache.headroom_cap_mb == 4096

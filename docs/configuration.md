@@ -179,6 +179,8 @@ All keys are optional:
 concurrency = {
     "max_workers": 4,  # Bump threads for massive datasets
     "category_priorities": {
+        "mask_stroke": 60,     # Commit interactive brush work first
+        "mask_snippet": 50,    # Then render mask edits and undo/redo
         "tiles_visible": 40,   # Load visible tiles first
         "pyramid": 30,         # Then build image pyramids
         "tiles_prefetch": 20,  # Warm nearby tiles after visible work

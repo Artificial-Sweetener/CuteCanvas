@@ -859,13 +859,24 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         self._mark_dirty()
 
     def _try_start_tasks_locked(self) -> list[_TaskEntry]:
-        """Attempt to activate queued tasks while respecting concurrency limits."""
+        """Activate highest-priority eligible tasks, preserving FIFO among peers."""
         if not self._pending_order:
             return []
-        rescan: deque[str] = deque()
+        submission_order = tuple(self._pending_order)
+        ranked_tasks = sorted(
+            enumerate(submission_order),
+            key=lambda item: (
+                -self._policy.priority_for(
+                    self._tasks[item[1]].handle.category
+                    if item[1] in self._tasks
+                    else ""
+                ),
+                item[0],
+            ),
+        )
+        remaining: set[str] = set()
         to_dispatch: list[_TaskEntry] = []
-        while self._pending_order:
-            task_id = self._pending_order.popleft()
+        for _submission_index, task_id in ranked_tasks:
             entry = self._tasks.get(task_id)
             if entry is None or entry.state != "pending":
                 self._reschedule_logged.discard(task_id)
@@ -888,7 +899,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
                         handle.device or "<none>",
                     )
                     self._reschedule_logged.add(task_id)
-                rescan.append(task_id)
+                remaining.add(task_id)
                 continue
             self._reschedule_logged.discard(task_id)
             if entry.callback is not None:
@@ -896,7 +907,9 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
                 to_dispatch.append(entry)
             else:
                 self._activate_worker_locked(entry)
-        self._pending_order = rescan
+        self._pending_order = deque(
+            task_id for task_id in submission_order if task_id in remaining
+        )
         return to_dispatch
 
     def _can_start_locked(self, entry: _TaskEntry) -> tuple[bool, _LimitReason | None]:
