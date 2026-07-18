@@ -47,43 +47,28 @@ Key behaviors to define
 Testing focus (when implemented)
 - No regressions in navigation responsiveness under heavy background work.
 
-## Enhance Input: Touch & Gesture, Add Mapping API
+## Add Input Mapping API
 
-Goal: make QPane feel native on touch screens, trackpads, and pen input (pinch-to-zoom,
-two-finger pan, etc) while refactoring input into a
-first-class domain so hosts can define keybindings and interaction rules without
-reaching into tool internals.
+Goal: let hosts define keybindings and interaction rules through a supported
+public API without reaching into tool internals.
 
 Possible integration points
-- `qpane/qpane.py`: accept gesture/touch events at the widget boundary and forward them into the
-  interaction layer (consider `event()` override or explicit `gestureEvent`/`touchEvent` hooks).
-- `qpane/ui/widget_props.py`: enable Qt touch attributes (`Qt.WA_AcceptTouchEvents`) and
-  `grabGesture(Qt.PinchGesture)`/`Qt.PanGesture` where appropriate.
-- `qpane/tools/delegate.py` and `qpane/tools/base.py`: add a gesture/keybinding dispatch path
-  alongside wheel/mouse events so tools can opt in without polluting QPane.
-- `qpane/rendering/viewport.py`: support anchor-aware zoom from pinch scale deltas and smooth
-  pan updates from gesture deltas.
-- `qpane/input/`: move input orchestration into a dedicated domain module so the widget stays
-  thin while input policies, mappings, and gesture normalization live in one place.
+- `qpane/tools/`: add a keybinding dispatch path that preserves tool ownership
+  and keeps mapping policy out of `QPane`.
 - `qpane/core/` + `qpane/qpane.pyi`: introduce a public-facing input mapping surface that lets
   hosts register shortcuts or replace default bindings without touching tool classes.
-- `qpane/core/config.py`: optional config flags to enable/disable touch gestures and tune
-  sensitivities without breaking existing mouse-centric defaults.
 - Trinity updates: evolve `qpane.pyi`, `qpane.py`, `docs/`, and `examples/` together for any new
   input mapping API surface, with tutorialized demos that stick to the public API.
 
 Key behaviors to define
-- Pinch-to-zoom anchored to the gesture center, with clamped zoom limits and DPI-correct scaling.
-- Two-finger pan that respects drag-out rules and placeholder modes.
-- Gesture priority rules
 - Host-configurable shortcuts for mode switching and "hold to pan" without custom event filters.
-- Clear fallbacks when the host platform does not emit pinch/pan gestures.
+- Conflict resolution between host mappings, tool bindings, and Qt-standard shortcuts.
+- Stable defaults when hosts do not provide custom mappings.
 
 Testing focus (when implemented)
-- Touch-enabled devices and trackpads across Windows, macOS, and Linux.
-- Pen tablets and stylus input (pressure-agnostic baseline, smooth pan/zoom handoffs).
-- Mixed input: pen + touch + mouse in the same session.
-- No regressions in existing wheel zoom or drag-out behavior.
+- Default keyboard and pointer behavior remains unchanged without custom mappings.
+- Host mappings activate the intended actions across control modes.
+- Conflicting or invalid mappings fail predictably without disrupting input.
 
 ## Expand SAM Model Support (CPU-First)
 
