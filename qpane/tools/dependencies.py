@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, TypedDict
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypedDict
 
 from PySide6.QtCore import QPoint, QPointF, QRect
 from PySide6.QtGui import QColor, QPen
@@ -46,7 +47,7 @@ class ToolDependencies(TypedDict, total=False):
     get_zoom: Callable[[], float]
     get_native_zoom: Callable[[], float]
     get_fit_zoom: Callable[[], float]
-    get_zoom_mode: Callable[[], "ViewportZoomMode"]
+    get_zoom_mode: Callable[[], ViewportZoomMode]
     set_zoom_fit: Callable[[], None]
     set_zoom_fit_interpolated: Callable[[], None]
     set_zoom_one_to_one: Callable[[QPoint | None], None]
@@ -54,8 +55,8 @@ class ToolDependencies(TypedDict, total=False):
     get_brush_size: Callable[[], int]
     get_preview_pens: Callable[[], tuple[QPen, QPen]]
     get_brush_increment: Callable[[], int]
-    panel_hit_test: Callable[[QPoint], "PanelHitTest | None"]
-    panel_hit_test_precise: Callable[[QPointF], "PanelHitTest | None"]
+    panel_hit_test: Callable[[QPoint], PanelHitTest | None]
+    panel_hit_test_precise: Callable[[QPointF], PanelHitTest | None]
     panel_to_content_point: Callable[[QPoint], QPoint | None]
     image_to_panel_point: Callable[[QPoint | QPointF], QPointF | None]
     is_point_in_widget: Callable[[QPoint], bool]

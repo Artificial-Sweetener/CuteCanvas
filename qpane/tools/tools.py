@@ -17,18 +17,12 @@
 """Tool manager orchestration helpers."""
 
 import logging
-
+from collections.abc import Callable
 from dataclasses import dataclass
 
-from typing import Callable, Dict
-
-
 import numpy as np
-
 from PySide6.QtCore import QObject, QPoint, QPointF, Signal
-
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
-
 
 from .base import BaseTool, CursorTool, ExtensionTool, PanZoomTool
 from .dependencies import ToolDependencies
@@ -84,11 +78,11 @@ class Tools(QObject):
         """Seed the manager with the default pan/zoom tool registration."""
         super().__init__(parent)
         self.signals = ToolManagerSignals()
-        self._registrations: Dict[str, ToolRegistration] = {}
-        self._tools: Dict[str, ExtensionTool] = {}
+        self._registrations: dict[str, ToolRegistration] = {}
+        self._tools: dict[str, ExtensionTool] = {}
         self._control_mode: str | None = None
         self._active_tool: ExtensionTool | None = None
-        self._tool_connections: Dict[
+        self._tool_connections: dict[
             ExtensionTool, list[tuple[object, object, str, str]]
         ] = {}
         self.registerTool(

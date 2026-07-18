@@ -19,9 +19,7 @@
 from __future__ import annotations
 
 import logging
-
 from typing import TYPE_CHECKING
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +28,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guards
     from ..tools.delegate import ToolInteractionDelegate
 
 
-def resume_overlays(interaction: "ToolInteractionDelegate") -> None:
+def resume_overlays(interaction: ToolInteractionDelegate) -> None:
     """Clear overlay suspension flags on the interaction delegate.
 
     Args:
@@ -41,7 +39,7 @@ def resume_overlays(interaction: "ToolInteractionDelegate") -> None:
 
 
 def resume_overlays_and_update(
-    qpane: "QPane", interaction: "ToolInteractionDelegate"
+    qpane: QPane, interaction: ToolInteractionDelegate
 ) -> None:
     """Resume overlays and trigger a repaint on `qpane`.
 
@@ -53,9 +51,7 @@ def resume_overlays_and_update(
     qpane.update()
 
 
-def maybe_resume_overlays(
-    qpane: "QPane", interaction: "ToolInteractionDelegate"
-) -> None:
+def maybe_resume_overlays(qpane: QPane, interaction: ToolInteractionDelegate) -> None:
     """Resume overlays once mask activation has completed for the active image.
 
     Args:

@@ -56,7 +56,7 @@ def test_attach_and_detach_mask_service_wires_state() -> None:
         def __init__(self) -> None:
             self.undo_slots: list[object] = []
 
-        def on_mask_undo_stack_changed(self, mask_id):  # noqa: ANN001
+        def on_mask_undo_stack_changed(self, mask_id):
             self.undo_slots.append(mask_id)
 
     class _SwapDelegateStub:

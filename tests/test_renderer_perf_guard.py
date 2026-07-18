@@ -16,6 +16,7 @@
 
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QImage
+
 from qpane import QPane
 from tests.helpers.render_plan import make_render_plan
 

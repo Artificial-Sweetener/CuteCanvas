@@ -17,11 +17,12 @@
 """Tests for pan/zoom tool interactions."""
 
 from __future__ import annotations
-from typing import List, Tuple
+
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
+
 from qpane.rendering import ViewportZoomMode
 from qpane.tools import PanZoomTool, ToolDependencies
 
@@ -107,7 +108,7 @@ def test_panzoom_respects_lock(qapp):
             get_zoom=lambda: 1.0,
         )
     )
-    received: List[str] = []
+    received: list[str] = []
     tool.signals.pan_requested.connect(lambda *_: received.append("pan"))
     tool.signals.zoom_requested.connect(lambda *_: received.append("zoom"))
     press = _PositioningMouseEvent(QPointF(10, 10))
@@ -122,7 +123,7 @@ def test_panzoom_respects_lock(qapp):
 def test_panzoom_emits_pan_when_dragging(qapp):
     tool = PanZoomTool()
     current_pan = QPointF(4.0, 8.0)
-    emissions: List[QPointF] = []
+    emissions: list[QPointF] = []
     tool.signals.pan_requested.connect(lambda pan: emissions.append(pan))
     tool.activate(
         ToolDependencies(
@@ -174,7 +175,7 @@ def test_panzoom_does_not_emit_cursor_update_for_steady_pan_move(qapp):
 def test_panzoom_scales_drag_delta_by_dpr(qapp):
     tool = PanZoomTool()
     current_pan = QPointF(10.0, 20.0)
-    emissions: List[QPointF] = []
+    emissions: list[QPointF] = []
     tool.signals.pan_requested.connect(lambda pan: emissions.append(pan))
     dpr = 1.25
     tool.activate(
@@ -293,7 +294,7 @@ def test_panzoom_cursor_arrow_when_pan_not_possible(qapp):
 
 def test_panzoom_does_not_enter_panning_when_pan_impossible(qapp):
     tool = PanZoomTool()
-    emissions: List[QPointF] = []
+    emissions: list[QPointF] = []
     tool.signals.pan_requested.connect(lambda pan: emissions.append(pan))
     tool.activate(
         ToolDependencies(
@@ -317,7 +318,7 @@ def test_panzoom_does_not_enter_panning_when_pan_impossible(qapp):
 
 def test_panzoom_wheel_emits_zoom(qapp):
     tool = PanZoomTool()
-    zooms: List[Tuple[float, QPoint]] = []
+    zooms: list[tuple[float, QPoint]] = []
     current_zoom = 2.0
     native_zoom = 1.0
 
@@ -347,7 +348,7 @@ def test_panzoom_wheel_emits_zoom(qapp):
 
 def test_panzoom_wheel_uses_delta_magnitude(qapp):
     tool = PanZoomTool()
-    zooms: List[float] = []
+    zooms: list[float] = []
     current_zoom = 2.0
 
     def on_zoom(value: float, _anchor: QPoint) -> None:
@@ -377,7 +378,7 @@ def test_panzoom_wheel_uses_delta_magnitude(qapp):
 
 def test_panzoom_wheel_snaps_to_native_zoom_on_crossing(qapp):
     tool = PanZoomTool()
-    emissions: List[Tuple[float, ViewportZoomMode]] = []
+    emissions: list[tuple[float, ViewportZoomMode]] = []
     current_zoom = 0.9
     native_zoom = 1.0
 
@@ -402,7 +403,7 @@ def test_panzoom_wheel_snaps_to_native_zoom_on_crossing(qapp):
 
 def test_panzoom_wheel_snaps_to_native_zoom_on_reverse_crossing(qapp):
     tool = PanZoomTool()
-    emissions: List[Tuple[float, ViewportZoomMode]] = []
+    emissions: list[tuple[float, ViewportZoomMode]] = []
     current_zoom = 1.2
     native_zoom = 1.0
 
@@ -427,7 +428,7 @@ def test_panzoom_wheel_snaps_to_native_zoom_on_reverse_crossing(qapp):
 
 def test_panzoom_wheel_snaps_to_hidpi_native_zoom(qapp):
     tool = PanZoomTool()
-    emissions: List[Tuple[float, ViewportZoomMode]] = []
+    emissions: list[tuple[float, ViewportZoomMode]] = []
     current_zoom = 1.4
     native_zoom = 1.5
 
@@ -471,7 +472,7 @@ def test_panzoom_double_click_sets_zoom_fit_when_not_fit(qapp):
 
 def test_panzoom_double_click_sets_zoom_one_to_one_when_fit(qapp):
     tool = PanZoomTool()
-    calls: List[object] = []
+    calls: list[object] = []
 
     def record_one_to_one(anchor=None):
         calls.append(("one", anchor))

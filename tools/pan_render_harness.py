@@ -19,14 +19,15 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import random
 import sys
-from typing import TYPE_CHECKING, Callable, Sequence
 import uuid
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
@@ -150,7 +151,7 @@ class HeadlessPanHarness:
         application: QApplication,
         image: QImage,
         *,
-        viewport_size: QSize = QSize(512, 512),
+        viewport_size: QSize | None = None,
         device_pixel_ratio: float = 1.0,
         zoom: float = 1.0,
         channel_tolerance: int = 0,
@@ -159,6 +160,9 @@ class HeadlessPanHarness:
         features: Sequence[str] = (),
     ) -> None:
         """Mount the offscreen widgets and initialize their identical scenes."""
+        viewport_size = (
+            QSize(512, 512) if viewport_size is None else QSize(viewport_size)
+        )
         if image.isNull():
             raise ValueError("image must be non-null")
         if viewport_size.isEmpty():

@@ -15,9 +15,10 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import uuid
+from collections.abc import Iterable, Mapping
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Mapping, TypeVar
+from typing import Any
 
 from PySide6.QtCore import (
     QEvent,
@@ -42,6 +43,7 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import QWidget
+from typing_extensions import Self
 
 from .catalog import ImageMap
 from .concurrency import TaskExecutorProtocol, ThreadPolicy
@@ -52,11 +54,9 @@ from .core import (
     ToolFactory,
     ToolSignalBinder,
 )
-from .masks.workflow import MaskInfo
 from .masks.mask_undo import MaskUndoState
+from .masks.workflow import MaskInfo
 from .types import CatalogSnapshot, LinkedGroup
-
-_ConfigT = TypeVar("_ConfigT", bound="Config")
 
 class CacheMode(str, Enum):
     AUTO = "auto"
@@ -239,10 +239,8 @@ class Config:
     def __init__(self, **overrides: Any) -> None: ...
     @staticmethod
     def feature_descriptors() -> Mapping[str, object]: ...
-    def configure(
-        self: _ConfigT, config_obj: object | None = ..., **kwargs: Any
-    ) -> _ConfigT: ...
-    def copy(self: _ConfigT) -> _ConfigT: ...
+    def configure(self, config_obj: object | None = ..., **kwargs: Any) -> Self: ...
+    def copy(self) -> Self: ...
     def as_dict(self) -> dict[str, Any]: ...
 
 class ExtensionToolSignals(QObject):

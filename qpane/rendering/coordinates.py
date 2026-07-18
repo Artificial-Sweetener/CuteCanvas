@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, QSizeF
 from PySide6.QtGui import QTransform
@@ -39,7 +39,7 @@ class NormalizedViewState:
     center_x: float
     center_y: float
     zoom_frac: float
-    zoom_mode: "ViewportZoomMode"
+    zoom_mode: ViewportZoomMode
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class LogicalPoint:
     y: float
 
     @classmethod
-    def from_qt(cls, point: QPointF | QPoint) -> "LogicalPoint":
+    def from_qt(cls, point: QPointF | QPoint) -> LogicalPoint:
         """Build a LogicalPoint copy from a Qt ``point`` variant."""
         qpoint = QPointF(point)
         return cls(qpoint.x(), qpoint.y())
@@ -74,19 +74,19 @@ class LogicalPoint:
         """Return a QPointF representing this logical coordinate."""
         return QPointF(self.x, self.y)
 
-    def plus(self, other: "LogicalPoint") -> "LogicalPoint":
+    def plus(self, other: LogicalPoint) -> LogicalPoint:
         """Return a new LogicalPoint translated by ``other``."""
         return LogicalPoint(self.x + other.x, self.y + other.y)
 
-    def minus(self, other: "LogicalPoint") -> "LogicalPoint":
+    def minus(self, other: LogicalPoint) -> LogicalPoint:
         """Return a new LogicalPoint offset by ``other`` in the opposite direction."""
         return LogicalPoint(self.x - other.x, self.y - other.y)
 
-    def scaled(self, factor: float) -> "LogicalPoint":
+    def scaled(self, factor: float) -> LogicalPoint:
         """Return a LogicalPoint scaled by ``factor`` along each axis."""
         return LogicalPoint(self.x * factor, self.y * factor)
 
-    def to_physical(self, dpr: float) -> "PhysicalPoint":
+    def to_physical(self, dpr: float) -> PhysicalPoint:
         """Convert logical pixels into physical coordinates using ``dpr``."""
         return PhysicalPoint(self.x * dpr, self.y * dpr)
 
@@ -104,7 +104,7 @@ class PhysicalPoint:
     y: float
 
     @classmethod
-    def from_qt(cls, point: QPointF | QPoint) -> "PhysicalPoint":
+    def from_qt(cls, point: QPointF | QPoint) -> PhysicalPoint:
         """Build a PhysicalPoint from a QPoint/QPointF."""
         qpoint = QPointF(point)
         return cls(qpoint.x(), qpoint.y())
@@ -113,15 +113,15 @@ class PhysicalPoint:
         """Represent this physical coordinate as a QPointF."""
         return QPointF(self.x, self.y)
 
-    def plus(self, other: "PhysicalPoint") -> "PhysicalPoint":
+    def plus(self, other: PhysicalPoint) -> PhysicalPoint:
         """Return a PhysicalPoint shifted by ``other``."""
         return PhysicalPoint(self.x + other.x, self.y + other.y)
 
-    def minus(self, other: "PhysicalPoint") -> "PhysicalPoint":
+    def minus(self, other: PhysicalPoint) -> PhysicalPoint:
         """Return a PhysicalPoint offset opposite ``other``."""
         return PhysicalPoint(self.x - other.x, self.y - other.y)
 
-    def scaled(self, factor: float) -> "PhysicalPoint":
+    def scaled(self, factor: float) -> PhysicalPoint:
         """Scale this point's coordinates by ``factor``."""
         return PhysicalPoint(self.x * factor, self.y * factor)
 
@@ -144,7 +144,7 @@ class LogicalSize:
     height: float
 
     @classmethod
-    def from_qt(cls, size: QSizeF | QSize) -> "LogicalSize":
+    def from_qt(cls, size: QSizeF | QSize) -> LogicalSize:
         """Return a LogicalSize copy of the provided Qt ``size``."""
         qsize = QSizeF(size)
         return cls(qsize.width(), qsize.height())
@@ -153,7 +153,7 @@ class LogicalSize:
         """Represent this logical size as a QSizeF."""
         return QSizeF(self.width, self.height)
 
-    def to_physical(self, dpr: float) -> "PhysicalSize":
+    def to_physical(self, dpr: float) -> PhysicalSize:
         """Scale this logical size by ``dpr`` to obtain physical dimensions."""
         return PhysicalSize(self.width * dpr, self.height * dpr)
 
@@ -175,7 +175,7 @@ class PhysicalSize:
     height: float
 
     @classmethod
-    def from_qt(cls, size: QSizeF | QSize) -> "PhysicalSize":
+    def from_qt(cls, size: QSizeF | QSize) -> PhysicalSize:
         """Return a PhysicalSize copy from the provided Qt ``size``."""
         qsize = QSizeF(size)
         return cls(qsize.width(), qsize.height())
@@ -190,19 +190,19 @@ class PhysicalSize:
         return LogicalSize(self.width / divisor, self.height / divisor)
 
 
-SupportedValue = Union[
-    float,
-    int,
-    QPointF,
-    QPoint,
-    QSizeF,
-    QSize,
-    QRectF,
-    LogicalPoint,
-    PhysicalPoint,
-    LogicalSize,
-    PhysicalSize,
-]
+SupportedValue = (
+    float
+    | int
+    | QPointF
+    | QPoint
+    | QSizeF
+    | QSize
+    | QRectF
+    | LogicalPoint
+    | PhysicalPoint
+    | LogicalSize
+    | PhysicalSize
+)
 
 
 class CoordinateContext:
@@ -213,9 +213,9 @@ class CoordinateContext:
 
     def __init__(
         self,
-        qpane: "QPane",
-        pan_override: Optional[QPointF] = None,
-        content_snapshot: "SceneContentSnapshot | None" = None,
+        qpane: QPane,
+        pan_override: QPointF | None = None,
+        content_snapshot: SceneContentSnapshot | None = None,
     ):
         """Snapshot DPR, image geometry, and viewport pan/zoom for conversions."""
         raw_dpr = float(qpane.devicePixelRatioF())
@@ -282,9 +282,9 @@ class CoordinateContext:
             return value.to_physical(self.dpr)
         if isinstance(value, (int, float)):
             return value * self.dpr
-        if isinstance(value, QPoint) or isinstance(value, QPointF):
+        if isinstance(value, (QPoint, QPointF)):
             return LogicalPoint.from_qt(value).to_physical(self.dpr).to_qt()
-        if isinstance(value, QSize) or isinstance(value, QSizeF):
+        if isinstance(value, (QSize, QSizeF)):
             return LogicalSize.from_qt(value).to_physical(self.dpr).to_qt()
         if isinstance(value, QRectF):
             top_left = (
@@ -292,7 +292,7 @@ class CoordinateContext:
             )
             size = LogicalSize.from_qt(value.size()).to_physical(self.dpr).to_qt()
             return QRectF(top_left, size)
-        if isinstance(value, PhysicalPoint) or isinstance(value, PhysicalSize):
+        if isinstance(value, (PhysicalPoint, PhysicalSize)):
             return value
         raise TypeError(
             f"Unsupported value type for coordinate conversion: {type(value)!r}"
@@ -307,9 +307,9 @@ class CoordinateContext:
         if isinstance(value, (int, float)):
             divisor = self.dpr if self.dpr > 0 else 1.0
             return value / divisor
-        if isinstance(value, QPoint) or isinstance(value, QPointF):
+        if isinstance(value, (QPoint, QPointF)):
             return PhysicalPoint.from_qt(value).to_logical(self.dpr).to_qt()
-        if isinstance(value, QSize) or isinstance(value, QSizeF):
+        if isinstance(value, (QSize, QSizeF)):
             return PhysicalSize.from_qt(value).to_logical(self.dpr).to_qt()
         if isinstance(value, QRectF):
             top_left = (
@@ -317,7 +317,7 @@ class CoordinateContext:
             )
             size = PhysicalSize.from_qt(value.size()).to_logical(self.dpr).to_qt()
             return QRectF(top_left, size)
-        if isinstance(value, LogicalPoint) or isinstance(value, LogicalSize):
+        if isinstance(value, (LogicalPoint, LogicalSize)):
             return value
         raise TypeError(
             f"Unsupported value type for coordinate conversion: {type(value)!r}"

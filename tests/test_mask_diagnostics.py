@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import uuid
+
 from qpane.masks.mask_diagnostics import (
     MaskStrokeDiagnostics,
 )

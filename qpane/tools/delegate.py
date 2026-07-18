@@ -19,9 +19,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (
@@ -42,7 +42,6 @@ from .dependencies import ToolDependencies
 from .input import PointerInputController
 from .tools import Tools
 
-
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
 
     from ..qpane import QPane
@@ -52,7 +51,7 @@ logger = logging.getLogger(__name__)
 class ToolInteractionDelegate:
     """Encapsulate cursor, overlay, and tool input plumbing for :class:`QPane`."""
 
-    def __init__(self, qpane: "QPane") -> None:
+    def __init__(self, qpane: QPane) -> None:
         """Initialize the delegate with the owning QPane widget."""
         self._qpane = qpane
         self._tools_activated = False

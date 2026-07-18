@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
 
+import tomllib
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,3 +43,12 @@ def test_typing_marker_exists_beside_public_stubs() -> None:
 
     assert (package_root / "py.typed").is_file()
     assert (package_root / "qpane.pyi").is_file()
+
+
+def test_examples_are_not_installed_as_package_modules() -> None:
+    """Keep repository tutorials out of the importable wheel package."""
+
+    pyproject = tomllib.loads((_PROJECT_ROOT / "pyproject.toml").read_text("utf-8"))
+    include_patterns = pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
+
+    assert include_patterns == ["qpane", "qpane.*"]

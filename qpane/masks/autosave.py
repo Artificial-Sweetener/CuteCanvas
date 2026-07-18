@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from PySide6.QtCore import (
     QBuffer,
@@ -40,8 +40,6 @@ from ..concurrency import (
     makeQtRetryController,
     qt_retry_dispatcher,
 )
-
-
 from ..core.config_features import MaskConfigSlice
 
 logger = logging.getLogger(__name__)
@@ -180,8 +178,8 @@ class AutosaveManager(QObject):
         except TaskRejected:
             try:
                 worker.deleteLater()
-            except Exception:
-                pass
+            except RuntimeError:
+                logger.debug("Blank-mask worker was already deleted", exc_info=True)
             raise
         self._blank_encode_entries.setdefault(mask_id, []).append((worker, handle))
         logger.info(
@@ -271,8 +269,8 @@ class AutosaveManager(QObject):
             self._blank_encode_entries.pop(mask_id, None)
         try:
             worker.deleteLater()
-        except Exception:
-            pass
+        except RuntimeError:
+            logger.debug("Blank-mask worker was already deleted", exc_info=True)
 
     @staticmethod
     def _coerce_image_dimensions(image_size) -> tuple[int, int]:
@@ -280,12 +278,12 @@ class AutosaveManager(QObject):
         if hasattr(image_size, "width") and hasattr(image_size, "height"):
             try:
                 return int(image_size.width()), int(image_size.height())
-            except Exception:
+            except (RuntimeError, TypeError, ValueError, OverflowError):
                 return 0, 0
         if isinstance(image_size, (tuple, list)) and len(image_size) >= 2:
             try:
                 return int(image_size[0]), int(image_size[1])
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 return 0, 0
         return 0, 0
 
@@ -396,7 +394,7 @@ class AutosaveManager(QObject):
             return sum(len(entries) for entries in self._active_entries.values())
         try:
             return self._executor.active_counts().get("io", 0)
-        except Exception:  # pragma: no cover - defensive fallback
+        except Exception:  # noqa: BLE001 - injected executor metrics are optional
             return sum(len(entries) for entries in self._active_entries.values())
 
     def _ensure_diagnostics_ticks(self) -> None:
@@ -542,12 +540,11 @@ class AutosaveManager(QObject):
             image_name = "mask"
         try:
             return Path(template.format(image_name=image_name, mask_id=mask_id))
-        except Exception as exc:
+        except Exception:
             logger.exception(
-                "Could not format mask autosave path for mask %s using template %r: %s",
+                "Could not format mask autosave path for mask %s using template %r",
                 mask_id,
                 template,
-                exc,
             )
             return None
 
@@ -600,7 +597,7 @@ class _MaskSaveWorker(QObject, QRunnable, BaseWorker):
         except Exception as exc:
             self.error = exc
             self.logger.exception(
-                "Could not save mask %s to %s: %s", self.mask_id, self.path, exc
+                "Could not save mask %s to %s", self.mask_id, self.path
             )
         finally:
             if buffer is not None and buffer.isOpen():
@@ -610,17 +607,15 @@ class _MaskSaveWorker(QObject, QRunnable, BaseWorker):
                     self.logger.debug(
                         "Failed to close buffer after mask save", exc_info=True
                     )
-            if cancelled or self.is_cancelled:
-                self.logger.info(
-                    "Mask %s save cancelled before completion", self.mask_id
-                )
-                self.emit_finished(False, payload=self)
-                self.finished.emit(self)
-                return
-            succeeded = self.error is None
-            self.emit_finished(succeeded, payload=self, error=self.error)
-            if not succeeded:
-                self.finished.emit(self)
+        if cancelled or self.is_cancelled:
+            self.logger.info("Mask %s save cancelled before completion", self.mask_id)
+            self.emit_finished(False, payload=self)
+            self.finished.emit(self)
+            return
+        succeeded = self.error is None
+        self.emit_finished(succeeded, payload=self, error=self.error)
+        if not succeeded:
+            self.finished.emit(self)
 
 
 class _BlankMaskEncodeWorker(QObject, QRunnable, BaseWorker):
@@ -660,10 +655,9 @@ class _BlankMaskEncodeWorker(QObject, QRunnable, BaseWorker):
         except Exception as exc:
             self.error = exc
             self.logger.exception(
-                "Could not encode blank mask %s to %s: %s",
+                "Could not encode blank mask %s to %s",
                 self.mask_id,
                 self.path,
-                exc,
             )
         finally:
             try:
@@ -674,11 +668,11 @@ class _BlankMaskEncodeWorker(QObject, QRunnable, BaseWorker):
                     "Failed to close QBuffer after blank mask encode",
                     exc_info=True,
                 )
-            if cancelled or self.is_cancelled:
-                self.emit_finished(False, payload=self)
-                self.finished.emit(self)
-                return
-            succeeded = self.error is None
-            self.emit_finished(succeeded, payload=self, error=self.error)
-            if not succeeded:
-                self.finished.emit(self)
+        if cancelled or self.is_cancelled:
+            self.emit_finished(False, payload=self)
+            self.finished.emit(self)
+            return
+        succeeded = self.error is None
+        self.emit_finished(succeeded, payload=self, error=self.error)
+        if not succeeded:
+            self.finished.emit(self)

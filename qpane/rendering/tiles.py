@@ -18,9 +18,10 @@
 
 import logging
 from collections import OrderedDict
+from collections import OrderedDict as OrderedDictType
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Sequence, TypedDict
-from typing import OrderedDict as OrderedDictType
+from typing import TypedDict
 
 from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QImage
@@ -37,8 +38,8 @@ from ..concurrency import (
 from ..core import CacheSettings, Config
 from ..core.threading import assert_qt_main_thread
 from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey
-from .cache_utils import CacheEvictionCoordinator, ExecutorOwnerMixin
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
+from .cache_utils import CacheEvictionCoordinator, ExecutorOwnerMixin
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ class TileGeneratorWorker(QRunnable, BaseWorker):
                 return
             tile = Tile(key=self.key, image=cropped_qimage)
             self.emit_finished(True, payload=tile)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker computation boundary
             self.emit_finished(False, payload=(self.key, str(exc)), error=exc)
 
     def cancel(self):
@@ -148,7 +149,7 @@ class WorkerEntry(TypedDict, total=False):
     handle: TaskHandle
 
 
-WorkerState = Dict[SceneLayerTileKey, WorkerEntry]
+WorkerState = dict[SceneLayerTileKey, WorkerEntry]
 
 
 class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):

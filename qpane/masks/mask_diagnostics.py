@@ -22,25 +22,27 @@ import logging
 import threading
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Callable, Mapping, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from ..types import DiagnosticRecord
-from ..features import FeatureInstallError
 from qpane.core.config_features import require_mask_config
+
+from ..features import FeatureInstallError
+from ..types import DiagnosticRecord
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..qpane import QPane
 __all__ = (
+    "MaskStrokeDiagnostics",
+    "MaskStrokeDiagnosticsSnapshot",
     "MaskStrokeJobSnapshot",
     "MaskStrokeResultSnapshot",
-    "MaskStrokeDiagnosticsSnapshot",
-    "MaskStrokeDiagnostics",
-    "mask_summary_provider",
-    "mask_job_detail_provider",
     "mask_brush_detail_provider",
+    "mask_job_detail_provider",
+    "mask_summary_provider",
 )
 
 
@@ -377,11 +379,11 @@ def _mask_job_records(snapshot) -> tuple[DiagnosticRecord, ...]:
     return tuple(entries)
 
 
-def mask_summary_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+def mask_summary_provider(qpane: QPane) -> tuple[DiagnosticRecord, ...]:
     """Return the always-on mask summary rows for diagnostics overlays."""
     service = getattr(qpane, "mask_service", None)
     if service is None:
-        return tuple()
+        return ()
     records: list[DiagnosticRecord] = []
     try:
         catalog_facade = qpane.catalog()
@@ -395,6 +397,7 @@ def mask_summary_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
         try:
             mask_ids = mask_manager.get_mask_ids_for_image(current_id) or []
         except Exception:
+            logger.debug("Mask ID enumeration failed", exc_info=True)
             mask_ids = []
     latest_mask = service.get_latest_status_message("Mask", "Mask Error")
     if latest_mask is not None:
@@ -410,23 +413,23 @@ def mask_summary_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
     return tuple(records)
 
 
-def mask_job_detail_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+def mask_job_detail_provider(qpane: QPane) -> tuple[DiagnosticRecord, ...]:
     """Return mask worker job diagnostics for the detail overlay tier."""
     service = getattr(qpane, "mask_service", None)
     if service is None:
-        return tuple()
+        return ()
     diagnostics_snapshot = service.strokeDiagnosticsSnapshot()
     if diagnostics_snapshot is None:
-        return tuple()
+        return ()
     return _mask_job_records(diagnostics_snapshot)
 
 
-def mask_brush_detail_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+def mask_brush_detail_provider(qpane: QPane) -> tuple[DiagnosticRecord, ...]:
     """Expose brush sizing and mode as detail-tier mask diagnostics."""
     interaction = getattr(qpane, "interaction", None)
     brush_size = getattr(interaction, "brush_size", getattr(qpane, "_brush_size", None))
     if brush_size is None:
-        return tuple()
+        return ()
     records: list[DiagnosticRecord] = []
     records.append(DiagnosticRecord("Mask|Brush", str(int(brush_size))))
     alt_held = getattr(
@@ -437,15 +440,18 @@ def mask_brush_detail_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
     return tuple(records)
 
 
-def _autosave_status(qpane: "QPane", service) -> str | None:
+def _autosave_status(qpane: QPane, service) -> str | None:
     """Return a short autosave status string for core mask diagnostics."""
     autosave_manager = None
     accessor = getattr(qpane, "autosaveManager", None)
     if callable(accessor):
         try:
             autosave_manager = accessor()
-        except Exception:
-            logger.debug("autosaveManager() raised while building diagnostics")
+        except RuntimeError:
+            logger.debug(
+                "autosaveManager() raised while building diagnostics",
+                exc_info=True,
+            )
     settings = getattr(qpane, "settings", None)
     mask_config = None
     if settings is not None:

@@ -16,6 +16,7 @@
 
 """Expose SAM integration helpers for QPane."""
 
+from . import service
 from .delegate import SamDelegate
 from .manager import (
     SamManager,
@@ -23,7 +24,6 @@ from .manager import (
     SamWorker,
     SamWorkerSignals,
 )
-from . import service
 
 __all__ = (
     "SamDelegate",

@@ -19,9 +19,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib import import_module
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 from ..features import (
     FeatureDefinition,
@@ -89,13 +90,13 @@ _DEFAULT_FEATURE_SPECS: tuple[_FeatureSpec, ...] = (
 
 def default_feature_selection() -> tuple[str, ...]:
     """Return the default feature activation order."""
-    return tuple()
+    return ()
 
 
 class FeatureCoordinator:
     """Prepare and install optional QPane features in dependency order."""
 
-    def __init__(self, qpane: "QPane", fallbacks: "FeatureFallbacks") -> None:
+    def __init__(self, qpane: QPane, fallbacks: FeatureFallbacks) -> None:
         """Store the QPane reference and fallback tracker used during installs."""
         self._qpane = qpane
         self._fallbacks = fallbacks
@@ -170,7 +171,7 @@ class FeatureCoordinator:
 def _register_feature(registry: FeatureRegistry, spec: _FeatureSpec) -> None:
     """Register a feature using the provided declarative specification."""
 
-    def _installer(qpane: "QPane") -> None:
+    def _installer(qpane: QPane) -> None:
         """Import the feature module and invoke the declared installer."""
         try:
             module = import_module(spec.module_path)

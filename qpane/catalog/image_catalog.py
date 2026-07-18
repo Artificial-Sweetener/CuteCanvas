@@ -22,7 +22,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
@@ -31,8 +31,8 @@ from ..concurrency import TaskExecutorProtocol
 from ..core import Config
 from ..rendering import PyramidManager
 from ..scene.identity import SceneLayerAssetKey, default_catalog_asset_key
-from .image_map import ImageMap
 from ..types import CatalogEntry
+from .image_map import ImageMap
 from .image_utils import images_differ
 
 if TYPE_CHECKING:
@@ -69,7 +69,7 @@ class ImageCatalog(QObject):
         config: Config,
         executor: TaskExecutorProtocol,
         parent=None,
-        mask_manager: "MaskManager" | None = None,
+        mask_manager: MaskManager | None = None,
     ):
         """Initialize the Qt-backed catalog and its managers.
 
@@ -81,10 +81,10 @@ class ImageCatalog(QObject):
         """
         super().__init__(parent)
         self._config = config
-        self._image_order: List[uuid.UUID] = []
-        self._records_by_id: Dict[uuid.UUID, _CatalogImageRecord] = {}
+        self._image_order: list[uuid.UUID] = []
+        self._records_by_id: dict[uuid.UUID, _CatalogImageRecord] = {}
         self._current_id: uuid.UUID | None = None
-        self.mask_manager: "MaskManager" | None = mask_manager
+        self.mask_manager: MaskManager | None = mask_manager
         self.pyramid_manager = PyramidManager(
             config=config, parent=self, executor=executor
         )
@@ -107,7 +107,7 @@ class ImageCatalog(QObject):
                 self._asset_key_for_record(current_id, record), record.image
             )
 
-    def set_mask_manager(self, mask_manager: "MaskManager" | None) -> None:
+    def set_mask_manager(self, mask_manager: MaskManager | None) -> None:
         """Assign or replace the mask manager backend.
 
         Args:
@@ -142,7 +142,7 @@ class ImageCatalog(QObject):
             raise ValueError("image_map must not be empty")
         if current_id not in image_map:
             raise KeyError("current_id must be a key in image_map")
-        formatted: Dict[uuid.UUID, QImage] = {}
+        formatted: dict[uuid.UUID, QImage] = {}
         for iid, entry in image_map.items():
             if not isinstance(entry, CatalogEntry):
                 raise TypeError("image_map values must be CatalogEntry instances")
@@ -183,7 +183,7 @@ class ImageCatalog(QObject):
                 asset_keys_to_evict.append(self._asset_key_for_record(iid, existing))
         for asset_key in asset_keys_to_evict:
             self.pyramid_manager.remove_pyramid(asset_key)
-        for iid in image_map.keys():
+        for iid in image_map:
             record = next_records[iid]
             image = record.image
             if image.isNull():
@@ -229,11 +229,7 @@ class ImageCatalog(QObject):
         existing_image = existing.image if existing is not None else None
         content_changed = images_differ(existing_image, formatted_image)
         path_changed = existing is not None and existing.path != path
-        if content_changed and existing is not None:
-            self.pyramid_manager.remove_pyramid(
-                self._asset_key_for_record(image_id, existing)
-            )
-        elif path_changed:
+        if content_changed and existing is not None or path_changed:
             self.pyramid_manager.remove_pyramid(
                 self._asset_key_for_record(image_id, existing)
             )
@@ -429,7 +425,7 @@ class ImageCatalog(QObject):
         """Return the content revision for the current catalog image."""
         return self.getRevision(self._current_id) if self._current_id else None
 
-    def get_mask_manager(self) -> "MaskManager" | None:
+    def get_mask_manager(self) -> MaskManager | None:
         """Expose the mask manager currently associated with this catalog."""
         return self.mask_manager
 
@@ -437,7 +433,7 @@ class ImageCatalog(QObject):
         """Return True when the catalog stores an image for ``image_id``."""
         return image_id in self._records_by_id
 
-    def getImageIds(self) -> List[uuid.UUID]:
+    def getImageIds(self) -> list[uuid.UUID]:
         """Return a copy of the catalog's UUID ordering."""
         return list(self._image_order)
 
@@ -445,7 +441,7 @@ class ImageCatalog(QObject):
         """Return ``True`` when at least one image is stored."""
         return bool(self._image_order)
 
-    def getAllImages(self) -> List[QImage]:
+    def getAllImages(self) -> list[QImage]:
         """Return each stored QImage preserving insertion order."""
         return [
             self._records_by_id[iid].image
@@ -453,7 +449,7 @@ class ImageCatalog(QObject):
             if iid in self._records_by_id
         ]
 
-    def getAllPaths(self) -> List[Path | None]:
+    def getAllPaths(self) -> list[Path | None]:
         """Return filesystem paths aligned with :meth:`getAllImages`."""
         return [self.getPath(iid) for iid in self._image_order]
 

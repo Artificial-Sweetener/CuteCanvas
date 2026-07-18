@@ -37,7 +37,7 @@ class MountedMaskFeedbackProbe(MountedQPaneHarness):
         self,
         qapp: QApplication,
         *,
-        image_size: QSize = QSize(400, 400),
+        image_size: QSize | None = None,
     ) -> None:
         """Create a shown brush-mode pane with one publicly created mask."""
         super().__init__(qapp, image_size=image_size)

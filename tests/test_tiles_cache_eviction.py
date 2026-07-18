@@ -18,16 +18,16 @@
 
 from __future__ import annotations
 
+import uuid
 from collections import OrderedDict
 from pathlib import Path
-import uuid
 
 import pytest
 
 from qpane import Config
 from qpane.rendering.tiles import TileManager
-from tests.helpers.render_plan import make_tile_key
 from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.render_plan import make_tile_key
 
 
 @pytest.mark.usefixtures("qapp")

@@ -15,8 +15,10 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import uuid
-from PySide6.QtGui import QImage
+
 from PySide6.QtCore import QRect
+from PySide6.QtGui import QImage
+
 from qpane import QPane
 from qpane.masks.workflow import Masks
 

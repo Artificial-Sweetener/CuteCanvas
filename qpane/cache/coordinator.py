@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Callable, Dict, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class _ConsumerState:
 
     registration: ConsumerRegistration
     usage_bytes: int = 0
-    last_trim: "TrimRecord | None" = None
+    last_trim: TrimRecord | None = None
 
     @property
     def consumer_id(self) -> str:
@@ -99,13 +99,13 @@ class CacheCoordinator:
                 refresh cache domain rows.
         """
         self._active_budget_bytes = max(0, active_budget_bytes)
-        self._consumers: Dict[str, _ConsumerState] = {}
-        self._missing_consumer_logs: Set[Tuple[str, str]] = set()
+        self._consumers: dict[str, _ConsumerState] = {}
+        self._missing_consumer_logs: set[tuple[str, str]] = set()
         self._dirty_callback = dirty_callback
         self._enforcing = False
         self._pending_enforce = False
         self._hard_cap_enabled = False
-        self._last_trim_events: tuple[dict[str, object], ...] = tuple()
+        self._last_trim_events: tuple[dict[str, object], ...] = ()
         self._headroom_snapshot: dict[str, object] | None = None
 
     @property
@@ -368,7 +368,7 @@ class CacheCoordinator:
     def _entitlement_bytes(
         self,
         consumer_id: str,
-        weights: Dict[str, float],
+        weights: dict[str, float],
         total_weight: float,
     ) -> float:
         """Return the weighted entitlement in bytes for ``consumer_id``."""
@@ -386,7 +386,7 @@ class CacheCoordinator:
         try:
             while True:
                 self._pending_enforce = False
-                self._last_trim_events = tuple()
+                self._last_trim_events = ()
                 events: list[dict[str, object]] = []
                 usage_before = self._total_usage()
                 weights = {
@@ -482,7 +482,7 @@ class CacheCoordinator:
                         extra={"cache_trim": payload},
                     )
                 elif self._total_usage() > self._active_budget_bytes:
-                    self._last_trim_events = tuple()
+                    self._last_trim_events = ()
                     logger.warning(
                         "Cache remains over budget after trims | budget=%d | usage=%d",
                         self._active_budget_bytes,

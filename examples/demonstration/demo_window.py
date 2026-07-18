@@ -21,24 +21,19 @@ The module mirrors the intended tutorial flow: configure, instantiate QPane,
 wire signals, build the surrounding UI, then layer optional extensions.
 """
 
-
 from __future__ import annotations
-
 
 import logging
 import random
 import traceback
 import uuid
-
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from math import isclose
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
-
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, Qt, QTimer, QThreadPool
-
+from PySide6.QtCore import QByteArray, QEvent, QPoint, QRect, Qt, QThreadPool, QTimer
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -48,7 +43,6 @@ from PySide6.QtGui import (
     QKeySequence,
     QShortcut,
 )
-
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -59,43 +53,29 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QSizePolicy,
     QSplitter,
     QStatusBar,
-    QSizePolicy,
-    QToolButton,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-
 from examples.demo_settings import load_demo_settings, save_demo_settings
-
-from examples.demonstration import hooks_examples, demo_text
-
-from examples.demonstration import scene_composition
-
-from examples.demonstration.custom_tool import build_custom_cursor_tool
-
-from examples.demonstration.hooks_editor import HookEditorWindow
-
+from examples.demonstration import demo_text, hooks_examples, scene_composition
+from examples.demonstration.catalog.builders import build_catalog_snapshot
 from examples.demonstration.catalog.dock import CatalogDock
-
 from examples.demonstration.catalog.models import CatalogSnapshot
-
 from examples.demonstration.config.dialog import ConfigDialog
-
 from examples.demonstration.config.spec import (
     build_sections_for_features,
     field_sets_for_sections,
 )
-
-from examples.demonstration.catalog.builders import build_catalog_snapshot
-
+from examples.demonstration.custom_tool import build_custom_cursor_tool
+from examples.demonstration.hooks_editor import HookEditorWindow
 from examples.demonstration.workers import ImageLoaderWorker
-
-from qpane import ComparisonOrientation, QPane, Config
-
+from qpane import ComparisonOrientation, Config, QPane
 
 _DIAGNOSTIC_DOMAIN_FIELD = "diagnostics_domains_enabled"
 _SAM_CONFIG_FIELDS = ConfigDialog.SAM_FIELDS
@@ -323,9 +303,7 @@ class ExampleWindow(QMainWindow):
         except UnicodeEncodeError:
             return False
         restored = self.restoreGeometry(QByteArray.fromBase64(raw))
-        if not restored:
-            return False
-        return True
+        return restored
 
     def _resolve_sam_download_mode(self, existing: dict[str, object]) -> str:
         """Select a SAM download mode for persisted demo settings."""
@@ -362,7 +340,7 @@ class ExampleWindow(QMainWindow):
             return ("mask", "sam")
         if feature_set == "mask":
             return ("mask",)
-        return tuple()
+        return ()
 
     @staticmethod
     def _placeholder_panzoom_enabled(settings: Mapping[str, object]) -> bool:
@@ -633,12 +611,10 @@ class ExampleWindow(QMainWindow):
                     and self._sam_tools_available()
                     and not placeholder_active
                 )
-            if placeholder_active and mode not in {
-                QPane.CONTROL_MODE_CURSOR,
-                QPane.CONTROL_MODE_PANZOOM,
-            }:
-                return False
-            return True
+            return not (
+                placeholder_active
+                and mode not in {QPane.CONTROL_MODE_CURSOR, QPane.CONTROL_MODE_PANZOOM}
+            )
 
         ordered_modes = [mode for mode in preferred_order if _mode_allowed(mode)]
         if not ordered_modes:
@@ -1042,7 +1018,7 @@ class ExampleWindow(QMainWindow):
         """Initialize the zoom status label with the viewport's current scale."""
         try:
             zoom = self.qpane.currentZoom()
-        except Exception:  # pragma: no cover - defensive guard during init
+        except RuntimeError:  # pragma: no cover - deleted Qt object during teardown
             zoom = 1.0
         self._update_zoom_readout(zoom)
         self._set_zoom_input_width()
@@ -1218,7 +1194,7 @@ class ExampleWindow(QMainWindow):
         state = None
         try:
             state = self.qpane.getMaskUndoState(active_mask_id)
-        except Exception:  # pragma: no cover - defensive UI read
+        except (RuntimeError, ValueError):  # pragma: no cover - transient mask teardown
             state = None
         if state is None:
             label.setText("Undo: 0 / Redo: 0")
@@ -1684,15 +1660,17 @@ class ExampleWindow(QMainWindow):
             return False
         if event.key() != Qt.Key_Space:
             return False
-        if event_type in (QEvent.KeyPress, QEvent.ShortcutOverride):
-            if self._should_forward_space_event(qpane_widget, watched, event):
-                if not self._space_forwarded_to_qpane and not event.isAutoRepeat():
-                    self._space_restore_mode = qpane_widget.getControlMode()
-                    if self._space_restore_mode != QPane.CONTROL_MODE_PANZOOM:
-                        qpane_widget.setControlMode(QPane.CONTROL_MODE_PANZOOM)
-                event.accept()
-                self._space_forwarded_to_qpane = True
-                return True
+        if event_type in (
+            QEvent.KeyPress,
+            QEvent.ShortcutOverride,
+        ) and self._should_forward_space_event(qpane_widget, watched, event):
+            if not self._space_forwarded_to_qpane and not event.isAutoRepeat():
+                self._space_restore_mode = qpane_widget.getControlMode()
+                if self._space_restore_mode != QPane.CONTROL_MODE_PANZOOM:
+                    qpane_widget.setControlMode(QPane.CONTROL_MODE_PANZOOM)
+            event.accept()
+            self._space_forwarded_to_qpane = True
+            return True
         if event_type == QEvent.KeyRelease and self._space_forwarded_to_qpane:
             event.accept()
             if event.isAutoRepeat():
@@ -2296,7 +2274,7 @@ class ExampleWindow(QMainWindow):
         self._ensure_custom_tool_registered()
         sandbox: dict[str, object] = {"__builtins__": __builtins__}
         try:
-            from PySide6.QtCore import Qt, QPoint, QRectF, QSize
+            from PySide6.QtCore import QPoint, QRectF, QSize, Qt
             from PySide6.QtGui import (
                 QBitmap,
                 QColor,
@@ -2327,10 +2305,14 @@ class ExampleWindow(QMainWindow):
                     "CUSTOM_MODE": _CUSTOM_TOOL_MODE,
                 }
             )
-        except Exception:
+        except ImportError:
             logger.exception("Failed to import PySide6 cursor dependencies")
         try:
-            exec(code, sandbox)
+            hooks_examples.execute_trusted_extension(
+                code,
+                sandbox,
+                source_name="<qpane-custom-cursor>",
+            )
         except Exception:
             logger.exception("Custom cursor code failed to execute")
             return (
@@ -2418,7 +2400,7 @@ class ExampleWindow(QMainWindow):
         """Compile and register the custom overlay draw hook."""
         sandbox: dict[str, object] = {"__builtins__": __builtins__}
         try:
-            from PySide6.QtCore import Qt, QRect
+            from PySide6.QtCore import QRect, Qt
             from PySide6.QtGui import QColor, QFont, QLinearGradient
 
             sandbox.update(
@@ -2430,10 +2412,14 @@ class ExampleWindow(QMainWindow):
                     "QLinearGradient": QLinearGradient,
                 }
             )
-        except Exception:
+        except ImportError:
             logger.exception("Failed to import PySide6 overlay dependencies")
         try:
-            exec(code, sandbox)
+            hooks_examples.execute_trusted_extension(
+                code,
+                sandbox,
+                source_name="<qpane-custom-overlay>",
+            )
         except Exception:
             logger.exception("Custom overlay code failed to execute")
             return (
@@ -2519,8 +2505,7 @@ class ExampleWindow(QMainWindow):
         self._ensure_lens_tool_registered()
         sandbox: dict[str, object] = {"__builtins__": __builtins__}
         try:
-            from PySide6.QtCore import Qt, QPoint, QRect
-            from PySide6.QtCore import QSize
+            from PySide6.QtCore import QPoint, QRect, QSize, Qt
             from PySide6.QtGui import (
                 QColor,
                 QCursor,
@@ -2548,11 +2533,15 @@ class ExampleWindow(QMainWindow):
                     "QSize": QSize,
                 }
             )
-        except Exception:
+        except ImportError:
             logger.exception("Failed to import PySide6 lens dependencies")
         sandbox.update({"CUSTOM_MODE": _LENS_TOOL_MODE, "qpane": self.qpane})
         try:
-            exec(code, sandbox)
+            hooks_examples.execute_trusted_extension(
+                code,
+                sandbox,
+                source_name="<qpane-lens-tool>",
+            )
         except Exception:
             logger.exception("Lens code failed to execute")
             return (

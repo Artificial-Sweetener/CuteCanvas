@@ -30,7 +30,6 @@ from PySide6.QtGui import (
     QPixmap,
 )
 
-
 # Provided by the demo host at execution time:
 # - CUSTOM_MODE: str (the tool mode this cursor belongs to)
 CUSTOM_MODE = globals().get("CUSTOM_MODE")

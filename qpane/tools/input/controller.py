@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-import time
-from dataclasses import replace
 import math
-from typing import TYPE_CHECKING, Callable
+import time
+from collections.abc import Callable
+from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt
 from PySide6.QtGui import (
@@ -35,9 +36,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication
 
+from .arena import TouchGestureArena, TouchGestureKind
 from .model import PointerDeviceKind, PointerPhase, PointerSample
 from .navigation import TouchNavigationSession
-from .arena import TouchGestureArena, TouchGestureKind
 
 if TYPE_CHECKING:
     from ...qpane import QPane
@@ -51,7 +52,7 @@ class PointerInputController(QObject):
 
     def __init__(
         self,
-        qpane: "QPane",
+        qpane: QPane,
         *,
         on_pointer_state_changed: Callable[[], None] | None = None,
     ) -> None:

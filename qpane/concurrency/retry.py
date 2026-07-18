@@ -25,14 +25,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import random
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from time import monotonic
 from typing import (
-    Callable,
-    Dict,
     Generic,
-    Iterable,
-    Optional,
     Protocol,
     TypeVar,
 )
@@ -59,9 +56,9 @@ class RetryContext(Generic[K, P]):
     """
 
     category: str
-    device: Optional[str]
+    device: str | None
     key: K
-    payload_size: Optional[int] = None
+    payload_size: int | None = None
 
 
 class BackoffPolicy:
@@ -85,7 +82,7 @@ class BackoffPolicy:
         self.jitter_pct = max(0.0, float(jitter_pct))
 
     def nextDelayMs(
-        self, attempt: int, context: Optional[RetryContext[K, P]] = None
+        self, attempt: int, context: RetryContext[K, P] | None = None
     ) -> int:
         """Return the delay for the supplied retry attempt.
 
@@ -108,9 +105,7 @@ class BackoffPolicy:
                 # Use a stable digest so jitter is deterministic across runs
                 payload_key = repr(context.key)
                 device_key = context.device or ""
-                data = f"{context.category}|{device_key}|{payload_key}|{n}".encode(
-                    "utf-8"
-                )
+                data = f"{context.category}|{device_key}|{payload_key}|{n}".encode()
                 digest = hashlib.sha1(data).digest()
                 seed_val = int.from_bytes(digest[:4], byteorder="big", signed=False)
                 rng = random.Random(seed_val)
@@ -129,9 +124,9 @@ class TerminationPolicy(Generic[K, P]):
         should_give_up: Optional predicate that short-circuits the built-in caps.
     """
 
-    attempt_cap: Optional[int] = None
-    time_budget_ms: Optional[int] = None
-    should_give_up: Optional[Callable[[int, RetryContext[K, P]], bool]] = None
+    attempt_cap: int | None = None
+    time_budget_ms: int | None = None
+    should_give_up: Callable[[int, RetryContext[K, P]], bool] | None = None
 
     def shouldGiveUp(
         self,
@@ -139,7 +134,7 @@ class TerminationPolicy(Generic[K, P]):
         *,
         started_at: float,
         now: float,
-        context: Optional[RetryContext[K, P]] = None,
+        context: RetryContext[K, P] | None = None,
     ) -> bool:
         """Check attempt counts, elapsed time, and predicates.
 
@@ -160,12 +155,10 @@ class TerminationPolicy(Generic[K, P]):
                 logger.debug("should_give_up predicate failed", exc_info=True)
         if self.attempt_cap is not None and attempt > max(0, int(self.attempt_cap)):
             return True
-        if (
+        return bool(
             self.time_budget_ms is not None
             and (now - started_at) * 1000.0 > self.time_budget_ms
-        ):
-            return True
-        return False
+        )
 
 
 @dataclass(frozen=True)
@@ -173,10 +166,10 @@ class RetryPolicy(Generic[K, P]):
     """Bundle backoff and termination policies for retry controllers."""
 
     backoff: BackoffPolicy
-    termination: Optional[TerminationPolicy[K, P]] = None
+    termination: TerminationPolicy[K, P] | None = None
 
     def nextDelayMs(
-        self, attempt: int, context: Optional[RetryContext[K, P]] = None
+        self, attempt: int, context: RetryContext[K, P] | None = None
     ) -> int:
         """Delegate delay calculation to the configured backoff policy.
 
@@ -195,7 +188,7 @@ class RetryPolicy(Generic[K, P]):
         *,
         started_at: float,
         now: float,
-        context: Optional[RetryContext[K, P]] = None,
+        context: RetryContext[K, P] | None = None,
     ) -> bool:
         """Ask the termination policy whether retries should end.
 
@@ -364,7 +357,7 @@ class QtTimerScheduler(Scheduler):
         try:
             QTimer.singleShot(0, self._parent, _start_on_main)
             return proxy
-        except Exception:  # pragma: no cover - defensive guard
+        except (RuntimeError, TypeError):
             logger.error(
                 "Failed to schedule retry timer on main thread; dispatcher missing or failed"
             )
@@ -398,7 +391,7 @@ class QtTimerScheduler(Scheduler):
                 )
         try:
             QTimer.singleShot(0, self._parent, lambda: self._stop_timer(handle))
-        except Exception:  # pragma: no cover - defensive guard
+        except (RuntimeError, TypeError):
             logger.error("Failed to cancel retry timer on main thread; handle may leak")
 
     def _start_timer(self, callback: Callable[[], None], delay_ms: int) -> QTimer:
@@ -426,14 +419,14 @@ class RetryCategorySnapshot(Generic[K, P]):
 
     active: int
     total_scheduled: int
-    peak_active: Optional[int] = None
+    peak_active: int | None = None
 
 
 @dataclass(frozen=True)
 class RetrySnapshot(Generic[K, P]):
     """Structured snapshot used by diagnostics providers."""
 
-    categories: Dict[str, RetryCategorySnapshot[K, P]]
+    categories: dict[str, RetryCategorySnapshot[K, P]]
 
 
 def qt_retry_dispatcher(
@@ -468,12 +461,12 @@ class _Entry(Generic[K, P]):
 
     attempts: int
     payload: P
-    handle: Optional[SchedulerHandle]
+    handle: SchedulerHandle | None
     submit: Callable[[P, int], TaskHandle]
-    coalesce: Optional[Callable[[P, P], P]]
+    coalesce: Callable[[P, P], P] | None
     throttle: Callable[[K, int, TaskRejected], None]
     started_at: float
-    on_give_up: Optional[Callable[[K, P, int], None]]
+    on_give_up: Callable[[K, P, int], None] | None
 
 
 class RetryController(Generic[K, P]):
@@ -485,7 +478,7 @@ class RetryController(Generic[K, P]):
         policy: BackoffPolicy | RetryPolicy[K, P],
         *,
         scheduler: Scheduler,
-        contextProvider: Optional[Callable[[K, P], RetryContext[K, P]]] = None,
+        contextProvider: Callable[[K, P], RetryContext[K, P]] | None = None,
     ) -> None:
         """Initialise the retry controller with policy and scheduling hooks.
 
@@ -499,7 +492,7 @@ class RetryController(Generic[K, P]):
         self._policy = policy if isinstance(policy, RetryPolicy) else RetryPolicy(policy)  # type: ignore[arg-type]
         self._scheduler = scheduler
         self._contextProvider = contextProvider
-        self._entries: Dict[K, _Entry[K, P]] = {}
+        self._entries: dict[K, _Entry[K, P]] = {}
         self.totalScheduled: int = 0  # diagnostics counter
         self.peakActive: int = 0
 
@@ -509,9 +502,9 @@ class RetryController(Generic[K, P]):
         payload: P,
         *,
         submit: Callable[[P, int], TaskHandle],
-        coalesce: Optional[Callable[[P, P], P]] = None,
+        coalesce: Callable[[P, P], P] | None = None,
         throttle: Callable[[K, int, TaskRejected], None],
-        onGiveUp: Optional[Callable[[K, P, int], None]] = None,
+        onGiveUp: Callable[[K, P, int], None] | None = None,
     ) -> None:
         """Submit work or coalesce with an existing retry entry.
 
@@ -590,13 +583,14 @@ class RetryController(Generic[K, P]):
                     return ctx
             except Exception:
                 logger.debug("contextProvider raised", exc_info=True)
-        size: Optional[int] = None
+        size: int | None = None
         try:
             if hasattr(payload, "sizeInBytes"):
                 size = int(payload.sizeInBytes())  # type: ignore[call-arg]
             elif isinstance(payload, (bytes, bytearray)):
                 size = len(payload)  # type: ignore[arg-type]
         except Exception:
+            logger.debug("Retry payload size inspection failed", exc_info=True)
             size = None
         return RetryContext(
             category=self._category, device=None, key=key, payload_size=size
@@ -610,9 +604,9 @@ class RetryController(Generic[K, P]):
         attempt: int,
         submit: Callable[[P, int], TaskHandle],
         throttle: Callable[[K, int, TaskRejected], None],
-        coalesce: Optional[Callable[[P, P], P]],
-        on_give_up: Optional[Callable[[K, P, int], None]],
-        started_at: Optional[float],
+        coalesce: Callable[[P, P], P] | None,
+        on_give_up: Callable[[K, P, int], None] | None,
+        started_at: float | None,
     ) -> None:
         """Attempt immediate submission and fall back to scheduling retries."""
         try:
@@ -653,8 +647,8 @@ class RetryController(Generic[K, P]):
         attempts: int,
         submit: Callable[[P, int], TaskHandle],
         throttle: Callable[[K, int, TaskRejected], None],
-        coalesce: Optional[Callable[[P, P], P]],
-        on_give_up: Optional[Callable[[K, P, int], None]],
+        coalesce: Callable[[P, P], P] | None,
+        on_give_up: Callable[[K, P, int], None] | None,
         started_at: float,
     ) -> None:
         """Schedule the retry according to the policy and scheduler."""
@@ -732,12 +726,8 @@ class RetryController(Generic[K, P]):
             on_give_up=on_give_up,
         )
         # update peak after entry creation to reflect current set size
-        try:
-            size = len(self._entries)
-        except Exception:
-            size = 0
-        if size > self.peakActive:
-            self.peakActive = size
+        size = len(self._entries)
+        self.peakActive = max(self.peakActive, size)
 
 
 def makeQtRetryController(
@@ -747,9 +737,9 @@ def makeQtRetryController(
     *,
     parent: QObject,
     jitter_pct: float = 0.25,
-    contextProvider: Optional[Callable[[K, P], RetryContext[K, P]]] = None,
+    contextProvider: Callable[[K, P], RetryContext[K, P]] | None = None,
     dispatcher: Callable[[Callable[[], None]], None] | None = None,
-) -> "RetryController[K, P]":
+) -> RetryController[K, P]:
     """Factory for a Qt-backed RetryController with standard backoff.
 
     Args:

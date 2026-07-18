@@ -21,19 +21,18 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from .base import ExtensionTool, ExtensionToolSignals
-from .base import CursorTool, PanZoomTool
+from .base import CursorTool, ExtensionTool, ExtensionToolSignals, PanZoomTool
 from .dependencies import ToolDependencies
-from .tools import Tools, ToolManagerSignals
+from .tools import ToolManagerSignals, Tools
 
 __all__ = [
     "CursorTool",
-    "PanZoomTool",
     "ExtensionTool",
     "ExtensionToolSignals",
+    "PanZoomTool",
     "ToolDependencies",
-    "Tools",
     "ToolManagerSignals",
+    "Tools",
 ]
 
 # Expose the module under a stable attribute so qpane.__getattr__("tools") returns it.

@@ -18,9 +18,10 @@
 
 import logging
 import uuid
+from collections.abc import Iterable, Mapping
 from math import isclose
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Mapping, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from PySide6.QtCore import (
@@ -92,6 +93,10 @@ from .scene.registry import (
     SceneProviderRegistry,
 )
 from .scene.render_plan import RasterLayerRenderItem, SceneLayerHitTestResult
+from .swap import SwapDelegate
+from .tools import Tools
+from .tools.base import ExtensionTool, ExtensionToolSignals
+from .tools.delegate import ToolInteractionDelegate
 from .types import (
     CatalogEntry,
     CatalogSnapshot,
@@ -101,17 +106,13 @@ from .types import (
     CompositionSnapshot,
     DiagnosticsDomain,
     LinkedGroup,
+    QPaneScene,
+    QPaneSceneHit,
     QPaneSceneLayer,
     QPaneSceneRequest,
     QPaneSceneTemplate,
     QPaneSceneTemplateBindings,
-    QPaneScene,
-    QPaneSceneHit,
 )
-from .swap import SwapDelegate
-from .tools import Tools
-from .tools.base import ExtensionTool, ExtensionToolSignals
-from .tools.delegate import ToolInteractionDelegate
 from .ui import (
     CursorBuilder,
 )
@@ -476,7 +477,7 @@ class QPane(QWidget):
         except FeatureInstallError as exc:
             hint = f" {exc.hint}" if exc.hint else ""
             return False, f"SAM refresh failed: {exc}.{hint}".strip()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - SAM backend boundary
             return False, f"SAM refresh failed: {exc}."
         return True, "SAM refreshed."
 
@@ -817,7 +818,7 @@ class QPane(QWidget):
             group_id = reuse_id if reuse_id is not None else uuid.uuid4()
             self.setLinkedGroups((LinkedGroup(group_id=group_id, members=members),))
         else:
-            self.setLinkedGroups(tuple())
+            self.setLinkedGroups(())
 
     def setLinkedGroups(self, groups: Iterable[LinkedGroup]) -> None:
         """Define linked pan/zoom groups and emit link change signals.
@@ -981,7 +982,7 @@ class QPane(QWidget):
             current_id = None
             try:
                 current_id = self.catalog().currentImageID()
-            except Exception:
+            except RuntimeError:
                 current_id = None
             self._emit_catalog_selection_changed(current_id)
         return changed
@@ -1361,7 +1362,7 @@ class QPane(QWidget):
         if self._initial_view_signals_scheduled:
             return
         self._initial_view_signals_scheduled = True
-        QTimer.singleShot(0, self._emit_initial_view_signals)
+        QTimer.singleShot(0, self, self._emit_initial_view_signals)
 
     def _emit_initial_view_signals(self) -> None:
         """Emit initial zoom and viewport snapshots after the widget initializes."""
@@ -1946,7 +1947,7 @@ class QPane(QWidget):
         """Emit the current zoom factor without reaching into demo code."""
         try:
             zoom = float(self.view().viewport.zoom)
-        except Exception:  # pragma: no cover - defensive path for shutdown
+        except RuntimeError:  # pragma: no cover - deleted Qt object during shutdown
             return
         self.zoomChanged.emit(zoom)
 
@@ -1977,7 +1978,7 @@ class QPane(QWidget):
         """Emit the physical viewport rectangle when it differs from the last snapshot."""
         try:
             rect = QRectF(self.physicalViewportRect())
-        except Exception:  # pragma: no cover - defensive path during teardown
+        except RuntimeError:  # pragma: no cover - deleted Qt object during teardown
             return
         if not force and self._last_viewport_rect == rect:
             return
@@ -2034,7 +2035,7 @@ class QPane(QWidget):
             else:
                 dirty_rect = None
             self.view().mark_dirty(dirty_rect)
-        except Exception:  # pragma: no cover - defensive teardown guard
+        except RuntimeError:  # pragma: no cover - deleted Qt object during teardown
             return
         state = self._comparison_service().state()
         if not state.enabled:
@@ -2266,7 +2267,7 @@ class QPane(QWidget):
         """Refresh rendering after private scene content changes."""
         try:
             self.view().mark_dirty(dirty_rect)
-        except Exception:  # pragma: no cover - defensive teardown guard
+        except RuntimeError:  # pragma: no cover - deleted Qt object during teardown
             return
         self.update()
 
@@ -2306,7 +2307,7 @@ class QPane(QWidget):
         current_id: uuid.UUID | None
         try:
             current_id = self.catalog().currentImageID()
-        except Exception:
+        except RuntimeError:
             current_id = None
         event = CatalogMutationEvent(
             reason=reason,

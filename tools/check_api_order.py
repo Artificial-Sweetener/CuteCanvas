@@ -58,7 +58,7 @@ def get_public_methods(pyi_path: Path) -> set[str]:
         sys.exit(1)
     try:
         tree = ast.parse(pyi_path.read_text(encoding="utf-8"))
-    except Exception as e:
+    except (OSError, UnicodeError, SyntaxError) as e:
         print(f"Error parsing {pyi_path}: {e}")
         sys.exit(1)
     public_methods = set()
@@ -95,7 +95,7 @@ def get_implementation_details(py_path: Path) -> tuple[int, dict[str, int]]:
         sys.exit(1)
     try:
         tree = ast.parse(content)
-    except Exception as e:
+    except SyntaxError as e:
         print(f"Error parsing {py_path}: {e}")
         sys.exit(1)
     method_lines = {}
@@ -135,7 +135,7 @@ def main():
             "The following methods are defined in qpane.pyi (Public Contract) but are located"
         )
         print("BELOW the 'Internal Implementation' banner in qpane.py:")
-        print("")
+        print()
         for name, lineno in sorted(hidden_public_api, key=lambda x: x[1]):
             print(f"  - {name} (Line {lineno})")
         print(
@@ -148,7 +148,7 @@ def main():
         print(
             "The following methods are NOT in qpane.pyi but are located ABOVE the banner:"
         )
-        print("")
+        print()
         for name, lineno in sorted(leaking_internal_api, key=lambda x: x[1]):
             print(f"  - {name} (Line {lineno})")
         print("\nFIX:")

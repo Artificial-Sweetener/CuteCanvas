@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 
 from PySide6.QtCore import QPoint
@@ -95,7 +96,7 @@ class StrokeVisualOracle:
         if len(points) == 1:
             return points
         samples: list[QPoint] = [points[0]]
-        for start, end in zip(points, points[1:]):
+        for start, end in itertools.pairwise(points):
             distance = math.hypot(end.x() - start.x(), end.y() - start.y())
             steps = max(1, math.ceil(distance / self._sample_spacing))
             for step in range(1, steps + 1):
@@ -132,7 +133,7 @@ class StrokeVisualOracle:
             return self._distance(point, path[0]) <= safe_radius
         return any(
             self._distance_to_segment(point, start, end) <= safe_radius
-            for start, end in zip(path, path[1:])
+            for start, end in itertools.pairwise(path)
         )
 
     @staticmethod

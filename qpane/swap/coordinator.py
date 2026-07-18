@@ -18,33 +18,21 @@
 
 from __future__ import annotations
 
-
 import logging
-
 import time
-
 import uuid
-
 from collections import deque
-
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
-
 from pathlib import Path
-
-from typing import TYPE_CHECKING, Callable, Collection, Sequence, TypeVar
-
+from typing import TYPE_CHECKING, TypeVar
 
 from PySide6.QtGui import QImage
 
-
 from ..catalog import ImageCatalog
-
 from ..core import CacheSettings, Config, PrefetchSettings
-
 from ..core.config_features import SamConfigSlice, require_sam_config
-
 from ..features import FeatureInstallError
-
 from ..rendering import Viewport
 from ..scene.identity import (
     SceneLayerAssetKey,
@@ -58,7 +46,6 @@ from .contracts import (
     SamPredictorManager,
     TilePrefetchManager,
 )
-
 
 if TYPE_CHECKING:
     from ..qpane import QPane
@@ -305,11 +292,14 @@ class SwapCoordinator:
             )
             for asset_key in mutation.cache_asset_keys_to_evict:
                 self._tile_manager.remove_tiles_for_source_asset(asset_key)
-            if image_id is not None and image_id in cache_changed_ids:
-                if self._sam_manager is not None:
-                    remove_cache = getattr(self._sam_manager, "removeFromCache", None)
-                    if callable(remove_cache):
-                        remove_cache(image_id)
+            if (
+                image_id is not None
+                and image_id in cache_changed_ids
+                and self._sam_manager is not None
+            ):
+                remove_cache = getattr(self._sam_manager, "removeFromCache", None)
+                if callable(remove_cache):
+                    remove_cache(image_id)
             qpane.setMinimumSize(qpane.minimumSizeHint())
             qpane.view().allocate_buffers()
             qpane.imageLoaded.emit(source_path or Path())

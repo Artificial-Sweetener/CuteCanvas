@@ -17,14 +17,14 @@
 """Unit tests for Viewport smooth zoom interpolation logic."""
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QWidget
 
 from qpane.core import Config
 from qpane.rendering.viewport import Viewport, ViewportZoomMode
-
-from PySide6.QtGui import QImage
 
 
 class MockView:
@@ -67,7 +67,7 @@ def viewport_setup(qapp):
 
 def test_smooth_zoom_interpolation(viewport_setup):
     """Verify that zoom interpolates correctly over time using the easing function."""
-    viewport, qpane = viewport_setup
+    viewport, _qpane = viewport_setup
 
     # Initial state
     viewport.zoom = 1.0
@@ -130,7 +130,7 @@ def test_zoom_animation_timer_uses_precise_timer(viewport_setup):
 
 def test_smooth_zoom_clamping(viewport_setup):
     """Verify that animation finishes cleanly even if time jumps past duration."""
-    viewport, qpane = viewport_setup
+    viewport, _qpane = viewport_setup
     viewport.zoom = 1.0
 
     with patch("qpane.rendering.viewport.time") as mock_time:
@@ -242,7 +242,7 @@ def test_anchored_one_to_one_completion_uses_exact_native_zoom(viewport_setup):
 
 def test_smooth_zoom_frame_skipping(viewport_setup):
     """Verify that updates are skipped if the delta time is less than min_frame_ms."""
-    viewport, qpane = viewport_setup
+    viewport, _qpane = viewport_setup
     viewport.zoom = 1.0
 
     with patch("qpane.rendering.viewport.time") as mock_time:

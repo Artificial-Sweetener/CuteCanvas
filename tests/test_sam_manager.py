@@ -17,15 +17,17 @@
 """Tests for SAM manager predictor handling and retries."""
 
 from __future__ import annotations
+
 import logging
 import time
 import uuid
 from pathlib import Path
+
 import numpy as np
 import pytest
 from PySide6.QtGui import QColor, QImage
-from qpane import sam
-from qpane import Config
+
+from qpane import Config, sam
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.mask import MaskLayer, MaskManager, MaskSurface
 from qpane.masks.mask_controller import MaskController
@@ -264,7 +266,7 @@ def test_requestPredictor_retries_after_throttle(monkeypatch, qapp, tmp_path) ->
     ), "sam retries should be cleared"
 
 
-def test_setCacheLimit_trims_existing_predictors(qapp):  # noqa: ANN001
+def test_setCacheLimit_trims_existing_predictors(qapp):
     manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
     removed: list[uuid.UUID] = []
     manager.predictorRemoved.connect(lambda path: removed.append(path))
@@ -277,7 +279,7 @@ def test_setCacheLimit_trims_existing_predictors(qapp):  # noqa: ANN001
     assert list(manager._sam_predictors.keys()) == [second]
 
 
-def test_cache_limit_enforced_on_predictor_ready(qapp):  # noqa: ANN001
+def test_cache_limit_enforced_on_predictor_ready(qapp):
     manager = SamManager(
         cache_limit=1,
         executor=StubExecutor(),

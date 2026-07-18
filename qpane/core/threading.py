@@ -18,8 +18,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QCoreApplication, QThread
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QCoreApplication, QObject, QThread
 
 
 def assert_qt_main_thread(owner: QObject, *, cache_attr: str = "_main_thread") -> None:

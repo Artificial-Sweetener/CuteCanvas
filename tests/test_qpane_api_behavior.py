@@ -18,9 +18,11 @@
 
 import json
 import uuid
+
 import pytest
 from PySide6.QtGui import QImage, Qt
-from qpane import QPane, Config
+
+from qpane import Config, QPane
 
 
 def _cleanup_qpane(qpane, qapp):
@@ -52,7 +54,7 @@ def test_config_behavior():
     # Test configure with keyword overrides
     cfg.configure(placeholder={"source": "override"}, drag_out_enabled=False)
     assert cfg.as_dict()["placeholder"]["source"] == "override"
-    assert getattr(cfg, "drag_out_enabled") is False
+    assert cfg.drag_out_enabled is False
     # Test unknown keys raise
     with pytest.raises(ValueError):
         Config(unknown_key="value")
@@ -68,12 +70,12 @@ def test_qpane_apply_settings_overrides(qapp):
         assert getattr(qpane.settings, "drag_out_enabled", True) is True
         # Apply with override
         qpane.applySettings(drag_out_enabled=False)
-        assert getattr(qpane.settings, "drag_out_enabled") is False
+        assert qpane.settings.drag_out_enabled is False
         # Apply with config object AND override
         new_config = Config(drag_out_enabled=True)
         qpane.applySettings(config=new_config, drag_out_enabled=False)
         # Override should win
-        assert getattr(qpane.settings, "drag_out_enabled") is False
+        assert qpane.settings.drag_out_enabled is False
     finally:
         _cleanup_qpane(qpane, qapp)
 

@@ -18,8 +18,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QEvent, QLineF, QPointF, Qt
@@ -30,7 +30,6 @@ from qpane import ComparisonOrientation, ExtensionTool, QPane
 from qpane.rendering.clip_geometry import projected_comparison_boundary
 from qpane.scene.render_plan import SceneRenderPlan
 from tests.helpers.render_compare import rendered_overscanned_widget_frame
-
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

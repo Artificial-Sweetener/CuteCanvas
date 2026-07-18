@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Iterable
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from ..types import DiagnosticRecord
 
@@ -30,22 +31,22 @@ logger = logging.getLogger(__name__)
 _failure_logged: set[str] = set()
 
 
-def swap_summary_provider(qpane: "QPane") -> Iterable[DiagnosticRecord]:
+def swap_summary_provider(qpane: QPane) -> Iterable[DiagnosticRecord]:
     """Return the navigation latency row for the core diagnostics tier."""
     metrics = _resolve_swap_metrics(qpane)
     if metrics is None:
-        return tuple()
+        return ()
     summary = _format_swap_summary(metrics)
     if not summary:
-        return tuple()
+        return ()
     return (DiagnosticRecord("Swap|Summary", summary),)
 
 
-def swap_progress_provider(qpane: "QPane") -> Iterable[DiagnosticRecord]:
+def swap_progress_provider(qpane: QPane) -> Iterable[DiagnosticRecord]:
     """Return swap-related diagnostics rows sourced from the swap delegate."""
     metrics = _resolve_swap_metrics(qpane)
     if metrics is None:
-        return tuple()
+        return ()
     rows: list[DiagnosticRecord] = []
     prefetch = _format_prefetch_line(metrics)
     if prefetch:
@@ -68,11 +69,11 @@ def swap_progress_provider(qpane: "QPane") -> Iterable[DiagnosticRecord]:
     return tuple(rows)
 
 
-def _resolve_swap_metrics(qpane: "QPane") -> "SwapCoordinatorMetrics" | None:
+def _resolve_swap_metrics(qpane: QPane) -> SwapCoordinatorMetrics | None:
     """Return the swap metrics snapshot from the delegate when present."""
     try:
         delegate = qpane.swapDelegate
-    except Exception as exc:  # pragma: no cover - defensive guard
+    except (AttributeError, RuntimeError) as exc:
         _log_snapshot_failure("swap_metrics", "Swap metrics delegate missing", exc)
         return None
     metrics = _safe_snapshot(
@@ -84,7 +85,7 @@ def _resolve_swap_metrics(qpane: "QPane") -> "SwapCoordinatorMetrics" | None:
     return metrics
 
 
-def _format_swap_summary(metrics: "SwapCoordinatorMetrics") -> str:
+def _format_swap_summary(metrics: SwapCoordinatorMetrics) -> str:
     """Format the swap summary row emphasising last navigation latency."""
     last_nav = metrics.last_navigation_ms
     if last_nav is None or last_nav < 0:
@@ -92,7 +93,7 @@ def _format_swap_summary(metrics: "SwapCoordinatorMetrics") -> str:
     return f"nav={last_nav:.0f}ms"
 
 
-def _format_prefetch_line(metrics: "SwapCoordinatorMetrics") -> str:
+def _format_prefetch_line(metrics: SwapCoordinatorMetrics) -> str:
     """Format pending prefetch counters for the diagnostics overlay."""
     parts: list[str] = []
     if metrics.pending_mask_prefetch > 0:
@@ -106,11 +107,11 @@ def _format_prefetch_line(metrics: "SwapCoordinatorMetrics") -> str:
     return " | ".join(parts)
 
 
-def _format_renderer_metrics(qpane: "QPane") -> str:
+def _format_renderer_metrics(qpane: QPane) -> str:
     """Build the renderer metrics row for the diagnostics overlay."""
     try:
         renderer = qpane.view().presenter.renderer
-    except Exception as exc:  # pragma: no cover - defensive guard
+    except (AttributeError, RuntimeError) as exc:
         _log_snapshot_failure("renderer", "Renderer unavailable for diagnostics", exc)
         return ""
     snapshot = _safe_snapshot(
@@ -133,7 +134,7 @@ def _format_renderer_metrics(qpane: "QPane") -> str:
     return " | ".join(parts)
 
 
-def _format_mask_metrics(qpane: "QPane") -> str:
+def _format_mask_metrics(qpane: QPane) -> str:
     """Build the diagnostics row describing mask cache usage."""
     controller = qpane.mask_controller
     if controller is None:
@@ -155,11 +156,11 @@ def _format_mask_metrics(qpane: "QPane") -> str:
     return " | ".join(parts)
 
 
-def _format_tile_metrics(qpane: "QPane") -> str:
+def _format_tile_metrics(qpane: QPane) -> str:
     """Summarize tile cache usage and retry counts for diagnostics."""
     try:
         manager = qpane.view().tile_manager
-    except Exception as exc:  # pragma: no cover - defensive guard
+    except (AttributeError, RuntimeError) as exc:
         _log_snapshot_failure("tiles", "Tile manager unavailable for diagnostics", exc)
         return ""
     snapshot = _safe_snapshot(
@@ -180,11 +181,11 @@ def _format_tile_metrics(qpane: "QPane") -> str:
     return " | ".join(parts)
 
 
-def _format_pyramid_metrics(qpane: "QPane") -> str:
+def _format_pyramid_metrics(qpane: QPane) -> str:
     """Summarize pyramid cache status for the diagnostics overlay."""
     try:
         manager = qpane.catalog().pyramid_manager
-    except Exception as exc:  # pragma: no cover - defensive guard
+    except (AttributeError, RuntimeError) as exc:
         _log_snapshot_failure(
             "pyramid", "Pyramid manager unavailable for diagnostics", exc
         )
@@ -203,7 +204,7 @@ def _format_pyramid_metrics(qpane: "QPane") -> str:
     return " | ".join(parts)
 
 
-def _format_sam_metrics(qpane: "QPane") -> str:
+def _format_sam_metrics(qpane: QPane) -> str:
     """Format cache stats for the SAM predictor workflow."""
     manager = qpane.samManager()
     if manager is None:
@@ -225,7 +226,7 @@ def _format_sam_metrics(qpane: "QPane") -> str:
 _MB = 1024 * 1024
 
 
-def _to_mb(value: int | float) -> float:
+def _to_mb(value: float) -> float:
     """Convert byte counts to megabytes for diagnostics display."""
     return float(value) / _MB if value else 0.0
 
@@ -234,7 +235,7 @@ def _safe_snapshot(provider, *, label: str, message: str):
     """Call snapshot_metrics on ``provider`` and guard against failures."""
     try:
         return provider.snapshot_metrics()
-    except Exception as exc:  # pragma: no cover - defensive guard
+    except Exception as exc:  # noqa: BLE001 - diagnostic provider boundary
         _log_snapshot_failure(label, message, exc)
         return None
 

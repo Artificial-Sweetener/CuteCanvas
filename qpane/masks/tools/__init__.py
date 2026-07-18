@@ -26,10 +26,10 @@ from .smart_select import (
 
 __all__ = (
     "BrushTool",
-    "connect_brush_signals",
-    "disconnect_brush_signals",
     "SmartSelectTool",
+    "connect_brush_signals",
     "connect_smart_select_signals",
+    "disconnect_brush_signals",
     "disconnect_smart_select_signals",
     "smart_select_cursor_provider",
 )

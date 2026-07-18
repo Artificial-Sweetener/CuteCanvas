@@ -30,11 +30,11 @@ from qpane import Config, LinkedGroup, OverlayState, QPane
 from qpane.catalog import CatalogMutationEvent
 from qpane.features import FeatureInstallError
 from qpane.rendering import Tile, ViewportZoomMode
-from qpane.scene.render_plan import RenderStrategy
 from qpane.scene.identity import SceneLayerTileKey, default_catalog_asset_key
-from tests.helpers.render_plan import make_render_plan, make_tile_key
+from qpane.scene.render_plan import RenderStrategy
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs
+from tests.helpers.render_plan import make_render_plan, make_tile_key
 from tests.test_mask_workflows import (
     _mask_service,
     _prepare_qpane_with_mask_feature,
@@ -306,7 +306,7 @@ def _assert_linked_groups_facade(qpane: QPane) -> None:
         assert len(emissions) == 2
     finally:
         qpane.linkGroupsChanged.disconnect(_record_link_change)
-        qpane.setLinkedGroups(tuple())
+        qpane.setLinkedGroups(())
         qpane.clearImages()
 
 

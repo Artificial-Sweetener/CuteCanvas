@@ -15,9 +15,13 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+
+import uuid
+
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, QSizeF
 from PySide6.QtGui import QImage
+
 from qpane.rendering.coordinates import (
     CoordinateContext,
     LogicalPoint,
@@ -26,7 +30,6 @@ from qpane.rendering.coordinates import (
 from qpane.scene.identity import default_catalog_asset_key, default_scene_id
 from qpane.scene.model import LayerPlacement
 from qpane.scene.render_plan import SceneContentSnapshot
-import uuid
 
 
 class _StubViewport:

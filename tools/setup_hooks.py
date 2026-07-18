@@ -18,9 +18,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
 import subprocess
+from pathlib import Path
 
 
 def _git_root() -> Path:

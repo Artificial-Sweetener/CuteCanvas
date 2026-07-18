@@ -20,11 +20,14 @@ import logging
 import uuid
 from types import SimpleNamespace
 
+from qpane import QPane
 from qpane.cache import cache_detail_provider, cache_diagnostics_provider
 from qpane.concurrency.retry import RetryCategorySnapshot, RetrySnapshot
-from qpane.types import DiagnosticRecord
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.mask_diagnostics import (
+    MaskStrokeDiagnosticsSnapshot,
+    MaskStrokeJobSnapshot,
+    MaskStrokeResultSnapshot,
     mask_brush_detail_provider,
     mask_job_detail_provider,
     mask_summary_provider,
@@ -32,14 +35,9 @@ from qpane.masks.mask_diagnostics import (
 from qpane.masks.sam_feature import (
     _sam_summary_diagnostics_provider,
 )
-from qpane.masks.mask_diagnostics import (
-    MaskStrokeDiagnosticsSnapshot,
-    MaskStrokeJobSnapshot,
-    MaskStrokeResultSnapshot,
-)
-from qpane import QPane
 from qpane.swap.coordinator import SwapCoordinatorMetrics
 from qpane.swap.diagnostics import swap_progress_provider
+from qpane.types import DiagnosticRecord
 
 
 def test_diagnostics_cached_snapshot_reuses_provider(qapp):
@@ -168,7 +166,7 @@ def test_mask_summary_provider_summarises_state():
 
 def test_mask_summary_provider_returns_empty_without_service():
     qpane = SimpleNamespace(mask_service=None)
-    assert mask_summary_provider(qpane) == tuple()
+    assert mask_summary_provider(qpane) == ()
 
 
 def test_mask_job_detail_provider_reports_job_metrics():
@@ -436,9 +434,7 @@ def test_overlay_formats_grouped_swap_rows(qapp):
         )
         formatted = overlay._format_rows(rows)
         lines = formatted.splitlines()
-        swap_lines = [
-            line for line in lines if line.startswith("Swap") or line.startswith("    ")
-        ]
+        swap_lines = [line for line in lines if line.startswith(("Swap", "    "))]
         assert swap_lines
         assert swap_lines[0].startswith("Swap")
         assert len(swap_lines) == 2

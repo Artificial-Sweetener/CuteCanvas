@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QRectF
-from PySide6.QtGui import QImage, QTransform, Qt
+from PySide6.QtGui import QImage, Qt, QTransform
 
 from qpane.scene.default_scene import build_default_catalog_scene
 from qpane.scene.identity import (

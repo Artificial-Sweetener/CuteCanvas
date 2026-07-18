@@ -21,9 +21,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from qpane.cache.diagnostics import (
-    _CacheMetricsBundle,
     _build_aggregate_record,
     _bundle_metrics,
+    _CacheMetricsBundle,
     _format_counters,
 )
 

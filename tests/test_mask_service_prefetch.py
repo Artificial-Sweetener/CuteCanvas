@@ -26,10 +26,10 @@ from PySide6.QtGui import QImage
 
 from qpane import Config
 from qpane.core.config_features import MaskConfigSlice
+from qpane.masks import mask_service as mask_service_module
 from qpane.masks.mask import MaskManager
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.mask_service import MaskService, PrefetchedOverlay
-from qpane.masks import mask_service as mask_service_module
 from qpane.types import DiagnosticRecord
 from tests.helpers.executor_stubs import StubExecutor
 
@@ -109,7 +109,7 @@ def test_consume_prefetch_results_stashes_when_busy(qpane_core):
         mask_id=mask_id,
         render_revision=controller.maskRenderRevision(mask_id),
         image=QImage(32, 32, QImage.Format_ARGB32),
-        scaled=tuple(),
+        scaled=(),
     )
     image_id = uuid.uuid4()
     service._prefetch_handles[image_id] = SimpleNamespace(
@@ -161,7 +161,7 @@ def test_stale_prefetch_completion_preserves_replacement_handle(qpane_core):
     image_id = uuid.uuid4()
     replacement = SimpleNamespace(
         handle=SimpleNamespace(task_id="replacement"),
-        mask_revisions=tuple(),
+        mask_revisions=(),
     )
     service._prefetch_handles[image_id] = replacement
 

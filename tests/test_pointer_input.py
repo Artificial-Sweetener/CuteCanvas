@@ -64,8 +64,9 @@ def _tablet_event(
     event_type: QEvent.Type,
     pressure: float,
     buttons: Qt.MouseButton,
-    position: QPointF = QPointF(10.25, 20.75),
+    position: QPointF | None = None,
 ) -> QTabletEvent:
+    position = QPointF(10.25, 20.75) if position is None else QPointF(position)
     return QTabletEvent(
         event_type,
         device,

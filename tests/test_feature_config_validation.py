@@ -17,8 +17,11 @@
 """Validation behaviour for feature-aware configuration slices."""
 
 from __future__ import annotations
+
 from pathlib import Path
+
 import pytest
+
 from qpane.core.config import Config, FeatureAwareConfig
 from qpane.core.config_features import iter_descriptors
 

@@ -17,8 +17,9 @@
 """Tests for pan/zoom tool snap-to-fit behavior."""
 
 from __future__ import annotations
-from typing import List
+
 from PySide6.QtCore import QPoint, QPointF
+
 from qpane.rendering import ViewportZoomMode
 from qpane.tools import PanZoomTool, ToolDependencies
 
@@ -37,7 +38,7 @@ class _WheelEventStub:
 
 def test_panzoom_wheel_snaps_to_fit_zoom(qapp):
     tool = PanZoomTool()
-    emissions: List[tuple[float, ViewportZoomMode]] = []
+    emissions: list[tuple[float, ViewportZoomMode]] = []
     current_zoom = 0.4
     native_zoom = 1.0
     fit_zoom = 0.5  # Target fit zoom
@@ -67,7 +68,7 @@ def test_panzoom_wheel_snaps_to_fit_zoom(qapp):
 
 def test_panzoom_wheel_snaps_to_fit_zoom_crossing(qapp):
     tool = PanZoomTool()
-    emissions: List[tuple[float, ViewportZoomMode]] = []
+    emissions: list[tuple[float, ViewportZoomMode]] = []
     current_zoom = 0.45
     native_zoom = 1.0
     fit_zoom = 0.5
@@ -96,7 +97,7 @@ def test_panzoom_wheel_snaps_to_fit_zoom_crossing(qapp):
 
 def test_panzoom_wheel_snaps_to_fit_zoom_reverse(qapp):
     tool = PanZoomTool()
-    emissions: List[tuple[float, ViewportZoomMode]] = []
+    emissions: list[tuple[float, ViewportZoomMode]] = []
     current_zoom = 0.6
     native_zoom = 1.0
     fit_zoom = 0.5
@@ -125,7 +126,7 @@ def test_panzoom_wheel_snaps_to_fit_zoom_reverse(qapp):
 
 def test_panzoom_prioritizes_native_over_fit_if_both_crossed(qapp):
     tool = PanZoomTool()
-    emissions: List[tuple[float, ViewportZoomMode]] = []
+    emissions: list[tuple[float, ViewportZoomMode]] = []
     current_zoom = 0.9
     native_zoom = 1.0
     fit_zoom = 1.05  # Very close to native

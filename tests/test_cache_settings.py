@@ -17,9 +17,12 @@
 """Tests for cache settings normalization and overrides."""
 
 from __future__ import annotations
+
 import json
-import pytest
 import logging
+
+import pytest
+
 import qpane.core.config as cache_config_module
 from qpane import Config, QPane
 from qpane.core.config import CacheSettings as CacheConfig

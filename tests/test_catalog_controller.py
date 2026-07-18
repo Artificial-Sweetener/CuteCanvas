@@ -18,10 +18,12 @@
 
 import uuid
 from pathlib import Path
+
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, Qt
-from qpane.types import CatalogEntry
+
 from qpane.rendering import ViewportZoomMode
+from qpane.types import CatalogEntry
 
 
 def _solid_image(color: Qt.GlobalColor, size: int = 8) -> QImage:

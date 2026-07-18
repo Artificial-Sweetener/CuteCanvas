@@ -15,12 +15,15 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
+
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
-from qpane.core import config
+
 from qpane import QPane
+from qpane.core import config
 
 
 @pytest.fixture(scope="session")
@@ -32,6 +35,14 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _flush_deferred_qt_deletions(qapp: QApplication) -> Iterator[None]:
+    """Deliver deferred QObject deletions on the GUI thread after every test."""
+    yield
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+
 @pytest.fixture()
 def qpane_core(qapp: QApplication) -> Iterator[QPane]:
     """Provision a bare QPane instance and ensure it is cleaned up."""
@@ -40,7 +51,6 @@ def qpane_core(qapp: QApplication) -> Iterator[QPane]:
         yield qpane
     finally:
         qpane.deleteLater()
-        qapp.processEvents()
 
 
 @pytest.fixture()

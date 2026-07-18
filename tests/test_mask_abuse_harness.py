@@ -20,11 +20,11 @@ from __future__ import annotations
 
 from itertools import product
 
+import pytest
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QCursor, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
-import pytest
 
 from qpane.scene.render_plan import MaskLayerRenderItem
 from tests.harness.abuse_model import (
@@ -46,8 +46,8 @@ from tests.harness.minimizer import minimize_failing_actions
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.scenarios import (
     deterministic_abuse_actions,
-    overlapping_noop_stroke_actions,
     ordered_device_history_actions,
+    overlapping_noop_stroke_actions,
     repeated_touch_mouse_cursor_actions,
     touch_mouse_mask_switch_actions,
 )

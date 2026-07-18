@@ -23,8 +23,9 @@ import math
 import time
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Mapping, MutableMapping, Sequence
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
@@ -39,12 +40,12 @@ from ..core import CacheSettings, Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from .mask import MaskLayer, MaskManager
 from .mask_diagnostics import MaskStrokeDiagnostics
+from .mask_undo import MaskHistoryChange, MaskPatch
 from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
     MaskStrokePayload,
 )
-from .mask_undo import MaskHistoryChange, MaskPatch
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class MaskReadyUpdate:
 
     mask_id: uuid.UUID
     dirty_rect: QRect | None
-    mask_layer: "MaskLayer" | None
+    mask_layer: MaskLayer | None
     changed: bool
 
 
@@ -250,7 +251,7 @@ class MaskController(QObject):
         self._cache_admission_guard = None
         self._rejected_cache_keys: set[MaskRenderCacheKey] = set()
 
-    def _get_layer(self, mask_id) -> "MaskLayer | None":
+    def _get_layer(self, mask_id) -> MaskLayer | None:
         """Return the mask layer for ``mask_id`` if it exists."""
         if mask_id is None:
             return None
@@ -295,7 +296,7 @@ class MaskController(QObject):
         """Return and clear recorded patches for ``mask_id``."""
         accumulator = self._stroke_accumulators.pop(mask_id, None)
         if accumulator is None:
-            return tuple(), False
+            return (), False
         return accumulator.consume()
 
     def getMaskGeneration(self, mask_id: uuid.UUID) -> int:
@@ -639,8 +640,8 @@ class MaskController(QObject):
 
     def _target_scaled_size(self, size: QSize, scale_key: float) -> QSize:
         """Return the integer QSize that corresponds to applying `scale_key`."""
-        width = max(1, int(round(size.width() * scale_key)))
-        height = max(1, int(round(size.height() * scale_key)))
+        width = max(1, round(size.width() * scale_key))
+        height = max(1, round(size.height() * scale_key))
         return QSize(width, height)
 
     def apply_config(
@@ -878,7 +879,12 @@ class MaskController(QObject):
                 )
         self.mask_updated.emit(mask_id, QRect())
 
-    def setMaskProperties(self, mask_id, color: QColor = None, opacity: float = None):
+    def setMaskProperties(
+        self,
+        mask_id: str,
+        color: QColor | None = None,
+        opacity: float | None = None,
+    ) -> bool:
         """Update mask presentation details and emit when values change."""
         color_changed = (
             self.setMaskColor(mask_id, color) if color is not None else False
@@ -1063,14 +1069,12 @@ class MaskController(QObject):
             return False
         patches, already_applied = self._drain_stroke_patches(mask_id)
         if patches:
-            if not self._commit_mask_update(
+            return self._commit_mask_update(
                 mask_id,
                 patches=patches,
                 preserve_cache=True,
                 already_applied=already_applied,
-            ):
-                return False
-            return True
+            )
         return False
 
     def apply_mask_image(
@@ -1110,7 +1114,7 @@ class MaskController(QObject):
     def updateMaskRegion(
         self,
         dirty_image_rect: QRect,
-        active_mask_layer: "MaskLayer",
+        active_mask_layer: MaskLayer,
         *,
         sub_mask_image: QImage | None = None,
         colorized_image: QImage | None = None,
@@ -1217,8 +1221,8 @@ class MaskController(QObject):
             if scaled_size.isEmpty():
                 continue
             scaled_top_left = QPoint(
-                int(round(dirty_image_rect.left() * scale_key)),
-                int(round(dirty_image_rect.top() * scale_key)),
+                round(dirty_image_rect.left() * scale_key),
+                round(dirty_image_rect.top() * scale_key),
             )
             scaled_painter = QPainter(scaled_pixmap)
             scaled_painter.setRenderHint(
@@ -1376,7 +1380,7 @@ class MaskController(QObject):
             changed=True,
         )
 
-    def invalidate_layer_cache(self, mask_layer: "MaskLayer | None") -> None:
+    def invalidate_layer_cache(self, mask_layer: MaskLayer | None) -> None:
         """Invalidate cached colorized pixmaps for ``mask_layer`` if present."""
         self._invalidate_colorized_mask_cache(mask_layer)
 
@@ -1666,7 +1670,7 @@ class MaskController(QObject):
         return pixmap
 
     def get_colorized_mask(
-        self, mask_layer: "MaskLayer", *, scale: float | None = None
+        self, mask_layer: MaskLayer, *, scale: float | None = None
     ) -> QPixmap | None:
         """Return the cached pixmap for ``mask_layer`` at the requested scale."""
         if mask_layer is None:
@@ -1730,8 +1734,8 @@ class MaskController(QObject):
                     )
                     destination = QRect(
                         QPoint(
-                            int(round(rect.left() * scale_key)),
-                            int(round(rect.top() * scale_key)),
+                            round(rect.left() * scale_key),
+                            round(rect.top() * scale_key),
                         ),
                         self._target_scaled_size(rect.size(), scale_key),
                     )

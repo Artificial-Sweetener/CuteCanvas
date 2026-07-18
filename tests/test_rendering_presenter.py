@@ -17,15 +17,15 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage, QPixmap, Qt
 from PySide6.QtWidgets import QWidget
 
-from qpane.core import CacheSettings
 import qpane.rendering.presenter as presenter_module
+from qpane.core import CacheSettings
 from qpane.rendering import (
     RenderingPresenter,
     ViewportZoomMode,
@@ -37,8 +37,8 @@ from qpane.scene.identity import (
     default_catalog_asset_key,
     default_scene_id,
 )
-from qpane.scene.model import LayerKind
 from qpane.scene.mask_adapter import MaskServiceSceneProvider
+from qpane.scene.model import LayerKind
 from qpane.scene.registry import (
     CatalogLayerSourceResolver,
     LayerSourceResolverRegistry,

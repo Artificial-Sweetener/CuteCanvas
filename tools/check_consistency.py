@@ -31,8 +31,9 @@ import dataclasses
 import pathlib
 import re
 import sys
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping
 from pathlib import Path
-from typing import Iterable, Iterator, Mapping, MutableMapping, Pattern
+from re import Pattern
 
 # --- Constants ---
 
@@ -175,7 +176,7 @@ def load_public_symbols(
             if "__all__" in target_ids:
                 try:
                     value = ast.literal_eval(node.value)
-                except Exception:
+                except (ValueError, TypeError, MemoryError, RecursionError):
                     value = None
                 if isinstance(value, list) and all(
                     isinstance(item, str) for item in value
@@ -184,7 +185,7 @@ def load_public_symbols(
             if "_LAZY_SYMBOLS" in target_ids:
                 try:
                     value = ast.literal_eval(node.value)
-                except Exception:
+                except (ValueError, TypeError, MemoryError, RecursionError):
                     value = None
                 if isinstance(value, dict):
                     # Only keep string->(module, attr) entries.
@@ -226,7 +227,7 @@ def extract_return_annotation(node: ast.AST) -> str | None:
         return None
     try:
         return ast.unparse(ann)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -356,7 +357,7 @@ def load_hook_snippets() -> list[DemoSource]:
             continue
         try:
             literal = ast.literal_eval(value_node)
-        except Exception:
+        except (ValueError, TypeError, MemoryError, RecursionError):
             continue
         if not isinstance(literal, str):
             continue
@@ -582,7 +583,7 @@ def analyze_demo_usage(
                     if arg.annotation is not None:
                         try:
                             annotation_text = ast.unparse(arg.annotation)
-                        except Exception:
+                        except (TypeError, ValueError):
                             annotation_text = None
                     if "qpane" in arg.arg.lower() or (
                         annotation_text and "QPane" in annotation_text
@@ -607,15 +608,17 @@ def analyze_demo_usage(
                 if node.name in qpane_subclasses:
                     continue
                 for base in node.bases:
-                    if isinstance(base, ast.Attribute):
-                        if (
+                    if (
+                        isinstance(base, ast.Attribute)
+                        and (
                             isinstance(base.value, ast.Name)
                             and base.value.id in aliases
-                        ):
-                            if base.attr == "QPane" or base.attr == "Catalog":
-                                qpane_subclasses.add(node.name)
-                                changed = True
-                                break
+                        )
+                        and (base.attr == "QPane" or base.attr == "Catalog")
+                    ):
+                        qpane_subclasses.add(node.name)
+                        changed = True
+                        break
                     if isinstance(base, ast.Name) and base.id in qpane_subclasses:
                         qpane_subclasses.add(node.name)
                         changed = True
@@ -643,10 +646,9 @@ def analyze_demo_usage(
                         isinstance(base, ast.Attribute)
                         and isinstance(base.value, ast.Name)
                         and base.value.id in aliases
-                    ):
-                        if base.attr in {"QPane", "Catalog"}:
-                            base_name = base.attr
-                            break
+                    ) and base.attr in {"QPane", "Catalog"}:
+                        base_name = base.attr
+                        break
                     if isinstance(base, ast.Name) and base.id in {"QPane", "Catalog"}:
                         base_name = base.id
                         break
@@ -729,7 +731,7 @@ def analyze_demo_usage(
                     class_map[attr_name] = candidate_class or "QPane"
         # Identify variables assigned from QPane() or QPane subclass constructors.
         for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
+            if isinstance(node, ast.Assign):  # noqa: SIM102 - staged AST narrowing
                 if isinstance(node.value, ast.Call):
                     target_names = [
                         t.id for t in node.targets if isinstance(t, ast.Name)
@@ -771,15 +773,16 @@ def analyze_demo_usage(
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id == "getattr":
-                    if (
-                        node.args
-                        and isinstance(node.args[0], ast.Name)
-                        and node.args[0].id in aliases
-                    ):
-                        dynamic_notes.append(
-                            f"{path.as_posix()}:{node.lineno} getattr on qpane alias"
-                        )
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "getattr"
+                    and node.args
+                    and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id in aliases
+                ):
+                    dynamic_notes.append(
+                        f"{path.as_posix()}:{node.lineno} getattr on qpane alias"
+                    )
                 if isinstance(node.func, ast.Attribute):
                     attr_chain = extract_chain(node.func)
                     if attr_chain and attr_chain[0] == ("name", "importlib"):
@@ -1395,8 +1398,9 @@ def check_config_docs_consistency() -> list[str]:
 
     # Silence psutil warning during static analysis
     qpane.core.config._PSUTIL_WARNING_EMITTED = True
+    from dataclasses import asdict, is_dataclass
+
     from qpane.core.config import Config
-    from dataclasses import is_dataclass, asdict
 
     errors = []
     doc_path = DOCS_DIR / "configuration-reference.md"
@@ -1421,13 +1425,23 @@ def check_config_docs_consistency() -> list[str]:
     if not code_blocks:
         return ["No python code blocks found in configuration-reference.md"]
     config_code = code_blocks[0]
-    # Parse the dict
+    # Parse the assignment without executing documentation as code.
     try:
-        ns = {}
-        exec(config_code, {}, ns)
-        doc_config = ns.get("config")
-    except Exception as e:
-        return [f"Error parsing config from docs: {e}"]
+        config_module = ast.parse(config_code)
+        config_assignment = next(
+            node
+            for node in config_module.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and any(
+                isinstance(target, ast.Name) and target.id == "config"
+                for target in (
+                    node.targets if isinstance(node, ast.Assign) else (node.target,)
+                )
+            )
+        )
+        doc_config = ast.literal_eval(config_assignment.value)
+    except (SyntaxError, ValueError, StopIteration) as exc:
+        return [f"Error parsing config from docs: {exc}"]
     if not isinstance(doc_config, dict):
         return ["'config' variable in docs is not a dict"]
     actual_config = Config().as_dict()
@@ -1440,9 +1454,12 @@ def check_config_docs_consistency() -> list[str]:
                 v = asdict(v)
             # Special exemption for cache overrides which are flattened in to_dict
             # but might not be in the doc example if they are considered advanced/internal
-            if path == "cache" and k in ("tiles", "pyramids", "masks", "predictors"):
-                if k not in doc_d:
-                    continue
+            if (
+                path == "cache"
+                and k in ("tiles", "pyramids", "masks", "predictors")
+                and k not in doc_d
+            ):
+                continue
             if k not in doc_d:
                 errors.append(f"[Config Reference] Missing key at {path}: {k}")
                 continue
@@ -1457,9 +1474,12 @@ def check_config_docs_consistency() -> list[str]:
                 elif isinstance(v, float) and isinstance(doc_val, (float, int)):
                     if abs(v - doc_val) < 1e-9:
                         match = True
-                elif isinstance(v, tuple) and isinstance(doc_val, list):
-                    if v == tuple(doc_val):
-                        match = True
+                elif (
+                    isinstance(v, tuple)
+                    and isinstance(doc_val, list)
+                    and v == tuple(doc_val)
+                ):
+                    match = True
                 if not match:
                     errors.append(
                         f"[Config Reference] Value mismatch at {path}.{k}: Doc={doc_val!r}, Actual={v!r}"

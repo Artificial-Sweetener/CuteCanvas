@@ -15,7 +15,9 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+
 import types
+
 import pytest
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import (
@@ -24,6 +26,7 @@ from PySide6.QtGui import (
     QRegion,
     Qt,
 )
+
 from qpane.rendering import Renderer
 from tests.helpers.render_plan import make_render_plan
 

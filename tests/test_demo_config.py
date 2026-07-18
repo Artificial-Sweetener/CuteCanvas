@@ -22,12 +22,12 @@ from PySide6.QtWidgets import QCheckBox
 
 from examples.demo import ExampleOptions, ExampleWindow, parse_args
 from examples.demonstration.config.dialog import ConfigDialog, DomainCheckboxGroup
-from qpane.features.registry import FeatureInstallError
 from examples.demonstration.config.spec import (
     build_sections_for_features,
     field_sets_for_sections,
 )
 from qpane import Config, QPane
+from qpane.features.registry import FeatureInstallError
 from tests.helpers.render_plan import make_render_plan
 
 MB = 1024 * 1024

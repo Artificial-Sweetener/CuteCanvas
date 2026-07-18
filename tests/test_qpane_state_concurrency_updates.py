@@ -17,8 +17,10 @@
 """Tests for QPaneState concurrency updates and propagation."""
 
 from types import SimpleNamespace
+
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
+
 from qpane.concurrency import QThreadPoolExecutor, build_thread_policy
 from qpane.core.config import Config
 from qpane.core.state import QPaneState

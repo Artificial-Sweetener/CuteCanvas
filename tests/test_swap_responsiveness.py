@@ -29,10 +29,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
-from qpane import sam
-from qpane import Config, QPane
-from qpane.features import FeatureInstallError
+from qpane import Config, QPane, sam
 from qpane.core.config_features import MaskConfigSlice
+from qpane.features import FeatureInstallError
 from qpane.masks.mask import MaskManager
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.mask_service import MaskService

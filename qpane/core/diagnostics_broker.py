@@ -23,15 +23,10 @@ and viewport collaborators while optional domains extend the overlay.
 
 from __future__ import annotations
 
-
 import logging
-
 from collections.abc import Callable, Iterable
-
 from dataclasses import dataclass
-
 from typing import TYPE_CHECKING
-
 
 from PySide6.QtCore import (
     QCoreApplication,
@@ -41,15 +36,13 @@ from PySide6.QtCore import (
     Signal,
 )
 
-
+from ..types import DiagnosticRecord
 from .diagnostics import (
     DiagnosticsProvider,
     DiagnosticsRegistry,
     DiagnosticsSnapshot,
     build_core_diagnostics,
 )
-from ..types import DiagnosticRecord
-
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +104,7 @@ class Diagnostics(QObject):
 
     diagnosticsUpdated = Signal(object)
 
-    def __init__(self, qpane: "QPane") -> None:
+    def __init__(self, qpane: QPane) -> None:
         """Initialize the broker and attach a fresh diagnostics registry."""
         super().__init__(qpane)
         self._qpane = qpane
@@ -119,11 +112,9 @@ class Diagnostics(QObject):
         self._registered: set[DiagnosticsProvider] = set()
         self._providers: list[_DiagnosticsProviderEntry] = []
         self._detail_enabled: dict[str, bool] = {}
-        self._stack_accessor: Callable[[], "View | None"] | None = None
+        self._stack_accessor: Callable[[], View | None] | None = None
         self._core_provider: DiagnosticsProvider | None = None
-        self._executor_accessor: Callable[[], "TaskExecutorProtocol | None"] | None = (
-            None
-        )
+        self._executor_accessor: Callable[[], TaskExecutorProtocol | None] | None = None
         self._executor_summary_provider: DiagnosticsProvider | None = None
         self._executor_detail_provider: DiagnosticsProvider | None = None
         self._retry_detail_provider: DiagnosticsProvider | None = None
@@ -168,7 +159,7 @@ class Diagnostics(QObject):
         if force or self._should_refresh():
             return self._collect_snapshot(force=force)
         if self._cached_snapshot is None:
-            self._cached_snapshot = DiagnosticsSnapshot(tuple())
+            self._cached_snapshot = DiagnosticsSnapshot(())
         return self._cached_snapshot
 
     def set_dirty(self, domain: str | None = None) -> None:
@@ -200,7 +191,7 @@ class Diagnostics(QObject):
         self._register_once(provider, domain=domain, tier=tier)
 
     def register_core_providers(
-        self, stack_accessor: Callable[[], "View | None"]
+        self, stack_accessor: Callable[[], View | None]
     ) -> None:
         """Install renderer, viewport, and pyramid diagnostics providers.
 
@@ -221,9 +212,9 @@ class Diagnostics(QObject):
 
     def register_executor_providers(
         self,
-        executor_accessor: Callable[[], "TaskExecutorProtocol | None"],
-        retry_provider: Callable[["QPane"], Iterable[DiagnosticRecord]],
-        retry_summary_provider: Callable[["QPane"], Iterable[DiagnosticRecord]],
+        executor_accessor: Callable[[], TaskExecutorProtocol | None],
+        retry_provider: Callable[[QPane], Iterable[DiagnosticRecord]],
+        retry_summary_provider: Callable[[QPane], Iterable[DiagnosticRecord]],
     ) -> None:
         """Install executor utilisation and retry diagnostics providers.
 
@@ -295,9 +286,7 @@ class Diagnostics(QObject):
         """Return True when diagnostics should be gathered again."""
         if self._cached_snapshot is None:
             return True
-        if self._dirty_domains:
-            return True
-        return False
+        return bool(self._dirty_domains)
 
     def _collect_snapshot(self, *, force: bool = False) -> DiagnosticsSnapshot:
         """Gather diagnostics and broadcast the refreshed snapshot."""
@@ -345,17 +334,17 @@ class Diagnostics(QObject):
             priority if priority is not None else self._priority_for(domain, tier)
         )
 
-        def _wrapped(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+        def _wrapped(qpane: QPane) -> tuple[DiagnosticRecord, ...]:
             """Invoke provider with caching and optional detail-tier gating."""
             if tier == _DETAIL_TIER and not self.domain_detail_enabled(domain):
-                return tuple()
+                return ()
             should_refresh = (
                 self._force_refresh
                 or provider not in self._provider_rows
                 or domain in self._dirty_domains
             )
             if not should_refresh:
-                return self._provider_rows.get(provider, tuple())
+                return self._provider_rows.get(provider, ())
             rows = tuple(provider(qpane))
             self._provider_rows[provider] = rows
             return rows
@@ -373,7 +362,7 @@ class Diagnostics(QObject):
         self._registry.register(_wrapped, priority=computed_priority)
 
     def _invoke_on_main(self, callback: Callable[[], None]) -> None:
-        """Execute callback on the Qt main thread if invoked from a worker."""
+        """Execute callback on the Qt main thread while this broker remains alive."""
         app = QCoreApplication.instance()
         main_thread = app.thread() if app else None
         if main_thread is None or QThread.currentThread() == main_thread:
@@ -387,26 +376,16 @@ class Diagnostics(QObject):
             return
         try:
             QTimer.singleShot(0, self, callback)
-            return
-        except Exception:  # pragma: no cover - defensive guard
+        except RuntimeError as exc:
+            if "already deleted" in str(exc):
+                return
             logger.warning(
-                "Failed to schedule diagnostics callback on Diagnostics QObject; retrying with application",
+                "Failed to schedule diagnostics callback on its owning QObject",
                 exc_info=True,
             )
-            try:
-                if app is not None:
-                    QTimer.singleShot(0, app, callback)
-                    return
-            except Exception:
-                logger.warning(
-                    "Failed to schedule diagnostics callback on application instance",
-                    exc_info=True,
-                )
-        try:
-            callback()
-        except Exception:
+        except Exception:  # pragma: no cover - defensive guard
             logger.warning(
-                "Diagnostics callback failed after scheduling fallbacks",
+                "Failed to schedule diagnostics callback on its owning QObject",
                 exc_info=True,
             )
 
@@ -419,7 +398,7 @@ class Diagnostics(QObject):
     def _build_core_provider(self) -> DiagnosticsProvider:
         """Return a provider that reports renderer, viewport, tile, and pyramid diagnostics."""
 
-        def _provider(_qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+        def _provider(_qpane: QPane) -> tuple[DiagnosticRecord, ...]:
             """Collect renderer, viewport, tile, and pyramid diagnostics."""
             accessor = self._stack_accessor
             if accessor is None:
@@ -428,7 +407,7 @@ class Diagnostics(QObject):
                         "Diagnostics core provider skipping because view accessor is unavailable"
                     )
                     self._presenter_missing_logged = True
-                return tuple()
+                return ()
             view = accessor()
             presenter = getattr(view, "presenter", None) if view is not None else None
             if presenter is None:
@@ -437,7 +416,7 @@ class Diagnostics(QObject):
                         "Diagnostics core provider skipping because presenter is unavailable"
                     )
                     self._presenter_missing_logged = True
-                return tuple()
+                return ()
             renderer = getattr(presenter, "renderer", None)
             viewport = getattr(presenter, "viewport", None)
             tile_manager = getattr(presenter, "tile_manager", None)
@@ -478,14 +457,14 @@ class Diagnostics(QObject):
     ) -> DiagnosticsProvider:
         """Return a provider that fetches a collaborator via an accessor."""
 
-        def _provider(_qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+        def _provider(_qpane: QPane) -> tuple[DiagnosticRecord, ...]:
             """Collect diagnostics for the collaborator returned by the accessor."""
             accessor = getattr(self, accessor_attr)
             if accessor is None:
-                return tuple()
+                return ()
             target = accessor()
             if target is None:
-                return tuple()
+                return ()
             return tuple(provider_fn(target))
 
         return _provider

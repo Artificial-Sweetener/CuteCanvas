@@ -25,26 +25,27 @@ and concurrency limits.
 
 from __future__ import annotations
 
-
 import logging
-
-from copy import deepcopy
-from dataclasses import dataclass, field, fields
-from enum import Enum
-from typing import (
-    Any,
+from collections.abc import (
     Collection,
     Iterable,
     Iterator,
     Mapping,
     MutableMapping,
     Sequence,
+)
+from copy import deepcopy
+from dataclasses import dataclass, field, fields
+from enum import Enum
+from typing import (
+    Any,
     TypeVar,
 )
 
+from typing_extensions import Self
+
 from ..features import FeatureInstallError
 from ..types import CacheMode, DiagnosticsDomain, PlaceholderScaleMode, ZoomMode
-
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def _normalize_domain_sequence(
 ) -> tuple[str, ...]:
     """Return canonical diagnostics domains deduplicated in order."""
     if domains is None:
-        return tuple()
+        return ()
     if isinstance(domains, (str, DiagnosticsDomain)):
         domains = (domains,)
     normalized: list[str] = []
@@ -145,7 +146,7 @@ class PrefetchSettings:
     predictors: int = 0
     tiles_per_neighbor: int = 4
 
-    def clone(self) -> "PrefetchSettings":
+    def clone(self) -> PrefetchSettings:
         """Return a defensive copy of the prefetch settings."""
         return PrefetchSettings(
             pyramids=int(self.pyramids),
@@ -210,7 +211,7 @@ class CacheSettings:
     )
     prefetch: PrefetchSettings = field(default_factory=PrefetchSettings)
 
-    def clone(self) -> "CacheSettings":
+    def clone(self) -> CacheSettings:
         """Return a deep copy so callers can mutate the duplicate safely."""
         return CacheSettings(
             mode=str(self.mode),
@@ -232,15 +233,15 @@ class CacheSettings:
         psutil = psutil_module
         if psutil is None:
             try:
-                import psutil as psutil  # type: ignore
-            except Exception:  # pragma: no cover - defensive import
+                import psutil  # type: ignore
+            except ImportError:  # pragma: no cover - optional dependency
                 _warn_psutil_missing()
                 return 1024 * 1024 * 1024
         try:
             mem = psutil.virtual_memory()
-            available = int(getattr(mem, "available"))
-            total = int(getattr(mem, "total"))
-        except Exception:  # pragma: no cover - defensive guard
+            available = int(mem.available)
+            total = int(mem.total)
+        except Exception:  # noqa: BLE001 - psutil is an optional system boundary
             logger.warning(
                 "Failed to read system memory; falling back to hard cache cap (1024 MB)"
             )
@@ -474,7 +475,7 @@ class PlaceholderSettings:
     max_display_size: tuple[int, int] | None = None
     scale_factor: float = 1.0
 
-    def clone(self) -> "PlaceholderSettings":
+    def clone(self) -> PlaceholderSettings:
         """Return a defensive copy of the placeholder settings."""
         return PlaceholderSettings(
             source=self.source,
@@ -684,9 +685,7 @@ class Config:
 
         return descriptors_by_namespace()
 
-    def configure(
-        self: ConfigT, config_obj: object | None = None, **kwargs: Any
-    ) -> ConfigT:
+    def configure(self, config_obj: object | None = None, **kwargs: Any) -> Self:
         """Mutate this instance with values from another object or keyword args.
 
         Args:
@@ -706,7 +705,7 @@ class Config:
             self._apply_items(kwargs.items())
         return self
 
-    def copy(self: ConfigT) -> ConfigT:
+    def copy(self) -> Self:
         """Return a deep copy of this configuration snapshot."""
         clone = type(self)()
         for key in self.__slots__:
@@ -873,9 +872,9 @@ class FeatureAwareConfig:
     ) -> None:
         """Compose feature slices over a base config while tracking inactive overrides."""
         self._base = base
-        self._descriptors = tuple(descriptors or tuple())
-        self._installed_features = tuple(installed_features or tuple())
-        self._override_fields = set(override_fields or tuple())
+        self._descriptors = tuple(descriptors or ())
+        self._installed_features = tuple(installed_features or ())
+        self._override_fields = set(override_fields or ())
         self._strict = strict
         self._descriptor_map: dict[str, object] = {}
         self._field_map: dict[str, object] = {}
@@ -968,7 +967,7 @@ class FeatureAwareConfig:
 
     def _descriptor_active(self, descriptor: object) -> bool:
         """Return True when all required features for ``descriptor`` are installed."""
-        required = getattr(descriptor, "requires", tuple())
+        required = getattr(descriptor, "requires", ())
         if not required:
             return True
         missing = [
@@ -996,7 +995,7 @@ class FeatureAwareConfig:
         for validator in validators:
             try:
                 validator(slice_instance)
-            except Exception as exc:  # pragma: no cover - defensive; exercised in tests
+            except Exception as exc:  # noqa: BLE001 - feature validators are extensible
                 return exc
         return None
 

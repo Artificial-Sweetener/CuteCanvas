@@ -21,10 +21,11 @@ link membership, with selection identifiers carried alongside.
 """
 
 from __future__ import annotations
+
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+
 from PySide6.QtGui import QColor
 
 
@@ -45,9 +46,9 @@ class CatalogImage:
     image_id: uuid.UUID
     label: str
     index: int
-    path: Optional[Path]
+    path: Path | None
     is_current: bool
-    link_id: Optional[uuid.UUID]
+    link_id: uuid.UUID | None
     masks: list[CatalogMask] = field(default_factory=list)
 
     @property
@@ -63,7 +64,7 @@ class CatalogGroup:
     Extend by adding fields that the dock can render (e.g., tooltips, diagnostics badges).
     """
 
-    group_id: Optional[uuid.UUID]
+    group_id: uuid.UUID | None
     title: str
     images: list[CatalogImage] = field(default_factory=list)
     is_link_group: bool = False
@@ -74,7 +75,7 @@ class CatalogSnapshot:
     """Aggregate catalog state emitted to the dock for rendering rows and link groups."""
 
     groups: list[CatalogGroup]
-    current_image_id: Optional[uuid.UUID]
-    active_mask_id: Optional[uuid.UUID]
+    current_image_id: uuid.UUID | None
+    active_mask_id: uuid.UUID | None
     image_count: int
     mask_capable: bool

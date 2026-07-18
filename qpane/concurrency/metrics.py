@@ -19,12 +19,11 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from ..types import DiagnosticRecord
 from .executor import ExecutorSnapshot, TaskExecutorProtocol
-
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +94,8 @@ def executor_diagnostics_provider(
         )
         if devices:
             yield DiagnosticRecord("Executor|Device Limits", devices)
-    if snapshot.rejection_count is not None:
-        if snapshot.rejection_count > 0:
-            yield DiagnosticRecord("Executor|Rejections", str(snapshot.rejection_count))
+    if snapshot.rejection_count is not None and snapshot.rejection_count > 0:
+        yield DiagnosticRecord("Executor|Rejections", str(snapshot.rejection_count))
     if snapshot.average_wait_time_ms is not None:
         yield DiagnosticRecord(
             "Executor|Avg Wait",
@@ -123,10 +121,10 @@ def retry_diagnostics_provider(qpane) -> Iterable[DiagnosticRecord]:
     """Yield detailed retry metrics per category."""
     summaries = _retry_category_summaries(qpane)
     if not summaries:
-        return tuple()
+        return ()
     active_only = [s for s in summaries if s.active or s.total]
     if not active_only:
-        return tuple()
+        return ()
     yield DiagnosticRecord(
         "Retry|Detail",
         ", ".join(summary.format_detail() for summary in active_only),
@@ -137,7 +135,7 @@ def retry_summary_provider(qpane) -> Iterable[DiagnosticRecord]:
     """Return compact retry counters for the retry detail tier."""
     summaries = _retry_category_summaries(qpane)
     if not summaries:
-        return tuple()
+        return ()
     limited = summaries[:2]
     value = ", ".join(summary.format_summary() for summary in limited)
     yield DiagnosticRecord("Retry|Summary", value)

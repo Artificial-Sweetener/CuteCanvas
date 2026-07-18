@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 class MaskDelegate:
     """Bridge QPane mask calls to MaskService, undo helpers, and autosave wiring."""
 
-    def __init__(self, qpane: "QPane") -> None:
+    def __init__(self, qpane: QPane) -> None:
         """Capture the owning QPane so mask helpers can reach shared state."""
         self._qpane = qpane
         self._catalog_cache = None
@@ -80,7 +80,7 @@ class MaskDelegate:
             return False
         return mask_ready
 
-    def attachMaskService(self, service: "MaskService") -> None:
+    def attachMaskService(self, service: MaskService) -> None:
         """Connect a new mask service, registering hooks and autosave wiring."""
         qpane = self._qpane
         if qpane.mask_service is not None:
@@ -154,20 +154,23 @@ class MaskDelegate:
         if callable(accessor):
             try:
                 current = accessor()
-            except Exception:
-                logger.debug("autosaveManager() raised during autosave teardown")
+            except RuntimeError:
+                logger.debug(
+                    "autosaveManager() raised during autosave teardown",
+                    exc_info=True,
+                )
         if current is not None:
             self._qpane.hooks.detachAutosaveManager()
 
     # Public QPane API forwards
-    def get_mask_undo_state(self, mask_id: uuid.UUID) -> "MaskUndoState | None":
+    def get_mask_undo_state(self, mask_id: uuid.UUID) -> MaskUndoState | None:
         """Expose the undo depth for ``mask_id`` when a service is attached."""
         service = self._mask_service
         if service is None:
             return None
         return service.getUndoState(mask_id)
 
-    def load_mask_from_file(self, path: str) -> "uuid.UUID | None":
+    def load_mask_from_file(self, path: str) -> uuid.UUID | None:
         """Load a mask from ``path`` via the mask service when available."""
         if not self.mask_feature_available():
             return self._fallbacks().get("mask", "load_mask_from_file", default=None)
@@ -352,7 +355,7 @@ class MaskDelegate:
     def update_mask_region(
         self,
         dirty_image_rect: QRect,
-        active_mask_layer: "MaskLayer",
+        active_mask_layer: MaskLayer,
         *,
         sub_mask_image: QImage | None = None,
         force_async_colorize: bool = False,
@@ -406,6 +409,6 @@ class MaskDelegate:
 
     # Helpers
     @property
-    def _mask_service(self) -> "MaskService | None":
+    def _mask_service(self) -> MaskService | None:
         """Expose the QPane-owned MaskService if present."""
         return getattr(self._qpane, "mask_service", None)

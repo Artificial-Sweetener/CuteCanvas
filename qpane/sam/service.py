@@ -18,14 +18,15 @@
 
 from __future__ import annotations
 
-import warnings
-from functools import lru_cache
-from pathlib import Path
-from types import ModuleType
-from typing import TYPE_CHECKING, Any, Callable
+import hashlib
 import sys
 import urllib.request
-import hashlib
+import warnings
+from collections.abc import Callable
+from functools import cache, lru_cache
+from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PySide6.QtCore import QStandardPaths
@@ -132,7 +133,7 @@ def ensure_checkpoint(
     return resolved
 
 
-def load_predictor(checkpoint_path: Path, *, device: str = "cpu") -> "SamPredictor":
+def load_predictor(checkpoint_path: Path, *, device: str = "cpu") -> SamPredictor:
     """Return a SAM predictor initialised on device using a cached model.
 
     Args:
@@ -153,7 +154,7 @@ def load_predictor(checkpoint_path: Path, *, device: str = "cpu") -> "SamPredict
 
 
 def predict_mask_from_box(
-    predictor: "SamPredictor", bbox: np.ndarray
+    predictor: SamPredictor, bbox: np.ndarray
 ) -> np.ndarray | None:
     """Predict a mask for bbox using the provided predictor.
 
@@ -168,7 +169,7 @@ def predict_mask_from_box(
         ValueError: If bbox does not have shape (4,) or (1, 4).
     """
     normalized_bbox = _normalize_bbox(bbox)
-    masks, scores, logits = predictor.predict(
+    masks, _scores, _logits = predictor.predict(
         box=normalized_bbox, multimask_output=False
     )
     if masks.size == 0:
@@ -199,7 +200,7 @@ def _normalize_bbox(bbox: np.ndarray) -> np.ndarray:
 
 
 @lru_cache(maxsize=1)
-def _import_dependencies() -> tuple[ModuleType, type["SamPredictor"], Any]:
+def _import_dependencies() -> tuple[ModuleType, type[SamPredictor], Any]:
     """Import torch/mobilesam-mirror once with warnings suppressed.
 
     Raises:
@@ -331,8 +332,8 @@ def _format_bytes(value: int) -> str:
     return f"{int(size)} B"
 
 
-@lru_cache(maxsize=None)
-def _load_model(device: str, checkpoint_path: Path) -> "torch.nn.Module":
+@cache
+def _load_model(device: str, checkpoint_path: Path) -> torch.nn.Module:
     """Load and cache the MobileSAM model on the target device.
 
     Args:
@@ -343,7 +344,7 @@ def _load_model(device: str, checkpoint_path: Path) -> "torch.nn.Module":
         SamDependencyError: When the checkpoint is missing or dependencies are unavailable.
     """
     checkpoint = checkpoint_path
-    torch, _, sam_model_registry = _import_dependencies()
+    _torch, _, sam_model_registry = _import_dependencies()
     if not checkpoint.exists():
         raise SamDependencyError(
             "SAM checkpoint not found at '"

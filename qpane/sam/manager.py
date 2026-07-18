@@ -19,9 +19,10 @@
 import logging
 import random
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Iterable
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtCore import QCoreApplication, QObject, QRunnable, QThread, QTimer, Signal
@@ -30,13 +31,13 @@ from PySide6.QtGui import QImage
 from ..concurrency import (
     BaseWorker,
     RetryContext,
+    RetryEntriesView,
     TaskExecutorProtocol,
     TaskHandle,
     TaskRejected,
     makeQtRetryController,
     qt_retry_dispatcher,
 )
-from ..concurrency import RetryEntriesView
 from . import service
 
 if TYPE_CHECKING:
@@ -132,7 +133,7 @@ class SamWorker(QRunnable, BaseWorker):
             self.emit_finished(True, payload=(predictor, self.image_id))
         except service.SamDependencyError as exc:
             self.emit_finished(False, payload=(self.image_id, str(exc)), error=exc)
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except Exception as exc:  # noqa: BLE001 - predictor worker boundary
             self.emit_finished(False, payload=(self.image_id, str(exc)), error=exc)
 
     def _handle_cancelled(self) -> None:
@@ -195,12 +196,12 @@ class SamManager(QObject):
         self._device = device
         self._checkpoint_path = checkpoint_path
         self._executor: TaskExecutorProtocol | None = executor
-        self._sam_predictors: dict[uuid.UUID, "SamPredictor"] = {}
+        self._sam_predictors: dict[uuid.UUID, SamPredictor] = {}
         self._cache_hits: int = 0
         self._cache_misses: int = 0
-        self._predictor_sizes: Dict[uuid.UUID, int] = {}
-        self._predictor_paths: Dict[uuid.UUID, Path | None] = {}
-        self._pending_estimates: Dict[uuid.UUID, int] = {}
+        self._predictor_sizes: dict[uuid.UUID, int] = {}
+        self._predictor_paths: dict[uuid.UUID, Path | None] = {}
+        self._pending_estimates: dict[uuid.UUID, int] = {}
         self._inflight: dict[uuid.UUID, tuple[SamWorker, TaskHandle]] = {}
         self._predictor_retry_entries: dict[
             tuple[uuid.UUID, str], _PredictorRetryEntry
@@ -287,7 +288,7 @@ class SamManager(QObject):
             return len(self._inflight)
         try:
             return self._executor.active_counts().get("sam", 0)
-        except Exception:  # pragma: no cover - defensive fallback
+        except Exception:  # noqa: BLE001 - injected executor metrics are optional
             return len(self._inflight)
 
     def getPredictor(self, image_id: uuid.UUID) -> "SamPredictor | None":
@@ -438,12 +439,11 @@ class SamManager(QObject):
                 exc,
             )
             self.maskReady.emit(None, bbox, erase_mode)
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except Exception:
             logger.exception(
-                "Error during mask generation for %s (erase=%s): %s",
+                "Error during mask generation for %s (erase=%s)",
                 image_id,
                 erase_mode,
-                exc,
             )
             self.maskReady.emit(None, bbox, erase_mode)
 
@@ -635,7 +635,7 @@ class SamManager(QObject):
             _SAM_RETRY_BASE_DELAY_MS * (2 ** (capped_attempts - 1)),
         )
         jitter = min(_SAM_RETRY_BASE_DELAY_MS, int(base * 0.25))
-        delay = base + random.randint(0, jitter if jitter > 0 else 0)
+        delay = base + random.randint(0, max(0, jitter))
         return min(
             _SAM_RETRY_MAX_DELAY_MS,
             max(_SAM_RETRY_BASE_DELAY_MS, delay),
@@ -726,7 +726,7 @@ class SamManager(QObject):
         if image is not None and hasattr(image, "sizeInBytes"):
             try:
                 return max(int(image.sizeInBytes()), _DEFAULT_PREDICTOR_ESTIMATE_BYTES)
-            except Exception:  # pragma: no cover - defensive
+            except (RuntimeError, TypeError, ValueError, OverflowError):
                 return _DEFAULT_PREDICTOR_ESTIMATE_BYTES
         return _DEFAULT_PREDICTOR_ESTIMATE_BYTES
 
@@ -760,7 +760,8 @@ class SamManager(QObject):
             for tensor in tensors:
                 try:
                     total += int(tensor.numel()) * int(tensor.element_size())
-                except Exception:  # pragma: no cover - defensive guard
+                except (RuntimeError, TypeError, ValueError, OverflowError):
+                    logger.debug("Could not measure one SAM tensor", exc_info=True)
                     continue
             return total
 

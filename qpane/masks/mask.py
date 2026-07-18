@@ -21,8 +21,9 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Sequence, Set
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QPoint, QSize
@@ -112,7 +113,7 @@ class MaskSurface:
         return _normalize_mask_array(buffer)
 
     @classmethod
-    def from_qimage(cls, image: QImage) -> "MaskSurface":
+    def from_qimage(cls, image: QImage) -> MaskSurface:
         """Build a surface from an existing ``QImage`` snapshot."""
         if image.isNull():
             return cls(np.zeros((0, 0), dtype=np.uint8))
@@ -123,7 +124,7 @@ class MaskSurface:
         return cls(buffer)
 
     @classmethod
-    def blank(cls, size: QSize) -> "MaskSurface":
+    def blank(cls, size: QSize) -> MaskSurface:
         """Create an empty surface matching ``size``."""
         if not size.isValid():
             return cls(np.zeros((0, 0), dtype=np.uint8))
@@ -257,22 +258,22 @@ class MaskManager:
     ) -> None:
         """Initialize mask registries and undo provider with the configured limit."""
         self._undo_limit = max(1, int(undo_limit))
-        self._masks: Dict[uuid.UUID, MaskLayer] = {}
-        self._image_mask_order: Dict[uuid.UUID, List[uuid.UUID]] = {}
-        self._mask_to_images: Dict[uuid.UUID, Set[uuid.UUID]] = {}
+        self._masks: dict[uuid.UUID, MaskLayer] = {}
+        self._image_mask_order: dict[uuid.UUID, list[uuid.UUID]] = {}
+        self._mask_to_images: dict[uuid.UUID, set[uuid.UUID]] = {}
         self._undo_provider: MaskUndoProvider = undo_provider or MaskLayerUndoProvider()
 
-    def get_masks_for_image(self, image_id: uuid.UUID) -> List[MaskLayer]:
+    def get_masks_for_image(self, image_id: uuid.UUID) -> list[MaskLayer]:
         """Retrieve all mask layers for ``image_id`` in draw order (bottom -> top)."""
         mask_ids = self._image_mask_order.get(image_id, [])
         return [self._masks[mid] for mid in mask_ids if mid in self._masks]
 
-    def get_mask_ids_for_image(self, image_id: uuid.UUID) -> List[uuid.UUID]:
+    def get_mask_ids_for_image(self, image_id: uuid.UUID) -> list[uuid.UUID]:
         """Return mask identifiers for ``image_id`` mirroring render order."""
         order = self._image_mask_order.get(image_id)
         return list(order) if order else []
 
-    def get_images_for_mask(self, mask_id: uuid.UUID) -> List[uuid.UUID]:
+    def get_images_for_mask(self, mask_id: uuid.UUID) -> list[uuid.UUID]:
         """Return the image identifiers currently associated with ``mask_id``."""
         images = self._mask_to_images.get(mask_id)
         return list(images) if images else []
@@ -319,7 +320,7 @@ class MaskManager:
     def set_undo_limit(self, undo_limit: int) -> None:
         """Update the undo depth and trim existing stacks as needed."""
         self._undo_limit = max(1, int(undo_limit))
-        for mask_id in self._masks.keys():
+        for mask_id in self._masks:
             self._undo_provider.set_limit(mask_id, self._undo_limit)
 
     @property
@@ -646,7 +647,7 @@ class MaskManager:
     def adjust_component_at_point(
         self,
         mask_id: uuid.UUID,
-        point: "QPoint",
+        point: QPoint,
         grow: bool,
     ) -> QImage | None:
         """Adjust the connected component under ``point`` by growing or shrinking it."""
@@ -678,7 +679,7 @@ class MaskManager:
             )
             return None
         cv2_mod = _require_cv2()
-        num_labels, labels, stats, centroids = cv2_mod.connectedComponentsWithStats(
+        _num_labels, labels, _stats, _centroids = cv2_mod.connectedComponentsWithStats(
             current_mask_np
         )
         target_label = labels[y, x]

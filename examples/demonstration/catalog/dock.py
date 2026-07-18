@@ -17,20 +17,14 @@
 
 """Catalog dock presenting compositions, images, link groups, and masks."""
 
-
 from __future__ import annotations
 
 import uuid
-
 from collections.abc import Callable
-from typing import Optional
-
 from pathlib import Path
 
 from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, Signal
-
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPixmap
-
 from PySide6.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -44,19 +38,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qpane import CompositionEntry
-from qpane import CompositionSnapshot as QPaneCompositionSnapshot
-from qpane import LinkedGroup, QPane
-
 from examples.demonstration import demo_text
-
 from examples.demonstration.catalog.builders import build_catalog_snapshot
 from examples.demonstration.catalog.models import (
     CatalogImage,
     CatalogMask,
     CatalogSnapshot,
 )
-
+from qpane import CompositionEntry, LinkedGroup, QPane
+from qpane import CompositionSnapshot as QPaneCompositionSnapshot
 
 FocusPolicy = Callable[[str], None]
 SelectionPolicy = Callable[[], bool]
@@ -195,9 +185,7 @@ class CatalogDock(QWidget):
             image_id is None
             or not self._show_mask_selection()
             or not self._qpane.maskFeatureAvailable()
-        ):
-            mask_id = None
-        elif self._qpane.currentImageID() != image_id:
+        ) or self._qpane.currentImageID() != image_id:
             mask_id = None
         else:
             mask_id = self._qpane.activeMaskID()
@@ -305,7 +293,7 @@ class CatalogDock(QWidget):
 
     def _handle_clear_links(self) -> None:
         """Clear every configured link group."""
-        self._qpane.setLinkedGroups(tuple())
+        self._qpane.setLinkedGroups(())
 
     def _handle_remove_images(self) -> None:
         """Delete the currently selected images from the qpane catalog."""
@@ -429,7 +417,7 @@ class CatalogDock(QWidget):
             self._handle_reveal_in_file_browser(payload)
             return
 
-    def _handle_change_mask_color(self, mask_entry: "MaskEntry") -> None:
+    def _handle_change_mask_color(self, mask_entry: MaskEntry) -> None:
         """Prompt for a new color and forward the update to the qpane."""
         current_color = mask_entry.color
         color = QColorDialog.getColor(current_color, self, "Select Mask Color")
@@ -484,14 +472,14 @@ class CatalogDock(QWidget):
                 return True
             subprocess.run(["xdg-open", str(resolved.parent)], check=True, shell=False)
             return True
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             return False
 
 
 class MaskEntry:
     """Value object storing mask metadata for quick lookups."""
 
-    __slots__ = ("image_id", "mask_id", "color")
+    __slots__ = ("color", "image_id", "mask_id")
 
     def __init__(self, image_id: uuid.UUID, mask: CatalogMask) -> None:
         """Store the immutable mask metadata required for context actions."""
@@ -660,9 +648,7 @@ class CatalogTree(QTreeWidget):
                     ids.append(image_id)
         return ids
 
-    def mask_details(
-        self, image_id: uuid.UUID, mask_id: uuid.UUID
-    ) -> Optional[MaskEntry]:
+    def mask_details(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> MaskEntry | None:
         """Return cached mask metadata for ``(image_id, mask_id)`` when available."""
         return self._mask_lookup.get((image_id, mask_id))
 

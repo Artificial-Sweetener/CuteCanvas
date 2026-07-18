@@ -17,22 +17,25 @@
 """Config dialog used by the example to edit QPane settings."""
 
 from __future__ import annotations
+
 import json
-from pathlib import Path
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Dict, Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import ClassVar
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFileDialog,
-    QHBoxLayout,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -43,6 +46,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
 from examples.demonstration.config.spec import (
     _ALL_FIELDS,
     _CONFIG_FIELDS,
@@ -270,7 +274,7 @@ class LockedSizeWidget(QWidget):
             try:
                 w = int(value[0])
                 h = int(value[1])
-            except Exception:  # pragma: no cover - defensive
+            except (IndexError, TypeError, ValueError, OverflowError):
                 return fallback, fallback
             if w > 0 and h > 0:
                 return w, h
@@ -281,7 +285,7 @@ class LockedSizeWidget(QWidget):
 class ConfigResult:
     """Diff from the dialog along with context needed for application."""
 
-    values: Dict[str, object]
+    values: dict[str, object]
     config_fields: set[str]
     all_fields: set[str]
     restart_fields: set[str]
@@ -303,7 +307,7 @@ class DomainCheckboxGroup(QWidget):
         super().__init__(parent)
         self._domains = tuple(domains)
         selected_set = set(selected)
-        self._checkboxes: Dict[str, QCheckBox] = {}
+        self._checkboxes: dict[str, QCheckBox] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -359,9 +363,9 @@ class ConfigDialog(QDialog):
         active_features: Installed feature names used to hide gated controls.
     """
 
-    ALL_FIELDS: set[str] = _ALL_FIELDS
-    CONFIG_FIELDS: set[str] = _CONFIG_FIELDS
-    SAM_FIELDS: set[str] = set(_SAM_CONFIG_FIELDS)
+    ALL_FIELDS: ClassVar[set[str]] = _ALL_FIELDS
+    CONFIG_FIELDS: ClassVar[set[str]] = _CONFIG_FIELDS
+    SAM_FIELDS: ClassVar[set[str]] = set(_SAM_CONFIG_FIELDS)
 
     def __init__(
         self,
@@ -399,15 +403,15 @@ class ConfigDialog(QDialog):
             self._config_fields,
             self._field_specs,
         ) = field_sets_for_sections(self._sections)
-        self._widgets: Dict[str, QWidget] = {}
-        self._field_containers: Dict[str, QWidget] = {}
-        self._field_labels: Dict[str, QWidget] = {}
+        self._widgets: dict[str, QWidget] = {}
+        self._field_containers: dict[str, QWidget] = {}
+        self._field_labels: dict[str, QWidget] = {}
         self._concurrency_adv: ConcurrencyAdvancedWidget | None = None
-        self._concurrency_initial: Dict[str, object] = {}
-        self._concurrency_defaults: Dict[str, object] = {}
-        self._section_items: Dict[str, QWidget] = {}
-        self._section_terms: Dict[str, set[str]] = {}
-        self._tab_indices: Dict[str, int] = {}
+        self._concurrency_initial: dict[str, object] = {}
+        self._concurrency_defaults: dict[str, object] = {}
+        self._section_items: dict[str, QWidget] = {}
+        self._section_terms: dict[str, set[str]] = {}
+        self._tab_indices: dict[str, int] = {}
         self._cache_mode: QComboBox | None = None
         self._cache_headroom_percent: QWidget | None = None
         self._cache_headroom_cap: QWidget | None = None
@@ -434,7 +438,7 @@ class ConfigDialog(QDialog):
         root_layout.addLayout(filter_row)
         tabs = QTabWidget(self)
         self._tabs = tabs
-        self._tab_layouts: Dict[str, QVBoxLayout] = {}
+        self._tab_layouts: dict[str, QVBoxLayout] = {}
         self._build_sections(tabs)
         root_layout.addWidget(tabs)
         preview_box = QGroupBox("Config Preview", self)
@@ -555,7 +559,7 @@ class ConfigDialog(QDialog):
             ) or {}
             try:
                 return int(concurrency.get("max_workers", 8))
-            except Exception:  # pragma: no cover - defensive
+            except (TypeError, ValueError, OverflowError):
                 return 8
         if name == "concurrency_max_pending_total":
             concurrency = (
@@ -704,7 +708,7 @@ class ConfigDialog(QDialog):
             selected = (
                 tuple(current_value)
                 if isinstance(current_value, (list, tuple, set))
-                else tuple()
+                else ()
             )
             widget = DomainCheckboxGroup(
                 domains=available_domains,
@@ -820,9 +824,9 @@ class ConfigDialog(QDialog):
         )
 
     @staticmethod
-    def collapse_values(values: Mapping[str, object]) -> Dict[str, object]:
+    def collapse_values(values: Mapping[str, object]) -> dict[str, object]:
         """Convert dotted keys into nested dictionaries for downstream consumers."""
-        collapsed: Dict[str, object] = {}
+        collapsed: dict[str, object] = {}
         for key, value in values.items():
             if "." not in key:
                 collapsed[key] = value
@@ -872,9 +876,7 @@ class ConfigDialog(QDialog):
 
     def _wire_widget_signals(self, widget: QWidget) -> None:
         """Attach change listeners so the preview stays in sync."""
-        if isinstance(widget, QSpinBox):
-            widget.valueChanged.connect(self._trigger_preview_update)
-        elif isinstance(widget, QDoubleSpinBox):
+        if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
             widget.valueChanged.connect(self._trigger_preview_update)
         elif isinstance(widget, QCheckBox):
             widget.toggled.connect(self._trigger_preview_update)
@@ -1010,10 +1012,10 @@ class ConfigDialog(QDialog):
     def _diff_against(
         self,
         reference_snapshot: Mapping[str, object],
-        concurrency_reference: Dict[str, object] | None,
-    ) -> Dict[str, object]:
+        concurrency_reference: dict[str, object] | None,
+    ) -> dict[str, object]:
         """Return the flattened config diff relative to the provided baselines."""
-        values: Dict[str, object] = {}
+        values: dict[str, object] = {}
         for name, widget in self._widgets.items():
             spec = self._field_specs.get(name)
             reference_value = (
@@ -1148,7 +1150,7 @@ class ConfigDialog(QDialog):
             return current, normalized_reference
         return reference_value, reference_value
 
-    def _concurrency_maps_from_widget(self) -> Dict[str, object]:
+    def _concurrency_maps_from_widget(self) -> dict[str, object]:
         """Return the current concurrency tuning maps from the advanced widget."""
         prios, cats, pend, devs = self._concurrency_adv.value_maps()
         result = {
@@ -1162,13 +1164,13 @@ class ConfigDialog(QDialog):
 
     @staticmethod
     def _normalize_concurrency_reference(
-        reference: Dict[str, object],
-        template: Dict[str, object],
-    ) -> Dict[str, object]:
+        reference: dict[str, object],
+        template: dict[str, object],
+    ) -> dict[str, object]:
         """Align a reference mapping to the structure of ``template``."""
         if not reference:
             return template
-        normalized: Dict[str, object] = {}
+        normalized: dict[str, object] = {}
         for key, template_map in template.items():
             if key == "concurrency_device_limits_map":
                 normalized_devices: dict[str, dict[str, int]] = {}
@@ -1198,7 +1200,7 @@ class ConfigDialog(QDialog):
     @staticmethod
     def _concurrency_maps_from_config(
         config_snapshot: Mapping[str, object] | None,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Build normalized concurrency maps from a Config dict snapshot."""
         data = (
             config_snapshot.get("concurrency")

@@ -45,9 +45,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qpane import QPane
-
 from examples.demonstration.touch_and_pen import build_touch_mask_editor
+from qpane import QPane
 
 
 class PointerSimulator:

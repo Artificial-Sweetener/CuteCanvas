@@ -18,12 +18,14 @@
 
 import uuid
 from pathlib import Path
+
 import pytest
 from PySide6.QtGui import QImage
+
+from qpane import Config
 from qpane.catalog import ImageCatalog
 from qpane.scene.identity import SceneLayerAssetKey
 from qpane.types import CatalogEntry
-from qpane import Config
 from tests.helpers.executor_stubs import StubExecutor
 
 
@@ -344,4 +346,4 @@ def test_catalog_passes_executor_to_pyramid_manager() -> None:
     """ImageCatalog should supply the shared executor to PyramidManager."""
     executor = StubExecutor()
     catalog = ImageCatalog(config=Config(), executor=executor)
-    assert getattr(catalog.pyramid_manager, "_executor") is executor
+    assert catalog.pyramid_manager._executor is executor

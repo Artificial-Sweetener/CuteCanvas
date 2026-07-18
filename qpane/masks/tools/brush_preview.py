@@ -47,7 +47,7 @@ class BrushPreview:
         erase: bool,
         device: PointerDeviceKind,
         contact: bool,
-    ) -> "BrushPreview":
+    ) -> BrushPreview:
         """Copy one preview observation into immutable scalar state."""
         return cls(
             panel_x=float(position.x()),
@@ -79,7 +79,7 @@ class BrushPreview:
             logical_diameter,
             logical_diameter,
         ).toAlignedRect()
-        margin = max(1, int(round(float(padding))))
+        margin = max(1, round(float(padding)))
         return bounds.adjusted(-margin, -margin, margin, margin)
 
 

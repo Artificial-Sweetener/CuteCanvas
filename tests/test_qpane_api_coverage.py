@@ -16,12 +16,14 @@
 
 """Tests ensuring full coverage of the QPane public API surface."""
 
-from pathlib import Path
 import uuid
+from pathlib import Path
+
 import pytest
-from PySide6.QtCore import QRectF, QPoint, QSize
+from PySide6.QtCore import QPoint, QRectF, QSize
 from PySide6.QtGui import QImage, Qt
-from qpane import QPane, Config, ExtensionTool
+
+from qpane import Config, ExtensionTool, QPane
 
 
 def _cleanup_qpane(qpane, qapp):
@@ -196,7 +198,7 @@ def test_mask_delegates_stub(qapp, monkeypatch):
                 self.manager = type(
                     "MaskManagerStub",
                     (),
-                    {"get_mask_ids_for_image": staticmethod(lambda _image_id: tuple())},
+                    {"get_mask_ids_for_image": staticmethod(lambda _image_id: ())},
                 )()
 
             def setMaskProperties(self, mask_id, color, opacity):

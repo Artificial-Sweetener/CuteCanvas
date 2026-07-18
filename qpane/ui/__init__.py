@@ -18,9 +18,8 @@
 
 from __future__ import annotations
 
-from .widget_props import apply_widget_defaults
-from .cursor_builder import CursorBuilder
 from .clipboard import copyToClipboard
+from .cursor_builder import CursorBuilder
 from .dragdrop import drag_out_image, is_drag_out_allowed
 from .dragout import maybeStartDrag
 from .overlays import (
@@ -29,16 +28,17 @@ from .overlays import (
     resume_overlays_and_update,
 )
 from .status import create_status_overlay
+from .widget_props import apply_widget_defaults
 
 __all__ = [
-    "apply_widget_defaults",
     "CursorBuilder",
+    "apply_widget_defaults",
     "copyToClipboard",
+    "create_status_overlay",
     "drag_out_image",
     "is_drag_out_allowed",
     "maybeStartDrag",
     "maybe_resume_overlays",
     "resume_overlays",
     "resume_overlays_and_update",
-    "create_status_overlay",
 ]

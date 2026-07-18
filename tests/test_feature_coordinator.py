@@ -16,6 +16,7 @@
 
 import sys
 import types
+
 from qpane.core import FeatureCoordinator, FeatureFallbacks
 from qpane.core.feature_coordinator import _FeatureSpec
 
@@ -23,13 +24,9 @@ from qpane.core.feature_coordinator import _FeatureSpec
 class DummyQPane:
     """Minimal QPane stub used for coordinator tests."""
 
-    pass
-
 
 def test_unknown_feature_records_failure_and_fallback(monkeypatch):
-    monkeypatch.setattr(
-        "qpane.core.feature_coordinator._DEFAULT_FEATURE_SPECS", tuple()
-    )
+    monkeypatch.setattr("qpane.core.feature_coordinator._DEFAULT_FEATURE_SPECS", ())
     fallbacks = FeatureFallbacks()
     coordinator = FeatureCoordinator(DummyQPane(), fallbacks)
     summary = coordinator.install(("mystery",))

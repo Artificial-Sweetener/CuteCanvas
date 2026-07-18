@@ -18,18 +18,19 @@
 
 from __future__ import annotations
 
+import math
+import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-import math
 from pathlib import Path
-import time
 from types import MethodType, TracebackType
-import uuid
 
 from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from typing_extensions import Self
 
 from qpane import QPane
 from qpane.scene.render_plan import MaskLayerRenderItem, SceneRenderPlan
@@ -62,13 +63,13 @@ class PresentedMaskFrame:
 class PresentedFrameProbe:
     """Record every backing frame rendered while the probe is active."""
 
-    def __init__(self, harness: "MountedQPaneHarness") -> None:
+    def __init__(self, harness: MountedQPaneHarness) -> None:
         """Bind the mounted pane without changing its rendering policy."""
         self._renderer = harness.viewer.view().presenter.renderer
         self._original_paint: Callable[[SceneRenderPlan], None] | None = None
         self.frames: list[PresentedMaskFrame] = []
 
-    def __enter__(self) -> "PresentedFrameProbe":
+    def __enter__(self) -> Self:
         """Begin recording frames after normal renderer painting completes."""
         original_paint = self._renderer.paint
         self._original_paint = original_paint
@@ -113,8 +114,8 @@ class MountedQPaneHarness:
         self,
         qapp: QApplication,
         *,
-        image_size: QSize = QSize(400, 400),
-        widget_size: QSize = QSize(400, 400),
+        image_size: QSize | None = None,
+        widget_size: QSize | None = None,
         mask_count: int = 1,
         brush_size: int = 30,
         cache_budget_mb: int = 1024,
@@ -124,6 +125,8 @@ class MountedQPaneHarness:
             raise ValueError("mask_count must be at least one")
         if cache_budget_mb < 1:
             raise ValueError("cache_budget_mb must be at least one")
+        image_size = QSize(400, 400) if image_size is None else QSize(image_size)
+        widget_size = QSize(400, 400) if widget_size is None else QSize(widget_size)
         self.qapp = qapp
         self.host = QWidget()
         self.host.resize(widget_size)

@@ -16,6 +16,7 @@
 
 """Core orchestration, configuration, and diagnostics helpers for QPane."""
 
+from ..types import DiagnosticRecord
 from .config import CacheSettings, CacheWeights, Config, PrefetchSettings
 from .diagnostics import (
     DiagnosticsProvider,
@@ -35,29 +36,28 @@ from .hooks import (
     ToolFactory,
     ToolSignalBinder,
 )
-from ..types import DiagnosticRecord
 
 __all__ = [
-    "CacheWeights",
     "CacheSettings",
+    "CacheWeights",
     "Config",
-    "PrefetchSettings",
-    "FeatureFailure",
-    "FeatureFallbacks",
+    "CursorProvider",
     "DiagnosticRecord",
+    "Diagnostics",
     "DiagnosticsProvider",
     "DiagnosticsRegistry",
     "DiagnosticsSnapshot",
-    "build_core_diagnostics",
-    "pyramid_level_record",
-    "Diagnostics",
     "FeatureCoordinator",
-    "CursorProvider",
+    "FeatureFailure",
+    "FeatureFallbacks",
     "OverlayDrawFn",
-    "SceneOverlayDrawFn",
+    "PrefetchSettings",
     "QPaneHooks",
+    "SceneOverlayDrawFn",
     "ToolFactory",
     "ToolSignalBinder",
+    "build_core_diagnostics",
+    "pyramid_level_record",
 ]
 
 

@@ -16,9 +16,9 @@
 
 """Tests for the public types and enums exposed by the qpane facade."""
 
-from pathlib import Path
-from dataclasses import FrozenInstanceError
 import uuid
+from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QRectF
@@ -40,7 +40,8 @@ from qpane import (
     QPaneTemplateLayer,
     ZoomMode,
 )
-from qpane.types import DiagnosticRecord, __all__ as exported_types
+from qpane.types import DiagnosticRecord
+from qpane.types import __all__ as exported_types
 
 
 def test_type_exports_are_listed() -> None:
@@ -113,7 +114,7 @@ def test_linked_group_is_frozen_and_preserves_members() -> None:
     assert group.group_id == group_id
     assert group.members == members
     with pytest.raises(FrozenInstanceError):
-        group.members = tuple()  # type: ignore[misc]
+        group.members = ()  # type: ignore[misc]
 
 
 def test_diagnostic_record_formatting() -> None:

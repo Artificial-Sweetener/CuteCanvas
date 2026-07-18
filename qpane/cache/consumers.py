@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .coordinator import CacheConsumerCallbacks, CacheCoordinator, CachePriority
 
@@ -250,7 +251,7 @@ class SamPredictorCacheConsumer:
                 exc_info=True,
             )
 
-    def _on_predictor_ready(self, predictor, image_id):  # noqa: ANN001
+    def _on_predictor_ready(self, predictor, image_id):
         """Record predictor estimates once the manager signals readiness."""
         self._notify()
 
@@ -279,7 +280,7 @@ class SamPredictorCacheConsumer:
             logger.exception("SAM predictor usage hooks failed")
             raise
 
-    def _set_budget(self, target_bytes: int) -> None:  # noqa: ARG002
+    def _set_budget(self, target_bytes: int) -> None:
         """SAM predictors lack a budget knob; trims drive enforcement."""
         return
 
@@ -294,13 +295,17 @@ class SamPredictorCacheConsumer:
             logger.error(
                 "SAM predictor manager missing removeFromCache; cannot enforce trims"
             )
-            raise RuntimeError("removeFromCache missing for SAM cache consumer")
+            raise RuntimeError(  # noqa: TRY004 - collaborator contract failure
+                "removeFromCache missing for SAM cache consumer"
+            )
         id_accessor = getattr(self._manager, "predictorImageIds", None)
         if not callable(id_accessor):
             logger.error(
                 "SAM predictor manager missing predictorImageIds; cannot enumerate cache keys"
             )
-            raise RuntimeError("predictorImageIds missing for SAM cache consumer")
+            raise RuntimeError(  # noqa: TRY004 - collaborator contract failure
+                "predictorImageIds missing for SAM cache consumer"
+            )
         for image_id in id_accessor():
             if usage <= target:
                 break
@@ -385,7 +390,7 @@ class MaskOverlayCacheConsumer:
             logger.exception("Mask controller failed to report cache usage")
             raise
 
-    def _set_budget(self, target_bytes: int) -> None:  # noqa: ARG002
+    def _set_budget(self, target_bytes: int) -> None:
         """Mask overlays lack a budget knob; trims enforce the limit."""
         return
 
@@ -400,7 +405,7 @@ class MaskOverlayCacheConsumer:
             logger.error(
                 "Mask controller missing drop_oldest_cached_mask; cannot trim mask cache"
             )
-            raise RuntimeError(
+            raise RuntimeError(  # noqa: TRY004 - collaborator contract failure
                 "drop_oldest_cached_mask missing for mask cache consumer"
             )
         active_accessor = getattr(self._controller, "get_active_mask_id", None)
@@ -408,7 +413,10 @@ class MaskOverlayCacheConsumer:
         if callable(active_accessor):
             try:
                 active_mask_id = active_accessor()
-            except Exception:  # pragma: no cover - defensive
+            except Exception:
+                logger.debug(
+                    "Active mask lookup failed during cache trim", exc_info=True
+                )
                 active_mask_id = None
         exclude = {active_mask_id} if active_mask_id else set()
         while usage > target:
@@ -516,8 +524,8 @@ def _wrap_manager_hook(
     attr_name: str,
     *,
     log_message: str,
-    after_success: "Callable[[Any, tuple[Any, ...], dict[str, Any]], None] | None" = None,
-    after_finally: "Callable[[], None] | None" = None,
+    after_success: Callable[[Any, tuple[Any, ...], dict[str, Any]], None] | None = None,
+    after_finally: Callable[[], None] | None = None,
 ) -> None:
     """Wrap a manager method with logging and notification hooks.
 
@@ -546,7 +554,7 @@ def _wrap_manager_hook(
                 attr_name,
             )
             _MISSING_HOOK_LOGS.add(key)
-        raise RuntimeError(
+        raise RuntimeError(  # noqa: TRY004 - collaborator contract failure
             f"Missing required manager hook {type(manager).__name__}.{attr_name}"
         )
 
@@ -575,8 +583,12 @@ def _install_admission_guard(manager: Any, guard: Callable[[int], bool] | None) 
         return
     try:
         setter(guard)
-    except Exception:  # pragma: no cover - defensive
-        logger.debug("Admission guard install failed for %s", type(manager).__name__)
+    except Exception:
+        logger.debug(
+            "Admission guard install failed for %s",
+            type(manager).__name__,
+            exc_info=True,
+        )
 
 
 def _run_cache_batch_trim(
@@ -622,7 +634,9 @@ def _run_cache_batch_trim(
             consumer_id,
             missing_hook_label,
         )
-        raise RuntimeError(f"Missing cache trim hook {missing_hook_label}")
+        raise RuntimeError(  # noqa: TRY004 - collaborator contract failure
+            f"Missing cache trim hook {missing_hook_label}"
+        )
     attempts = 0
     while usage > target and attempts < max_attempts:
         batch()
@@ -642,7 +656,7 @@ def _run_cache_batch_trim(
 _INVALID_VALUE_LOGGED: set[str] = set()
 
 
-def _safe_int(value: int | float, *, label: str | None = None) -> int:
+def _safe_int(value: float, *, label: str | None = None) -> int:
     """Clamp the provided value to a non-negative integer."""
     try:
         return max(0, int(value))

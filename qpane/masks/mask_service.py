@@ -22,9 +22,10 @@ import logging
 import uuid
 import weakref
 from collections import deque
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from time import monotonic
-from typing import TYPE_CHECKING, Callable, Deque, Mapping, Sequence, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtCore import QMetaObject, QRect, QRunnable, QSize, Qt, QTimer
@@ -36,16 +37,16 @@ from ..catalog.image_utils import (
 )
 from ..concurrency import BaseWorker, TaskExecutorProtocol, TaskHandle, TaskRejected
 from ..core import Config
-from ..types import DiagnosticRecord, DiagnosticsDomain
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from ..features import FeatureInstallError
+from ..types import DiagnosticRecord, DiagnosticsDomain
 from .autosave import AutosaveManager
 from .mask import MaskLayer, MaskManager
 from .mask_controller import MaskController, Masking
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_undo import MaskUndoProvider, MaskUndoState
-from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 from .stroke_models import MaskStrokeSegmentPayload
+from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 
@@ -79,7 +80,7 @@ class _PrefetchHandle:
     """Track one queued prefetch and the render revisions it owns."""
 
     handle: TaskHandle
-    mask_revisions: Tuple[Tuple[uuid.UUID, int], ...]
+    mask_revisions: tuple[tuple[uuid.UUID, int], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +90,7 @@ class PrefetchedOverlay:
     mask_id: uuid.UUID
     render_revision: int
     image: QImage
-    scaled: Tuple[Tuple[float, QImage], ...] = tuple()
+    scaled: tuple[tuple[float, QImage], ...] = ()
 
 
 class MaskService:
@@ -98,7 +99,7 @@ class MaskService:
     def __init__(
         self,
         *,
-        qpane: "QPane",
+        qpane: QPane,
         mask_manager: MaskManager,
         mask_controller: MaskController,
         config: Config,
@@ -126,7 +127,7 @@ class MaskService:
             executor=executor,
         )
         self._connected_autosave_manager: AutosaveManager | None = None
-        self._status_messages: Deque[tuple[str, str]] = deque(maxlen=8)
+        self._status_messages: deque[tuple[str, str]] = deque(maxlen=8)
         self._prefetch_enabled = True
         self._cancelled_prefetch_tasks: set[str] = set()
         self._prefetch_handles: dict[uuid.UUID, _PrefetchHandle] = {}
@@ -134,7 +135,7 @@ class MaskService:
         self._pending_prefetched_overlays: dict[uuid.UUID, PrefetchedOverlay] = {}
         self._pending_activation_images: set[uuid.UUID] = set()
         self._prefetch_stats = _MaskPrefetchStats()
-        self._prefetch_scales: Tuple[float, ...] = (0.5, 0.25)
+        self._prefetch_scales: tuple[float, ...] = (0.5, 0.25)
         self._scene_mutations: SceneMutationCoordinator | None = None
         self._scene_mutation_owner: MaskSceneMutationOwner | None = None
         self._catalog.onNavigationStarted(self._handle_catalog_navigation_started)
@@ -295,7 +296,7 @@ class MaskService:
         """Return mask order and render revisions for scene compilation."""
         image_id = self._catalog.currentImageID()
         if image_id is None:
-            return (None, tuple())
+            return (None, ())
         mask_revisions = tuple(
             (
                 mask_id,
@@ -306,7 +307,7 @@ class MaskService:
         return (image_id, mask_revisions)
 
     def setSceneMutationCoordinator(
-        self, coordinator: "SceneMutationCoordinator | None"
+        self, coordinator: SceneMutationCoordinator | None
     ) -> None:
         """Register mask layer mutations with the internal scene coordinator."""
         current_owner = self._scene_mutation_owner
@@ -379,7 +380,7 @@ class MaskService:
 
     def _scene_layer_for_mask(
         self, mask_id: uuid.UUID
-    ) -> tuple["SceneDescriptor", "LayerDescriptor"] | None:
+    ) -> tuple[SceneDescriptor, LayerDescriptor] | None:
         """Return the active scene/layer pair for ``mask_id`` when visible."""
         coordinator = self._scene_mutations
         if coordinator is None:
@@ -497,7 +498,7 @@ class MaskService:
 
     def _resolve_prefetch_scales(
         self, scales: Sequence[float] | None
-    ) -> Tuple[float, ...]:
+    ) -> tuple[float, ...]:
         """Normalize and de-duplicate requested overlay scales for worker prefetch."""
         candidate = scales if scales is not None else self._prefetch_scales
         normalized: list[float] = []
@@ -617,6 +618,7 @@ class MaskService:
             try:
                 cancelled = executor.cancel(handle)
             except Exception:
+                logger.debug("Mask prefetch cancellation failed", exc_info=True)
                 cancelled = False
         if cancelled:
             message = f"Prefetch cancelled for {self._format_uuid(image_id)}."
@@ -879,7 +881,7 @@ class MaskService:
                 if catalog is not None:
                     try:
                         resolved_image_id = catalog.currentImageID()
-                    except Exception:
+                    except RuntimeError:
                         resolved_image_id = None
             try:
                 if warm_cache and mid is not None:
@@ -949,7 +951,7 @@ class MaskService:
     def updateMaskRegion(
         self,
         dirty_image_rect: QRect,
-        mask_layer: "MaskLayer",
+        mask_layer: MaskLayer,
         *,
         sub_mask_image: QImage | None = None,
         force_async_colorize: bool = False,
@@ -976,7 +978,7 @@ class MaskService:
             zoom = 1.0
         stride = 1
         if zoom < 1.0:
-            stride = max(1, int(round(1.0 / max(zoom, 1e-6))))
+            stride = max(1, round(1.0 / max(zoom, 1e-6)))
         if (
             sub_mask_image is None
             and stride > 1
@@ -1064,7 +1066,7 @@ class MaskService:
             self._mask_controller.mask_updated.emit(update.mask_id, QRect())
 
     def getColorizedMask(
-        self, mask_layer: "MaskLayer", *, scale: float | None = None
+        self, mask_layer: MaskLayer, *, scale: float | None = None
     ) -> QPixmap | None:
         """Get the colorized pixmap for ``mask_layer`` when available."""
         return self._mask_controller.get_colorized_mask(mask_layer, scale=scale)
@@ -1144,7 +1146,7 @@ class MaskService:
     def _request_async_colorize(
         self,
         mask_id: uuid.UUID,
-        mask_layer: "MaskLayer",
+        mask_layer: MaskLayer,
     ) -> bool:
         """Queue asynchronous colorization for full-mask cache misses."""
         render_revision = self._mask_controller.maskRenderRevision(mask_id)
@@ -1190,14 +1192,14 @@ class MaskService:
             return None
         try:
             return catalog.currentImageID()
-        except Exception:  # pragma: no cover - defensive guard
+        except RuntimeError:  # pragma: no cover - catalog teardown
             return None
 
     def _schedule_snippet_colorize(
         self,
         mask_id: uuid.UUID,
         dirty_image_rect: QRect,
-        mask_layer: "MaskLayer",
+        mask_layer: MaskLayer,
         snippet: QImage,
     ) -> bool:
         """Dispatch a snippet colorization worker for the dirty mask region."""
@@ -1218,8 +1220,8 @@ class MaskService:
         if previous is not None:
             try:
                 executor.cancel(previous)
-            except Exception:  # pragma: no cover - defensive
-                pass
+            except Exception:
+                logger.debug("Previous mask snippet cancellation failed", exc_info=True)
         try:
             handle = executor.submit(worker, category="mask_snippet")
         except TaskRejected as exc:
@@ -1475,7 +1477,7 @@ class MaskService:
         self._pending_prefetched_overlays.pop(mask_id, None)
         self._reset_pending_strokes(mask_id, request_redraw=request_redraw)
 
-    def _diagnostics_provider(self, _: "QPane") -> Sequence[DiagnosticRecord]:
+    def _diagnostics_provider(self, _: QPane) -> Sequence[DiagnosticRecord]:
         """Surface recent mask service status messages for diagnostics overlays."""
         records: list[DiagnosticRecord] = []
         suppressed_labels = {"Mask", "Mask Autosave"}
@@ -1843,7 +1845,7 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
         mask_ids: Sequence[uuid.UUID],
         mask_manager: MaskManager,
         controller: MaskController,
-        service: "MaskService",
+        service: MaskService,
         scales: Sequence[float] | None = None,
     ) -> None:
         """Record collaborators required to pre-colorize mask renders."""
@@ -1858,7 +1860,7 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
             catalog = getattr(service, "_catalog", None)
             if catalog is not None:
                 current_id = catalog.currentImageID()
-        except Exception:  # pragma: no cover - defensive
+        except RuntimeError:  # pragma: no cover - catalog teardown
             current_id = None
         if current_id in masks:
             masks.remove(current_id)
@@ -1867,7 +1869,7 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
         self._mask_manager = manager
         self._controller = controller
         self._service_ref = weakref.ref(service)
-        self._scales: Tuple[float, ...] = tuple(scales or ())
+        self._scales: tuple[float, ...] = tuple(scales or ())
         self._task_id: str | None = None
         self.setAutoDelete(False)
 
@@ -1898,11 +1900,11 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                     image = self._controller.prepare_colorized_mask(
                         layer, mask_id=mask_id
                     )
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception as exc:  # noqa: BLE001 - isolate one corrupt mask
                     failures[mask_id] = str(exc)
                     continue
                 if image is not None:
-                    scaled_outputs: list[Tuple[float, QImage]] = []
+                    scaled_outputs: list[tuple[float, QImage]] = []
                     for scale_key in self._scales:
                         target_size = self._controller._target_scaled_size(
                             image.size(), scale_key
@@ -1987,7 +1989,7 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
         snippet: QImage,
         color: QColor,
         controller: MaskController,
-        service: "MaskService",
+        service: MaskService,
     ) -> None:
         """Capture snippet metadata and controller hooks for async colorization."""
         QRunnable.__init__(self)
@@ -2074,7 +2076,7 @@ class MaskAutosaveCoordinator:
     def __init__(
         self,
         *,
-        qpane: "QPane",
+        qpane: QPane,
         mask_manager: MaskManager,
         mask_controller: MaskController,
         executor: TaskExecutorProtocol,
@@ -2199,7 +2201,7 @@ class MaskAutosaveCoordinator:
         manager.saveBlankMask(str(active_id), image.size())
 
 
-def should_enable_mask_autosave(qpane: "QPane") -> bool:
+def should_enable_mask_autosave(qpane: QPane) -> bool:
     """Return True when mask autosave should be active for qpane using public QPane accessors."""
     settings = getattr(qpane, "settings", None)
     if settings is None:
@@ -2211,15 +2213,7 @@ def should_enable_mask_autosave(qpane: "QPane") -> bool:
     if not mask_config.mask_autosave_enabled:
         return False
     service = getattr(qpane, "mask_service", None)
-    if service is None:
-        return False
-    image_accessor = getattr(qpane, "currentImage", None)
-    if callable(image_accessor):
-        try:
-            image_accessor()
-        except Exception:
-            pass
-    return True
+    return service is not None
 
 
 def _random_mask_color(layer_index: int = 0) -> QColor:

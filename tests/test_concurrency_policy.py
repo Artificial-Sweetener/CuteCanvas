@@ -17,7 +17,9 @@
 """Tests covering concurrency policy normalization utilities."""
 
 from __future__ import annotations
+
 import pytest
+
 from qpane.concurrency.thread_policy import build_thread_policy
 
 

@@ -19,14 +19,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QWheelEvent
 
-from qpane.tools.base import BaseTool
 from qpane.tools import ToolDependencies
+from qpane.tools.base import BaseTool
 from qpane.tools.input.model import PointerPhase, PointerSample
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,7 @@ class SmartSelectTool(BaseTool):
 
     def getCursor(self):
         """Let the QPane provide the smart-select cursor with erase indicators."""
-        return None
+        return
 
     def mousePressEvent(self, event: QMouseEvent):
         """Start a rectangular selection when the user presses the left button."""
@@ -250,7 +251,7 @@ class SmartSelectTool(BaseTool):
 
 
 def connect_smart_select_signals(
-    manager_signals: "ToolManagerSignals", tool: BaseTool
+    manager_signals: ToolManagerSignals, tool: BaseTool
 ) -> None:
     """Connect SmartSelectTool signals to the ToolManager bus."""
     tool.signals.region_selected_for_masking.connect(
@@ -262,7 +263,7 @@ def connect_smart_select_signals(
 
 
 def disconnect_smart_select_signals(
-    manager_signals: "ToolManagerSignals", tool: BaseTool
+    manager_signals: ToolManagerSignals, tool: BaseTool
 ) -> None:
     """Disconnect SmartSelectTool signals with diagnostics."""
     mappings = (
@@ -288,7 +289,7 @@ def disconnect_smart_select_signals(
             )
 
 
-def smart_select_cursor_provider(qpane_instance: "QPane") -> QCursor | None:
+def smart_select_cursor_provider(qpane_instance: QPane) -> QCursor | None:
     """Provide the smart-select cursor with erase indicator support."""
     return qpane_instance.cursor_builder.create_smart_select_cursor(
         erase_indicator=qpane_instance.interaction.alt_key_held

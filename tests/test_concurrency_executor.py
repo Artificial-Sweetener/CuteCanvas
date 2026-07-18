@@ -17,9 +17,22 @@
 """Tests for the Qt-based executor and worker scaffolding."""
 
 from __future__ import annotations
+
 import threading
+from types import SimpleNamespace
+
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QRunnable, QThreadPool
+from PySide6.QtCore import (
+    QCoreApplication,
+    QEvent,
+    QObject,
+    QRunnable,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
+from shiboken6 import isValid
+
 from qpane.concurrency import (
     QThreadPoolExecutor,
     TaskHandle,
@@ -28,14 +41,12 @@ from qpane.concurrency import (
     ThreadPolicy,
 )
 from qpane.concurrency.base_worker import BaseWorker
-from types import SimpleNamespace
-
+from qpane.concurrency.executor import ExecutorSnapshot, _TaskEntry
 from qpane.concurrency.metrics import (
     executor_diagnostics_provider,
     gather_executor_snapshot,
     retry_summary_provider,
 )
-from qpane.concurrency.executor import ExecutorSnapshot, _TaskEntry
 from tests.helpers.executor_stubs import CallableRunnable, StubExecutor
 
 
@@ -79,6 +90,30 @@ class _RecordingWorker(QRunnable, BaseWorker):
 
     def run(self) -> None:
         self.emit_finished(True, payload="completed")
+
+
+class _TimerBackedSignals(QObject):
+    """Signal bridge with a timer that exposes wrong-thread destruction."""
+
+    finished = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.timer = QTimer(self)
+        self.timer.start(60_000)
+
+
+class _SignalDisposalWorker(QRunnable, BaseWorker):
+    """Worker whose terminal signal bridge must be retired on the GUI thread."""
+
+    def __init__(self) -> None:
+        QRunnable.__init__(self)
+        BaseWorker.__init__(self)
+        self.signals = _TimerBackedSignals()
+
+    def run(self) -> None:
+        """Report completion from the pool thread."""
+        self.emit_finished(True)
 
 
 @pytest.mark.usefixtures("qapp")
@@ -272,6 +307,21 @@ class TestBaseWorkerIntegration:
         assert recorded_handle == handle
         assert outcome.success is True
         assert outcome.payload == "completed"
+
+    @pytest.mark.usefixtures("qapp")
+    def test_terminal_signal_bridge_is_disposed_on_gui_thread(self) -> None:
+        """Retire worker-owned QObjects through Qt's owning event loop."""
+        pool = QThreadPool()
+        executor = QThreadPoolExecutor(pool=pool, name="signal-disposal")
+        worker = _SignalDisposalWorker()
+        signal_bridge = worker.signals
+        executor.submit(worker, category="test")
+
+        assert pool.waitForDone(5_000)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+        assert not isValid(signal_bridge)
+        executor.shutdown()
 
 
 class TestExecutorDiagnostics:

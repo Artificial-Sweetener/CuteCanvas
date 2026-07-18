@@ -17,15 +17,19 @@
 """Tests verifying PyramidManager integration with the shared executor."""
 
 from __future__ import annotations
+
 import logging
 import time
-from pathlib import Path
 import uuid
+from pathlib import Path
+
 import pytest
 from PySide6.QtGui import QImage, Qt
+
 from qpane import Config
 from qpane.rendering import ImagePyramid, PyramidManager, PyramidStatus
 from qpane.scene.identity import SceneLayerAssetKey, default_catalog_asset_key
+from tests.helpers.config import fixed_cache_config
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
 
@@ -82,7 +86,7 @@ class TestPyramidManager:
     def test_regeneration_after_cancellation(self, sample_image: QImage, qapp):
         """Regenerating a cancelled pyramid should succeed and update cache."""
         executor = StubExecutor()
-        manager = PyramidManager(config=Config(), executor=executor)
+        manager = PyramidManager(config=fixed_cache_config(), executor=executor)
         image_id = uuid.uuid4()
         source_path = Path("regen-cancel.png")
         key = _asset_key(image_id, source_path)
@@ -163,7 +167,7 @@ class TestPyramidManager:
     ) -> None:
         """Generate a pyramid and ensure the executor recorded a pyramid task."""
         executor = StubExecutor()
-        manager = PyramidManager(config=Config(), executor=executor)
+        manager = PyramidManager(config=fixed_cache_config(), executor=executor)
         image_id = uuid.uuid4()
         source_path = Path("image-a.png")
         manager.generate_pyramid_for_asset(

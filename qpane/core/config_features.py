@@ -23,22 +23,15 @@ feature so installers and demos can reason about their settings explicitly.
 from __future__ import annotations
 
 import os
-
+from collections.abc import Callable, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import (
-    Callable,
-    Dict,
-    Mapping,
-    MutableMapping,
-    Optional,
-    Tuple,
-    Type,
     TypeVar,
 )
 
-from .config import CacheSettings, Config
 from ..features import FeatureInstallError
+from .config import CacheSettings, Config
 
 T = TypeVar("T")
 
@@ -122,11 +115,11 @@ class SamConfigSlice:
     """
 
     sam_device: str = _BASE_CONFIG.sam_device
-    sam_model_path: Optional[str] = _BASE_CONFIG.sam_model_path
+    sam_model_path: str | None = _BASE_CONFIG.sam_model_path
     sam_model_url: str = _BASE_CONFIG.sam_model_url
-    sam_model_hash: Optional[str] = _BASE_CONFIG.sam_model_hash
+    sam_model_hash: str | None = _BASE_CONFIG.sam_model_hash
     sam_download_mode: str = _BASE_CONFIG.sam_download_mode
-    sam_prefetch_depth: Optional[int] = _BASE_CONFIG.sam_prefetch_depth
+    sam_prefetch_depth: int | None = _BASE_CONFIG.sam_prefetch_depth
     sam_cache_limit: int = _BASE_CONFIG.sam_cache_limit
 
 
@@ -135,11 +128,11 @@ class FeatureConfigDescriptor:
     """Declarative description of a feature-owned configuration namespace."""
 
     namespace: str
-    schema: Type[object]
-    requires: Tuple[str, ...] = ()
+    schema: type[object]
+    requires: tuple[str, ...] = ()
     title: str | None = None
     description: str | None = None
-    validators: Tuple[ConfigValidator, ...] = ()
+    validators: tuple[ConfigValidator, ...] = ()
 
     def create_defaults(self) -> object:
         """Return a fresh instance of the schema populated with defaults."""
@@ -191,7 +184,9 @@ def _validate_input_config(slice_obj: InputConfigSlice) -> None:
     )
     for field_name in boolean_fields:
         if not isinstance(getattr(slice_obj, field_name), bool):
-            raise ValueError(f"{field_name} must be a boolean")
+            raise ValueError(  # noqa: TRY004 - Config validation contract
+                f"{field_name} must be a boolean"
+            )
     if not 0 < slice_obj.pen_pressure_min_ratio <= 1:
         raise ValueError("pen_pressure_min_ratio must be greater than 0 and at most 1")
     if slice_obj.pen_pressure_gamma <= 0:
@@ -205,15 +200,23 @@ def _validate_input_config(slice_obj: InputConfigSlice) -> None:
 def _validate_diagnostics_config(slice_obj: DiagnosticsConfigSlice) -> None:
     """Validate diagnostics toggles remain booleans and domain sets are strings."""
     if not isinstance(slice_obj.diagnostics_overlay_enabled, bool):
-        raise ValueError("diagnostics_overlay_enabled must be a boolean")
+        raise ValueError(  # noqa: TRY004 - Config validation contract
+            "diagnostics_overlay_enabled must be a boolean"
+        )
     if not isinstance(slice_obj.draw_tile_grid, bool):
-        raise ValueError("draw_tile_grid must be a boolean")
+        raise ValueError(  # noqa: TRY004 - Config validation contract
+            "draw_tile_grid must be a boolean"
+        )
     domains = getattr(slice_obj, "diagnostics_domains_enabled", ())
     if not isinstance(domains, (tuple, list)):
-        raise ValueError("diagnostics_domains_enabled must be a sequence of strings")
+        raise ValueError(  # noqa: TRY004 - Config validation contract
+            "diagnostics_domains_enabled must be a sequence of strings"
+        )
     for domain in domains:
         if not isinstance(domain, str):
-            raise ValueError("diagnostics_domains_enabled must contain strings only")
+            raise ValueError(  # noqa: TRY004 - Config validation contract
+                "diagnostics_domains_enabled must contain strings only"
+            )
 
 
 def _validate_sam_config(slice_obj: SamConfigSlice) -> None:
@@ -248,7 +251,9 @@ def _validate_sam_model_path(path_value: object) -> None:
     if isinstance(path_value, os.PathLike):
         path_value = os.fspath(path_value)
     if not isinstance(path_value, str):
-        raise ValueError("sam_model_path must be a string or None")
+        raise ValueError(  # noqa: TRY004 - Config validation contract
+            "sam_model_path must be a string or None"
+        )
     if not path_value.strip():
         raise ValueError("sam_model_path must be a non-empty string when set")
 
@@ -256,7 +261,9 @@ def _validate_sam_model_path(path_value: object) -> None:
 def _validate_sam_model_url(url: object) -> None:
     """Reject empty SAM model URLs so downloaders have a usable target."""
     if not isinstance(url, str):
-        raise ValueError("sam_model_url must be a non-empty string")
+        raise ValueError(  # noqa: TRY004 - Config validation contract
+            "sam_model_url must be a non-empty string"
+        )
     if not url.strip():
         raise ValueError("sam_model_url must be a non-empty string")
 
@@ -266,7 +273,9 @@ def _validate_sam_model_hash(hash_value: object) -> None:
     if hash_value is None:
         return
     if not isinstance(hash_value, str):
-        raise ValueError("sam_model_hash must be a string or None")
+        raise ValueError(  # noqa: TRY004 - Config validation contract
+            "sam_model_hash must be a string or None"
+        )
     if not hash_value.strip():
         raise ValueError("sam_model_hash must be a non-empty string when set")
 
@@ -313,7 +322,7 @@ class ConfigFeatureRegistry:
 
     def __init__(self) -> None:
         """Initialize an empty descriptor registry."""
-        self._descriptors: Dict[str, FeatureConfigDescriptor] = {}
+        self._descriptors: dict[str, FeatureConfigDescriptor] = {}
 
     def register(self, descriptor: FeatureConfigDescriptor) -> None:
         """Add ``descriptor`` while rejecting duplicate namespaces."""
@@ -326,11 +335,11 @@ class ConfigFeatureRegistry:
         """Return the descriptor registered for ``namespace``."""
         return self._descriptors[namespace]
 
-    def values(self) -> Tuple[FeatureConfigDescriptor, ...]:
+    def values(self) -> tuple[FeatureConfigDescriptor, ...]:
         """Expose the registered descriptors in registration order."""
         return tuple(self._descriptors.values())
 
-    def items(self) -> Tuple[Tuple[str, FeatureConfigDescriptor], ...]:
+    def items(self) -> tuple[tuple[str, FeatureConfigDescriptor], ...]:
         """Return ``(namespace, descriptor)`` pairs for callers needing both."""
         return tuple(self._descriptors.items())
 
@@ -385,7 +394,7 @@ for descriptor in (
     _registry.register(descriptor)
 
 
-def iter_descriptors() -> Tuple[FeatureConfigDescriptor, ...]:
+def iter_descriptors() -> tuple[FeatureConfigDescriptor, ...]:
     """Return all registered descriptors in deterministic order."""
     return _registry.values()
 
@@ -410,7 +419,7 @@ def require_sam_config(source: object) -> SamConfigSlice:
     return _require_feature_slice("sam", SamConfigSlice, source)
 
 
-def _require_feature_slice(namespace: str, slice_type: Type[T], source: object) -> T:
+def _require_feature_slice(namespace: str, slice_type: type[T], source: object) -> T:
     """Return the feature slice for ``namespace`` or raise if unavailable or wrong type.
 
     Raises:

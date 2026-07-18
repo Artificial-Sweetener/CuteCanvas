@@ -197,8 +197,8 @@ def _internal_clip(clip: object | None) -> LayerClip | None:
     """Convert a public scene clip into an internal layer clip."""
     if clip is None:
         return None
-    space = ClipCoordinateSpace(getattr(clip, "coordinate_space"))
-    rect = getattr(clip, "rect")
+    space = ClipCoordinateSpace(clip.coordinate_space)
+    rect = clip.rect
     return LayerClip(
         coordinate_space=space,
         x=rect.x(),

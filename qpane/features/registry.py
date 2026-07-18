@@ -19,16 +19,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, KeysView, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
-    Callable,
-    Dict,
-    KeysView,
-    List,
-    Sequence,
-    Set,
-    Tuple,
 )
 
 if TYPE_CHECKING:
@@ -53,7 +47,7 @@ class FeatureDefinition:
 
     name: str
     installer: FeatureInstaller
-    requires: Tuple[str, ...] = ()
+    requires: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Ensure the dependency list is always stored as an immutable tuple."""
@@ -65,7 +59,7 @@ class FeatureRegistry:
 
     def __init__(self) -> None:
         """Initialise an empty map of feature definitions."""
-        self._definitions: Dict[str, FeatureDefinition] = {}
+        self._definitions: dict[str, FeatureDefinition] = {}
 
     def register(self, definition: FeatureDefinition) -> None:
         """Register a feature, raising if a definition with the same name exists."""
@@ -89,15 +83,15 @@ class FeatureRegistry:
 
 def resolve_feature_order(
     registry: FeatureRegistry, requested: Sequence[str]
-) -> List[FeatureDefinition]:
+) -> list[FeatureDefinition]:
     """Topologically sort requested features and their dependencies.
 
     Resolution fails with ``FeatureInstallError`` if a requested feature
     does not exist or if the dependency graph contains a cycle.
     """
-    order: List[FeatureDefinition] = []
-    visited: Set[str] = set()
-    stack: List[str] = []
+    order: list[FeatureDefinition] = []
+    visited: set[str] = set()
+    stack: list[str] = []
 
     def visit(name: str) -> None:
         """Resolve a feature and its dependencies using depth-first traversal."""

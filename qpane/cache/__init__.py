@@ -29,6 +29,6 @@ __all__ = [
     "CacheCoordinator",
     "CachePriority",
     "ConsumerRegistration",
-    "cache_diagnostics_provider",
     "cache_detail_provider",
+    "cache_diagnostics_provider",
 ]

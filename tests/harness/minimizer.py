@@ -18,11 +18,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import math
+from collections.abc import Callable
 
 from .abuse_model import AbuseAction, AbuseReport
-
 
 TraceRunner = Callable[[tuple[AbuseAction, ...]], AbuseReport]
 

@@ -18,11 +18,11 @@
 
 from __future__ import annotations
 
-
 import logging
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QTimer
 
@@ -33,28 +33,19 @@ from ..concurrency.executor import (
     QThreadPoolExecutor,
     TaskExecutorProtocol,
 )
-
 from ..concurrency.metrics import retry_diagnostics_provider, retry_summary_provider
-
 from ..concurrency.thread_policy import ThreadPolicy, build_thread_policy
-
+from ..types import DiagnosticRecord
 from .config import CacheSettings, Config, FeatureAwareConfig, diff_config_fields
-
 from .config_features import FeatureConfigDescriptor, iter_descriptors
-
 from .diagnostics import (
     DiagnosticsProvider,
     DiagnosticsRegistry,
     DiagnosticsSnapshot,
 )
-
 from .diagnostics_broker import Diagnostics
-
 from .fallbacks import FeatureFailure, FeatureFallbacks
-
 from .feature_coordinator import FeatureCoordinator, default_feature_selection
-
-from ..types import DiagnosticRecord
 
 if TYPE_CHECKING:  # pragma: no cover
 
@@ -65,7 +56,7 @@ MB = 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
-def _qpane_view(qpane: "QPane"):
+def _qpane_view(qpane: QPane):
     """Return ``qpane.view()`` while tolerating partially-initialized panes."""
     try:
         return qpane.view()
@@ -73,7 +64,7 @@ def _qpane_view(qpane: "QPane"):
         return None
 
 
-def _qpane_catalog(qpane: "QPane"):
+def _qpane_catalog(qpane: QPane):
     """Return ``qpane.catalog()`` if available, otherwise ``None``."""
     try:
         return qpane.catalog()
@@ -87,7 +78,7 @@ class QPaneState:
     def __init__(
         self,
         *,
-        qpane: "QPane",
+        qpane: QPane,
         initial_config: Config | None,
         config_overrides: Mapping[str, Any] | None,
         features: Iterable[str] | None,
@@ -350,7 +341,7 @@ class QPaneState:
     def _build_config_diagnostics_provider(self) -> DiagnosticsProvider:
         """Return a provider describing unused configuration overrides."""
 
-        def _provider(_qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+        def _provider(_qpane: QPane) -> tuple[DiagnosticRecord, ...]:
             """Expose ignored override counts for diagnostics overlays."""
             records: list[DiagnosticRecord] = []
             for namespace in sorted(self._unused_setting_counts.keys()):
@@ -465,7 +456,7 @@ class QPaneState:
         if psutil_module is None and not self._headroom_psutil_missing:
             try:
                 import psutil  # type: ignore
-            except Exception:
+            except ImportError:
                 self._headroom_psutil_missing = True
                 fallback_to_hard_cap = True
             else:
@@ -479,9 +470,9 @@ class QPaneState:
         else:
             try:
                 mem = psutil_module.virtual_memory()  # type: ignore[attr-defined]
-                available = int(getattr(mem, "available"))
-                total = int(getattr(mem, "total"))
-            except Exception:
+                available = int(mem.available)
+                total = int(mem.total)
+            except Exception:  # noqa: BLE001 - psutil is an optional system boundary
                 self._headroom_psutil_missing = True
                 budget_bytes = 1024 * MB
                 self._stop_headroom_monitor()
@@ -523,9 +514,9 @@ class QPaneState:
             return {}
         try:
             mem = psutil_module.virtual_memory()  # type: ignore[attr-defined]
-            available = int(getattr(mem, "available"))
-            total = int(getattr(mem, "total"))
-        except Exception:
+            available = int(mem.available)
+            total = int(mem.total)
+        except Exception:  # noqa: BLE001 - psutil is an optional system boundary
             return {}
         snapshot: dict[str, object] = {
             "available_bytes": max(0, available),
@@ -533,9 +524,9 @@ class QPaneState:
         }
         try:
             swap = psutil_module.swap_memory()  # type: ignore[attr-defined]
-            snapshot["swap_total_bytes"] = int(getattr(swap, "total"))
-            snapshot["swap_free_bytes"] = int(getattr(swap, "free"))
-        except Exception:
+            snapshot["swap_total_bytes"] = int(swap.total)
+            snapshot["swap_free_bytes"] = int(swap.free)
+        except Exception:  # noqa: BLE001 - psutil is an optional system boundary
             return snapshot
         return snapshot
 
@@ -551,7 +542,7 @@ class QPaneState:
         if qpane is not None:
             try:
                 diagnostics = qpane.diagnostics()
-            except Exception:
+            except RuntimeError:
                 diagnostics = None
             if diagnostics is not None:
 
@@ -624,7 +615,7 @@ class QPaneState:
             catalog.applyConfig(self.settings)
         (
             _view,
-            presenter,
+            _presenter,
             viewport,
             tile_manager,
             swap_delegate,
@@ -678,7 +669,7 @@ class QPaneState:
                     "features must be an iterable of strings or None"
                 ) from exc
         if not items:
-            return tuple()
+            return ()
         normalized: list[str] = []
         for item in items:
             if not isinstance(item, str):
@@ -729,6 +720,6 @@ class QPaneState:
         try:
             self._executor.shutdown(wait=False)
         except Exception:
-            logger.exception("Failed to shut down QPane executor", exc_info=True)
+            logger.exception("Failed to shut down QPane executor")
         finally:
             self._owns_executor = False

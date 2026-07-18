@@ -18,8 +18,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 from uuid import UUID, uuid4
 
 from PySide6.QtGui import QImage

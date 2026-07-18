@@ -55,6 +55,7 @@ from .mutations import (
     SceneMutationResult,
     SceneMutationStatus,
 )
+from .placeholder_scene import build_placeholder_scene
 from .providers import SceneContribution, SceneProvider, SceneResolver
 from .registry import (
     CatalogLayerSourceResolver,
@@ -64,10 +65,9 @@ from .registry import (
     SceneProviderRegistry,
     SceneReplacementProvider,
 )
-from .placeholder_scene import build_placeholder_scene
 from .render_plan import (
-    RasterLayerRenderItem,
     MaskLayerRenderItem,
+    RasterLayerRenderItem,
     RenderStrategy,
     SceneHitTestItem,
     SceneLayerHitTestResult,
@@ -83,12 +83,12 @@ from .sources import (
 )
 
 __all__ = [
+    "BaseSceneMutationOwner",
     "BlendMode",
     "CatalogImageSource",
     "CatalogLayerSourceResolver",
     "ClipCoordinateSpace",
     "DefaultCatalogSceneProvider",
-    "BaseSceneMutationOwner",
     "LayerClip",
     "LayerDescriptor",
     "LayerHitTest",
@@ -97,30 +97,30 @@ __all__ = [
     "LayerSource",
     "LayerSourceResolver",
     "LayerSourceResolverRegistry",
-    "MaskLayerSource",
     "MaskLayerRenderItem",
+    "MaskLayerSource",
     "MaskSceneProvider",
     "MaskServiceSceneProvider",
     "PlaceholderImageSource",
     "RasterLayerRenderItem",
     "RenderStrategy",
     "SceneContribution",
+    "SceneContributionProvider",
     "SceneDescriptor",
     "SceneHitTestItem",
-    "SceneLayerHitTestResult",
     "SceneKind",
     "SceneLayerAssetKey",
+    "SceneLayerHitTestResult",
     "SceneLayerTileKey",
     "SceneMutationCoordinator",
     "SceneMutationOwner",
     "SceneMutationResult",
     "SceneMutationStatus",
     "SceneProvider",
-    "SceneContributionProvider",
     "SceneProviderRegistry",
-    "SceneReplacementProvider",
     "SceneRenderItem",
     "SceneRenderPlan",
+    "SceneReplacementProvider",
     "SceneResolver",
     "TileRenderData",
     "base_image_layer_id",

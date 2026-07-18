@@ -70,7 +70,7 @@ def main() -> int:
 
         window_layout = QVBoxLayout(window)
         window_layout.addWidget(label)
-    except Exception:
+    except (RuntimeError, TypeError):
         label.setParent(window)
         label.move(20, 40)
     window.show()

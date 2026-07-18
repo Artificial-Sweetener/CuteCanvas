@@ -18,8 +18,10 @@
 
 import logging
 import uuid
+
 import pytest
 from PySide6.QtGui import QImage, Qt
+
 from qpane import Config, QPane
 
 

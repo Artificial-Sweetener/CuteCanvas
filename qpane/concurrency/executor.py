@@ -21,10 +21,11 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from itertools import count
 from time import monotonic
-from typing import Any, Callable, Mapping, NamedTuple, Protocol, runtime_checkable
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 from PySide6.QtCore import (
     QCoreApplication,
@@ -201,7 +202,7 @@ class _MainThreadInvoker(QObject):
 
     invoke = Signal(str)
 
-    def __init__(self, owner: "QThreadPoolExecutor") -> None:
+    def __init__(self, owner: QThreadPoolExecutor) -> None:
         """Bind the helper to its owning executor for queued deliveries."""
         super().__init__()
         self._owner = owner
@@ -596,12 +597,11 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
                     self._decrement_active_locked(entry.handle)
             self._pending_condition.notify_all()
             # Active workers continue running; late UI dispatches are rejected.
-        if wait and hasattr(self._pool, "waitForDone"):
-            if self._is_pool_available():
-                try:
-                    self._pool.waitForDone()
-                except Exception:  # pragma: no cover - defensive guard
-                    logger.debug("waitForDone failed for %s", self._pool, exc_info=True)
+        if wait and hasattr(self._pool, "waitForDone") and self._is_pool_available():
+            try:
+                self._pool.waitForDone()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.debug("waitForDone failed for %s", self._pool, exc_info=True)
         self._pool_unavailable = True
 
     def _is_gui_thread(self) -> bool:
@@ -734,7 +734,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
             return None
         try:
             current = int(self._pool.maxThreadCount())
-        except Exception:
+        except (RuntimeError, TypeError, ValueError, OverflowError):
             return None
         target = self._policy.max_workers
         if current == target:
@@ -744,7 +744,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
             self._apply_pool_max_threads_locked(target)
             try:
                 current = int(self._pool.maxThreadCount())
-            except Exception:
+            except (RuntimeError, TypeError, ValueError, OverflowError):
                 current = original
             if not self._pool_threads_reset_logged:
                 logger.info(
@@ -778,7 +778,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
             return False
         try:
             alive = isValid(pool)
-        except Exception:
+        except (RuntimeError, TypeError):
             alive = False
         if not alive:
             self._pool_unavailable = True
@@ -1066,7 +1066,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         if callable(base):  # PySide exposes objectName() callable
             try:
                 name = pool.objectName()
-            except Exception:  # pragma: no cover - defensive guard
+            except (RuntimeError, TypeError):
                 name = None
         else:
             name = base

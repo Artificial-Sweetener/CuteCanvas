@@ -16,16 +16,16 @@
 
 """Catalog package public API surface."""
 
-from .controller import CatalogController
 from .catalog import Catalog, CatalogMutationEvent, NavigationEvent
+from .controller import CatalogController
 from .image_catalog import ImageCatalog
 from .image_map import ImageMap
 from .link import LinkManager
 
 __all__ = [
     "Catalog",
-    "CatalogMutationEvent",
     "CatalogController",
+    "CatalogMutationEvent",
     "ImageCatalog",
     "ImageMap",
     "LinkManager",

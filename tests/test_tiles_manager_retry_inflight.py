@@ -17,14 +17,17 @@
 """Tests for tile manager retry handling for inflight requests."""
 
 from __future__ import annotations
-from pathlib import Path
+
 import uuid
+from pathlib import Path
+
 import pytest
 from PySide6.QtGui import QImage
+
 from qpane import Config
 from qpane.rendering import TileManager
-from tests.helpers.render_plan import make_tile_key
 from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.render_plan import make_tile_key
 
 
 @pytest.mark.usefixtures("qapp")

@@ -21,9 +21,9 @@ from .delegate import SwapDelegate
 from .diagnostics import swap_progress_provider, swap_summary_provider
 
 __all__ = (
-    "SwapDelegate",
     "SwapCoordinator",
     "SwapCoordinatorMetrics",
+    "SwapDelegate",
     "swap_progress_provider",
     "swap_summary_provider",
 )

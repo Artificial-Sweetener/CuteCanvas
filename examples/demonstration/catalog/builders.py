@@ -18,11 +18,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import uuid
-
-from qpane import CatalogSnapshot as QPaneCatalogSnapshot
-from qpane import LinkedGroup, QPane
+from pathlib import Path
 
 from examples.demonstration.catalog.models import (
     CatalogGroup,
@@ -30,6 +27,8 @@ from examples.demonstration.catalog.models import (
     CatalogMask,
     CatalogSnapshot,
 )
+from qpane import CatalogSnapshot as QPaneCatalogSnapshot
+from qpane import LinkedGroup, QPane
 
 
 def build_catalog_snapshot(qpane: QPane) -> CatalogSnapshot:

@@ -18,21 +18,23 @@
 
 from __future__ import annotations
 
-import time
 import logging
+import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
+
 import pytest
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
+
+from qpane import Config, QPane
 from qpane.concurrency import (
     ExecutorSnapshot,
     TaskExecutorProtocol,
     TaskHandle,
     TaskOutcome,
 )
-from qpane import Config, QPane
 from qpane.rendering import Tile, TileManager
 from qpane.rendering.tiles import _SourceTilePayloadKey
 from qpane.scene.identity import (
@@ -40,8 +42,8 @@ from qpane.scene.identity import (
     SceneLayerTileKey,
     default_catalog_asset_key,
 )
-from tests.helpers.render_plan import make_tile_key
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
+from tests.helpers.render_plan import make_tile_key
 
 MB = 1024 * 1024
 
@@ -50,7 +52,7 @@ class ImmediateStubExecutor(TaskExecutorProtocol):
     """Test executor that records submissions and executes runnables on demand."""
 
     def __init__(self) -> None:
-        self._submissions: List[Dict[str, Any]] = []
+        self._submissions: list[dict[str, Any]] = []
         self.cancelled: list[TaskHandle] = []
         self.finished: list[tuple[TaskHandle, TaskOutcome]] = []
         self.shutdown_called = False
@@ -84,7 +86,7 @@ class ImmediateStubExecutor(TaskExecutorProtocol):
     def mark_finished(self, handle: TaskHandle, outcome: TaskOutcome) -> None:
         self.finished.append((handle, outcome))
 
-    def active_counts(self) -> Dict[str, int]:
+    def active_counts(self) -> dict[str, int]:
         return {}
 
     def snapshot(self) -> ExecutorSnapshot:
@@ -109,7 +111,7 @@ class ImmediateStubExecutor(TaskExecutorProtocol):
 
     # Helpers for tests -------------------------------------------------
 
-    def pending_categories(self) -> List[str]:
+    def pending_categories(self) -> list[str]:
         """Return the categories of currently queued runnables."""
         return [entry["category"] for entry in self._submissions]
 
@@ -365,7 +367,7 @@ def test_remove_tiles_for_asset_keeps_shared_source_worker(qapp) -> None:
     manager.remove_tiles_for_asset(first_key.asset_key)
 
     assert len(list(executor.pending_tasks())) == 1
-    executor.run_task(list(executor.pending_tasks())[0].handle.task_id)
+    executor.run_task(next(iter(executor.pending_tasks())).handle.task_id)
     qapp.processEvents()
 
     assert ready == [second_key]

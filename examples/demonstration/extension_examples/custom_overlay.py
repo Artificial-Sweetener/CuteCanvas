@@ -16,9 +16,8 @@
 
 """Overlay example that frames the viewport and labels zoom via OverlayState."""
 
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient
-
 
 # Provided by the demo host at execution time:
 # - state: OverlayState (stable overlay snapshot)

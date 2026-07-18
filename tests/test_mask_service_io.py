@@ -19,19 +19,21 @@
 import uuid
 from pathlib import Path
 from types import MethodType, SimpleNamespace
+
 import numpy as np
 import pytest
 from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QImage, Qt
+
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks import mask_service
 from qpane.masks.mask import MaskManager
 from qpane.masks.mask_service import _random_mask_color
-from tests.test_mask_workflows import _mask_service
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
 from tests.test_mask_workflows import (
     _cleanup_qpane,
+    _mask_service,
     _prepare_qpane_with_mask_feature,
     _queue_pending_stroke,
 )
@@ -338,6 +340,6 @@ def test_mask_autosave_coordinator_uses_shared_executor(monkeypatch) -> None:
     )
     coordinator.refresh()
     assert isinstance(qpane.autosaveManager(), mask_service.AutosaveManager)
-    assert getattr(qpane.autosaveManager(), "_executor") is executor
+    assert qpane.autosaveManager()._executor is executor
     qpane.autosaveManager().shutdown()
     coordinator._disconnect(force=True)

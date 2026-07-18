@@ -18,9 +18,9 @@
 
 from __future__ import annotations
 
-import numpy as np
 import math
 
+import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QBrush, QImage, QPainter
 
@@ -35,7 +35,7 @@ def stroke_pen_width(brush_size: float, stride: int = 1) -> int:
     """Return the pen width for a brush diameter respecting preview stride."""
     stride_value = max(1, int(stride))
     brush_value = max(1.0, float(brush_size))
-    width = int(round(float(brush_value) / stride_value))
+    width = round(float(brush_value) / stride_value)
     return max(1, width)
 
 
@@ -121,7 +121,7 @@ def resampled_segment_dabs(
         min(float(segment.start_diameter), float(segment.end_diameter)),
     )
     spacing = max(0.5, minimum_diameter * 0.2)
-    step_count = max(1, int(math.ceil(distance / spacing)))
+    step_count = max(1, math.ceil(distance / spacing))
     return tuple(
         (
             start + delta * (step / step_count),

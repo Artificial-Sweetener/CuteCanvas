@@ -34,7 +34,7 @@ class CompiledRenderScene:
 
     scene: SceneDescriptor
     content_snapshot: SceneContentSnapshot
-    layers: tuple["CompiledRenderLayer", ...]
+    layers: tuple[CompiledRenderLayer, ...]
     mask_layers: tuple[LayerDescriptor, ...]
     hit_test_items: tuple[SceneHitTestItem, ...]
 

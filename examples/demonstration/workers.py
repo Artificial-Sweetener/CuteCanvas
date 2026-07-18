@@ -23,8 +23,8 @@ background threads to keep the UI responsive, adhering to the QPane
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from PySide6.QtGui import QImage, QImageReader

@@ -17,6 +17,7 @@
 """Tests for the Auto-mode headroom monitor."""
 
 from __future__ import annotations
+
 from qpane import QPane
 
 MB = 1024 * 1024

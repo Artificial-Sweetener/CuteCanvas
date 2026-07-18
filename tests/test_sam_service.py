@@ -15,11 +15,14 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
-from pathlib import Path
+
 import hashlib
+from pathlib import Path
+
 import numpy as np
 import pytest
 from PySide6.QtCore import QStandardPaths
+
 from qpane.sam import service
 
 

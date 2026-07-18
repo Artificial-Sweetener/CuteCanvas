@@ -24,13 +24,14 @@ from .status_overlay import QPaneStatusOverlay
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
     from PySide6.QtWidgets import QWidget
+
     from ..qpane import QPane
 
 
 def create_status_overlay(
-    qpane: "QPane",
+    qpane: QPane,
     *,
-    parent: "QWidget" | None = None,
+    parent: QWidget | None = None,
 ) -> QPaneStatusOverlay:
     """Create a QPaneStatusOverlay wired to the provided qpane.
 

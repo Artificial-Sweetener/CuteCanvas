@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import Qt
 
@@ -48,6 +49,7 @@ class BaseWorker:
         self._executor: TaskExecutorProtocol | None = None
         self._handle: TaskHandle | None = None
         self._logger = logger or logging.getLogger(__name__)
+        self._signal_disposal_scheduled = False
 
     @property
     def logger(self) -> logging.Logger:
@@ -87,11 +89,13 @@ class BaseWorker:
             error: Optional exception captured for diagnostics.
 
         Side effects:
-            Emits the finished/error Qt signal and calls mark_finished on the
-            bound executor.
+            Emits the finished/error Qt signal, schedules the worker-owned Qt
+            signal bridge for disposal on its affinity thread, and calls
+            mark_finished on the bound executor.
         """
         target_signal = "finished" if success else "error"
         self._emit_signal(target_signal, payload)
+        self._schedule_signal_disposal()
         if self._executor is not None and self._handle is not None:
             outcome = TaskOutcome(success=success, payload=payload, error=error)
             self._executor.mark_finished(self._handle, outcome)
@@ -120,7 +124,7 @@ class BaseWorker:
             if callable(owner):
                 try:
                     owner = owner()
-                except Exception:
+                except (RuntimeError, TypeError):
                     owner = None
             if owner is None:
                 owner = getattr(signal, "__self__", None)
@@ -137,3 +141,17 @@ class BaseWorker:
             self.logger.exception("Failed to emit %s with args %s", name, filtered_args)
         except Exception:  # pragma: no cover - Qt will raise if signatures mismatch
             self.logger.exception("Failed to emit %s with args %s", name, filtered_args)
+
+    def _schedule_signal_disposal(self) -> None:
+        """Dispose a terminal worker signal bridge on its owning Qt thread."""
+        signal_container = getattr(self, "signals", None)
+        if signal_container is None or self._signal_disposal_scheduled:
+            return
+        self._signal_disposal_scheduled = True
+        try:
+            signal_container.deleteLater()
+        except RuntimeError:
+            self.logger.debug(
+                "Worker signal bridge was already unavailable during disposal",
+                exc_info=True,
+            )

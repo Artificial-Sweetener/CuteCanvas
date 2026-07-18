@@ -19,9 +19,10 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from itertools import count
-from typing import Any, Callable, Dict, Iterable, List
+from typing import Any
 
 from PySide6.QtCore import QRunnable
 
@@ -72,11 +73,11 @@ class StubExecutor(TaskExecutorProtocol):
         self._auto_finish = auto_finish
         self._supports_main_thread_dispatch = supports_main_thread_dispatch
         self._counter = count(1)
-        self._tasks: Dict[str, _TaskRecord] = {}
+        self._tasks: dict[str, _TaskRecord] = {}
         self._pending_order: deque[str] = deque()
-        self._queued_by_category: Dict[str, int] = {}
-        self._active_by_category: Dict[str, int] = {}
-        self._active_by_device: Dict[tuple[str, str], int] = {}
+        self._queued_by_category: dict[str, int] = {}
+        self._active_by_category: dict[str, int] = {}
+        self._active_by_device: dict[tuple[str, str], int] = {}
         self._active_total = 0
         self.cancelled: list[TaskHandle] = []
         self.finished: list[tuple[TaskHandle, TaskOutcome]] = []
@@ -134,7 +135,7 @@ class StubExecutor(TaskExecutorProtocol):
             try:
                 runnable.cancel()  # type: ignore[call-arg]
                 cancelled = True
-            except Exception:
+            except Exception:  # noqa: BLE001 - arbitrary cancellation collaborator
                 cancelled = False
         if cancelled:
             self.cancelled.append(handle)
@@ -155,13 +156,13 @@ class StubExecutor(TaskExecutorProtocol):
         self.finished.append((handle, outcome))
         self._tasks.pop(handle.task_id, None)
 
-    def active_counts(self) -> Dict[str, int]:
+    def active_counts(self) -> dict[str, int]:
         """Return a copy of active counts keyed by category."""
         return dict(self._active_by_category)
 
     def snapshot(self) -> ExecutorSnapshot:
         """Return a diagnostic snapshot consistent with ExecutorSnapshot."""
-        queued_by_category: Dict[str, int] = {}
+        queued_by_category: dict[str, int] = {}
         for record in self._tasks.values():
             if record.state == "pending":
                 category = record.handle.category
@@ -207,7 +208,7 @@ class StubExecutor(TaskExecutorProtocol):
             return
         try:
             record.callback()
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except Exception as exc:  # noqa: BLE001 - mirrors worker callback boundary
             self.mark_finished(
                 record.handle,
                 TaskOutcome(success=False, payload=str(exc), error=exc),
@@ -350,7 +351,7 @@ class RetryTestScheduler:
     """Deterministic scheduler for unit tests (no Qt dependency)."""
 
     def __init__(self) -> None:
-        self.scheduled: List[_TestHandle] = []
+        self.scheduled: list[_TestHandle] = []
 
     def schedule(self, key, delay_ms: int, callback: Callable[[], None]):
         handle = _TestHandle(key=key, callback=callback, when_ms=int(delay_ms))
@@ -374,7 +375,7 @@ class RetryTestScheduler:
 
 __all__ = [
     "CallableRunnable",
-    "StubExecutor",
     "RejectingStubExecutor",
     "RetryTestScheduler",
+    "StubExecutor",
 ]

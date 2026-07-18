@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from .registry import (
     FeatureDefinition,
-    FeatureInstallError,
     FeatureInstaller,
+    FeatureInstallError,
     FeatureRegistry,
     resolve_feature_order,
 )

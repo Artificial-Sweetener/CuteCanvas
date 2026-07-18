@@ -17,7 +17,9 @@
 """Integration tests for mask features within the qpane."""
 
 import uuid
+
 from PySide6.QtCore import QRect
+
 from qpane import Config
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.mask import MaskManager

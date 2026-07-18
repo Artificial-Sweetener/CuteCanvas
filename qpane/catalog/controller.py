@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QGuiApplication, QImage, QPixmap
@@ -31,9 +32,9 @@ from ..core.config import PlaceholderSettings
 from ..rendering import CoordinateContext, NormalizedViewState, ViewportZoomMode
 from ..scene.identity import SceneLayerAssetKey
 from ..tools import Tools
+from ..types import LinkedGroup
 from ..ui import copyToClipboard, drag_out_image
 from .image_map import ImageMap
-from ..types import LinkedGroup
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..masks.mask_service import MaskService
@@ -236,7 +237,7 @@ class CatalogController:
             group_id = existing_id if existing_id is not None else uuid.uuid4()
             self.setLinkedGroups((LinkedGroup(group_id=group_id, members=image_ids),))
             return
-        self.setLinkedGroups(tuple())
+        self.setLinkedGroups(())
 
     def apply_placeholder_config(self, settings: PlaceholderSettings) -> None:
         """Resolve and store placeholder assets/policies from configuration.
@@ -269,6 +270,9 @@ class CatalogController:
         try:
             resolved_source = str(source)
         except Exception:
+            logger.warning(
+                "Placeholder source could not be converted to text", exc_info=True
+            )
             resolved_source = None
         if not resolved_source:
             return None, None
@@ -315,8 +319,11 @@ class CatalogController:
                     logger.warning(
                         "Placeholder source does not exist on disk: %s", path_obj
                     )
-            except Exception:
-                pass
+            except (OSError, TypeError, ValueError):
+                logger.debug(
+                    "Placeholder source could not be inspected as a filesystem path",
+                    exc_info=True,
+                )
         placeholder = QImage(source)
         if placeholder.isNull():
             from PySide6.QtGui import QImageReader  # local import to avoid startup cost
@@ -619,8 +626,8 @@ class CatalogController:
             return QSize()
         if scale_mode == "physical_fit" and screen_dpr > 0:
             return QSize(
-                int(round(size.width() / screen_dpr)),
-                int(round(size.height() / screen_dpr)),
+                round(size.width() / screen_dpr),
+                round(size.height() / screen_dpr),
             )
         return size
 
@@ -837,7 +844,7 @@ class CatalogController:
             self.catalog.removeImageByID(image_id)
             self.link_manager.handleImageRemoved(image_id)
         if not removed:
-            return tuple()
+            return ()
         if not self.catalog.hasImages():
             logger.info(
                 "Catalog empty after %s; clearing images and using placeholder",

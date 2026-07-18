@@ -21,8 +21,10 @@ import logging
 import uuid
 import weakref
 from pathlib import Path
+
 import pytest
 from PySide6.QtGui import QImage, Qt
+
 from qpane import LinkedGroup
 from qpane.catalog.catalog import Catalog
 from qpane.catalog.link import LinkManager
@@ -165,7 +167,7 @@ class StubCatalogController:
                 )
             )
         else:
-            self.link_manager.setGroups(tuple())
+            self.link_manager.setGroups(())
 
     def handleDragRequest(self, event):
         self.calls.append(("handleDragRequest", event))

@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..core.config import Config
@@ -71,7 +72,7 @@ class ThreadPolicy:
         return limit
 
     @classmethod
-    def from_config(cls, config: "Config") -> "ThreadPolicy":
+    def from_config(cls, config: Config) -> ThreadPolicy:
         """Construct a thread policy from an existing :class:`Config`.
 
         Args:
@@ -84,7 +85,7 @@ class ThreadPolicy:
 
 
 def build_thread_policy(
-    config: "Config" | Mapping[str, Any] | None = None,
+    config: Config | Mapping[str, Any] | None = None,
     **overrides: Any,
 ) -> ThreadPolicy:
     """Create a :class:`ThreadPolicy` from config or explicit overrides.
@@ -338,6 +339,6 @@ def _is_config_instance(value: Any) -> bool:
     """
     try:
         config_cls = _config_class()
-    except Exception:  # pragma: no cover - defensive
+    except (ImportError, AttributeError):
         return False
     return isinstance(value, config_cls)

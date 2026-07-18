@@ -21,7 +21,8 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
-from typing import TYPE_CHECKING, Mapping
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF
 
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 class TouchNavigationSession:
     """Keep touch contacts anchored while applying incremental pan and zoom."""
 
-    def __init__(self, qpane: "QPane") -> None:
+    def __init__(self, qpane: QPane) -> None:
         """Capture the pane whose viewport receives direct manipulation."""
         self._qpane = qpane
         self._baseline_points: dict[int, QPointF] = {}

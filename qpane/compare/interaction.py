@@ -23,8 +23,10 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QCursor, QMouseEvent
 
-from ..rendering.clip_geometry import ProjectedClipBoundary
-from ..rendering.clip_geometry import projected_comparison_boundary
+from ..rendering.clip_geometry import (
+    ProjectedClipBoundary,
+    projected_comparison_boundary,
+)
 from ..scene.render_plan import SceneRenderPlan
 from ..types import ComparisonDividerState, ComparisonOrientation
 from .service import CompareService
@@ -39,7 +41,7 @@ class CompareDividerInteraction:
     _HIT_WIDTH = 12.0
     _TOUCH_HIT_WIDTH = 44.0
 
-    def __init__(self, *, qpane: "QPane", service: CompareService) -> None:
+    def __init__(self, *, qpane: QPane, service: CompareService) -> None:
         """Capture the owning widget and comparison state service."""
         self._qpane = qpane
         self._service = service

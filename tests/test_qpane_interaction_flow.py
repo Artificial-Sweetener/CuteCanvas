@@ -18,9 +18,11 @@
 
 import types
 import uuid
+
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QEnterEvent, QImage, QKeyEvent, QWheelEvent
+
 from qpane import QPane
 
 

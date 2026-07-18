@@ -134,7 +134,7 @@ class _LinkManagerStub:
     def __init__(self) -> None:
         self.removed: list[uuid.UUID] = []
         self.cleared = False
-        self.groups: tuple[object, ...] = tuple()
+        self.groups: tuple[object, ...] = ()
         self.records: list[object] = []
 
     def handleImageRemoved(self, image_id: uuid.UUID) -> None:
@@ -236,7 +236,7 @@ def test_apply_normalized_view_state_uses_fit_for_zero_zoom_frac() -> None:
     """Zero zoom fractions should force a fit zoom."""
     image = QImage(10, 10, QImage.Format_ARGB32)
     image_id = uuid.uuid4()
-    controller, catalog, _, _ = _make_controller(image=image, image_id=image_id)
+    controller, _catalog, _, _ = _make_controller(image=image, image_id=image_id)
     state = NormalizedViewState(
         center_x=0.5,
         center_y=0.5,
@@ -287,7 +287,7 @@ def test_set_all_images_linked_clears_for_single_image() -> None:
     )
     catalog._image_ids = [uuid.uuid4()]
     controller.setAllImagesLinked(True)
-    assert link_manager.groups == tuple()
+    assert link_manager.groups == ()
 
 
 def test_set_current_image_delegates_to_swap_delegate() -> None:

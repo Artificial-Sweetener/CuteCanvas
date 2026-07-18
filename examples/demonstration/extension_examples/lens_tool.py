@@ -27,9 +27,8 @@ described in `docs/extensibility.md`, where `draw_overlay` and
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPoint, QRect, QRectF, QSize
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QCursor, QImage, QPainterPath, QPen, QPixmap
-
 
 # Provided by the demo host at execution time:
 # - CUSTOM_MODE: str (the tool mode this lens belongs to)
@@ -52,7 +51,7 @@ def _qpane_viewport_rect():
     if rect is None:
         try:
             rect = qpane.currentViewportRect()
-        except Exception:
+        except RuntimeError:
             return None
         _VIEWPORT_CACHE["rect"] = rect
     if hasattr(rect, "toRect"):
@@ -70,7 +69,7 @@ if not globals().get("_LENS_VIEWPORT_CONNECTED"):
         qpane.viewportRectChanged.connect(_capture_viewport)
         _VIEWPORT_CACHE["rect"] = qpane.currentViewportRect()
         globals()["_LENS_VIEWPORT_CONNECTED"] = True
-    except Exception:
+    except RuntimeError:
         globals()["_LENS_VIEWPORT_CONNECTED"] = False
 
 

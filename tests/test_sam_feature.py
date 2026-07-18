@@ -24,16 +24,15 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QPoint
 
-from qpane.types import DiagnosticRecord
+from qpane import Config, QPane
+from qpane.features import FeatureInstallError
 from qpane.masks import sam_feature
 from qpane.masks.sam_feature import (
     _sam_detail_diagnostics_provider,
     _sam_summary_diagnostics_provider,
 )
-from qpane import Config, QPane
-from qpane.features import FeatureInstallError
 from qpane.sam import service
-
+from qpane.types import DiagnosticRecord
 from tests.helpers.executor_stubs import StubExecutor
 
 
@@ -201,10 +200,10 @@ def test_install_sam_feature_respects_config(monkeypatch, qapp):
             and callable(getattr(torch.cuda, "is_available", None))
             and torch.cuda.is_available()
         )
-    except Exception:
+    except (AttributeError, RuntimeError):
         cuda_available = False
     expected_device = "cuda" if cuda_available else "cpu"
-    assert getattr(manager, "_device") == expected_device
+    assert manager._device == expected_device
     assert manager.cacheLimit() == 1
 
 

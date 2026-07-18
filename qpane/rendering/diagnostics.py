@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable, TYPE_CHECKING, Any
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 from ..types import DiagnosticRecord
 
@@ -28,7 +29,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 logger = logging.getLogger(__name__)
 
 
-def rendering_retry_provider(qpane: "QPane") -> Iterable[DiagnosticRecord]:
+def rendering_retry_provider(qpane: QPane) -> Iterable[DiagnosticRecord]:
     """Expose retry snapshot details for tile and pyramid managers."""
     rows: list[DiagnosticRecord] = []
     view = _call_accessor(qpane, "view")

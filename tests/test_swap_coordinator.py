@@ -246,13 +246,13 @@ class StubView:
 class StubCatalogFacade:
     """Facade mimicking QPane.catalog() semantics."""
 
-    def __init__(self, catalog: "StubCatalog") -> None:
+    def __init__(self, catalog: StubCatalog) -> None:
         self._catalog = catalog
 
     def exitPlaceholderMode(self) -> None:
         return
 
-    def imageCatalog(self) -> "StubCatalog":
+    def imageCatalog(self) -> StubCatalog:
         return self._catalog
 
 
@@ -383,7 +383,7 @@ class StubCatalog:
     def exitPlaceholderMode(self) -> None:
         return
 
-    def imageCatalog(self) -> "StubCatalog":
+    def imageCatalog(self) -> StubCatalog:
         return self
 
 

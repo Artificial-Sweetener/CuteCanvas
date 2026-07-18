@@ -19,13 +19,13 @@
 import logging
 
 import pytest
-from PySide6.QtCore import QPointF, Qt, QEvent
+from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
 
-from qpane.tools.tools import Tools
 from qpane.tools import ToolDependencies
 from qpane.tools.base import BaseTool, CursorTool, ExtensionTool, PanZoomTool
+from qpane.tools.tools import Tools
 
 pytestmark = [
     pytest.mark.filterwarnings("ignore:Failed to disconnect.*"),

@@ -19,25 +19,26 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 import math
-from typing import Callable, TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen
 
-from qpane.rendering.coordinates import PanelHitTest
 from qpane.masks.stroke_models import MaskStrokeSegmentPayload
-from qpane.tools.base import BaseTool
+from qpane.rendering.coordinates import PanelHitTest
 from qpane.tools import ToolDependencies
+from qpane.tools.base import BaseTool
 from qpane.tools.input.model import (
     PointerDeviceKind,
     PointerPhase,
     PointerSample,
 )
 
-from .stroke_session import BrushStrokeSession
 from .brush_preview import BrushPreview, BrushPreviewRenderer
+from .stroke_session import BrushStrokeSession
 
 if TYPE_CHECKING:
     from qpane.tools.tools import ToolManagerSignals
@@ -574,7 +575,7 @@ _BRUSH_SIGNAL_MAPPINGS: tuple[tuple[str, str], ...] = (
 
 def _wire_mask_tool_signals(
     tool: BaseTool,
-    manager_signals: "ToolManagerSignals",
+    manager_signals: ToolManagerSignals,
     mapping: tuple[tuple[str, str], ...],
     *,
     tool_name: str,
@@ -596,7 +597,7 @@ def _wire_mask_tool_signals(
 
 def _unwire_mask_tool_signals(
     tool: BaseTool,
-    manager_signals: "ToolManagerSignals",
+    manager_signals: ToolManagerSignals,
     mapping: tuple[tuple[str, str], ...],
     *,
     tool_name: str,
@@ -622,9 +623,7 @@ def _unwire_mask_tool_signals(
             )
 
 
-def connect_brush_signals(
-    manager_signals: "ToolManagerSignals", tool: BaseTool
-) -> None:
+def connect_brush_signals(manager_signals: ToolManagerSignals, tool: BaseTool) -> None:
     """Bridge BrushTool emissions into ToolManagerSignals using the shared contract."""
     _wire_mask_tool_signals(
         tool,
@@ -635,7 +634,7 @@ def connect_brush_signals(
 
 
 def disconnect_brush_signals(
-    manager_signals: "ToolManagerSignals", tool: BaseTool
+    manager_signals: ToolManagerSignals, tool: BaseTool
 ) -> None:
     """Tear down BrushTool wiring using the shared contract mapping."""
     _unwire_mask_tool_signals(

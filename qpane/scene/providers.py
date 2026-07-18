@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Protocol
 
 from .model import SceneDescriptor
 
@@ -27,7 +28,7 @@ from .model import SceneDescriptor
 class SceneProvider(Protocol):
     """Contributor that can supply scene data for the current context."""
 
-    def scene_contribution(self) -> "SceneContribution | None":
+    def scene_contribution(self) -> SceneContribution | None:
         """Return a scene contribution, or None when inactive."""
         ...
 

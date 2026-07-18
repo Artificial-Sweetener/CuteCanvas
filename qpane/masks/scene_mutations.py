@@ -41,7 +41,7 @@ class MaskSceneMutationOwner(BaseSceneMutationOwner):
 
     name = "masks"
 
-    def __init__(self, service: "MaskService") -> None:
+    def __init__(self, service: MaskService) -> None:
         """Capture the mask service that owns mask workflow state."""
         self._service = service
 

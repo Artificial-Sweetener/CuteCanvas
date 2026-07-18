@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from itertools import count
-from typing import TYPE_CHECKING, Callable, Mapping, MutableMapping
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import numpy as np
@@ -35,13 +36,13 @@ from ..catalog.image_utils import (
 )
 from ..concurrency import TaskExecutorProtocol, TaskHandle
 from .mask_controller import MaskController
+from .mask_diagnostics import MaskStrokeDiagnostics
 from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
     MaskStrokePayload,
     MaskStrokeSegmentPayload,
 )
-from .mask_diagnostics import MaskStrokeDiagnostics
 from .stroke_render import paint_stroke_segment
 from .stroke_worker import MaskStrokeWorker
 
@@ -55,10 +56,10 @@ logger = logging.getLogger(__name__)
 class MaskStrokeDebugSnapshot:
     """Represent pending stroke bookkeeping for assertions and diagnostics."""
 
-    preview_state_ids: tuple[UUID, ...] = tuple()
+    preview_state_ids: tuple[UUID, ...] = ()
     preview_tokens: dict[UUID, int] = field(default_factory=dict)
     pending_jobs: dict[UUID, tuple[TaskHandle, ...]] = field(default_factory=dict)
-    invalidated_job_tokens: tuple[tuple[UUID, int], ...] = tuple()
+    invalidated_job_tokens: tuple[tuple[UUID, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,11 +127,9 @@ class _DecimatedStrokeState:
         try:
             for recorded in self._segments:
                 start_qpoint = QPoint(
-                    int(round(recorded.start[0])), int(round(recorded.start[1]))
+                    round(recorded.start[0]), round(recorded.start[1])
                 )
-                end_qpoint = QPoint(
-                    int(round(recorded.end[0])), int(round(recorded.end[1]))
-                )
+                end_qpoint = QPoint(round(recorded.end[0]), round(recorded.end[1]))
                 segment_rect = QRect(start_qpoint, end_qpoint).normalized()
                 segment_margin = int(recorded.maximum_diameter / 2.0) + 2
                 segment_rect = segment_rect.adjusted(
@@ -228,8 +227,8 @@ class MaskStrokePipeline:
     def __init__(
         self,
         *,
-        qpane: "QPane",
-        service: "MaskService",
+        qpane: QPane,
+        service: MaskService,
         diagnostics: MaskStrokeDiagnostics | None = None,
     ) -> None:
         """Initialize stroke pipeline state, tokens, and optional diagnostics."""

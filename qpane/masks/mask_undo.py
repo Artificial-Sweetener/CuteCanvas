@@ -19,27 +19,23 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
-    Callable,
-    Dict,
-    Iterable,
-    List,
     Literal,
     Protocol,
-    Sequence,
-    Tuple,
 )
 
 import numpy as np
-from PySide6.QtCore import QRect
 from numpy.typing import NDArray
+from PySide6.QtCore import QRect
 
 from ..catalog.image_utils import qimage_to_numpy_grayscale8
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QImage
+
     from .mask import MaskLayer
 
 
@@ -66,7 +62,7 @@ class MaskUndoSnippet:
     """Describe a rectangular snippet affected by a mask history change."""
 
     rect: QRect
-    image: "QImage"
+    image: QImage
 
 
 @dataclass(frozen=True)
@@ -75,8 +71,8 @@ class MaskHistoryChange:
 
     mask_id: uuid.UUID
     direction: Literal["undo", "redo"]
-    command: "MaskUndoCommand"
-    snippets: Tuple[MaskUndoSnippet, ...] = ()
+    command: MaskUndoCommand
+    snippets: tuple[MaskUndoSnippet, ...] = ()
 
     @property
     def has_snippets(self) -> bool:
@@ -102,7 +98,7 @@ class MaskUndoCommand(Protocol):
 class MaskUndoProvider(Protocol):
     """Define the hooks required to integrate mask undo/redo workflows."""
 
-    def initialize_mask(self, mask_id: uuid.UUID, layer: "MaskLayer") -> None:
+    def initialize_mask(self, mask_id: uuid.UUID, layer: MaskLayer) -> None:
         """Prepare provider state for ``mask_id`` using the current layer."""
 
     def dispose_mask(self, mask_id: uuid.UUID) -> None:
@@ -137,9 +133,9 @@ class MaskImageCommand:
     """Concrete command that swaps mask images with cache notifications."""
 
     mask_id: uuid.UUID
-    before: "QImage"
-    after: "QImage"
-    apply: Callable[[uuid.UUID, "QImage"], None]
+    before: QImage
+    after: QImage
+    apply: Callable[[uuid.UUID, QImage], None]
     notify: Callable[[uuid.UUID], None] | None = None
     description: str = "mask-change"
 
@@ -185,8 +181,8 @@ class MaskPatch:
     """Represent a rectangular patch captured from a mask stroke."""
 
     rect: QRect
-    before: "QImage"
-    after: "QImage"
+    before: QImage
+    after: QImage
     mask: NDArray[np.bool_]
 
 
@@ -230,11 +226,11 @@ class MaskLayerUndoProvider:
 
     def __init__(self) -> None:
         """Initialize in-memory stacks for undo/redo tracking."""
-        self._history: Dict[uuid.UUID, List[MaskUndoCommand]] = {}
-        self._redos: Dict[uuid.UUID, List[MaskUndoCommand]] = {}
-        self._baselines: Dict[uuid.UUID, "QImage"] = {}
+        self._history: dict[uuid.UUID, list[MaskUndoCommand]] = {}
+        self._redos: dict[uuid.UUID, list[MaskUndoCommand]] = {}
+        self._baselines: dict[uuid.UUID, QImage] = {}
 
-    def initialize_mask(self, mask_id: uuid.UUID, layer: "MaskLayer") -> None:
+    def initialize_mask(self, mask_id: uuid.UUID, layer: MaskLayer) -> None:
         """Prepare provider state for ``mask_id`` using ``layer``'s snapshot."""
         self._history[mask_id] = []
         self._redos[mask_id] = []
@@ -305,7 +301,7 @@ class MaskLayerUndoProvider:
         redo_stack = self._redos.get(mask_id) or []
         return MaskUndoState(undo_depth=len(history), redo_depth=len(redo_stack))
 
-    def capture_snapshot(self, mask_id: uuid.UUID, image: "QImage") -> None:
+    def capture_snapshot(self, mask_id: uuid.UUID, image: QImage) -> None:
         """Store the current image as the provider baseline."""
         self._baselines[mask_id] = image.copy()
 
@@ -322,12 +318,12 @@ class MaskLayerUndoProvider:
 
     def _describe_command_delta(
         self, command: MaskUndoCommand, *, use_after: bool
-    ) -> Tuple[MaskUndoSnippet, ...]:
+    ) -> tuple[MaskUndoSnippet, ...]:
         """Return a normalized tuple of snippets from the command if available."""
         describe = getattr(command, "describe_delta", None)
         if describe is None:
-            return tuple()
+            return ()
         data = describe(use_after=use_after)
         if not data:
-            return tuple()
+            return ()
         return tuple(data)

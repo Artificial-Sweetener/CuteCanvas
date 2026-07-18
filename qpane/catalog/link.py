@@ -18,7 +18,7 @@
 
 import logging
 import uuid
-from typing import Iterable
+from collections.abc import Iterable
 
 from ..rendering import NormalizedViewState
 from ..types import LinkedGroup

@@ -17,9 +17,12 @@
 """Ensure the qpane package exports the intended public symbols."""
 
 from __future__ import annotations
+
 import uuid
-import qpane
+
 import pytest
+
+import qpane
 from qpane.catalog.catalog import Catalog
 from qpane.core.diagnostics_broker import Diagnostics
 from qpane.rendering.view import View
@@ -80,9 +83,9 @@ def test_qpane_accessors_expose_curated_types(qapp):
         assert viewer.maskFeatureAvailable() is False
         assert viewer.samFeatureAvailable() is False
         with pytest.raises(AttributeError):
-            viewer.tools  # type: ignore[attr-defined]
+            _ = viewer.tools  # type: ignore[attr-defined]
         with pytest.raises(AttributeError):
-            viewer.masks  # type: ignore[attr-defined]
+            _ = viewer.masks  # type: ignore[attr-defined]
     finally:
         viewer.deleteLater()
         qapp.processEvents()

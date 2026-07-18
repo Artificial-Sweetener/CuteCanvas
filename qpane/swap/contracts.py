@@ -24,8 +24,9 @@ wire-up time; missing methods or signals are treated as programmer errors.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QImage

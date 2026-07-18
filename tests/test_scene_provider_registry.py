@@ -33,7 +33,7 @@ class _RevisionedContributionProvider:
 
     def scene_contribution(self, _base_scene, _image_id):
         """Contribute no layers; only revision behavior matters here."""
-        return None
+        return
 
 
 def test_registry_revision_tracks_structure_and_provider_state() -> None:

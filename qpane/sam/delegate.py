@@ -18,15 +18,11 @@
 
 from __future__ import annotations
 
-
 import logging
 import uuid
-
 from typing import TYPE_CHECKING
 
-
 import numpy as np
-
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +41,9 @@ class SamDelegate:
     def __init__(
         self,
         *,
-        qpane: "QPane",
-        swap_delegate: "SwapDelegate",
-        cache_registry: "CacheRegistry | None",
+        qpane: QPane,
+        swap_delegate: SwapDelegate,
+        cache_registry: CacheRegistry | None,
     ) -> None:
         """Store collaborators used to manage the SAM manager lifecycle.
 
@@ -59,12 +55,12 @@ class SamDelegate:
         self._qpane = qpane
         self._swap_delegate = swap_delegate
         self._cache_registry = cache_registry
-        self._manager: "SamManager | None" = None
+        self._manager: SamManager | None = None
         self._active_predictor = None
         self._warned_missing_mask_service = False
 
     @property
-    def manager(self) -> "SamManager | None":
+    def manager(self) -> SamManager | None:
         """Currently attached SAM manager, if any."""
         return self._manager
 
@@ -73,13 +69,13 @@ class SamDelegate:
         """Predictor prepared for the QPane's current image, if available."""
         return self._active_predictor
 
-    def updateCacheRegistry(self, registry: "CacheRegistry | None") -> None:
+    def updateCacheRegistry(self, registry: CacheRegistry | None) -> None:
         """Store the cache registry reference and attach the active SAM manager into it."""
         self._cache_registry = registry
         if registry is not None and self._manager is not None:
             registry.attachSamManager(self._manager)
 
-    def attachManager(self, sam_manager: "SamManager") -> None:
+    def attachManager(self, sam_manager: SamManager) -> None:
         """Attach a SAM manager, subscribe to its signals, and refresh QPane policies.
 
         Raises:

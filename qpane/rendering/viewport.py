@@ -19,16 +19,15 @@
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from PySide6.QtCore import (
     QElapsedTimer,
     QObject,
     QPoint,
     QPointF,
-    Qt,
     QSize,
     QSizeF,
+    Qt,
     QTimer,
     Signal,
 )
@@ -36,9 +35,9 @@ from PySide6.QtGui import QTransform
 from PySide6.QtWidgets import QWidget
 
 from ..core import Config
+from ..scene.render_plan import SceneContentSnapshot
 from .coordinates import CoordinateContext, PanelHitTest
 from .viewport_motion import ViewportMotionController
-from ..scene.render_plan import SceneContentSnapshot
 
 
 class ViewportZoomMode(str, Enum):
@@ -244,9 +243,9 @@ class Viewport(QObject):
     def can_pan(
         self,
         *,
-        zoom: Optional[float] = None,
+        zoom: float | None = None,
         panel_size=None,
-        image_size: Optional[QSize] = None,
+        image_size: QSize | None = None,
     ) -> bool:
         """Return True when panning could change the viewport based on size and lock state."""
         if self._pan_zoom_locked:
@@ -588,12 +587,10 @@ class Viewport(QObject):
             return False
         if abs(new_zoom - old_zoom) <= self._SMOOTH_ZOOM_MIN_DELTA:
             return False
-        if (
+        return not (
             self._smooth_zoom_duration_ms <= 0
             and self._smooth_zoom_burst_duration_ms <= 0
-        ):
-            return False
-        return True
+        )
 
     @staticmethod
     def _should_start_zoom_animation(duration_ms: int, min_frame_ms: int) -> bool:
@@ -774,12 +771,12 @@ class Viewport(QObject):
             self._smooth_zoom_slow_threshold_ms - self._smooth_zoom_fast_threshold_ms
         )
         span = self._smooth_zoom_duration_ms - self._smooth_zoom_burst_duration_ms
-        return int(round(self._smooth_zoom_burst_duration_ms + span * ratio))
+        return round(self._smooth_zoom_burst_duration_ms + span * ratio)
 
     def _get_zoom_target_frame_ms(self) -> int:
         """Return the ideal frame interval derived from the active screen refresh."""
         fps = self._get_active_zoom_fps()
-        return max(1, int(round(1000.0 / fps)))
+        return max(1, round(1000.0 / fps))
 
     def _get_active_zoom_fps(self) -> float:
         """Return the FPS target used for smooth-zoom interpolation."""
@@ -823,8 +820,9 @@ class Viewport(QObject):
             getattr(config, "smooth_zoom_burst_duration_ms", 20),
             fallback=20,
         )
-        if self._smooth_zoom_burst_duration_ms > self._smooth_zoom_duration_ms:
-            self._smooth_zoom_burst_duration_ms = self._smooth_zoom_duration_ms
+        self._smooth_zoom_burst_duration_ms = min(
+            self._smooth_zoom_burst_duration_ms, self._smooth_zoom_duration_ms
+        )
         self._smooth_zoom_burst_threshold_ms = self._coerce_non_negative_float(
             getattr(config, "smooth_zoom_burst_threshold_ms", 25),
             fallback=25.0,
@@ -875,7 +873,7 @@ class Viewport(QObject):
             return
         try:
             manager = diagnostics()
-        except Exception:  # pragma: no cover - defensive guard
+        except RuntimeError:  # pragma: no cover - diagnostics teardown
             return
         if manager is not None:
             manager.set_dirty("render")

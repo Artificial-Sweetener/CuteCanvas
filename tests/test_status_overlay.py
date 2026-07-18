@@ -17,9 +17,11 @@
 """Tests for status overlay rendering and staleness."""
 
 from __future__ import annotations
+
 import pytest
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QSize, Signal
 from PySide6.QtWidgets import QWidget
+
 from qpane.core import DiagnosticsSnapshot
 from qpane.types import DiagnosticRecord
 from qpane.ui.status_overlay import (
@@ -27,7 +29,6 @@ from qpane.ui.status_overlay import (
     OVERLAY_MARGIN_PX,
     PADDING_HORIZONTAL_PX,
     PADDING_VERTICAL_PX,
-    STROKE_OFFSETS,
     STALE_THRESHOLD_SEC,
     QPaneStatusOverlay,
 )
@@ -148,7 +149,7 @@ def test_overlay_falls_back_on_initial_errors() -> None:
 
 @pytest.mark.usefixtures("qapp")
 def test_overlay_allocates_stroke_and_shadow_slack() -> None:
-    """Allocate extra overlay space for stroke and shadow rendering."""
+    """Keep the rendered text inside the overlay's allocated pixel surface."""
     qpane = DummyQPane()
     qpane.resize(320, 240)
     overlay = QPaneStatusOverlay(qpane=qpane)
@@ -156,34 +157,36 @@ def test_overlay_allocates_stroke_and_shadow_slack() -> None:
         overlay.set_active(True)
         text = overlay._last_rendered_text
         width_limit = max(qpane.width() - (OVERLAY_MARGIN_PX * 2), 1)
-        metrics = overlay.fontMetrics()
-        bounding = metrics.boundingRect(
-            0, 0, width_limit, 10_000, Qt.TextWordWrap, text
+        content_size = overlay._measure_content(
+            text,
+            overlay.font(),
+            width_limit=width_limit,
         )
-        stroke_left = max(
-            (-dx for dx, _ in STROKE_OFFSETS if dx < 0),
-            default=0,
+        expected_display_size = QSize(
+            content_size.width() + PADDING_HORIZONTAL_PX * 2,
+            content_size.height() + PADDING_VERTICAL_PX * 2,
         )
-        stroke_right = max(
-            (dx for dx, _ in STROKE_OFFSETS if dx > 0),
-            default=0,
+        assert overlay._pixmap_display_size == expected_display_size
+        assert overlay._cached_pixmap is not None
+        assert (
+            overlay._cached_pixmap.deviceIndependentSize().toSize()
+            == expected_display_size
         )
-        stroke_up = max(
-            (-dy for _, dy in STROKE_OFFSETS if dy < 0),
-            default=0,
+        rendered_image = overlay._cached_pixmap.toImage()
+        visible_pixels = (
+            (x, y)
+            for y in range(rendered_image.height())
+            for x in range(rendered_image.width())
+            if rendered_image.pixelColor(x, y).alpha() > 0
         )
-        stroke_down = max(
-            (dy for _, dy in STROKE_OFFSETS if dy > 0),
-            default=0,
-        )
-        expected_width = (
-            bounding.width() + stroke_left + stroke_right + PADDING_HORIZONTAL_PX * 2
-        )
-        expected_height = (
-            bounding.height() + stroke_up + stroke_down + PADDING_VERTICAL_PX * 2
-        )
-        assert overlay._pixmap_display_size.width() >= expected_width
-        assert overlay._pixmap_display_size.height() >= expected_height
+        visible_coordinates = tuple(visible_pixels)
+        assert visible_coordinates
+        visible_x = [coordinate[0] for coordinate in visible_coordinates]
+        visible_y = [coordinate[1] for coordinate in visible_coordinates]
+        assert min(visible_x) > 0
+        assert max(visible_x) < rendered_image.width() - 1
+        assert min(visible_y) > 0
+        assert max(visible_y) < rendered_image.height() - 1
     finally:
         overlay.deleteLater()
         qpane.deleteLater()

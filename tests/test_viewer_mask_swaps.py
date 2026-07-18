@@ -20,24 +20,24 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from statistics import mean
-from typing import Iterator, Tuple
 
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 
+from qpane import QPane
 from qpane.masks.mask import MaskManager
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.mask_service import MaskService
-from qpane import QPane
 from tests.helpers.executor_stubs import StubExecutor
 
 WARM_SWAP_THRESHOLD_MS = 120.0
 _IMAGE_EDGE_PX = 192  # keep swaps representative without colorizing 4K overlays
 _SWAP_SAMPLES = 2  # enough samples for smoothing without long runtimes
-MaskPresence = Tuple[bool, bool]
+MaskPresence = tuple[bool, bool]
 
 
 def _make_image(width: int, height: int, color: Qt.GlobalColor) -> QImage:
@@ -77,7 +77,7 @@ def _measure_swap(
 @contextmanager
 def _mask_swap_environment(
     qapp, monkeypatch, *, mask_presence: MaskPresence
-) -> Iterator[Tuple[QPane, StubExecutor, Tuple[uuid.UUID, uuid.UUID]]]:
+) -> Iterator[tuple[QPane, StubExecutor, tuple[uuid.UUID, uuid.UUID]]]:
     """Yield a qpane and executor configured according to ``mask_presence``."""
     from qpane.masks import install as mask
 
@@ -173,7 +173,7 @@ def _mask_swap_environment(
 @pytest.fixture
 def mask_swap_environment(
     qapp, monkeypatch, request
-) -> Iterator[Tuple[QPane, StubExecutor, Tuple[uuid.UUID, uuid.UUID]]]:
+) -> Iterator[tuple[QPane, StubExecutor, tuple[uuid.UUID, uuid.UUID]]]:
     """Provide warmed overlays for the requested mask presence setup."""
     mask_presence = getattr(request, "param", (True, True))
     if len(mask_presence) != 2:
@@ -189,11 +189,11 @@ def mask_swap_environment(
 def _exercise_and_assert_swaps(
     qpane: QPane,
     executor: StubExecutor,
-    image_ids: Tuple[uuid.UUID, uuid.UUID],
+    image_ids: tuple[uuid.UUID, uuid.UUID],
     *,
     qapp,
     require_cache_hit: bool = True,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Measure swaps in both directions and enforce the warm latency budget."""
     first_id, second_id = image_ids
     controller = qpane.mask_service.controller

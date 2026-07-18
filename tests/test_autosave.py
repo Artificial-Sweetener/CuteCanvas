@@ -19,14 +19,16 @@
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from PySide6.QtCore import QObject, QSize, QBuffer, QIODevice
+
+from PySide6.QtCore import QBuffer, QIODevice, QObject, QSize
 from PySide6.QtGui import QImage, Qt
+
 from qpane import Config
 from qpane.concurrency import TaskRejected
 from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.install import should_enable_mask_autosave
 from qpane.masks import autosave
 from qpane.masks.autosave import AutosaveManager
+from qpane.masks.install import should_enable_mask_autosave
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
 

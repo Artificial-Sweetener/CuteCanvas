@@ -25,36 +25,25 @@ QWidget facade stays focused on presentation.
 
 from __future__ import annotations
 
-
 import logging
-
 import uuid
-
 from dataclasses import dataclass
-
 from typing import TYPE_CHECKING
 
-
 import numpy as np
-
 from PySide6.QtCore import QRect, QSize
-
 from PySide6.QtGui import QColor, QCursor, QImage, Qt
 
-
 from ..core import Config
-from ..types import DiagnosticRecord
-
 from ..masks import MaskDelegate
+from ..rendering import CoordinateContext
+from ..sam import SamDelegate
+from ..types import DiagnosticRecord
 from .mask_diagnostics import (
     mask_brush_detail_provider,
     mask_job_detail_provider,
     mask_summary_provider,
 )
-from ..rendering import CoordinateContext
-
-from ..sam import SamDelegate
-
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +51,10 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:  # pragma: no cover
 
     from ..catalog import Catalog, NavigationEvent
+    from ..core.diagnostics_broker import Diagnostics
     from ..masks.mask_service import MaskService
     from ..qpane import QPane
     from ..swap import SwapDelegate
-    from ..core.diagnostics_broker import Diagnostics
 
 
 @dataclass(frozen=True)
@@ -91,7 +80,7 @@ class MaskInfo:
 class _MaskUndoAPI:
     """Own undo/redo helpers so Masks can stay a thin facade."""
 
-    def __init__(self, owner: "Masks") -> None:
+    def __init__(self, owner: Masks) -> None:
         """Store the owning Masks controller for delegate lookups."""
         self._owner = owner
 
@@ -145,7 +134,7 @@ class _MaskUndoAPI:
 class _BrushCursorAdapter:
     """Keep brush cursor rendering isolated from the Masks facade."""
 
-    def __init__(self, owner: "Masks") -> None:
+    def __init__(self, owner: Masks) -> None:
         """Capture the owning Masks controller."""
         self._owner = owner
 
@@ -164,7 +153,7 @@ class _BrushCursorAdapter:
         qpane.interaction.custom_cursor = cursor
         qpane.setCursor(cursor)
 
-    def cursor_provider(self, _qpane_instance: "QPane") -> QCursor | None:
+    def cursor_provider(self, _qpane_instance: QPane) -> QCursor | None:
         """Return the cursor used for the active brush state."""
         qpane = self._owner._qpane
         if not self._owner.mask_feature_available():
@@ -211,7 +200,7 @@ class _BrushCursorAdapter:
 class _SamWorkflow:
     """Encapsulate SAM orchestration so Masks can delegate high-level calls."""
 
-    def __init__(self, owner: "Masks") -> None:
+    def __init__(self, owner: Masks) -> None:
         """Store the owning Masks controller."""
         self._owner = owner
 
@@ -365,7 +354,7 @@ class Masks:
             sam.updateCacheRegistry(cache_registry)
         self._sam_delegate: SamDelegate | None = sam
         self._mask_service: MaskService | None = getattr(qpane, "mask_service", None)
-        self._last_navigation_event: "NavigationEvent | None" = None
+        self._last_navigation_event: NavigationEvent | None = None
         self._pending_activation_images: set[uuid.UUID] = set()
         self._cached_mask_service_records: tuple[DiagnosticRecord, ...] = ()
         self._diagnostics_registered = False
@@ -392,7 +381,7 @@ class Masks:
             self._brush_cursor_adapter.cursor_provider,
         )
 
-    def on_navigation_started(self, event: "NavigationEvent") -> None:
+    def on_navigation_started(self, event: NavigationEvent) -> None:
         """Record navigation metadata and suspend overlays when needed."""
         self._last_navigation_event = event
         interaction = self._qpane.interaction
@@ -448,7 +437,7 @@ class Masks:
 
     # Diagnostics
 
-    def register_diagnostics(self, broker: "Diagnostics") -> None:
+    def register_diagnostics(self, broker: Diagnostics) -> None:
         """Register mask diagnostics providers once via the diagnostics broker."""
         if self._diagnostics_registered:
             return
@@ -458,15 +447,15 @@ class Masks:
         broker.register_mask_providers(self._mask_brush_diagnostics)
         self._diagnostics_registered = True
 
-    def _mask_summary_diagnostics(self, qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+    def _mask_summary_diagnostics(self, qpane: QPane) -> tuple[DiagnosticRecord, ...]:
         """Return summary diagnostics rows for overlay consumption."""
         return tuple(mask_summary_provider(qpane))
 
-    def _mask_job_diagnostics(self, qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+    def _mask_job_diagnostics(self, qpane: QPane) -> tuple[DiagnosticRecord, ...]:
         """Return detailed mask job diagnostics rows."""
         return tuple(mask_job_detail_provider(qpane))
 
-    def _mask_service_diagnostics(self, qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+    def _mask_service_diagnostics(self, qpane: QPane) -> tuple[DiagnosticRecord, ...]:
         """Return cached or fresh diagnostics emitted by the mask service."""
         service = self._ensure_mask_service()
         if service is None:
@@ -479,7 +468,7 @@ class Masks:
         self._cached_mask_service_records = records
         return records
 
-    def _mask_brush_diagnostics(self, qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+    def _mask_brush_diagnostics(self, qpane: QPane) -> tuple[DiagnosticRecord, ...]:
         """Return brush diagnostics rows for the detail overlay tier."""
         return tuple(mask_brush_detail_provider(qpane))
 

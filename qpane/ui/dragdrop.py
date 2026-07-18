@@ -32,7 +32,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 
 
 def drag_out_image(
-    qpane: "QPane",
+    qpane: QPane,
     event: QMouseEvent | None,
     *,
     image: QImage | None = None,

@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+
 from qpane.core import FeatureFailure, FeatureFallbacks
 
 

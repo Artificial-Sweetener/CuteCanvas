@@ -56,7 +56,7 @@ DiagnosticsProvider = Callable[["QPane"], Iterable[DiagnosticRecord]]
 class DiagnosticsRegistry:
     """Track diagnostics providers and collect their output safely."""
 
-    def __init__(self, qpane: "QPane") -> None:
+    def __init__(self, qpane: QPane) -> None:
         """Initialize the registry with the owning QPane reference."""
         self._qpane = qpane
         self._providers: list[tuple[int, DiagnosticsProvider]] = []
@@ -83,7 +83,7 @@ class DiagnosticsRegistry:
         for _priority, provider in self._providers:
             try:
                 candidate = provider(self._qpane)
-            except Exception as exc:  # pragma: no cover - defensive guard
+            except Exception as exc:  # noqa: BLE001 - extensible provider boundary
                 self._record_failure(provider, "call", exc)
                 continue
             provider_entries: list[DiagnosticRecord] = []
@@ -97,7 +97,7 @@ class DiagnosticsRegistry:
             except TypeError as exc:
                 self._record_failure(provider, "type", exc)
                 continue
-            except Exception as exc:  # pragma: no cover - defensive guard
+            except Exception as exc:  # noqa: BLE001 - extensible provider iterator
                 self._record_failure(provider, "iteration", exc)
                 continue
             self._provider_failures.pop(provider, None)

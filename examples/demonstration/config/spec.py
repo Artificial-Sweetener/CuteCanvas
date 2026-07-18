@@ -17,8 +17,10 @@
 """Field specifications for the example configuration dialog."""
 
 from __future__ import annotations
+
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Iterator, Literal, Mapping, Sequence
+from typing import Literal
 
 from qpane import (
     CacheMode,
@@ -773,8 +775,7 @@ def iter_field_specs(
     source = CONFIG_DIALOG_SECTIONS if sections is None else tuple(sections)
     for section in source:
         for group in section.groups:
-            for spec in group.fields:
-                yield spec
+            yield from group.fields
 
 
 def active_namespaces_for_features(
@@ -872,17 +873,17 @@ _CONFIG_FIELDS: set[str] = {
     path for path in _ALL_FIELDS if path not in _INTERNAL_ONLY_FIELDS
 }
 __all__ = [
-    "FieldSpec",
-    "FieldGroupSpec",
-    "SectionSpec",
     "CONFIG_DIALOG_SECTIONS",
+    "DIAGNOSTIC_DOMAIN_OPTIONS",
+    "FIELD_SPECS_BY_PATH",
+    "_ALL_FIELDS",
+    "_CONFIG_FIELDS",
+    "_INTERNAL_ONLY_FIELDS",
+    "FieldGroupSpec",
+    "FieldSpec",
+    "SectionSpec",
     "build_sections_for_features",
     "field_sets_for_sections",
     "filter_sections_for_features",
-    "FIELD_SPECS_BY_PATH",
     "iter_field_specs",
-    "_INTERNAL_ONLY_FIELDS",
-    "_ALL_FIELDS",
-    "_CONFIG_FIELDS",
-    "DIAGNOSTIC_DOMAIN_OPTIONS",
 ]

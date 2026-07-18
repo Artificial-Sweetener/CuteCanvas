@@ -18,16 +18,18 @@
 
 import math
 import uuid
+
 import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
+
 from qpane.catalog.image_utils import qimage_to_numpy_view_grayscale8
-from qpane.masks.strokes import _DecimatedStrokeState
+from qpane.masks.stroke_models import MaskStrokeSegmentPayload
 from qpane.masks.stroke_render import render_stroke_segments
+from qpane.masks.strokes import _DecimatedStrokeState
 from qpane.masks.tools import BrushTool
 from qpane.rendering.coordinates import PanelHitTest
-from qpane.masks.stroke_models import MaskStrokeSegmentPayload
 from qpane.tools import ToolDependencies
 from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
 

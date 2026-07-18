@@ -18,24 +18,16 @@
 
 from __future__ import annotations
 
-
 from typing import TYPE_CHECKING
 
-
 from qpane.core.config_features import require_mask_config
-
 from qpane.features import FeatureInstallError
 
 from .mask import MaskManager, _require_cv2
-
 from .mask_controller import MaskController
-
 from .mask_diagnostics import MaskStrokeDiagnostics
-
 from .mask_service import MaskService, should_enable_mask_autosave
-
 from .tools import BrushTool, connect_brush_signals, disconnect_brush_signals
-
 
 if TYPE_CHECKING:
     from qpane import QPane
@@ -45,7 +37,7 @@ __all__ = [
 ]
 
 
-def install_mask_feature(qpane: "QPane") -> None:
+def install_mask_feature(qpane: QPane) -> None:
     """Install mask management subsystems and tool wiring for a QPane."""
     hooks = qpane.hooks
     try:

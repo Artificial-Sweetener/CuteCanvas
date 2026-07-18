@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import json
 import math
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import NoReturn
 
 from PySide6.QtCore import QPoint
@@ -36,9 +36,9 @@ from .abuse_model import (
     MouseHoverAction,
     PalmContactAction,
     PenHoverAction,
-    RedoAction,
-    PointerKind,
     PenLeaveAction,
+    PointerKind,
+    RedoAction,
     StrokeAction,
     TouchNavigationAction,
     UndoAction,
@@ -298,7 +298,7 @@ class MaskAbuseRunner:
         self._require_valid_history_frames(
             tuple(frame_probe.frames),
             expected_points=expected_points,
-            background_points=tuple(),
+            background_points=(),
             phase="redo-frame",
         )
         self._require_expected_tint(
@@ -562,7 +562,7 @@ class MaskAbuseRunner:
             / (2.0 * max(0.01, viewer.devicePixelRatioF()))
         )
         band = 5.0
-        extent = max(6, int(math.ceil(radius + band + 1.0)))
+        extent = max(6, math.ceil(radius + band + 1.0))
         dark_pixels = 0
         bright_pixels = 0
         for y_position in range(

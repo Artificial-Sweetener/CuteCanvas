@@ -16,7 +16,8 @@
 
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
+
 from qpane.concurrency import QtTimerScheduler
 
 
@@ -36,7 +37,7 @@ def test_qt_timer_scheduler_cancels_dispatched_timer_before_start(qapp) -> None:
     assert handle is not None
     scheduler.cancel(handle)
     assert dispatched, "dispatcher should have been used for off-thread scheduling"
-    for callback in list(dispatched):
+    for callback in dispatched:
         callback()
     qapp.processEvents()
     assert not fired, "cancel before dispatch should prevent timer start"

@@ -17,7 +17,9 @@
 """Unit tests for qpane.ui helper modules."""
 
 from __future__ import annotations
+
 from PySide6.QtCore import QSize, QSizeF
+
 from qpane import Config, QPane
 from qpane.rendering import ViewportZoomMode
 from qpane.ui import dragdrop

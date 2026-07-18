@@ -46,7 +46,7 @@ def default_catalog_asset_key(
     *,
     revision: int,
     source_path: Path | None,
-) -> "SceneLayerAssetKey":
+) -> SceneLayerAssetKey:
     """Return the default-scene asset key for a catalog image."""
     return SceneLayerAssetKey(
         scene_id=default_scene_id(image_id),
@@ -86,7 +86,7 @@ def mask_layer_asset_key(
     scene_id: uuid.UUID,
     mask_id: uuid.UUID,
     revision: int,
-) -> "SceneLayerAssetKey":
+) -> SceneLayerAssetKey:
     """Return the asset key for a mask layer in a resolved scene."""
     return SceneLayerAssetKey(
         scene_id=scene_id,
@@ -111,7 +111,7 @@ def scene_image_asset_key(
     source_kind: str,
     revision: int,
     source_path: Path | None,
-) -> "SceneLayerAssetKey":
+) -> SceneLayerAssetKey:
     """Return an image asset key for a non-default scene layer."""
     return SceneLayerAssetKey(
         scene_id=scene_id,

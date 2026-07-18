@@ -18,8 +18,8 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 import uuid
+from collections import OrderedDict
 
 import pytest
 from PySide6.QtGui import QImage

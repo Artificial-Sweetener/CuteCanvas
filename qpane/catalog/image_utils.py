@@ -23,10 +23,10 @@ from PySide6.QtGui import QImage
 
 __all__ = [
     "images_differ",
+    "numpy_to_qimage_argb32",
+    "numpy_to_qimage_grayscale8",
     "qimage_to_numpy_grayscale8",
     "qimage_to_numpy_view_grayscale8",
-    "numpy_to_qimage_grayscale8",
-    "numpy_to_qimage_argb32",
 ]
 
 
@@ -38,13 +38,11 @@ def images_differ(existing: QImage | None, updated: QImage) -> bool:
         return True
     if existing.cacheKey() == updated.cacheKey():
         return False
-    if (
+    return not (
         existing.size() == updated.size()
         and existing.format() == updated.format()
         and existing == updated
-    ):
-        return False
-    return True
+    )
 
 
 def _prepare_grayscale_bits(image: QImage) -> tuple[QImage, object]:

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from .interaction import CompareDividerInteraction
-from .service import ComparisonChange, ComparisonChangeKind, CompareService
+from .service import CompareService, ComparisonChange, ComparisonChangeKind
 
 __all__ = [
     "CompareDividerInteraction",

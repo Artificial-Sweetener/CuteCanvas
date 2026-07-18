@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import types
+
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QRegion, Qt, QTransform
 

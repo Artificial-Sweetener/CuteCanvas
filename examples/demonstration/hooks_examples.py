@@ -20,8 +20,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _EXAMPLE_DIR = Path(__file__).resolve().parent / "extension_examples"
+
+
+def execute_trusted_extension(
+    code: str,
+    namespace: dict[str, object],
+    *,
+    source_name: str,
+) -> None:
+    """Execute code entered in the demo's explicit local extension editor."""
+    compiled = compile(code, source_name, "exec")
+    exec(compiled, namespace)  # noqa: S102 - deliberate trusted-code boundary
 
 
 def load_custom_cursor_example() -> tuple[str, str | None]:
@@ -44,6 +54,6 @@ def _load_extension_example(filename: str) -> tuple[str, str | None]:
     path = _EXAMPLE_DIR / filename
     try:
         return path.read_text(encoding="utf-8"), None
-    except Exception as exc:
+    except (OSError, UnicodeError) as exc:
         message = f"Failed to load extension example: {path} ({exc})"
         return "", message

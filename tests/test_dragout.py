@@ -15,14 +15,17 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+
 from pathlib import Path
+from typing import ClassVar
+
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 
 from qpane.rendering import ViewportZoomMode
-from qpane.ui.dragout import maybeStartDrag
 from qpane.ui.dragdrop import is_drag_out_allowed
+from qpane.ui.dragout import maybeStartDrag
 
 pytestmark = pytest.mark.usefixtures("qapp")
 
@@ -143,7 +146,7 @@ def test_maybe_start_drag_builds_drag_payload(tmp_path, monkeypatch, caplog):
     )
 
     class _DummyDrag:
-        instances: list[_DummyDrag] = []
+        instances: ClassVar[list[_DummyDrag]] = []
 
         def __init__(self, parent):
             self.parent = parent

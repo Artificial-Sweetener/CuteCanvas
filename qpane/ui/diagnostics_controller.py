@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .status_overlay import QPaneStatusOverlay
 
@@ -29,7 +30,7 @@ if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
 class DiagnosticsOverlayController:
     """Own the diagnostics overlay widget and domain detail toggles."""
 
-    def __init__(self, qpane: "QPane") -> None:
+    def __init__(self, qpane: QPane) -> None:
         """Cache QPane reference and initialize overlay/detail state trackers."""
         self._qpane = qpane
         self._overlay: QPaneStatusOverlay | None = None

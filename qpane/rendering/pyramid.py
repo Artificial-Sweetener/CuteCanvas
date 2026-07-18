@@ -18,9 +18,9 @@
 
 import logging
 from collections import OrderedDict
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Dict, Sequence
 
 from PySide6.QtCore import QObject, QRunnable, Qt, Signal
 from PySide6.QtGui import QImage
@@ -37,8 +37,8 @@ from ..concurrency import (
 from ..core import CacheSettings, Config
 from ..core.threading import assert_qt_main_thread
 from ..scene.identity import SceneLayerAssetKey
-from .cache_utils import CacheEvictionCoordinator, ExecutorOwnerMixin
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
+from .cache_utils import CacheEvictionCoordinator, ExecutorOwnerMixin
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class PyramidGeneratorWorker(QRunnable, BaseWorker):
             self.pyramid.size_bytes = total_size
             self.pyramid.status = PyramidStatus.COMPLETE
             self.emit_finished(True, payload=self.pyramid.asset_key)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker computation boundary
             self.pyramid.status = PyramidStatus.FAILED
             self.emit_finished(
                 False,
@@ -156,7 +156,7 @@ class ImagePyramid:
 
     asset_key: SceneLayerAssetKey
     full_resolution_image: QImage
-    levels: Dict[float, QImage] = field(default_factory=dict)
+    levels: dict[float, QImage] = field(default_factory=dict)
     status: PyramidStatus = PyramidStatus.PENDING
     size_bytes: int = 0
 
@@ -193,14 +193,14 @@ class PyramidManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         self._owns_executor = bool(owns_executor)
         self._managed_mode = False
         self._cache_limit_bytes: int = 0
-        self._pyramids: Dict[SceneLayerAssetKey, ImagePyramid] = {}
+        self._pyramids: dict[SceneLayerAssetKey, ImagePyramid] = {}
         self._cache: OrderedDict[SceneLayerAssetKey, ImagePyramid] = OrderedDict()
         self._cache_admission_guard = None
         self._rejected_cache_keys: set[SceneLayerAssetKey] = set()
         self._cache_size_bytes: int = 0
         self.cache_limit_bytes = self._resolve_cache_limit_bytes(config)
-        self._active_workers: Dict[SceneLayerAssetKey, PyramidGeneratorWorker] = {}
-        self._active_handles: Dict[SceneLayerAssetKey, TaskHandle] = {}
+        self._active_workers: dict[SceneLayerAssetKey, PyramidGeneratorWorker] = {}
+        self._active_handles: dict[SceneLayerAssetKey, TaskHandle] = {}
         dispatcher = qt_retry_dispatcher(self._executor, category="pyramid_main")
         self._pyramid_retry: RetryController[SceneLayerAssetKey, ImagePyramid] = (
             makeQtRetryController(
@@ -282,7 +282,7 @@ class PyramidManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         """Request background pyramid generation for ``asset_key`` if needed."""
         self._assert_main_thread()
         if not isinstance(asset_key, SceneLayerAssetKey):
-            raise ValueError("asset_key is required")
+            raise ValueError("asset_key is required")  # noqa: TRY004 - API contract
         if image.isNull():
             return False
         if self._prefetch_pending(asset_key):
@@ -344,7 +344,7 @@ class PyramidManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         """Start a worker to generate a pyramid for ``asset_key``."""
         self._assert_main_thread()
         if not isinstance(asset_key, SceneLayerAssetKey):
-            raise ValueError("asset_key is required")
+            raise ValueError("asset_key is required")  # noqa: TRY004 - API contract
         existing = self._pyramids.get(asset_key)
         if existing is None:
             pyramid = ImagePyramid(
@@ -488,9 +488,7 @@ class PyramidManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
             return original_image
         target_scale = target_width / original_width
         # Pick the smallest scale that still meets ``target_scale``
-        available_scales = [
-            scale for scale in pyramid.levels.keys() if scale >= target_scale
-        ]
+        available_scales = [scale for scale in pyramid.levels if scale >= target_scale]
         best_scale = min(available_scales, default=None)
         if best_scale is not None:
             self._cache_hits += 1
@@ -502,7 +500,7 @@ class PyramidManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         """Purge pyramid, cache state, and worker bookkeeping for ``asset_key``."""
         self._assert_main_thread()
         if not isinstance(asset_key, SceneLayerAssetKey):
-            raise ValueError("asset_key is required")
+            raise ValueError("asset_key is required")  # noqa: TRY004 - API contract
         was_cached = asset_key in self._cache
         had_worker = asset_key in self._active_workers
         cancelled = self._cancel_active_generation(asset_key, reason="asset-removal")

@@ -18,38 +18,18 @@
 
 from __future__ import annotations
 
-
 import logging
-
 import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from math import isclose
 from pathlib import Path
-
-from typing import TYPE_CHECKING, Callable, Mapping
-
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF
-
-from PySide6.QtGui import QImage, QPainter, QTransform, Qt
-
+from PySide6.QtGui import QImage, QPainter, Qt, QTransform
 from PySide6.QtWidgets import QWidget
 
-
-from .coordinates import CoordinateContext, PanelHitTest
-from .compiled_scene import (
-    CompiledRenderLayer,
-    CompiledRenderScene,
-    hit_test_items_for_scene,
-)
-
-from .render import Renderer
-
-from .tiles import TileManager
-
-from .visibility import visible_source_rect_for_layer
-
-from .viewport import Viewport, ViewportZoomMode
 from ..scene.default_scene import DefaultCatalogSceneProvider
 from ..scene.identity import (
     SceneLayerAssetKey,
@@ -76,8 +56,8 @@ from ..scene.render_plan import (
     RenderStrategy,
     SceneContentSnapshot,
     SceneLayerHitTestResult,
-    SceneRenderPlan,
     SceneRenderItem,
+    SceneRenderPlan,
     TileRenderData,
 )
 from ..scene.sources import (
@@ -86,7 +66,16 @@ from ..scene.sources import (
     PlaceholderImageSource,
 )
 from ..types import OverlayState, QPaneSceneOverlayLayer, QPaneSceneOverlayState
-
+from .compiled_scene import (
+    CompiledRenderLayer,
+    CompiledRenderScene,
+    hit_test_items_for_scene,
+)
+from .coordinates import CoordinateContext, PanelHitTest
+from .render import Renderer
+from .tiles import TileManager
+from .viewport import Viewport, ViewportZoomMode
+from .visibility import visible_source_rect_for_layer
 
 if TYPE_CHECKING:
     from ..cache.registry import CacheRegistry
@@ -200,10 +189,10 @@ class RenderingPresenter:
     def __init__(
         self,
         *,
-        qpane: "QPane",
-        catalog: "ImageCatalog",
-        cache_registry: "CacheRegistry" | None,
-        executor: "TaskExecutorProtocol",
+        qpane: QPane,
+        catalog: ImageCatalog,
+        cache_registry: CacheRegistry | None,
+        executor: TaskExecutorProtocol,
     ) -> None:
         """Compose viewport/tile/renderer collaborators owned by the presenter."""
         self._qpane = qpane
@@ -263,8 +252,8 @@ class RenderingPresenter:
         self,
         *,
         is_blank: bool,
-        content_overlays: Mapping[str, "OverlayDrawFn"],
-        scene_overlays: Mapping[str, "SceneOverlayDrawFn"] | None = None,
+        content_overlays: Mapping[str, OverlayDrawFn],
+        scene_overlays: Mapping[str, SceneOverlayDrawFn] | None = None,
         overlays_suspended: bool,
         draw_tool_overlay: Callable[[QPainter], None] | None,
     ) -> SceneRenderPlan | None:
@@ -328,7 +317,7 @@ class RenderingPresenter:
         self,
         painter: QPainter,
         render_plan: SceneRenderPlan | None,
-        content_overlays: Mapping[str, "OverlayDrawFn"],
+        content_overlays: Mapping[str, OverlayDrawFn],
         *,
         overlays_suspended: bool,
     ) -> None:
@@ -359,7 +348,7 @@ class RenderingPresenter:
         self,
         painter: QPainter,
         render_plan: SceneRenderPlan | None,
-        scene_overlays: Mapping[str, "SceneOverlayDrawFn"],
+        scene_overlays: Mapping[str, SceneOverlayDrawFn],
         *,
         overlays_suspended: bool,
     ) -> None:
@@ -537,8 +526,8 @@ class RenderingPresenter:
         safe_min_zoom = getattr(self._qpane.settings, "safe_min_zoom", 1e-3)
         min_zoom = max(self.viewport.min_zoom(), safe_min_zoom)
         base_size = content_snapshot.base_image_size
-        min_width = max(1, int(round(base_size.width() * min_zoom)))
-        min_height = max(1, int(round(base_size.height() * min_zoom)))
+        min_width = max(1, round(base_size.width() * min_zoom))
+        min_height = max(1, round(base_size.height() * min_zoom))
         return QSize(min_width, min_height)
 
     def current_content_snapshot(self) -> SceneContentSnapshot | None:
@@ -1824,7 +1813,7 @@ class RenderingPresenter:
         if callable(service_getter):
             try:
                 service = service_getter()
-            except Exception:  # pragma: no cover - defensive teardown guard
+            except RuntimeError:  # pragma: no cover - service teardown
                 service = None
             if service is not None:
                 composition_id = service.current_composition_id()
@@ -1835,7 +1824,7 @@ class RenderingPresenter:
         if compare_service is not None:
             try:
                 state = compare_service.state()
-            except Exception:  # pragma: no cover - defensive teardown guard
+            except RuntimeError:  # pragma: no cover - service teardown
                 state = None
             if state is not None:
                 comparison_state = (

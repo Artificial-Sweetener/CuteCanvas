@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import QRunnable
 
@@ -168,7 +168,7 @@ class CallbackDispatchRunnable(QRunnable, BaseWorker):
             return
         try:
             self._callback()
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except Exception as exc:  # noqa: BLE001 - worker callback boundary
             self.emit_finished(False, payload=str(exc), error=exc)
         else:
             self.emit_finished(True)

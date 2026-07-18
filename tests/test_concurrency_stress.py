@@ -17,14 +17,17 @@
 """Integration stress test covering overlapping manager workloads."""
 
 from __future__ import annotations
+
 import threading
 import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+
 import pytest
 from PySide6.QtCore import QRunnable
 from PySide6.QtGui import QColor, QImage
+
 from qpane import Config, sam
 from qpane.concurrency import (
     BaseWorker,
@@ -33,8 +36,8 @@ from qpane.concurrency import (
 )
 from qpane.masks.autosave import AutosaveManager
 from qpane.rendering import PyramidManager, TileManager
-from qpane.scene.identity import SceneLayerTileKey, default_catalog_asset_key
 from qpane.sam.manager import SamManager
+from qpane.scene.identity import SceneLayerTileKey, default_catalog_asset_key
 from tests.helpers.render_plan import make_tile_key
 
 

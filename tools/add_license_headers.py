@@ -97,7 +97,7 @@ def get_tracked_python_files():
             files.update(Path(p) for p in result_py.stdout.splitlines())
         if result_pyi.stdout:
             files.update(Path(p) for p in result_pyi.stdout.splitlines())
-        return sorted(list(files))
+        return sorted(files)
     except subprocess.CalledProcessError as e:
         print(f"Error running git ls-files: {e}")
         sys.exit(1)

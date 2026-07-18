@@ -17,14 +17,15 @@
 """Tests for SAM predictor cache consumer wiring."""
 
 from __future__ import annotations
-from typing import Callable, List
+
 import uuid
+from collections.abc import Callable
 
 import pytest
 from PySide6.QtGui import QColor, QImage
 
-from qpane.cache.coordinator import CacheCoordinator
 from qpane.cache.consumers import SamPredictorCacheConsumer
+from qpane.cache.coordinator import CacheCoordinator
 from qpane.sam.manager import SamManager
 from tests.helpers.executor_stubs import StubExecutor
 
@@ -33,7 +34,7 @@ class _Signal:
     """Lightweight signal stub to mimic Qt connect/emit semantics."""
 
     def __init__(self) -> None:
-        self._callbacks: List[Callable[..., None]] = []
+        self._callbacks: list[Callable[..., None]] = []
 
     def connect(self, callback: Callable[..., None]) -> None:
         self._callbacks.append(callback)

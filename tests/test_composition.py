@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtGui import QColor, QImage
 
-from qpane import CompositionSnapshot, ComparisonOrientation, QPane
+from qpane import ComparisonOrientation, CompositionSnapshot, QPane
 
 
 def _image(color: QColor) -> QImage:

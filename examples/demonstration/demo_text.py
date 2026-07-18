@@ -17,9 +17,7 @@
 
 """Narrative copy and quick-reference hints for the QPane example demo."""
 
-
 from __future__ import annotations
-
 
 CATALOG_HINT = (
     "Browse compositions by default. Switch to Catalog to inspect source images, "

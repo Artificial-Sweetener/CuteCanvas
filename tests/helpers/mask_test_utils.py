@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QCoreApplication
@@ -32,7 +32,7 @@ def drain_mask_jobs(
     *,
     executor=None,
     timeout: float = 2.0,
-) -> Tuple[Dict[Any, Tuple[Any, ...]], Dict[Any, int]]:
+) -> tuple[dict[Any, tuple[Any, ...]], dict[Any, int]]:
     """Run queued mask worker + finalize jobs until pending state clears."""
     deadline = time.monotonic() + timeout
     exec_obj = executor or getattr(qpane, "executor", None)

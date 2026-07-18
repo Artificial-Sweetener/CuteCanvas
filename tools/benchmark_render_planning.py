@@ -27,11 +27,11 @@ from collections.abc import Callable
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPointF, QRectF  # noqa: E402
-from PySide6.QtGui import QImage, Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QImage, Qt
+from PySide6.QtWidgets import QApplication
 
-from qpane import (  # noqa: E402
+from qpane import (
     QPane,
     QPaneCatalogImageLayerRequest,
     QPaneSceneRequest,

@@ -18,6 +18,7 @@
 """Entry point for the QPane example demo application."""
 
 from __future__ import annotations
+
 import argparse
 import importlib.util
 import logging
@@ -25,8 +26,9 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if __package__ is None or __package__ == "":
     # Allow running as a script (python examples/demo.py) by adding repo root.
@@ -36,7 +38,7 @@ from examples.demo_settings import load_demo_settings, save_demo_settings
 if TYPE_CHECKING:
     from examples.demonstration.demo_window import ExampleOptions, ExampleWindow
 
-__all__ = ["ExampleOptions", "ExampleWindow", "parse_args", "main"]
+__all__ = ["ExampleOptions", "ExampleWindow", "main", "parse_args"]
 _TIERS = {
     "core": {"extra": None, "features": "core", "label": "Core"},
     "mask": {"extra": "mask", "features": "mask", "label": "Masks"},
@@ -53,6 +55,8 @@ def _load_example_types() -> tuple[Any, Any]:
     if ExampleOptions is None or ExampleWindow is None:
         from examples.demonstration.demo_window import (
             ExampleOptions as DemoExampleOptions,
+        )
+        from examples.demonstration.demo_window import (
             ExampleWindow as DemoExampleWindow,
         )
 
@@ -572,7 +576,7 @@ def _interactive_menu() -> int:
                 )
 
 
-def parse_args(argv: Optional[Iterable[str]] = None) -> ExampleOptions:
+def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
     """Parse CLI arguments controlling feature selection and config strictness."""
     _load_example_types()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -650,7 +654,7 @@ def _configure_logging(level_name: str = "INFO") -> None:
     )
 
 
-def main(argv: Optional[Iterable[str]] = None) -> int:
+def main(argv: Iterable[str] | None = None) -> int:
     """Entry point for launching the example application."""
     args = list(argv) if argv is not None else sys.argv[1:]
     if not args:
@@ -674,6 +678,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     _load_example_types()
     from PySide6.QtGui import QImageReader
     from PySide6.QtWidgets import QApplication
+
     from qpane import Config
 
     opts = parse_args(args)

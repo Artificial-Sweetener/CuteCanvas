@@ -18,11 +18,10 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-
-import uuid
 
 from PySide6.QtCore import QRectF
 
@@ -51,7 +50,7 @@ class CompositionComparison:
         self,
         position: float,
         orientation: ComparisonOrientation,
-    ) -> "CompositionComparison":
+    ) -> CompositionComparison:
         """Return a comparison record with updated split settings."""
         return replace(
             self,
@@ -107,6 +106,6 @@ class CompositionRecord:
 
     def with_comparison(
         self, comparison: CompositionComparison | None
-    ) -> "CompositionRecord":
+    ) -> CompositionRecord:
         """Return a record with a replaced comparison payload."""
         return replace(self, comparison=comparison)

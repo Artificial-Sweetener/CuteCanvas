@@ -17,7 +17,6 @@
 """Core tool abstractions plus the default pan/zoom implementation."""
 
 import abc
-from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, Signal
@@ -32,9 +31,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication
 
 from .dependencies import ToolDependencies
-
-if TYPE_CHECKING:
-    pass
 
 
 def _viewport_zoom_mode():
@@ -64,11 +60,11 @@ class ExtensionTool(abc.ABC):
 
     def activate(self, dependencies: ToolDependencies) -> None:
         """Inject collaborators when a tool becomes active; base implementation does nothing."""
-        return None
+        return
 
     def deactivate(self) -> None:
         """Hook for cleanup when a tool is deactivated; base implementation does nothing."""
-        return None
+        return
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Ignore presses by default so tools opt in explicitly."""
@@ -108,7 +104,7 @@ class ExtensionTool(abc.ABC):
 
     def draw_overlay(self, painter: QPainter) -> None:
         """No-op overlay pass; override to draw custom visuals."""
-        return None
+        return
 
     def getCursor(self) -> QCursor | None:
         """Return the cursor the QPane should adopt when this tool is active.
@@ -332,9 +328,7 @@ class PanZoomTool(BaseTool):
         """Scale a logical-pixel delta by DPR so pan stays in physical pixels."""
         try:
             dpr = float(self._get_dpr())
-        except (
-            Exception
-        ):  # pragma: no cover - dependency should be safe but guard anyway
+        except Exception:  # noqa: BLE001 - injected viewport dependency boundary
             dpr = 1.0
         if dpr <= 0:
             dpr = 1.0
@@ -347,7 +341,7 @@ class PanZoomTool(BaseTool):
         try:
             native_zoom = float(self._get_native_zoom())
             fit_zoom = float(self._get_fit_zoom())
-        except Exception:  # pragma: no cover - dependency should be safe
+        except Exception:  # noqa: BLE001 - injected viewport dependency boundary
             return new_zoom, None
         zoom_mode = _viewport_zoom_mode()
 
@@ -358,9 +352,7 @@ class PanZoomTool(BaseTool):
                 return False
             if old_zoom < target <= new_zoom:
                 return True
-            if old_zoom > target >= new_zoom:
-                return True
-            return False
+            return old_zoom > target >= new_zoom
 
         crosses_native = crosses(native_zoom)
         crosses_fit = crosses(fit_zoom)

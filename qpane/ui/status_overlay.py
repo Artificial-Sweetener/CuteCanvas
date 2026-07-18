@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPixmap
@@ -63,7 +64,7 @@ class QPaneStatusOverlay(QLabel):
     def __init__(
         self,
         *,
-        qpane: "QPane",
+        qpane: QPane,
         parent: QWidget | None = None,
     ) -> None:
         """Bind the overlay to `qpane`, connect diagnostics signals, and prep timers."""
@@ -75,7 +76,7 @@ class QPaneStatusOverlay(QLabel):
         self._pixmap_display_size = QSize()
         self._display_size = QSize()
         self._pending_show = False
-        self._last_snapshot_rows: tuple[tuple[str, str], ...] = tuple()
+        self._last_snapshot_rows: tuple[tuple[str, str], ...] = ()
         self._last_snapshot_monotonic = 0.0
         self._stale = False
         self._listening = False
@@ -156,7 +157,7 @@ class QPaneStatusOverlay(QLabel):
 
     def _handle_snapshot(self, snapshot) -> None:
         """Render the provided diagnostics snapshot."""
-        rows = snapshot.rows() if snapshot is not None else tuple()
+        rows = snapshot.rows() if snapshot is not None else ()
         if rows:
             display_rows = rows
         elif self._last_snapshot_rows:
@@ -439,9 +440,7 @@ class QPaneStatusOverlay(QLabel):
         self._stale = stale
         self._render_rows(self._last_snapshot_rows, stale=stale, force=True)
 
-    def eventFilter(
-        self, watched: QObject, event: QEvent
-    ) -> bool:  # noqa: D401 - Qt signature
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """Reposition the overlay when the qpane resizes."""
         if watched is self._qpane and event.type() == QEvent.Resize:
             if self._last_snapshot_rows:
@@ -463,7 +462,7 @@ class QPaneStatusOverlay(QLabel):
         target_rect = QRect(0, -offset, logical_size.width(), logical_size.height())
         painter.drawPixmap(target_rect, self._cached_pixmap, self._cached_pixmap.rect())
 
-    def closeEvent(self, event: QEvent) -> None:  # noqa: D401 - Qt signature
+    def closeEvent(self, event: QEvent) -> None:
         """Tear down timers and event filters before closing."""
         self._stale_timer.stop()
         if self._event_filter_installed:

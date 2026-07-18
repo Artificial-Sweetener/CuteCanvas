@@ -18,6 +18,7 @@
 
 from PySide6.QtCore import QPointF, QRect
 from PySide6.QtGui import QImage
+
 from qpane.rendering import Renderer
 from qpane.scene.render_plan import RenderStrategy
 from tests.helpers.render_plan import make_render_plan

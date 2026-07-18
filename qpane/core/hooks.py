@@ -22,22 +22,17 @@ installers share consistent, documented signatures.
 
 from __future__ import annotations
 
-
 from dataclasses import dataclass
-
 from typing import TYPE_CHECKING, Protocol
-
 
 from PySide6.QtGui import QCursor, QPainter
 
-
 from ..tools import ToolManagerSignals
 
-
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
-    from ..tools.base import ExtensionTool
     from ..autosave import AutosaveManager
     from ..qpane import QPane
+    from ..tools.base import ExtensionTool
     from ..types import OverlayState, QPaneSceneOverlayState
     from .diagnostics import DiagnosticsProvider
 
@@ -45,7 +40,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 class ToolFactory(Protocol):
     """Factory callable used to create tool instances on demand."""
 
-    def __call__(self) -> "ExtensionTool":
+    def __call__(self) -> ExtensionTool:
         """Instantiate and return a tool for the registered mode."""
         ...
 
@@ -53,7 +48,7 @@ class ToolFactory(Protocol):
 class ToolSignalBinder(Protocol):
     """Callable that wires a tool's signals to the shared ToolManagerSignals object."""
 
-    def __call__(self, signals: ToolManagerSignals, tool: "ExtensionTool") -> None:
+    def __call__(self, signals: ToolManagerSignals, tool: ExtensionTool) -> None:
         """Bind or unbind tool signals to the shared manager."""
         ...
 
@@ -61,7 +56,7 @@ class ToolSignalBinder(Protocol):
 class OverlayDrawFn(Protocol):
     """Callable that draws public overlays after rendered scene content."""
 
-    def __call__(self, painter: QPainter, state: "OverlayState") -> None:
+    def __call__(self, painter: QPainter, state: OverlayState) -> None:
         """Render overlay content after the scene content is painted."""
         ...
 
@@ -69,7 +64,7 @@ class OverlayDrawFn(Protocol):
 class SceneOverlayDrawFn(Protocol):
     """Callable that draws host chrome relative to layered scene composition layers."""
 
-    def __call__(self, painter: QPainter, state: "QPaneSceneOverlayState") -> None:
+    def __call__(self, painter: QPainter, state: QPaneSceneOverlayState) -> None:
         """Render scene overlay content after composed scene pixels are painted."""
         ...
 
@@ -77,7 +72,7 @@ class SceneOverlayDrawFn(Protocol):
 class CursorProvider(Protocol):
     """Callable that returns a cursor for the current QPane state."""
 
-    def __call__(self, qpane: "QPane") -> QCursor | None:
+    def __call__(self, qpane: QPane) -> QCursor | None:
         """Return the cursor to display for the active control mode."""
         ...
 
@@ -86,7 +81,7 @@ class CursorProvider(Protocol):
 class QPaneHooks:
     """Expose stable hook helpers for optional feature installers."""
 
-    qpane: "QPane"
+    qpane: QPane
 
     def registerTool(
         self,
@@ -168,7 +163,7 @@ class QPaneHooks:
 
     def register_diagnostics_provider(
         self,
-        provider: "DiagnosticsProvider",
+        provider: DiagnosticsProvider,
         *,
         domain: str = "custom",
         tier: str = "core",
@@ -185,7 +180,7 @@ class QPaneHooks:
         diagnostics = self.qpane.diagnostics()
         diagnostics.register_provider(provider, domain=domain, tier=tier)
 
-    def attachAutosaveManager(self, manager: "AutosaveManager") -> None:
+    def attachAutosaveManager(self, manager: AutosaveManager) -> None:
         """Install the autosave manager used by mask-related features.
 
         Args:

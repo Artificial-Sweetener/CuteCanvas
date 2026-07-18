@@ -18,13 +18,9 @@
 
 from __future__ import annotations
 
-
 import logging
-
 from dataclasses import dataclass, field
-
-from typing import Any, Dict
-
+from typing import Any
 
 from .consumers import (
     MaskOverlayCacheConsumer,
@@ -32,9 +28,7 @@ from .consumers import (
     SamPredictorCacheConsumer,
     TileCacheConsumer,
 )
-
 from .coordinator import CacheCoordinator, CachePriority
-
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +38,7 @@ class CacheRegistry:
     """Lightweight container for cache-coordination attachments."""
 
     coordinator: CacheCoordinator
-    consumers: Dict[str, Any] = field(default_factory=dict)
+    consumers: dict[str, Any] = field(default_factory=dict)
 
     def _attach(
         self,

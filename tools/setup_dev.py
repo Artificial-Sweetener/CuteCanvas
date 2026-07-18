@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import os
 import subprocess
 import sys
+from pathlib import Path
+
+PIP_VERSION = "26.1.2"
 
 
 def _venv_python(venv_dir: Path) -> Path:
@@ -46,6 +48,20 @@ def _install_requirements(python_path: Path, requirements_path: Path) -> None:
     )
 
 
+def _install_pinned_pip(python_path: Path) -> None:
+    """Install the repository's pinned package installer version."""
+    subprocess.run(
+        [
+            str(python_path),
+            "-m",
+            "pip",
+            "install",
+            f"pip=={PIP_VERSION}",
+        ],
+        check=True,
+    )
+
+
 def _run_hook_setup(python_path: Path, script_path: Path) -> None:
     """Run the git hook setup script using the venv Python."""
     subprocess.run([str(python_path), str(script_path)], check=True)
@@ -61,6 +77,7 @@ def main() -> int:
     venv_python = _venv_python(venv_dir)
     if not venv_python.exists():
         raise FileNotFoundError(f"Venv Python not found at {venv_python}")
+    _install_pinned_pip(venv_python)
     _install_requirements(venv_python, requirements_path)
     _run_hook_setup(venv_python, hooks_script)
     return 0

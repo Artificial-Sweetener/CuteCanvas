@@ -17,13 +17,15 @@
 """Lightweight editors for live hook experimentation in the example demo."""
 
 from __future__ import annotations
-from typing import Callable, Tuple
+
+from collections.abc import Callable
+
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDialog,
     QLabel,
-    QPushButton,
     QPlainTextEdit,
+    QPushButton,
     QVBoxLayout,
 )
 
@@ -36,7 +38,7 @@ class HookEditorWindow(QDialog):
         title: str,
         description: str,
         seed_code: str,
-        on_apply: Callable[[str], Tuple[bool, str]],
+        on_apply: Callable[[str], tuple[bool, str]],
         parent=None,
     ) -> None:
         """Render the editor UI and wire the Apply callback.

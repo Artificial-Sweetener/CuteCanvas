@@ -17,7 +17,9 @@
 """Tests for feature-aware configuration descriptors and registry helpers."""
 
 from __future__ import annotations
+
 import pytest
+
 from qpane.core.config_features import (
     CORE_DESCRIPTOR,
     DIAGNOSTICS_DESCRIPTOR,

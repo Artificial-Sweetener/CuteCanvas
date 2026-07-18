@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import uuid
-
 from pathlib import Path
 
 from PySide6.QtGui import QImage
@@ -73,12 +72,10 @@ def _cycle(qpane: QPane) -> None:
             return mask_available and not placeholder_active
         if mode == QPane.CONTROL_MODE_SMART_SELECT:
             return mask_available and sam_available and not placeholder_active
-        if placeholder_active and mode not in {
-            QPane.CONTROL_MODE_CURSOR,
-            QPane.CONTROL_MODE_PANZOOM,
-        }:
-            return False
-        return True
+        return not (
+            placeholder_active
+            and mode not in {QPane.CONTROL_MODE_CURSOR, QPane.CONTROL_MODE_PANZOOM}
+        )
 
     ordered_modes = [mode for mode in preferred_order if _mode_allowed(mode)]
     if not ordered_modes:
@@ -107,7 +104,20 @@ def _cycle(qpane: QPane) -> None:
     qpane.setControlMode(next_mode)
 
 
-def test_cycle_order_matches_toolbar(qapp):
+def test_cycle_order_matches_toolbar(monkeypatch, qapp):
+    """Cycle through enabled tools without starting unrelated SAM inference."""
+    from qpane.sam.manager import SamManager
+
+    def ignore_predictor_request(
+        _manager, _image, _image_id, *, source_path=None
+    ) -> None:
+        """Keep an interaction-order test independent of predictor execution."""
+
+    monkeypatch.setattr(
+        SamManager,
+        "requestPredictor",
+        ignore_predictor_request,
+    )
     config = Config()
     qpane = QPane(config=config, features=("mask", "sam"))
     try:

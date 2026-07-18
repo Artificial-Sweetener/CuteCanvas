@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=67", "wheel", "setuptools_scm>=8"]
+requires = ["setuptools==83.0.0", "wheel==0.47.0", "setuptools_scm==10.2.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,10 +10,9 @@ readme = { file = "README.md", "content-type" = "text/markdown" }
 authors = [
   { name = "Artificial Sweetener", email = "artificialsweetenerai@proton.me" }
 ]
-license = { text = "GPL-3.0-or-later" }
+license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
 classifiers = [
-  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -49,11 +48,12 @@ dev = [
   "torch>=2.1",
   "mobilesam-mirror>=1.0.0",
   "timm>=0.9",
-  "pytest",
-  "pytest-xdist>=3.8.0",
-  "ruff",
-  "black",
-  "python-semantic-release"
+  "pytest==9.1.1",
+  "pytest-xdist==3.8.0",
+  "ruff==0.15.22",
+  "black==26.5.1",
+  "python-semantic-release==10.6.1",
+  "build==1.5.0"
 ]
 
 [project.urls]
@@ -63,7 +63,7 @@ Issues = "https://github.com/Artificial-Sweetener/QPane/issues"
 Documentation = "https://github.com/Artificial-Sweetener/QPane/tree/main/docs"
 
 [tool.setuptools.packages.find]
-include = ["qpane", "qpane.*", "examples"]
+include = ["qpane", "qpane.*"]
 
 [tool.setuptools]
 zip-safe = false
@@ -77,6 +77,9 @@ markers = [
   "performance: mark long-running performance benchmarks",
   "swap_benchmark: mark swap latency benchmarks",
 ]
+
+[tool.black]
+target-version = ["py310"]
 
 [tool.ruff]
 target-version = "py310"

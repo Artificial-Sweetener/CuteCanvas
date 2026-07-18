@@ -17,43 +17,44 @@
 """Expose the host-facing QPane package surface via lazy-loaded collaborators."""
 
 from __future__ import annotations
+
 from importlib import import_module
 from typing import Any
 
 __all__ = [
     "CacheMode",
-    "PlaceholderScaleMode",
-    "ZoomMode",
-    "DiagnosticsDomain",
-    "ControlMode",
-    "ComparisonOrientation",
     "CatalogEntry",
-    "LinkedGroup",
-    "ComparisonState",
-    "ComparisonDividerState",
-    "CompositionEntry",
-    "CompositionSnapshot",
-    "DiagnosticRecord",
-    "OverlayState",
-    "MaskInfo",
-    "MaskSavedPayload",
     "CatalogMutationEvent",
     "CatalogSnapshot",
-    "QPaneScene",
-    "QPaneSceneLayer",
-    "QPaneSceneRequest",
+    "ComparisonDividerState",
+    "ComparisonOrientation",
+    "ComparisonState",
+    "CompositionEntry",
+    "CompositionSnapshot",
+    "Config",
+    "ControlMode",
+    "DiagnosticRecord",
+    "DiagnosticsDomain",
+    "ExtensionTool",
+    "ExtensionToolSignals",
+    "LinkedGroup",
+    "MaskInfo",
+    "MaskSavedPayload",
+    "OverlayState",
+    "PlaceholderScaleMode",
+    "QPane",
     "QPaneCatalogImageLayerRequest",
-    "QPaneSceneTemplate",
-    "QPaneTemplateLayer",
-    "QPaneSceneTemplateBindings",
+    "QPaneScene",
     "QPaneSceneClip",
     "QPaneSceneHit",
-    "QPaneSceneOverlayState",
+    "QPaneSceneLayer",
     "QPaneSceneOverlayLayer",
-    "ExtensionToolSignals",
-    "ExtensionTool",
-    "Config",
-    "QPane",
+    "QPaneSceneOverlayState",
+    "QPaneSceneRequest",
+    "QPaneSceneTemplate",
+    "QPaneSceneTemplateBindings",
+    "QPaneTemplateLayer",
+    "ZoomMode",
     "__version__",
 ]
 _LAZY_SYMBOLS: dict[str, tuple[str, str]] = {
@@ -107,6 +108,4 @@ def __getattr__(name: str) -> Any:
 
 def __dir__() -> list[str]:
     """Return the sorted public attributes including lazy-loaded entries."""
-    return sorted(
-        __all__ + [key for key in globals().keys() if not key.startswith("_")]
-    )
+    return sorted(__all__ + [key for key in globals() if not key.startswith("_")])

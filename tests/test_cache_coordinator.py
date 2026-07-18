@@ -17,19 +17,23 @@
 """Tests for cache coordinator budgeting and trimming."""
 
 from __future__ import annotations
+
+import logging
+
 import pytest
 from PySide6.QtGui import QImage, Qt
-import logging
+
+from qpane import Config
 from qpane.cache.consumers import MaskOverlayCacheConsumer
 from qpane.cache.coordinator import (
     CacheConsumerCallbacks,
     CacheCoordinator,
     CachePriority,
 )
-from qpane import Config
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.mask import MaskManager
 from qpane.masks.mask_controller import MaskController
+from tests.helpers.config import fixed_cache_config
 
 MB = 1024 * 1024
 
@@ -304,7 +308,7 @@ def test_mask_overlay_consumer_uses_controller_callback():
     controller = MaskController(
         manager,
         lambda pt: pt,
-        Config(),
+        fixed_cache_config(),
         mask_config=MaskConfigSlice(),
     )
     coordinator = CacheCoordinator(active_budget_bytes=8 * 1024 * 1024)

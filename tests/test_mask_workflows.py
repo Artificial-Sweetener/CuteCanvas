@@ -24,31 +24,32 @@ from types import MethodType
 import numpy as np
 import pytest
 from PySide6.QtCore import QCoreApplication, QPoint, QPointF, QRect, QSize
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QTransform, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, Qt, QTransform
 
+from qpane import Config, QPane
 from qpane.catalog import NavigationEvent
 from qpane.catalog.image_utils import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_view_grayscale8,
 )
-from qpane.masks.stroke_render import render_stroke_segments
-from qpane.masks.strokes import _DecimatedStrokeState
-from qpane.masks.stroke_worker import MaskStrokeWorker
+from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.autosave import AutosaveManager
 from qpane.masks.mask import MaskManager
 from qpane.masks.mask_controller import (
     MaskController,
     MaskReadyUpdate,
 )
+from qpane.masks.mask_service import MaskService, PrefetchedOverlay
+from qpane.masks.mask_undo import MaskLayerUndoProvider, MaskUndoProvider
 from qpane.masks.stroke_models import (
     MaskStrokeJobResult,
     MaskStrokePayload,
     MaskStrokeSegmentPayload,
 )
-from qpane.masks.mask_service import MaskService, PrefetchedOverlay
-from qpane.masks.mask_undo import MaskLayerUndoProvider, MaskUndoProvider
-from qpane.core.config_features import MaskConfigSlice
-from qpane import Config, QPane
+from qpane.masks.stroke_render import render_stroke_segments
+from qpane.masks.stroke_worker import MaskStrokeWorker
+from qpane.masks.strokes import _DecimatedStrokeState
+from tests.helpers.config import fixed_cache_config
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
 
@@ -313,7 +314,7 @@ def test_mask_cycle_routes_reorder_through_scene_mutations(
 
 
 def test_qpane_brush_wrapper_delegates(monkeypatch, qapp):
-    qpane = QPane(features=("mask",))
+    qpane = QPane(config=fixed_cache_config(), features=("mask",))
     qpane.resize(16, 16)
     calls: list[int] = []
     masks = _masks(qpane)
@@ -352,7 +353,7 @@ def qpane_with_mask(qapp, monkeypatch):
         qpane.refreshMaskAutosavePolicy()
 
     monkeypatch.setattr(mask, "install_mask_feature", install_mask_feature)
-    qpane = QPane(features=("mask",))
+    qpane = QPane(config=fixed_cache_config(), features=("mask",))
     qpane.resize(32, 32)
     qpane.applySettings(mask_autosave_enabled=True)
     image = QImage(8, 8, QImage.Format_ARGB32)
@@ -524,7 +525,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
 
 
 def test_mask_region_update_triggers_autosave(qpane_with_mask, monkeypatch):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, mask_manager, _image_id = qpane_with_mask
     commit_patch_calls: list[tuple] = []
     commit_image_calls: list[None] = []
     original_commit_patches = MaskManager.commit_mask_patches
@@ -541,21 +542,6 @@ def test_mask_region_update_triggers_autosave(qpane_with_mask, monkeypatch):
     monkeypatch.setattr(MaskManager, "commit_mask_patches", tracking_commit_patches)
     monkeypatch.setattr(MaskManager, "commit_mask_image", tracking_commit_image)
     service = _mask_service(qpane)
-    commit_patch_calls: list[tuple] = []
-    commit_image_calls: list[None] = []
-    original_commit_patches = MaskManager.commit_mask_patches
-    original_commit_image = MaskManager.commit_mask_image
-
-    def tracking_commit_patches(self, mask_id, patches, **kwargs):
-        commit_patch_calls.append(tuple(patches))
-        return original_commit_patches(self, mask_id, patches, **kwargs)
-
-    def tracking_commit_image(self, mask_id, new_image, **kwargs):
-        commit_image_calls.append(None)
-        return original_commit_image(self, mask_id, new_image, **kwargs)
-
-    monkeypatch.setattr(MaskManager, "commit_mask_patches", tracking_commit_patches)
-    monkeypatch.setattr(MaskManager, "commit_mask_image", tracking_commit_image)
     base_image = qpane.catalog().currentImage()
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
@@ -622,7 +608,7 @@ def _mask_records(qpane):
 
 
 def test_mask_workflow_generate_and_apply_mask_success(qpane_with_mask, monkeypatch):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, _mask_manager, _image_id = qpane_with_mask
     masks = _masks(qpane)
     service = _mask_service(qpane)
     base_image = qpane.catalog().currentImage()
@@ -670,7 +656,7 @@ def test_mask_workflow_generate_and_apply_mask_success(qpane_with_mask, monkeypa
 def test_mask_workflow_generate_and_apply_mask_invalid_bbox(
     qpane_with_mask, monkeypatch, caplog
 ):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, _mask_manager, _image_id = qpane_with_mask
     masks = _masks(qpane)
     service = _mask_service(qpane)
     base_image = qpane.catalog().currentImage()
@@ -788,7 +774,7 @@ def test_remove_active_mask_promotes_next(qpane_with_mask):
 
 
 def test_prepare_apply_stroke_job_merges_pixels(qpane_with_mask, qapp):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, mask_manager, _image_id = qpane_with_mask
     service = _mask_service(qpane)
     assert service is not None
     controller = service.controller
@@ -831,7 +817,7 @@ def test_prepare_apply_stroke_job_merges_pixels(qpane_with_mask, qapp):
 
 
 def test_apply_stroke_job_rejects_stale_generation(qpane_with_mask, qapp):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, mask_manager, _image_id = qpane_with_mask
     service = _mask_service(qpane)
     assert service is not None
     controller = service.controller
@@ -889,6 +875,7 @@ def test_remove_last_mask_clears_active(qpane_with_mask):
 
 def test_mask_install_invokes_autosave_refresh_once(monkeypatch, qapp):
     import types
+
     from qpane.masks import install as mask
 
     qpane = QPane(features=("mask",))
@@ -949,10 +936,7 @@ def _emit_brush_stroke(qpane, start, end=None, erase=False):
     executor = getattr(qpane, "executor", None)
     drain = getattr(executor, "drain_all", None)
     if callable(drain):
-        try:
-            drain()
-        except Exception:  # pragma: no cover - defensive guard
-            pass
+        drain()
 
 
 def test_brush_mode_persists_when_mask_available(qapp):
@@ -1489,7 +1473,7 @@ def test_mask_service_produces_preview_for_zoomed_out(qpane_with_mask, monkeypat
     preview_image = captured["preview"]
     assert isinstance(preview_image, QImage)
     stride = int(preview_image.text("qpane_preview_stride"))
-    assert stride == max(1, int(round(1.0 / max(viewport.zoom, 1e-6))))
+    assert stride == max(1, round(1.0 / max(viewport.zoom, 1e-6)))
     assert preview_image.text("qpane_preview_provisional") == "1"
     preview_view, _ = qimage_to_numpy_view_grayscale8(preview_image)
     mask_view, _ = qimage_to_numpy_view_grayscale8(layer.mask_image)
@@ -1535,7 +1519,6 @@ def test_handle_generated_mask_requests_async_refresh_for_sam(
     ):
         captured["force_async"] = force_async_colorize
         captured["rect"] = QRect(dirty_rect_arg)
-        return None
 
     monkeypatch.setattr(service, "updateMaskRegion", fake_update_region)
     bbox = np.array(
@@ -1660,7 +1643,7 @@ def test_mask_reorder_commit_targets_active_layer(qpane_with_mask):
 
 
 def test_brush_stroke_commit_groups_segments(qpane_with_mask, qapp, monkeypatch):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, mask_manager, _image_id = qpane_with_mask
     commit_patch_calls: list[tuple] = []
     record_applied_calls: list[tuple] = []
     commit_image_calls: list[None] = []
@@ -1802,7 +1785,7 @@ def test_mask_tool_manager_stroke_undo_sequences(qapp, monkeypatch):
 
 
 def test_brush_single_click_undo(qpane_with_mask, qapp):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, mask_manager, _image_id = qpane_with_mask
     service = qpane.mask_service
     base_image = qpane.catalog().currentImage()
     assert base_image is not None
@@ -1874,7 +1857,7 @@ class _TrackingUndoProvider(MaskUndoProvider):
 
 
 def test_mask_service_accepts_custom_undo_provider(qpane_with_mask):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, _mask_manager, image_id = qpane_with_mask
     service = qpane.mask_service
     provider = _TrackingUndoProvider()
     service.setUndoProvider(provider)
@@ -1911,7 +1894,7 @@ def test_mask_service_accepts_custom_undo_provider(qpane_with_mask):
 
 
 def test_qpane_emits_mask_undo_signal(qpane_with_mask, qapp):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, _mask_manager, _image_id = qpane_with_mask
     service = qpane.mask_service
     base_image = qpane.catalog().currentImage()
     assert base_image is not None
@@ -1940,7 +1923,7 @@ def test_qpane_emits_mask_undo_signal(qpane_with_mask, qapp):
 
 
 def test_set_image_preserves_mask_cache(qpane_with_mask):
-    qpane, mask_manager, image_id = qpane_with_mask
+    qpane, mask_manager, _image_id = qpane_with_mask
     service = qpane.mask_service
     assert service is not None
     mask_id = service.createBlankMask(qpane.original_image.size())
@@ -2213,7 +2196,7 @@ def test_activation_prefetch_runs_when_pending(qapp, qpane_with_mask, monkeypatc
         result = service.ensureTopMaskActiveForImage(small_image_id)
         assert result is True
         assert calls
-        scheduled_image, reason, scales = calls[-1]
+        scheduled_image, reason, _scales = calls[-1]
         assert scheduled_image == small_image_id
         assert reason == "activation"
     finally:
@@ -2305,7 +2288,9 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
 
 def test_mask_prefetch_warms_masks(qapp):
     executor = StubExecutor(auto_finish=True)
-    qpane = QPane(features=("mask",), task_executor=executor)
+    qpane = QPane(
+        config=fixed_cache_config(), features=("mask",), task_executor=executor
+    )
     qpane.resize(32, 32)
     try:
         service = qpane.mask_service
@@ -3028,6 +3013,7 @@ def test_durable_worker_preview_matches_live_decimated_preview() -> None:
 def test_mask_snippet_worker_preserves_snippet_reference():
     from PySide6.QtCore import QRect
     from PySide6.QtGui import QColor, QImage
+
     from qpane.masks.mask_service import MaskSnippetWorker
 
     class DummyController:

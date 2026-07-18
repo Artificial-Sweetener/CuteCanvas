@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRect, QRectF
 
@@ -43,11 +44,11 @@ class SwapDelegate:
     def __init__(
         self,
         *,
-        qpane: "QPane",
-        catalog: "ImageCatalog",
-        viewport: "Viewport",
-        tile_manager: "TileManager",
-        rendering: "RenderingPresenter",
+        qpane: QPane,
+        catalog: ImageCatalog,
+        viewport: Viewport,
+        tile_manager: TileManager,
+        rendering: RenderingPresenter,
         prefetch_settings: PrefetchSettings | None,
         mark_dirty: Callable[[QRect | QRectF | None], None],
     ) -> None:
@@ -66,7 +67,7 @@ class SwapDelegate:
         self._tile_manager = tile_manager
         self._rendering = rendering
         self._mark_dirty = mark_dirty
-        self._catalog_controller: "CatalogController | None" = None
+        self._catalog_controller: CatalogController | None = None
         self._coordinator = SwapCoordinator(
             qpane=qpane,
             catalog=catalog,
@@ -75,7 +76,7 @@ class SwapDelegate:
             prefetch_settings=prefetch_settings,
         )
 
-    def attach_catalog_controller(self, controller: "CatalogController") -> None:
+    def attach_catalog_controller(self, controller: CatalogController) -> None:
         """Track the catalog controller used to persist view state."""
         self._catalog_controller = controller
 

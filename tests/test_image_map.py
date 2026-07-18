@@ -16,8 +16,10 @@
 
 from pathlib import Path
 from uuid import UUID, uuid4
+
 import pytest
 from PySide6.QtGui import QImage
+
 from qpane import QPane
 from qpane.catalog import ImageMap
 from qpane.types import CatalogEntry
@@ -46,9 +48,9 @@ def test_image_map_from_lists_generates_ids_when_missing() -> None:
     images = [_make_image(idx) for idx in range(2)]
     result = QPane.imageMapFromLists(images)
     assert len(result) == len(images)
-    assert list(result.values())[0].path is None
+    assert next(iter(result.values())).path is None
     assert all(value.path is None for value in result.values())
-    assert all(isinstance(key, UUID) for key in result.keys())
+    assert all(isinstance(key, UUID) for key in result)
 
 
 def test_image_map_from_lists_raises_on_path_length_mismatch() -> None:

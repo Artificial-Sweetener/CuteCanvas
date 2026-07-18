@@ -16,6 +16,7 @@
 
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF
+
 from qpane import Config
 from qpane.rendering import Viewport, ViewportZoomMode
 

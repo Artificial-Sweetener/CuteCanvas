@@ -18,16 +18,12 @@
 
 from __future__ import annotations
 
-
 import logging
-
+from collections.abc import Iterable
 from dataclasses import dataclass
-
-from typing import TYPE_CHECKING, Iterable
-
+from typing import TYPE_CHECKING
 
 from ..types import DiagnosticRecord
-
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 
@@ -87,14 +83,14 @@ _CONSUMER_LABELS = {
 }
 
 
-def cache_diagnostics_provider(qpane: "QPane") -> Iterable[DiagnosticRecord]:
+def cache_diagnostics_provider(qpane: QPane) -> Iterable[DiagnosticRecord]:
     """Emit lightweight cache health records using cached coordinator snapshots."""
     coordinator = _resolve_coordinator(qpane)
     if coordinator is None:
-        return tuple()
+        return ()
     snapshot = _safe_snapshot(coordinator, caller="cache_diagnostics_provider")
     if snapshot is None:
-        return tuple()
+        return ()
     records: list[DiagnosticRecord] = []
     aggregate = _build_aggregate_record(snapshot)
     if aggregate is not None:
@@ -102,14 +98,14 @@ def cache_diagnostics_provider(qpane: "QPane") -> Iterable[DiagnosticRecord]:
     return tuple(records)
 
 
-def cache_detail_provider(qpane: "QPane") -> Iterable[DiagnosticRecord]:
+def cache_detail_provider(qpane: QPane) -> Iterable[DiagnosticRecord]:
     """Emit per-consumer cache stats as single labeled rows."""
     coordinator = _resolve_coordinator(qpane)
     if coordinator is None:
-        return tuple()
+        return ()
     snapshot = _safe_snapshot(coordinator, caller="cache_detail_provider")
     if snapshot is None:
-        return tuple()
+        return ()
     records: list[DiagnosticRecord] = []
     consumers = snapshot.get("consumers", {})
     for consumer_id, state in sorted(consumers.items()):
@@ -149,7 +145,7 @@ def _safe_snapshot(coordinator, *, caller: str) -> dict[str, object] | None:
         return None
 
 
-def _resolve_coordinator(qpane: "QPane"):
+def _resolve_coordinator(qpane: QPane):
     """Return the cache coordinator while logging missing state once."""
     global _MISSING_COORDINATOR_LOGGED
     coordinator = qpane.cacheCoordinator
@@ -194,7 +190,7 @@ def _build_aggregate_record(snapshot: dict[str, object]) -> DiagnosticRecord | N
     return DiagnosticRecord("Cache", " | ".join(status_parts))
 
 
-def _to_mb(value: int | float | None) -> float:
+def _to_mb(value: float | None) -> float:
     """Convert ``value`` to megabytes while handling ``None`` safely."""
     if value in (None, 0):
         return 0.0
@@ -204,7 +200,7 @@ def _to_mb(value: int | float | None) -> float:
         return 0.0
 
 
-def _bundle_metrics(qpane: "QPane", consumer_id: str) -> _CacheMetricsBundle:
+def _bundle_metrics(qpane: QPane, consumer_id: str) -> _CacheMetricsBundle:
     """Collect snapshot metrics for the requested consumer when available."""
     if consumer_id == "tiles":
         manager = _stack_tile_manager(qpane)
@@ -238,10 +234,10 @@ def _bundle_metrics(qpane: "QPane", consumer_id: str) -> _CacheMetricsBundle:
 def _coerce_metrics(snapshot: object) -> _CacheMetricsBundle:
     """Convert snapshot objects into a unified cache metrics bundle."""
     try:
-        from ..rendering.cache_metrics import CacheManagerMetrics
         from ..masks.mask_controller import MaskOverlayMetrics
+        from ..rendering.cache_metrics import CacheManagerMetrics
         from ..sam.manager import SamPredictorMetrics
-    except Exception:
+    except ImportError:
         CacheManagerMetrics = MaskOverlayMetrics = SamPredictorMetrics = ()  # type: ignore[assignment]
     if isinstance(snapshot, CacheManagerMetrics):
         return _CacheMetricsBundle(
@@ -338,7 +334,7 @@ def _format_counters(bundle: _CacheMetricsBundle) -> str:
     return " ".join(parts)
 
 
-def _stack_tile_manager(qpane: "QPane"):
+def _stack_tile_manager(qpane: QPane):
     """Return the tile manager owned by the view or ``None`` when unavailable."""
     global _MISSING_TILE_VIEW_LOGGED, _MISSING_TILE_MANAGER_LOGGED
     try:
@@ -360,7 +356,7 @@ def _stack_tile_manager(qpane: "QPane"):
     return manager
 
 
-def _catalog_pyramid_manager(qpane: "QPane"):
+def _catalog_pyramid_manager(qpane: QPane):
     """Return the pyramid manager surfaced by the catalog facade when available."""
     global _MISSING_CATALOG_LOGGED, _MISSING_PYRAMID_ACCESSOR_LOGGED
     try:

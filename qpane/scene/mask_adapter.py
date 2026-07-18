@@ -41,7 +41,7 @@ class MaskLayerLike(Protocol):
     opacity: float
 
     @property
-    def mask_image(self):  # noqa: ANN201
+    def mask_image(self):
         """Expose the grayscale mask image for placement."""
         ...
 

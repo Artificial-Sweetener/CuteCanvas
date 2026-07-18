@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QRect
@@ -44,7 +45,7 @@ class MaskStrokeSegmentPayload:
         end: tuple[float, float],
         diameter: float,
         erase: bool,
-    ) -> "MaskStrokeSegmentPayload":
+    ) -> MaskStrokeSegmentPayload:
         """Create a constant-width segment."""
         return cls(
             start=start,

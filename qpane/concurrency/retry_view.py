@@ -18,8 +18,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, MutableMapping
 from types import SimpleNamespace
-from typing import Callable, MutableMapping
 
 
 class RetryEntriesView:

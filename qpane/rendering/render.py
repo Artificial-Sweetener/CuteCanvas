@@ -17,27 +17,21 @@
 """Rendering pipeline and metrics helpers for the QPane viewer."""
 
 import time
-
 from dataclasses import dataclass
 from math import isclose
-
 from typing import TYPE_CHECKING
 
-
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF, Qt
-
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QRegion
 
-
-from .coordinates import CoordinateContext
+from ..scene.model import ClipCoordinateSpace
 from ..scene.render_plan import (
     MaskLayerRenderItem,
     RasterLayerRenderItem,
     RenderStrategy,
     SceneRenderPlan,
 )
-from ..scene.model import ClipCoordinateSpace
-
+from .coordinates import CoordinateContext
 
 if TYPE_CHECKING:
     from ..qpane import QPane
@@ -179,7 +173,7 @@ class Renderer:
         view = qpane_view() if callable(qpane_view) else None
         plan_calculate = getattr(view, "calculateRenderPlan", None)
         if not callable(plan_calculate):
-            raise AttributeError(
+            raise AttributeError(  # noqa: TRY004 - missing protocol member
                 "QPane view must provide calculateRenderPlan for buffer repair"
             )
         plan = repair_plan or plan_calculate(use_pan=new_pan)
@@ -234,13 +228,16 @@ class Renderer:
             repair_rects.append(QRect(0, 0, dx, h))
         if dx < 0:
             repair_rects.append(QRect(w + dx, 0, -dx, h))
-        if repair_rects:
-            if plan and self._repair_base_buffer_strips(repair_rects, plan) is False:
-                self._scroll_temp.swap(self._base_image_buffer)
-                self._buffer_pan = previous_buffer_pan
-                self._subpixel_pan_offset = previous_subpixel_offset
-                self._scroll_misses += 1
-                return False
+        if (
+            repair_rects
+            and plan
+            and self._repair_base_buffer_strips(repair_rects, plan) is False
+        ):
+            self._scroll_temp.swap(self._base_image_buffer)
+            self._buffer_pan = previous_buffer_pan
+            self._subpixel_pan_offset = previous_subpixel_offset
+            self._scroll_misses += 1
+            return False
         self._scroll_hits += 1
         self._subpixel_pan_offset = viewport.pan - self._buffer_pan
         self.qpane.update()
@@ -932,7 +929,7 @@ class Renderer:
             return
         try:
             manager = diagnostics()
-        except Exception:  # pragma: no cover - defensive guard
+        except RuntimeError:  # pragma: no cover - diagnostics teardown
             return
         if manager is not None:
             manager.set_dirty("render")

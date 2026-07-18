@@ -21,23 +21,24 @@ from __future__ import annotations
 import logging
 import uuid
 import weakref
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QImage
 
 from ..core.config import Config, PlaceholderSettings
+from ..types import LinkedGroup
 from .controller import CatalogController, PlaceholderDisplayOptions
 from .image_catalog import ImageCatalog
 from .image_map import ImageMap, image_map_from_lists
 from .link import LinkManager
-from ..types import LinkedGroup
 
 if TYPE_CHECKING:  # pragma: no cover - typed during development only
+    from ..masks.mask import MaskManager
     from ..qpane import QPane
     from ..swap import SwapDelegate
-    from ..masks.mask import MaskManager
 logger = logging.getLogger(__name__)
 
 CatalogMutationCallback = Callable[["CatalogMutationEvent"], None]
@@ -98,8 +99,8 @@ class Catalog:
         catalog: ImageCatalog,
         controller: CatalogController,
         link_manager: LinkManager,
-        swap_delegate: "SwapDelegate",
-        qpane: "QPane" | None = None,
+        swap_delegate: SwapDelegate,
+        qpane: QPane | None = None,
     ) -> None:
         """Initialize the facade with its backing collaborators.
 
@@ -114,7 +115,7 @@ class Catalog:
         self._controller = controller
         self._link_manager = link_manager
         self._swap_delegate = swap_delegate
-        self._qpane_ref: weakref.ReferenceType["QPane"] | None = (
+        self._qpane_ref: weakref.ReferenceType[QPane] | None = (
             weakref.ref(qpane) if qpane is not None else None
         )
         self._navigation_callbacks: list[NavigationCallback] = []
@@ -124,7 +125,7 @@ class Catalog:
         """Return the underlying LinkManager instance."""
         return self._link_manager
 
-    def maskManager(self) -> "MaskManager" | None:
+    def maskManager(self) -> MaskManager | None:
         """Expose the catalog's mask manager when available."""
         return self._catalog.get_mask_manager()
 
@@ -136,11 +137,11 @@ class Catalog:
         """Return the underlying ImageCatalog for low-level integrations."""
         return self._catalog
 
-    def setMaskManager(self, manager: "MaskManager" | None) -> None:
+    def setMaskManager(self, manager: MaskManager | None) -> None:
         """Install or clear the catalog's mask manager instance."""
         self._catalog.set_mask_manager(manager)
 
-    def qpane(self) -> "QPane" | None:
+    def qpane(self) -> QPane | None:
         """Return the weakly referenced QPane when still alive."""
         if self._qpane_ref is None:
             return None
@@ -246,7 +247,7 @@ class Catalog:
         self._controller.clearImages()
         self._emit_catalog_mutation("clearImages", affected_ids=previous_ids)
 
-    def applyConfig(self, config: "Config") -> None:
+    def applyConfig(self, config: Config) -> None:
         """Propagate configuration updates to the underlying catalog.
 
         Args:
@@ -298,12 +299,12 @@ class Catalog:
     def setLinkedGroups(self, groups: Iterable[LinkedGroup]) -> None:
         """Persist linked-view groups using the controller and link manager."""
         self._controller.setLinkedGroups(groups)
-        self._emit_catalog_mutation("setLinkedGroups", affected_ids=tuple())
+        self._emit_catalog_mutation("setLinkedGroups", affected_ids=())
 
     def setAllImagesLinked(self, enabled: bool) -> None:
         """Toggle linked-view synchronization across the entire catalog."""
         self._controller.setAllImagesLinked(enabled)
-        self._emit_catalog_mutation("setAllImagesLinked", affected_ids=tuple())
+        self._emit_catalog_mutation("setAllImagesLinked", affected_ids=())
 
     def saveZoomPanForCurrentImage(self) -> None:
         """Persist the current normalized view state through the controller."""

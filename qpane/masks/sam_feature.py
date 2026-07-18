@@ -18,23 +18,19 @@
 
 from __future__ import annotations
 
-
 import logging
-
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
-
+from typing import TYPE_CHECKING
 
 import numpy as np
-
 from PySide6.QtCore import QObject, QPoint, QRunnable, Signal
 
-
-from qpane.types import DiagnosticRecord
-
+from qpane.concurrency import BaseWorker, TaskRejected
 from qpane.core.config import SAM_DEFAULT_MODEL_HASH, SAM_DEFAULT_MODEL_URL
 from qpane.core.config_features import require_sam_config
-from qpane.concurrency import BaseWorker, TaskRejected
+from qpane.features import FeatureInstallError
+from qpane.types import DiagnosticRecord
 
 from .tools import (
     SmartSelectTool,
@@ -42,10 +38,6 @@ from .tools import (
     disconnect_smart_select_signals,
     smart_select_cursor_provider,
 )
-
-
-from qpane.features import FeatureInstallError
-
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +90,11 @@ class _CheckpointDownloadWorker(QRunnable, BaseWorker):
                 progress_callback=self._progress_callback,
             )
             self.emit_finished(True, payload=self._checkpoint_path)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - background dependency boundary
             self.emit_finished(False, payload=str(exc), error=exc)
 
 
-def install_sam_feature(qpane: "QPane", device: str | None = None) -> None:
+def install_sam_feature(qpane: QPane, device: str | None = None) -> None:
     """Install SAM support without loading predictor dependencies eagerly."""
     hooks = qpane.hooks
     masks = qpane._masks_controller
@@ -342,12 +334,12 @@ def _warn_on_unverified_custom_url(
     _SAM_HASH_WARNING_EMITTED = True
 
 
-def _sam_summary_diagnostics_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+def _sam_summary_diagnostics_provider(qpane: QPane) -> tuple[DiagnosticRecord, ...]:
     """Expose SAM cache usage and readiness for the SAM detail overlay tier."""
     accessor = getattr(qpane, "samManager", None)
     manager = accessor() if callable(accessor) else None
     if manager is None:
-        return tuple()
+        return ()
     records: list[DiagnosticRecord] = [
         DiagnosticRecord("SAM|Cache", str(manager.getCachedPredictorCount()))
     ]
@@ -357,12 +349,12 @@ def _sam_summary_diagnostics_provider(qpane: "QPane") -> tuple[DiagnosticRecord,
     if callable(accessor):
         try:
             workflow = accessor()
-        except Exception:
+        except RuntimeError:
             workflow = None
     if workflow is not None:
         try:
             delegate = workflow.sam_delegate()
-        except Exception:
+        except RuntimeError:
             delegate = None
     active_predictor = (
         getattr(delegate, "activePredictor", None) if delegate is not None else None
@@ -372,27 +364,25 @@ def _sam_summary_diagnostics_provider(qpane: "QPane") -> tuple[DiagnosticRecord,
     return tuple(records)
 
 
-def _sam_detail_diagnostics_provider(qpane: "QPane") -> tuple[DiagnosticRecord, ...]:
+def _sam_detail_diagnostics_provider(qpane: QPane) -> tuple[DiagnosticRecord, ...]:
     """Return the worker-pool diagnostics rows for the SAM detail tier."""
     accessor = getattr(qpane, "samManager", None)
     manager = accessor() if callable(accessor) else None
     if manager is None:
-        return tuple()
+        return ()
     records: list[DiagnosticRecord] = []
     thread_pool = getattr(manager, "thread_pool", None)
     if thread_pool is not None:
         try:
-            records.append(
-                DiagnosticRecord(
-                    "SAM|Active Jobs", str(thread_pool.activeThreadCount())
-                )
-            )
-        except Exception:
-            pass
+            active_count = thread_pool.activeThreadCount()
+        except RuntimeError:
+            active_count = None
+        if active_count is not None:
+            records.append(DiagnosticRecord("SAM|Active Jobs", str(active_count)))
         try:
-            records.append(
-                DiagnosticRecord("SAM|Max Threads", str(thread_pool.maxThreadCount()))
-            )
-        except Exception:
-            pass
+            max_threads = thread_pool.maxThreadCount()
+        except RuntimeError:
+            max_threads = None
+        if max_threads is not None:
+            records.append(DiagnosticRecord("SAM|Max Threads", str(max_threads)))
     return tuple(records)

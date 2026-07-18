@@ -14,29 +14,11 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Mask domain delegates for the QPane widget."""
+"""Deterministic configuration builders shared by cache-sensitive tests."""
 
-from .autosave import AutosaveManager
-from .delegate import MaskDelegate
-from .mask import MaskLayer, MaskManager, _require_cv2
-from .mask_controller import MaskController, Masking
-from .mask_diagnostics import MaskStrokeDiagnostics
-from .mask_service import MaskService, should_enable_mask_autosave
-from .mask_undo import MaskPatch, MaskUndoState
-from .workflow import Masks
+from qpane import Config
 
-__all__ = (
-    "AutosaveManager",
-    "MaskController",
-    "MaskDelegate",
-    "MaskLayer",
-    "MaskManager",
-    "MaskPatch",
-    "MaskService",
-    "MaskStrokeDiagnostics",
-    "MaskUndoState",
-    "Masking",
-    "Masks",
-    "_require_cv2",
-    "should_enable_mask_autosave",
-)
+
+def fixed_cache_config() -> Config:
+    """Return a config whose cache capacity is independent of memory pressure."""
+    return Config(cache={"mode": "hard", "budget_mb": 1024})
