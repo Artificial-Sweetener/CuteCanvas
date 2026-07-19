@@ -28,6 +28,7 @@ _PLACEHOLDER_SCENE_NAMESPACE = uuid.UUID("96d6c459-5bd7-51b9-b7da-994caaf27218")
 _PLACEHOLDER_LAYER_NAMESPACE = uuid.UUID("2a82ab02-42ed-5269-9f16-21d2b48556ea")
 _PLACEHOLDER_SOURCE_NAMESPACE = uuid.UUID("af86f75f-e94d-5fb6-88fd-5ee9878ff977")
 _MASK_LAYER_NAMESPACE = uuid.UUID("80ae57c6-cf1c-5e9a-971f-5161839f0c7f")
+_EDITABLE_RASTER_LAYER_NAMESPACE = uuid.UUID("31c5ff47-caef-51c4-8f30-f4f79d2c6d87")
 _COMPARE_LAYER_NAMESPACE = uuid.UUID("e618d770-1769-571f-8471-5df8cf28ab15")
 
 
@@ -79,6 +80,11 @@ def placeholder_layer_id(source_id: uuid.UUID) -> uuid.UUID:
 def mask_layer_id(scene_id: uuid.UUID, mask_id: uuid.UUID) -> uuid.UUID:
     """Return the deterministic scene-layer ID for a mask source."""
     return uuid.uuid5(_MASK_LAYER_NAMESPACE, f"{scene_id}:{mask_id}")
+
+
+def editable_raster_layer_id(scene_id: uuid.UUID, raster_id: uuid.UUID) -> uuid.UUID:
+    """Return the deterministic scene-layer ID for an editable raster source."""
+    return uuid.uuid5(_EDITABLE_RASTER_LAYER_NAMESPACE, f"{scene_id}:{raster_id}")
 
 
 def mask_layer_asset_key(

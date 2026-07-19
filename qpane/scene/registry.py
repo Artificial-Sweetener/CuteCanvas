@@ -21,8 +21,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
+import numpy as np
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage
 
@@ -30,6 +31,10 @@ from .identity import SceneLayerAssetKey
 from .model import SceneDescriptor
 from .providers import SceneContribution
 from .sources import LayerSource
+
+if TYPE_CHECKING:
+    from ..coverage import CoverageSnapshot
+    from .pixel_fragments import RasterPixelFormat
 
 
 class SceneContributionProvider(Protocol):
@@ -99,6 +104,19 @@ class LayerSourceResolver(Protocol):
         """Return whether source coverage permits selecting ``point``."""
         ...
 
+    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
+        """Return editable coverage when the source domain supplies it."""
+        ...
+
+    def present_pixels(
+        self,
+        source: LayerSource,
+        pixel_format: RasterPixelFormat,
+        pixels: np.ndarray,
+    ) -> QImage | None:
+        """Present detached canonical pixels using source-domain appearance."""
+        ...
+
 
 class ScenePostProcessor(Protocol):
     """Apply transient descriptor changes after complete scene assembly."""
@@ -159,6 +177,19 @@ class CatalogLayerSourceResolver:
     def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
         """Treat catalog image source bounds as fully selectable coverage."""
         return True
+
+    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
+        """Return no coverage because catalog images are color rasters."""
+        return None
+
+    def present_pixels(
+        self,
+        source: LayerSource,
+        pixel_format: RasterPixelFormat,
+        pixels: np.ndarray,
+    ) -> QImage | None:
+        """Reject transient editing because catalog sources are not editable."""
+        return None
 
 
 class SceneProviderRegistry:
@@ -384,3 +415,20 @@ class LayerSourceResolverRegistry:
         """Return selection coverage through the authoritative source resolver."""
         resolver = self.resolver_for(source)
         return bool(resolver is not None and resolver.selection_contains(source, point))
+
+    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
+        """Return editable coverage through the authoritative source resolver."""
+        resolver = self.resolver_for(source)
+        return None if resolver is None else resolver.coverage_snapshot(source)
+
+    def present_pixels(
+        self,
+        source: LayerSource,
+        pixel_format: RasterPixelFormat,
+        pixels: np.ndarray,
+    ) -> QImage | None:
+        """Present canonical pixels through their authoritative source resolver."""
+        resolver = self.resolver_for(source)
+        if resolver is None:
+            return None
+        return resolver.present_pixels(source, pixel_format, pixels)

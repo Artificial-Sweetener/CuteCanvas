@@ -673,6 +673,7 @@ class Masks:
                 else QPaneLayerInteractionPolicy(
                     selectable=instance.interaction.selectable,
                     movable=instance.interaction.movable,
+                    pixel_editable=instance.interaction.pixel_editable,
                 )
             ),
             is_active=mask_id == self.active_mask_id(),

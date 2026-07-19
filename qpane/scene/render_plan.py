@@ -124,6 +124,24 @@ SceneRenderItem: TypeAlias = RasterLayerRenderItem | MaskLayerRenderItem
 
 
 @dataclass(frozen=True, slots=True)
+class FloatingPixelRenderContribution:
+    """Carry one exact transient raster into scene rendering."""
+
+    session_id: uuid.UUID
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    source_asset_key: SceneLayerAssetKey
+    source_image: QImage
+    source_pixmap: QPixmap | None = None
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt resources from the compiling presenter."""
+        object.__setattr__(self, "source_image", QImage(self.source_image))
+        if self.source_pixmap is not None:
+            object.__setattr__(self, "source_pixmap", QPixmap(self.source_pixmap))
+
+
+@dataclass(frozen=True, slots=True)
 class SceneHitTestItem:
     """Render-plan hit-test metadata for a resolved scene layer."""
 
@@ -164,6 +182,7 @@ class SceneRenderPlan:
     physical_viewport_rect: QRectF
     render_items: tuple[SceneRenderItem, ...]
     hit_test_items: tuple[SceneHitTestItem, ...]
+    floating_pixels: FloatingPixelRenderContribution | None = None
 
     def __post_init__(self) -> None:
         """Detach mutable Qt geometry values from caller-owned frame state."""

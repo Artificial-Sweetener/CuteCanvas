@@ -24,7 +24,7 @@ import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QBrush, QImage, QPainter
 
-from ..catalog.image_utils import (
+from ..raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,
 )
@@ -53,6 +53,7 @@ def render_stroke_segments(
     dirty_rect: QRect,
     segments: tuple[MaskStrokeSegmentPayload, ...],
     preview_stride: int = 1,
+    constraint: np.ndarray | None = None,
 ) -> tuple[np.ndarray, QImage]:
     """Return an exact mask slice plus a display-scale stroke preview."""
     working_array = np.array(before, copy=True)
@@ -66,6 +67,9 @@ def render_stroke_segments(
         finally:
             painter.end()
     after_slice = qimage_to_numpy_grayscale8(image)
+    if constraint is not None:
+        after_slice = apply_coverage_constraint(before, after_slice, constraint)
+        image = numpy_to_qimage_grayscale8(after_slice)
     stride = max(1, int(preview_stride))
     if stride == 1:
         return after_slice, image.copy()
@@ -84,7 +88,32 @@ def render_stroke_segments(
                 )
         finally:
             preview_painter.end()
+    if constraint is not None:
+        preview_constraint = constraint[::stride, ::stride]
+        painted_preview = qimage_to_numpy_grayscale8(preview_image)
+        preview_array = apply_coverage_constraint(
+            preview_array,
+            painted_preview,
+            preview_constraint,
+        )
+        preview_image = numpy_to_qimage_grayscale8(preview_array)
     return after_slice, preview_image.copy()
+
+
+def apply_coverage_constraint(
+    before: np.ndarray,
+    painted: np.ndarray,
+    constraint: np.ndarray,
+) -> np.ndarray:
+    """Blend a painted result through 8-bit selection coverage exactly once."""
+    if before.shape != painted.shape or before.shape != constraint.shape:
+        raise ValueError("stroke constraint must match the rendered slice")
+    coverage = constraint.astype(np.uint16)
+    inverse = 255 - coverage
+    blended = (
+        before.astype(np.uint16) * inverse + painted.astype(np.uint16) * coverage + 127
+    ) // 255
+    return blended.astype(np.uint8)
 
 
 def paint_stroke_segment(

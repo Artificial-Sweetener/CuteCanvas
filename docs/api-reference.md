@@ -38,7 +38,7 @@ Quick index to the QPane facade. Each entry includes a concise explainer; use th
 - QPane.setControlMode — Switch to a registered mode; unavailable mask/SAM modes are ignored while the placeholder is active, and unknown mode IDs raise `ValueError`.
 - QPane.CONTROL_MODE_CURSOR — Built-in inert cursor mode (no pan/zoom).
 - QPane.CONTROL_MODE_PANZOOM — Built-in pan/zoom mode for navigation.
-- QPane.CONTROL_MODE_MOVE — Built-in direct-manipulation mode for selectable, movable scene layers.
+- QPane.CONTROL_MODE_MOVE — Built-in selection-aware mode that moves selected editable pixels first, or a selectable movable layer when no pixel selection exists.
 
 See also: [Configuration](configuration.md) and [Interaction Modes](interaction-modes.md).
 
@@ -79,6 +79,17 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- ControlMode.MOVE — Direct layer movement mode (`move`).
 	- ControlMode.DRAW_BRUSH — Mask painting mode (`draw-brush`).
 	- ControlMode.SMART_SELECT — SAM-based selection mode (`smart-select`).
+	- ControlMode.SELECT_RECTANGLE — Rectangular pixel-selection mode (`select-rectangle`).
+	- ControlMode.SELECT_ELLIPSE — Elliptical pixel-selection mode (`select-ellipse`).
+	- ControlMode.SELECT_LASSO — Freeform pixel-selection mode (`select-lasso`).
+- qpane.PixelSelectionMode — Coverage combination used by pixel-selection edits.
+	- PixelSelectionMode.REPLACE — Replace existing selection coverage.
+	- PixelSelectionMode.ADD — Add incoming soft coverage.
+	- PixelSelectionMode.SUBTRACT — Subtract incoming soft coverage.
+	- PixelSelectionMode.INTERSECT — Retain overlapping coverage.
+- qpane.FloatingPixelMode — Whether an unresolved pixel fragment will cut or copy its source.
+	- FloatingPixelMode.CUT — Clear selected source pixels when the fragment resolves.
+	- FloatingPixelMode.COPY — Preserve source pixels when the fragment resolves.
 - qpane.ComparisonOrientation — Split direction for comparison rendering.
 	- ComparisonOrientation.VERTICAL — Reveal the comparison image to the right of a vertical divider.
 	- ComparisonOrientation.HORIZONTAL — Reveal the comparison image below a horizontal divider.
@@ -147,6 +158,10 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 - qpane.QPaneLayerInteractionPolicy — Host policy for direct layer interaction; `selectable` enables covered-pixel selection and `movable` permits placement changes.
 	- QPaneLayerInteractionPolicy.selectable — Allow direct tools to select the layer through covered source pixels.
 	- QPaneLayerInteractionPolicy.movable — Allow generic placement mutation and Move-tool dragging for the layer.
+	- QPaneLayerInteractionPolicy.pixel_editable — Allow pixel tools to mutate a layer when its source also advertises raster editing.
+- qpane.QPaneLayerSelectionState — Selected scene-layer identity, kept separate from pixel-selection coverage.
+	- QPaneLayerSelectionState.scene_id — Public identity of the scene containing the selected layer.
+	- QPaneLayerSelectionState.layer_id — Stable identity of the selected layer.
 - qpane.RasterExtentPolicy — Write-boundary policy for raster layer storage.
 	- RasterExtentPolicy.FIXED — Clip edits to the layer's current local bounds.
 	- RasterExtentPolicy.EXPAND_ON_WRITE — Grow local storage when an edit reaches beyond its current bounds.
@@ -185,9 +200,9 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- QPaneScene.title — Host-facing composition title.
 	- QPaneScene.bounds — Host-defined scene-coordinate bounds.
 	- QPaneScene.layers — Ordered `QPaneSceneLayer` entries.
-- qpane.QPaneSceneLayer — Catalog-backed image layer in a composed scene.
+- qpane.QPaneSceneLayer — Source-backed layer in a composed scene.
 	- QPaneSceneLayer.layer_id — Stable layer UUID supplied by the host.
-	- QPaneSceneLayer.image_id — Catalog image UUID rendered for this layer.
+	- QPaneSceneLayer.image_id — Catalog image UUID for image layers, or `None` for masks and editable rasters.
 	- QPaneSceneLayer.placement — Scene-coordinate rectangle for this layer.
 	- QPaneSceneLayer.visible — Whether the layer renders and hit-tests.
 	- QPaneSceneLayer.opacity — Layer opacity from `0.0` to `1.0`.
@@ -196,6 +211,9 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- QPaneSceneLayer.role — Host label carried into hits and overlays.
 	- QPaneSceneLayer.metadata — Opaque host metadata carried into hits and overlays.
 	- QPaneSceneLayer.interaction — Current selection and movement policy for the layer.
+	- QPaneSceneLayer.source_kind — Source domain: `catalog-image`, `mask`, `raster`, or `placeholder-image`.
+	- QPaneSceneLayer.source_id — Stable source asset UUID independent of the scene-layer UUID.
+	- QPaneSceneLayer.label — Optional host-facing authoring-layer label.
 - qpane.QPaneSceneClip — Optional layer clip rectangle.
 	- QPaneSceneClip.coordinate_space — Coordinate system for `rect`: `"scene"`, `"normalized-scene"`, `"viewport"`, or `"normalized-viewport"`.
 	- QPaneSceneClip.rect — Clip rectangle in the selected coordinate space.
@@ -276,9 +294,20 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - QPane.sceneOverlays — Return a read-only snapshot of registered scene overlays; use register/unregister helpers to change it.
 - QPane.setLayerInteractionPolicy — Replace selection and movement permissions for a layer through its scene owner.
 - QPane.setLayerPlacement — Set an absolute scene-space layer rectangle when movement policy permits it.
+- QPane.selectedLayer — Return selected scene-layer identity independently of pixel coverage.
+- QPane.setSelectedLayer — Select a policy-enabled layer in the active scene.
+- QPane.clearSelectedLayer — Clear layer identity without clearing pixel selection.
 - QPane.rasterSurfaceState — Return local bounds, extent policy, and revisions for a supported active raster layer.
 - QPane.setRasterExtentPolicy — Choose whether writes clip to current local bounds or expand storage.
 - QPane.requestRasterBounds — Asynchronously pad or crop a supported raster layer to exact integer local bounds while preserving its scene transform.
+- QPane.addEditableRasterLayer — Copy a color image into a composition-owned editable RGBA layer.
+- QPane.editableRasterLayerImage — Return a detached image snapshot for an editable RGBA layer.
+- QPane.selectLayerCoverage — Project a mask or other coverage-source layer into pixel selection.
+- QPane.deleteSelectedPixels — Clear selected coverage from the selected policy-enabled mask or RGBA layer.
+- QPane.floatingPixelEditState — Return detached state for the unresolved floating fragment, or `None`.
+- QPane.anchorFloatingPixels — Resolve floating pixels into their source or a compatible destination layer.
+- QPane.promoteFloatingPixels — Resolve floating pixels into a newly created composition layer.
+- QPane.cancelFloatingPixels — Cancel floating pixels without changing durable source pixels.
 - QPane.sceneEditUndoAvailable — Report whether the active scene has a placement change to undo.
 - QPane.sceneEditRedoAvailable — Report whether the active scene has a placement change to redo.
 - QPane.undoSceneEdit — Undo the active scene's latest committed layer placement.
@@ -430,7 +459,30 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - QPane.compositionChanged — `CompositionSnapshot` payload emitted after composition records change.
 - QPane.compositionSelectionChanged — Composition UUID or `None` payload emitted when selection changes.
 - QPane.sceneChanged — `QPaneScene` or `None` payload emitted when the normalized active render scene changes.
-- QPane.sceneEditHistoryChanged — Two booleans reporting active-scene placement undo and redo availability.
+- QPane.sceneEditHistoryChanged — Two booleans reporting active-scene chronological editor undo and redo availability.
+- QPane.pixelSelectionChanged — `QPanePixelSelectionState` payload emitted when the active composition selection changes.
+- QPane.floatingPixelEditChanged — `QPaneFloatingPixelEditState` or `None` emitted when unresolved fragment state changes.
+- QPane.selectedLayerChanged — `QPaneLayerSelectionState` or `None` emitted when selected layer identity changes.
+- QPane.CONTROL_MODE_SELECT_RECTANGLE — Built-in rectangular pixel-selection tool ID.
+- QPane.CONTROL_MODE_SELECT_ELLIPSE — Built-in elliptical pixel-selection tool ID.
+- QPane.CONTROL_MODE_SELECT_LASSO — Built-in freeform pixel-selection tool ID.
+- QPane.pixelSelectionState — Return the active composition's detached selection snapshot.
+- QPane.setPixelSelection — Combine caller-provided grayscale coverage at explicit scene-coordinate bounds.
+- QPane.clearPixelSelection — Clear selection coverage in the active composition.
+- QPane.selectAllPixels — Select the active scene's finite canvas bounds.
+- QPane.invertPixelSelection — Invert coverage inside the active scene's finite canvas bounds.
+- qpane.QPanePixelSelectionState — Detached scene ID, revision, optional bounds, and grayscale coverage for one composition selection.
+	- QPanePixelSelectionState.scene_id — Public active-scene identity.
+	- QPanePixelSelectionState.revision — Monotonic selection revision for that scene.
+	- QPanePixelSelectionState.bounds — Optional scene-coordinate coverage bounds.
+	- QPanePixelSelectionState.coverage — Optional detached grayscale coverage image.
+	- QPanePixelSelectionState.has_selection — Whether nonzero selection coverage is active.
+- qpane.QPaneFloatingPixelEditState — Detached unresolved-fragment source identity, cut/copy mode, local offset, and scene bounds.
+	- QPaneFloatingPixelEditState.scene_id — Public scene owning the floating edit.
+	- QPaneFloatingPixelEditState.source_layer_id — Layer from which pixels were lifted.
+	- QPaneFloatingPixelEditState.mode — Whether resolution cuts or copies source pixels.
+	- QPaneFloatingPixelEditState.offset — Integer source-local movement from the lift origin.
+	- QPaneFloatingPixelEditState.bounds — Current scene-coordinate content-selection bounds.
 
 ### View State
 - QPane.zoomChanged — Float payload emitted when viewport zoom changes; seeds once during initialization so listeners can prime UI without peeking at the viewport.

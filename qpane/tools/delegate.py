@@ -301,6 +301,7 @@ class ToolInteractionDelegate:
                 "panel_hit_test": qpane.panelHitTest,
                 "panel_hit_test_precise": viewport.panel_hit_test,
                 "panel_to_content_point": viewport.panel_to_content_point,
+                "panel_to_scene_point": qpane.view().panel_to_scene_point,
                 "image_to_panel_point": viewport.content_to_panel_point,
                 "panel_to_active_mask_point": qpane.activeMaskLayerCoordinates().panel_to_source,
                 "active_mask_to_panel_point": qpane.activeMaskLayerCoordinates().source_to_panel,
@@ -345,10 +346,23 @@ class ToolInteractionDelegate:
                     else None
                 ),
                 "request_overlay_update": qpane.update,
-                "begin_layer_move": qpane.sceneLayerMovementInteraction().begin,
-                "update_layer_move": qpane.sceneLayerMovementInteraction().update,
-                "finish_layer_move": qpane.sceneLayerMovementInteraction().finish,
-                "cancel_layer_move": qpane.sceneLayerMovementInteraction().cancel,
+                "begin_move": qpane.editorMovementInteraction().begin,
+                "update_move": qpane.editorMovementInteraction().update,
+                "finish_move": qpane.editorMovementInteraction().finish,
+                "suspend_move": qpane.editorMovementInteraction().suspend,
+                "cancel_move": qpane.editorMovementInteraction().cancel,
+                "anchor_move": (
+                    qpane.editorMovementInteraction().anchor_floating_pixels
+                ),
+                "update_move_hover": qpane.editorMovementInteraction().update_hover,
+                "clear_move_hover": qpane.editorMovementInteraction().clear_hover,
+                "move_target_available": lambda: (
+                    qpane.editorMovementInteraction().target_available
+                ),
+                "nudge_move": qpane.editorMovementInteraction().nudge,
+                "commit_pixel_selection": (
+                    qpane.editorInteraction().commit_active_pixel_selection
+                ),
             }
         )
         if tools.get_control_mode() != mode:
@@ -596,9 +610,6 @@ class ToolInteractionDelegate:
             else:
                 super(type(qpane), qpane).keyPressEvent(event)
             return True
-        if event.key() in (Qt.Key_Left, Qt.Key_Right):
-            event.ignore()
-            return True
         if event.key() == Qt.Key_Shift:
             if not event.isAutoRepeat():
                 self._shift_key_held = True
@@ -619,7 +630,9 @@ class ToolInteractionDelegate:
                     self.set_control_mode(Tools.CONTROL_MODE_PANZOOM)
             event.accept()
             return True
-        return False
+        event.ignore()
+        qpane._tools_manager.keyPressEvent(event)
+        return event.isAccepted()
 
     def handle_key_release(self, event) -> bool:
         """Reset Alt/Shift/Space state and report whether the event was consumed.
@@ -648,4 +661,6 @@ class ToolInteractionDelegate:
                 self._qpane.update()
             event.accept()
             return True
-        return False
+        event.ignore()
+        self._qpane._tools_manager.keyReleaseEvent(event)
+        return event.isAccepted()

@@ -22,6 +22,7 @@ import random
 
 from .abuse_model import (
     AbuseAction,
+    EditorWorkflowAction,
     HarnessPoint,
     IdleAction,
     MouseHoverAction,
@@ -40,6 +41,7 @@ from .abuse_model import (
 def deterministic_abuse_actions() -> tuple[AbuseAction, ...]:
     """Return a compact cross-device intersection and history scenario."""
     return (
+        EditorWorkflowAction(),
         StrokeAction(
             PointerKind.MOUSE,
             _points((70, 120), (430, 120)),

@@ -14,11 +14,12 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Generic scene-layer selection state independent of source domains."""
+"""Selected scene-layer state independent of pixel-selection coverage."""
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .model import SceneDescriptor
@@ -36,9 +37,13 @@ class SceneLayerSelection:
 class SceneLayerSelectionController:
     """Own persistent generic selection for direct layer interaction."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        changed: Callable[[SceneLayerSelection | None], None] | None = None,
+    ) -> None:
         """Initialize without a selected scene layer."""
         self._selection: SceneLayerSelection | None = None
+        self._changed = changed
 
     @property
     def current(self) -> SceneLayerSelection | None:
@@ -57,6 +62,7 @@ class SceneLayerSelectionController:
         if selection == self._selection:
             return False
         self._selection = selection
+        self._publish()
         return True
 
     def clear(self) -> bool:
@@ -64,6 +70,7 @@ class SceneLayerSelectionController:
         if self._selection is None:
             return False
         self._selection = None
+        self._publish()
         return True
 
     def validate(self, scene: SceneDescriptor | None) -> bool:
@@ -78,3 +85,8 @@ class SceneLayerSelectionController:
         ):
             return False
         return self.clear()
+
+    def _publish(self) -> None:
+        """Notify the configured observer after identity changes."""
+        if self._changed is not None:
+            self._changed(self._selection)

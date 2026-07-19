@@ -40,7 +40,8 @@ from ..types import (
     QPaneSceneTemplate,
     QPaneSceneTemplateBindings,
 )
-from .history import LayerPlacementHistory
+from .edit_controller import CompositionEditController
+from .edit_history import CompositionEditHistory
 from .layers import ImageSceneLayerStore
 from .model import (
     CompositionComparison,
@@ -62,8 +63,11 @@ _VALID_CLIP_SPACES = {
 class CompositionService:
     """Own persistent compositions and active-composition state."""
 
-    def __init__(self) -> None:
-        """Initialize an empty composition collection."""
+    def __init__(
+        self,
+        history_changed: Callable[[uuid.UUID], None] | None = None,
+    ) -> None:
+        """Initialize compositions with optional edit-history observation."""
         self._records: dict[uuid.UUID, CompositionRecord] = {}
         self._order: list[uuid.UUID] = []
         self._default_by_image_id: dict[uuid.UUID, uuid.UUID] = {}
@@ -72,7 +76,11 @@ class CompositionService:
         self._default_orientation = ComparisonOrientation.VERTICAL
         self._revision = 0
         self._image_layers = ImageSceneLayerStore()
-        self._placement_history = LayerPlacementHistory()
+        self._edit_history = CompositionEditHistory()
+        self._edit_controller = CompositionEditController(
+            self._edit_history,
+            changed=history_changed,
+        )
 
     @property
     def image_layers(self) -> ImageSceneLayerStore:
@@ -80,9 +88,14 @@ class CompositionService:
         return self._image_layers
 
     @property
-    def placement_history(self) -> LayerPlacementHistory:
-        """Return composition-scoped scene-layer placement history."""
-        return self._placement_history
+    def edit_history(self) -> CompositionEditHistory:
+        """Return authoritative composition editing history."""
+        return self._edit_history
+
+    @property
+    def edit_controller(self) -> CompositionEditController:
+        """Return the dispatcher for chronological composition edits."""
+        return self._edit_controller
 
     def sync_catalog(
         self,
@@ -136,7 +149,7 @@ class CompositionService:
         self._order.clear()
         self._default_by_image_id.clear()
         self._image_layers.clear()
-        self._placement_history.clear()
+        self._edit_history.clear()
         self._active_id = None
         self._touch()
         return True
@@ -203,7 +216,7 @@ class CompositionService:
         if existing is not None and existing.kind == CompositionKind.DEFAULT_IMAGE:
             raise ValueError("default catalog compositions cannot be replaced")
         if existing is not None:
-            self._placement_history.clear_scene(record.composition_id)
+            self._edit_history.clear_scope(record.composition_id)
         self._records[record.composition_id] = record
         if record.composition_id not in self._order:
             self._order.append(record.composition_id)
@@ -282,7 +295,7 @@ class CompositionService:
         if record.kind == CompositionKind.DEFAULT_IMAGE:
             raise ValueError("default catalog compositions cannot be removed directly")
         self._records.pop(composition_id, None)
-        self._placement_history.clear_scene(composition_id)
+        self._edit_history.clear_scope(composition_id)
         self._order = [item for item in self._order if item != composition_id]
         if self._active_id == composition_id:
             self._active_id = self._order[0] if self._order else None
@@ -620,14 +633,14 @@ class CompositionService:
             self._default_by_image_id.pop(image_id, None)
             self._image_layers.remove_image(image_id)
             self._records.pop(composition_id, None)
-            self._placement_history.clear_scene(composition_id)
+            self._edit_history.clear_scope(composition_id)
             changed = True
         for composition_id, record in list(self._records.items()):
             if record.kind == CompositionKind.DEFAULT_IMAGE:
                 continue
             if any(image_id not in valid_ids for image_id in record.source_image_ids):
                 self._records.pop(composition_id, None)
-                self._placement_history.clear_scene(composition_id)
+                self._edit_history.clear_scope(composition_id)
                 changed = True
                 continue
             comparison = record.comparison
@@ -837,6 +850,7 @@ def _internal_interaction(
     return LayerInteractionPolicy(
         selectable=bool(policy.selectable),
         movable=bool(policy.movable),
+        pixel_editable=bool(policy.pixel_editable),
     )
 
 
@@ -847,4 +861,5 @@ def _public_interaction(
     return QPaneLayerInteractionPolicy(
         selectable=policy.selectable,
         movable=policy.movable,
+        pixel_editable=policy.pixel_editable,
     )

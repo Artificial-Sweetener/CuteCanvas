@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, QRectF
 from PySide6.QtGui import QColor, QImage
 
-from qpane import RasterExtentPolicy
+from qpane import QPaneLayerInteractionPolicy, RasterExtentPolicy
+from qpane.masks.stroke_models import MaskStrokeSegmentPayload
+from tests.helpers.mask_test_utils import drain_mask_jobs
 
 pytest_plugins = ("tests.test_mask_workflows",)
 
@@ -69,6 +71,166 @@ def test_public_raster_state_and_policy_preserve_bounds_and_pixels(qpane_with_ma
     assert updated.structure_revision == state.structure_revision + 1
     assert updated.content_revision == state.content_revision
     assert (layer.surface.snapshot_array() == before).all()
+
+
+def test_mask_coverage_can_select_and_delete_through_generic_layer_editing(
+    qpane_with_mask,
+) -> None:
+    """Masks should behave as selection sources and editable raster layers."""
+    qpane, manager, image_id = qpane_with_mask
+    mask_id, info = _attached_mask(qpane, manager, image_id)
+    layer = manager.get_layer(mask_id)
+    assert layer is not None
+    layer.surface.fill(255)
+    assert qpane.setLayerInteractionPolicy(
+        info.scene_id,
+        info.layer_id,
+        QPaneLayerInteractionPolicy(
+            selectable=True,
+            movable=True,
+            pixel_editable=True,
+        ),
+    )
+    assert qpane.setSelectedLayer(info.scene_id, info.layer_id)
+    assert qpane.selectLayerCoverage(info.scene_id, info.layer_id)
+
+    assert qpane.deleteSelectedPixels()
+    assert not layer.surface.snapshot_array().any()
+
+    assert qpane.undoSceneEdit()
+    assert (layer.surface.snapshot_array() == 255).all()
+    assert qpane.redoSceneEdit()
+    assert not layer.surface.snapshot_array().any()
+
+
+def test_mask_delete_projects_through_scaled_transform_and_offset_bounds(
+    qpane_with_mask,
+    qapp,
+) -> None:
+    """Generic deletion must map scene coverage into offset local storage exactly."""
+    qpane, manager, image_id = qpane_with_mask
+    mask_id, info = _attached_mask(qpane, manager, image_id)
+    layer = manager.get_layer(mask_id)
+    assert layer is not None
+    layer.surface.fill(255)
+    completions: list[tuple] = []
+    qpane.rasterBoundsRequestCompleted.connect(
+        lambda *args: completions.append(tuple(args))
+    )
+    request_id = qpane.requestRasterBounds(
+        info.scene_id,
+        info.layer_id,
+        QRect(-2, -1, 12, 10),
+    )
+    assert request_id is not None
+    _wait_for(qapp, lambda: bool(completions))
+    assert completions[-1][3] is True
+    assert qpane.setLayerInteractionPolicy(
+        info.scene_id,
+        info.layer_id,
+        QPaneLayerInteractionPolicy(
+            selectable=True,
+            movable=True,
+            pixel_editable=True,
+        ),
+    )
+    assert qpane.setLayerPlacement(
+        info.scene_id,
+        info.layer_id,
+        QRectF(10.0, 20.0, 24.0, 20.0),
+    )
+    assert qpane.setSelectedLayer(info.scene_id, info.layer_id)
+    selection = QImage(8, 8, QImage.Format_Grayscale8)
+    selection.fill(255)
+    assert qpane.setPixelSelection(selection, QRect(14, 24, 8, 8))
+    before = layer.surface.snapshot_array()
+
+    assert qpane.deleteSelectedPixels()
+    after = layer.surface.snapshot_array()
+    expected = before.copy()
+    expected[2:6, 2:6] = 0
+    assert (after == expected).all()
+    assert qpane.undoSceneEdit()
+    assert (layer.surface.snapshot_array() == before).all()
+    assert qpane.redoSceneEdit()
+    assert (layer.surface.snapshot_array() == expected).all()
+
+
+def test_mask_brush_preview_and_commit_respect_pixel_selection(
+    qpane_with_mask,
+    qapp,
+) -> None:
+    """Selection-constrained strokes must never preview or persist outside coverage."""
+    qpane, manager, image_id = qpane_with_mask
+    mask_id, _info = _attached_mask(qpane, manager, image_id)
+    layer = manager.get_layer(mask_id)
+    service = qpane.mask_service
+    assert layer is not None
+    assert service is not None
+    selection = QImage(4, 8, QImage.Format_Grayscale8)
+    selection.fill(255)
+    assert qpane.setPixelSelection(selection, QRect(0, 0, 4, 8))
+
+    service.applyStrokeSegment(
+        MaskStrokeSegmentPayload.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
+    )
+    preview = service.getColorizedMask(layer)
+    assert preview is not None
+    preview_image = preview.toImage()
+    assert preview_image.pixelColor(2, 4).alpha() > 0
+    assert preview_image.pixelColor(6, 4).alpha() == 0
+
+    service.commitStroke()
+    drain_mask_jobs(qpane)
+    pixels = layer.surface.snapshot_array()
+    assert pixels[4, 2] == 255
+    assert pixels[4, 6] == 0
+    assert qpane.undoSceneEdit()
+    assert not layer.surface.snapshot_array().any()
+
+
+def test_transformed_mask_brush_preview_and_commit_share_scene_selection(
+    qpane_with_mask,
+) -> None:
+    """Moved and scaled mask authoring must project the active scene selection."""
+    qpane, manager, image_id = qpane_with_mask
+    mask_id, info = _attached_mask(qpane, manager, image_id)
+    layer = manager.get_layer(mask_id)
+    service = qpane.mask_service
+    assert layer is not None
+    assert service is not None
+    assert qpane.setLayerInteractionPolicy(
+        info.scene_id,
+        info.layer_id,
+        QPaneLayerInteractionPolicy(selectable=True, movable=True),
+    )
+    assert qpane.setLayerPlacement(
+        info.scene_id,
+        info.layer_id,
+        QRectF(10.0, 20.0, 16.0, 16.0),
+    )
+    selection = QImage(8, 16, QImage.Format_Grayscale8)
+    selection.fill(255)
+    assert qpane.setPixelSelection(selection, QRect(14, 20, 8, 16))
+
+    service.applyStrokeSegment(
+        MaskStrokeSegmentPayload.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
+    )
+    preview = service.getColorizedMask(layer)
+    assert preview is not None
+    preview_image = preview.toImage()
+    assert preview_image.pixelColor(3, 4).alpha() > 0
+    assert preview_image.pixelColor(1, 4).alpha() == 0
+    assert preview_image.pixelColor(7, 4).alpha() == 0
+
+    service.commitStroke()
+    drain_mask_jobs(qpane)
+    pixels = layer.surface.snapshot_array()
+    assert pixels[4, 3] == 255
+    assert pixels[4, 1] == 0
+    assert pixels[4, 7] == 0
+    assert qpane.undoSceneEdit()
+    assert not layer.surface.snapshot_array().any()
 
 
 def test_public_bounds_request_is_async_undoable_and_keeps_transform(

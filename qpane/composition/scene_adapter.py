@@ -145,6 +145,7 @@ class CompositionSceneAdapter:
             interaction=QPaneLayerInteractionPolicy(
                 selectable=layer.interaction.selectable,
                 movable=layer.interaction.movable,
+                pixel_editable=layer.interaction.pixel_editable,
             ),
             role=layer.role,
             metadata=layer.metadata,
@@ -185,6 +186,7 @@ class CompositionSceneAdapter:
             interaction=LayerInteractionPolicy(
                 selectable=layer.interaction.selectable,
                 movable=layer.interaction.movable,
+                pixel_editable=layer.interaction.pixel_editable,
             ),
             source_revision=revision,
             raster_bounds=raster_bounds,

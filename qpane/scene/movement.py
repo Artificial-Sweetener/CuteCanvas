@@ -23,11 +23,11 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
 
+from .layer_selection import SceneLayerSelectionController
 from .model import LayerPlacement, SceneDescriptor
 from .mutations import SceneMutationCoordinator, SceneMutationResult
 from .placement_preview import SceneLayerPlacementPreview
 from .render_plan import SceneLayerHitTestResult
-from .selection import SceneLayerSelectionController
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +82,18 @@ class SceneLayerMovementController:
         )
         return True
 
+    def can_move(self, hit: SceneLayerHitTestResult) -> bool:
+        """Return whether ``hit`` resolves to a policy-enabled movable layer."""
+        resolved = self._mutations.find_layer(
+            lambda layer: (
+                layer.scene_id == hit.scene_id and layer.layer_id == hit.layer_id
+            )
+        )
+        if resolved is None:
+            return False
+        _scene, layer = resolved
+        return layer.interaction.selectable and layer.interaction.movable
+
     def update(self, scene_point: QPointF) -> bool:
         """Update transient placement from the active pointer delta."""
         session = self._session
@@ -121,6 +133,36 @@ class SceneLayerMovementController:
         had_session = self._session is not None
         self._session = None
         return self._preview.clear() or had_session
+
+    def nudge_selected(
+        self, delta_x: float, delta_y: float
+    ) -> SceneMutationResult | None:
+        """Move the selected policy-enabled layer by one keyboard delta."""
+        selected = self._selection.current
+        if selected is None:
+            return None
+        resolved = self._mutations.find_layer(
+            lambda layer: (
+                layer.scene_id == selected.scene_id
+                and layer.layer_id == selected.layer_id
+            )
+        )
+        if resolved is None:
+            return None
+        _scene, layer = resolved
+        if not layer.interaction.selectable or not layer.interaction.movable:
+            return None
+        placement = layer.placement
+        return self._mutations.set_placement(
+            layer.scene_id,
+            layer.layer_id,
+            LayerPlacement(
+                placement.x + delta_x,
+                placement.y + delta_y,
+                placement.width,
+                placement.height,
+            ),
+        )
 
     def clear_selection(self) -> bool:
         """Clear persistent scene-layer selection."""

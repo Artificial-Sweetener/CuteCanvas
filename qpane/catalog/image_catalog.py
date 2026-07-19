@@ -28,11 +28,11 @@ from PySide6.QtGui import QImage
 
 from ..concurrency import TaskExecutorProtocol
 from ..core import Config
+from ..raster.image_conversion import images_differ
 from ..rendering import PyramidManager
 from ..scene.identity import SceneLayerAssetKey, default_catalog_asset_key
 from ..types import CatalogEntry
 from .image_map import ImageMap
-from .image_utils import images_differ
 
 logger = logging.getLogger(__name__)
 

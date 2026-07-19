@@ -61,6 +61,7 @@ from ..scene.render_plan import (
 )
 from ..scene.sources import (
     CatalogImageSource,
+    EditableRasterSource,
     MaskLayerSource,
     PlaceholderImageSource,
 )
@@ -71,6 +72,7 @@ from .compiled_scene import (
     hit_test_items_for_scene,
 )
 from .coordinates import CoordinateContext, PanelHitTest
+from .floating_pixels import FloatingPixelRenderCompiler
 from .render import Renderer
 from .tiles import TileManager
 from .viewport import Viewport, ViewportZoomMode
@@ -82,6 +84,7 @@ if TYPE_CHECKING:
     from ..concurrency import TaskExecutorProtocol
     from ..core import OverlayDrawFn, SceneOverlayDrawFn
     from ..qpane import QPane
+    from ..scene.pixel_move_preview import RasterPixelMovePreview
 logger = logging.getLogger(__name__)
 
 
@@ -193,18 +196,29 @@ class RenderingPresenter:
         self._scene_providers = qpane.sceneProviderRegistry()
         self._scene_assembly = SceneAssembly(self._scene_providers)
         self._source_resolvers = qpane.layerSourceResolverRegistry()
+        self._floating_pixels = FloatingPixelRenderCompiler(self._source_resolvers)
         self._last_view_size = QSize()
         self._last_device_pixel_ratio = float(qpane.devicePixelRatioF())
         self._placeholder_content_provider: Callable[[], object | None] | None = None
         self._cached_compiled_scene_key: tuple[object, ...] | None = None
         self._cached_compiled_scene: CompiledRenderScene | None = None
         self._last_scroll_reuse_signature: tuple[object, ...] | None = None
+        self._pixel_move_preview_provider: Callable[
+            [], RasterPixelMovePreview | None
+        ] = lambda: None
 
     def set_placeholder_content_provider(
         self, provider: Callable[[], object | None]
     ) -> None:
         """Install the catalog-owned placeholder content provider."""
         self._placeholder_content_provider = provider
+
+    def set_pixel_move_preview_provider(
+        self,
+        provider: Callable[[], RasterPixelMovePreview | None],
+    ) -> None:
+        """Install the transient selected-pixel preview provider."""
+        self._pixel_move_preview_provider = provider
 
     def calculateRenderPlan(
         self,
@@ -243,6 +257,10 @@ class RenderingPresenter:
             physical_viewport_rect=frame.physical_viewport_rect,
             render_items=render_items,
             hit_test_items=compiled.hit_test_items,
+            floating_pixels=self._floating_pixels.compile(
+                self._pixel_move_preview_provider(),
+                render_items,
+            ),
         )
 
     def paint(
@@ -535,6 +553,30 @@ class RenderingPresenter:
         return QPointF(
             local.x() + compiled.scene.bounds.x,
             local.y() + compiled.scene.bounds.y,
+        )
+
+    def scene_to_panel_transform(self) -> QTransform | None:
+        """Return a transform mapping absolute scene coordinates into the panel."""
+        geometry = self._active_scene_geometry()
+        if geometry is None:
+            return None
+        compiled, frame = geometry
+        local_to_panel = self._scene_to_panel_transform(compiled, frame)
+        origin = local_to_panel.map(QPointF())
+        x_axis = local_to_panel.map(QPointF(1.0, 0.0))
+        y_axis = local_to_panel.map(QPointF(0.0, 1.0))
+        x_scale_x = x_axis.x() - origin.x()
+        x_scale_y = x_axis.y() - origin.y()
+        y_scale_x = y_axis.x() - origin.x()
+        y_scale_y = y_axis.y() - origin.y()
+        scene_bounds = compiled.scene.bounds
+        return QTransform(
+            x_scale_x,
+            x_scale_y,
+            y_scale_x,
+            y_scale_y,
+            origin.x() - scene_bounds.x * x_scale_x - scene_bounds.y * y_scale_x,
+            origin.y() - scene_bounds.x * x_scale_y - scene_bounds.y * y_scale_y,
         )
 
     def panel_to_layer_source_point(
@@ -1704,6 +1746,15 @@ class RenderingPresenter:
                 revision=layer.source_revision,
                 source_path=layer.source.source_path,
             )
+        if isinstance(layer.source, EditableRasterSource):
+            return scene_image_asset_key(
+                scene_id=scene.scene_id,
+                layer_id=layer.layer_id,
+                source_id=layer.source.raster_id,
+                source_kind="editable-raster",
+                revision=layer.source_revision,
+                source_path=None,
+            )
         if scene.kind == SceneKind.PLACEHOLDER_IMAGE and isinstance(
             layer.source, PlaceholderImageSource
         ):
@@ -1723,6 +1774,8 @@ class RenderingPresenter:
         """Return the source/pyramid identity for a resolved image layer."""
         if isinstance(layer.source, CatalogImageSource):
             return self._catalog.defaultAssetKeyForImage(layer.source.image_id)
+        if isinstance(layer.source, EditableRasterSource):
+            return self._render_asset_key_for_image_layer(scene, layer)
         if scene.kind == SceneKind.PLACEHOLDER_IMAGE and isinstance(
             layer.source, PlaceholderImageSource
         ):
@@ -1907,7 +1960,7 @@ class RenderingPresenter:
             if layer.kind == LayerKind.MASK:
                 mask_layers.append(layer)
                 continue
-            if layer.kind != LayerKind.IMAGE:
+            if layer.kind not in {LayerKind.IMAGE, LayerKind.RASTER}:
                 continue
             if base_layer is None:
                 continue

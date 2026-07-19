@@ -25,6 +25,7 @@ from PySide6.QtCore import QPoint, QPointF, QRect
 from PySide6.QtGui import QColor, QPen
 
 if TYPE_CHECKING:
+    from qpane.coverage import CoverageCombineMode, CoverageSnapshot
     from qpane.rendering import ViewportZoomMode
     from qpane.rendering.coordinates import PanelHitTest
 
@@ -58,6 +59,7 @@ class ToolDependencies(TypedDict, total=False):
     panel_hit_test: Callable[[QPoint], PanelHitTest | None]
     panel_hit_test_precise: Callable[[QPointF], PanelHitTest | None]
     panel_to_content_point: Callable[[QPoint], QPoint | None]
+    panel_to_scene_point: Callable[[QPointF], QPointF | None]
     image_to_panel_point: Callable[[QPoint | QPointF], QPointF | None]
     panel_to_active_mask_point: Callable[[QPoint | QPointF], QPointF | None]
     active_mask_to_panel_point: Callable[[QPoint | QPointF], QPointF | None]
@@ -67,10 +69,17 @@ class ToolDependencies(TypedDict, total=False):
     get_min_selection_size: Callable[[], int]
     get_active_mask_color: Callable[[], QColor | None]
     request_overlay_update: Callable[[QRect], None]
-    begin_layer_move: Callable[[QPointF], bool]
-    update_layer_move: Callable[[QPointF], bool]
-    finish_layer_move: Callable[[QPointF], bool]
-    cancel_layer_move: Callable[[], bool]
+    begin_move: Callable[[QPointF, bool], bool]
+    update_move: Callable[[QPointF], bool]
+    finish_move: Callable[[QPointF], bool]
+    suspend_move: Callable[[], bool]
+    cancel_move: Callable[[], bool]
+    anchor_move: Callable[[], bool]
+    update_move_hover: Callable[[QPointF], bool]
+    clear_move_hover: Callable[[], bool]
+    move_target_available: Callable[[], bool]
+    nudge_move: Callable[[int, int], bool]
+    commit_pixel_selection: Callable[[CoverageSnapshot, CoverageCombineMode], bool]
     get_pen_pressure_min_ratio: Callable[[], float]
     get_pen_pressure_gamma: Callable[[], float]
     get_pen_pressure_enabled: Callable[[], bool]

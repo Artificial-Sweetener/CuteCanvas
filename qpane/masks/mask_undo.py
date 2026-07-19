@@ -31,12 +31,10 @@ import numpy as np
 from numpy.typing import NDArray
 from PySide6.QtCore import QRect
 
-from ..catalog.image_utils import qimage_to_numpy_grayscale8
+from ..raster.image_conversion import qimage_to_numpy_grayscale8
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QImage
-
-    from .mask import MaskLayer
 
 
 @dataclass(frozen=True)
@@ -93,39 +91,6 @@ class MaskUndoCommand(Protocol):
 
     def describe_delta(self, *, use_after: bool) -> Iterable[MaskUndoSnippet] | None:
         """Return the snippets touched when replaying this command."""
-
-
-class MaskUndoProvider(Protocol):
-    """Define the hooks required to integrate mask undo/redo workflows."""
-
-    def initialize_mask(self, mask_id: uuid.UUID, layer: MaskLayer) -> None:
-        """Prepare provider state for ``mask_id`` using the current layer."""
-
-    def dispose_mask(self, mask_id: uuid.UUID) -> None:
-        """Release any provider state associated with ``mask_id``."""
-
-    def submit(self, mask_id: uuid.UUID, command: MaskUndoCommand, limit: int) -> None:
-        """Record ``command`` for ``mask_id`` and execute it immediately."""
-
-    def record_applied(
-        self,
-        mask_id: uuid.UUID,
-        command: MaskUndoCommand,
-        limit: int,
-    ) -> None:
-        """Record ``command`` after its mutation has already been applied."""
-
-    def undo(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
-        """Undo the latest change for ``mask_id`` when available."""
-
-    def redo(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
-        """Redo the previously undone change for ``mask_id`` when available."""
-
-    def set_limit(self, mask_id: uuid.UUID, limit: int) -> None:
-        """Update the retained history depth for ``mask_id``."""
-
-    def get_state(self, mask_id: uuid.UUID) -> MaskUndoState:
-        """Return the current undo/redo depth for ``mask_id``."""
 
 
 @dataclass
@@ -219,111 +184,3 @@ class MaskPatchCommand:
         if not payload:
             return None
         return tuple(payload)
-
-
-class MaskLayerUndoProvider:
-    """Default provider storing undoable commands in memory."""
-
-    def __init__(self) -> None:
-        """Initialize in-memory stacks for undo/redo tracking."""
-        self._history: dict[uuid.UUID, list[MaskUndoCommand]] = {}
-        self._redos: dict[uuid.UUID, list[MaskUndoCommand]] = {}
-        self._baselines: dict[uuid.UUID, QImage] = {}
-
-    def initialize_mask(self, mask_id: uuid.UUID, layer: MaskLayer) -> None:
-        """Prepare provider state for ``mask_id`` using ``layer``'s snapshot."""
-        self._history[mask_id] = []
-        self._redos[mask_id] = []
-        self._baselines[mask_id] = layer.surface.snapshot_qimage()
-
-    def dispose_mask(self, mask_id: uuid.UUID) -> None:
-        """Release cached history for ``mask_id``."""
-        self._history.pop(mask_id, None)
-        self._redos.pop(mask_id, None)
-        self._baselines.pop(mask_id, None)
-
-    def submit(self, mask_id: uuid.UUID, command: MaskUndoCommand, limit: int) -> None:
-        """Execute ``command`` and push it on the undo stack."""
-        command.redo()
-        self.record_applied(mask_id, command, limit)
-
-    def record_applied(
-        self,
-        mask_id: uuid.UUID,
-        command: MaskUndoCommand,
-        limit: int,
-    ) -> None:
-        """Push an already-applied command without replaying its mutation."""
-        history = self._history.setdefault(mask_id, [])
-        history.append(command)
-        self._redos[mask_id] = []
-        self._enforce_limit(mask_id, limit)
-
-    def undo(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
-        """Undo the latest command for ``mask_id`` when available."""
-        history = self._history.get(mask_id)
-        if not history:
-            return None
-        command = history.pop()
-        command.undo()
-        self._redos.setdefault(mask_id, []).append(command)
-        snippets = self._describe_command_delta(command, use_after=False)
-        return MaskHistoryChange(
-            mask_id=mask_id,
-            direction="undo",
-            command=command,
-            snippets=snippets,
-        )
-
-    def redo(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
-        """Replay the previously undone command for ``mask_id``."""
-        redo_stack = self._redos.get(mask_id)
-        if not redo_stack:
-            return None
-        command = redo_stack.pop()
-        command.redo()
-        self._history.setdefault(mask_id, []).append(command)
-        snippets = self._describe_command_delta(command, use_after=True)
-        return MaskHistoryChange(
-            mask_id=mask_id,
-            direction="redo",
-            command=command,
-            snippets=snippets,
-        )
-
-    def set_limit(self, mask_id: uuid.UUID, limit: int) -> None:
-        """Clamp the retained history for ``mask_id`` to ``limit`` entries."""
-        self._enforce_limit(mask_id, limit)
-
-    def get_state(self, mask_id: uuid.UUID) -> MaskUndoState:
-        """Return the current undo/redo depth for ``mask_id``."""
-        history = self._history.get(mask_id) or []
-        redo_stack = self._redos.get(mask_id) or []
-        return MaskUndoState(undo_depth=len(history), redo_depth=len(redo_stack))
-
-    def capture_snapshot(self, mask_id: uuid.UUID, image: QImage) -> None:
-        """Store the current image as the provider baseline."""
-        self._baselines[mask_id] = image.copy()
-
-    def _enforce_limit(self, mask_id: uuid.UUID, limit: int) -> None:
-        """Trim oldest history entries when exceeding ``limit``."""
-        if limit <= 0:
-            return
-        history = self._history.get(mask_id)
-        if not history:
-            return
-        excess = len(history) - limit
-        if excess > 0:
-            del history[0:excess]
-
-    def _describe_command_delta(
-        self, command: MaskUndoCommand, *, use_after: bool
-    ) -> tuple[MaskUndoSnippet, ...]:
-        """Return a normalized tuple of snippets from the command if available."""
-        describe = getattr(command, "describe_delta", None)
-        if describe is None:
-            return ()
-        data = describe(use_after=use_after)
-        if not data:
-            return ()
-        return tuple(data)

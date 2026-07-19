@@ -20,7 +20,6 @@ import uuid
 
 from PySide6.QtGui import QColor
 
-from qpane.composition.history import LayerPlacementHistory
 from qpane.composition.layers import (
     CompositionLayerInstance,
     CompositionLayerSourceKind,
@@ -29,7 +28,6 @@ from qpane.composition.layers import (
 from qpane.scene.model import (
     LayerInteractionPolicy,
     LayerPlacement,
-    LayerPlacementChange,
 )
 from qpane.scene.raster import LayerTransform, RasterBounds
 
@@ -138,31 +136,3 @@ def test_layer_store_replaces_policy_and_transform_as_instance_state():
     assert updated.transform == transform
     assert mask.interaction == LayerInteractionPolicy()
     assert mask.transform == LayerTransform()
-
-
-def test_placement_history_is_scoped_to_each_scene():
-    """Undo and redo branches should advance independently per scene."""
-    history = LayerPlacementHistory()
-    first_scene_id = uuid.uuid4()
-    second_scene_id = uuid.uuid4()
-    first_change = LayerPlacementChange(
-        scene_id=first_scene_id,
-        layer_id=uuid.uuid4(),
-        before=_PLACEMENT,
-        after=LayerPlacement(10.0, 0.0, 100.0, 80.0),
-    )
-    second_change = LayerPlacementChange(
-        scene_id=second_scene_id,
-        layer_id=uuid.uuid4(),
-        before=_PLACEMENT,
-        after=LayerPlacement(0.0, 10.0, 100.0, 80.0),
-    )
-
-    assert history.record(first_change)
-    assert history.record(second_change)
-    assert history.commit_undo(first_change)
-
-    assert history.undo_candidate(first_scene_id) is None
-    assert history.redo_candidate(first_scene_id) == first_change
-    assert history.undo_candidate(second_scene_id) == second_change
-    assert history.redo_candidate(second_scene_id) is None

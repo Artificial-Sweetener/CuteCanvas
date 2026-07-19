@@ -88,6 +88,15 @@ class RasterBounds:
             and self.bottom >= other.bottom
         )
 
+    def translated(self, delta_x: int, delta_y: int) -> RasterBounds:
+        """Return identical extents shifted in local pixel coordinates."""
+        return RasterBounds(
+            self.x + int(delta_x),
+            self.y + int(delta_y),
+            self.width,
+            self.height,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class LayerTransform:

@@ -133,10 +133,18 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
         _cycle(qpane)
         if qpane.samFeatureAvailable():
             assert qpane.getControlMode() == QPane.CONTROL_MODE_SMART_SELECT
+        assert qpane.getControlMode() in {
+            QPane.CONTROL_MODE_DRAW_BRUSH,
+            QPane.CONTROL_MODE_SMART_SELECT,
+        }
+        for expected in (
+            QPane.CONTROL_MODE_SELECT_RECTANGLE,
+            QPane.CONTROL_MODE_SELECT_ELLIPSE,
+            QPane.CONTROL_MODE_SELECT_LASSO,
+            QPane.CONTROL_MODE_CURSOR,
+        ):
             _cycle(qpane)
-            assert qpane.getControlMode() == QPane.CONTROL_MODE_CURSOR
-        else:
-            assert qpane.getControlMode() == QPane.CONTROL_MODE_CURSOR
+            assert qpane.getControlMode() == expected
     finally:
         qpane.deleteLater()
         qapp.processEvents()

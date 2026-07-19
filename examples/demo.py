@@ -20,10 +20,8 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import logging
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -33,26 +31,27 @@ from typing import TYPE_CHECKING, Any
 if __package__ is None or __package__ == "":
     # Allow running as a script (python examples/demo.py) by adding repo root.
     sys.path.append(str(Path(__file__).resolve().parent.parent))
+from examples.demo_environment import (
+    DEMO_TIERS,
+    DemoEnvironmentError,
+    DemoEnvironmentManager,
+    DemoLaunchSettings,
+)
 from examples.demo_settings import load_demo_settings, save_demo_settings
 
 if TYPE_CHECKING:
     from examples.demonstration.demo_window import ExampleOptions, ExampleWindow
 
 __all__ = ["ExampleOptions", "ExampleWindow", "main", "parse_args"]
-_TIERS = {
-    "core": {"extra": None, "features": "core", "label": "Core"},
-    "mask": {"extra": "mask", "features": "mask", "label": "Masks"},
-    "masksam": {"extra": "full", "features": "masksam", "label": "Mask+SAM"},
-}
 _SAM_DOWNLOAD_MODES = ["background", "blocking", "disabled"]
-ExampleOptions: Any | None = None
-ExampleWindow: Any | None = None
+_DEMO_ENVIRONMENTS = DemoEnvironmentManager(Path(__file__))
 
 
 def _load_example_types() -> tuple[Any, Any]:
     """Import and cache the demo window symbols."""
-    global ExampleOptions, ExampleWindow
-    if ExampleOptions is None or ExampleWindow is None:
+    options_type = globals().get("ExampleOptions")
+    window_type = globals().get("ExampleWindow")
+    if options_type is None or window_type is None:
         from examples.demonstration.demo_window import (
             ExampleOptions as DemoExampleOptions,
         )
@@ -60,14 +59,19 @@ def _load_example_types() -> tuple[Any, Any]:
             ExampleWindow as DemoExampleWindow,
         )
 
-        ExampleOptions = DemoExampleOptions
-        ExampleWindow = DemoExampleWindow
-    return ExampleOptions, ExampleWindow
+        globals()["ExampleOptions"] = DemoExampleOptions
+        globals()["ExampleWindow"] = DemoExampleWindow
+        options_type = DemoExampleOptions
+        window_type = DemoExampleWindow
+    return options_type, window_type
 
 
-def _pyside_available() -> bool:
-    """Return True when PySide6 is available for imports."""
-    return importlib.util.find_spec("PySide6") is not None
+def __getattr__(name: str) -> Any:
+    """Load demo UI types only when callers explicitly request them."""
+    if name not in {"ExampleOptions", "ExampleWindow"}:
+        raise AttributeError(name)
+    options_type, window_type = _load_example_types()
+    return options_type if name == "ExampleOptions" else window_type
 
 
 def _resolve_fallback_app_data_dir() -> Path | None:
@@ -145,100 +149,6 @@ def _parse_bootstrap_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-if _pyside_available():
-    _load_example_types()
-
-
-def _venv_dir(tier: str) -> Path:
-    """Resolve the directory path for the specified environment tier."""
-    return Path(__file__).resolve().parent / f"venv-{tier}"
-
-
-def _venv_python(tier: str) -> Path:
-    """Locate the Python executable within the tier's virtual environment."""
-    return (
-        _venv_dir(tier)
-        / ("Scripts" if sys.platform.startswith("win") else "bin")
-        / ("python.exe" if sys.platform.startswith("win") else "python")
-    )
-
-
-def _create_venv(tier: str, rebuild: bool = False) -> None:
-    """Initialize a fresh virtual environment for the specified tier."""
-    target = _venv_dir(tier)
-    if rebuild and target.exists():
-        shutil.rmtree(target)
-    if not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run([sys.executable, "-m", "venv", str(target)], check=True)
-
-
-def _install_extras(tier: str) -> None:
-    """Install the package with tier-specific extras into the environment."""
-    info = _TIERS[tier]
-    venv_python = _venv_python(tier)
-    subprocess.run(
-        [str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], check=True
-    )
-    project_root = Path(__file__).resolve().parent.parent
-    target = str(project_root)
-    if info["extra"]:
-        target = f"{target}[{info['extra']}]"
-    subprocess.run([str(venv_python), "-m", "pip", "install", "-e", target], check=True)
-
-
-def _venv_exists(tier: str) -> bool:
-    """Check if the virtual environment for the tier is already created."""
-    return _venv_python(tier).exists()
-
-
-def _ensure_venv_ready(
-    tier: str, *, rebuild: bool = False, skip_install_if_present: bool = False
-) -> None:
-    """Create or rebuild the tier-specific venv and install extras."""
-    if rebuild or not _venv_exists(tier):
-        _create_venv(tier, rebuild=rebuild)
-        _install_extras(tier)
-        return
-    if not skip_install_if_present:
-        _install_extras(tier)
-
-
-def _launch_in_venv(
-    tier: str,
-    log_level: str = "INFO",
-    config_strict: bool = False,
-    sam_download_mode: str | None = None,
-    sam_model_path: str | None = None,
-    sam_model_url: str | None = None,
-    sam_model_hash: str | None = None,
-) -> int:
-    """Spawn the demo using the tier-specific venv and feature selection."""
-    python_bin = _venv_python(tier)
-    info = _TIERS[tier]
-    cmd = [
-        str(python_bin),
-        "-m",
-        "examples.demo",
-        "--features",
-        info["features"],
-        "--log-level",
-        log_level,
-        "--skip-menu",
-    ]
-    if config_strict:
-        cmd.append("--config-strict")
-    if tier == "masksam" and sam_download_mode:
-        cmd.extend(["--sam-download-mode", sam_download_mode])
-    if tier == "masksam" and sam_model_path:
-        cmd.extend(["--sam-model-path", sam_model_path])
-    if tier == "masksam" and sam_model_url:
-        cmd.extend(["--sam-model-url", sam_model_url])
-    if tier == "masksam" and sam_model_hash:
-        cmd.extend(["--sam-model-hash", sam_model_hash])
-    return subprocess.call(cmd)
-
-
 def _interactive_menu() -> int:
     """Present a dashboard menu to rebuild/install venvs and launch the demo."""
     tiers = ["core", "mask", "masksam"]
@@ -307,7 +217,7 @@ def _interactive_menu() -> int:
                 "kind": "option",
                 "key": "feature",
                 "label": "Feature Set",
-                "value": _TIERS[_current_tier()]["label"],
+                "value": DEMO_TIERS[_current_tier()].label,
                 "help": (
                     "Select feature tier. Left/Right to cycle. "
                     "(Core: Viewer, Masks: +Masks, Mask+SAM: +AI)"
@@ -525,16 +435,22 @@ def _interactive_menu() -> int:
                         _clear_sam_checkpoint(checkpoint_path)
                 save_demo_settings(tier, level, sam_mode, sam_path, sam_url, sam_hash)
                 try:
-                    _ensure_venv_ready(tier, skip_install_if_present=True)
-                    return _launch_in_venv(
+                    _DEMO_ENVIRONMENTS.ensure_ready(tier)
+                    return _DEMO_ENVIRONMENTS.launch(
                         tier,
-                        log_level=level,
-                        sam_download_mode=sam_mode,
-                        sam_model_path=sam_path,
-                        sam_model_url=sam_url,
-                        sam_model_hash=sam_hash,
+                        DemoLaunchSettings(
+                            log_level=level,
+                            sam_download_mode=sam_mode,
+                            sam_model_path=sam_path,
+                            sam_model_url=sam_url,
+                            sam_model_hash=sam_hash,
+                        ),
                     )
-                except subprocess.CalledProcessError as exc:
+                except (
+                    DemoEnvironmentError,
+                    OSError,
+                    subprocess.CalledProcessError,
+                ) as exc:
                     print(f"\nError: {exc}")
                     input("Press Enter...")
             elif row["key"] == "rebuild":
@@ -547,10 +463,14 @@ def _interactive_menu() -> int:
                 save_demo_settings(tier, level, sam_mode, sam_path, sam_url, sam_hash)
                 try:
                     print(f"\nRebuilding {tier} environment...")
-                    _ensure_venv_ready(tier, rebuild=True)
+                    _DEMO_ENVIRONMENTS.ensure_ready(tier, rebuild=True)
                     print("Done.")
                     input("Press Enter...")
-                except subprocess.CalledProcessError as exc:
+                except (
+                    DemoEnvironmentError,
+                    OSError,
+                    subprocess.CalledProcessError,
+                ) as exc:
                     print(f"\nError: {exc}")
                     input("Press Enter...")
             elif row["key"] == "exit":
@@ -578,7 +498,7 @@ def _interactive_menu() -> int:
 
 def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
     """Parse CLI arguments controlling feature selection and config strictness."""
-    _load_example_types()
+    options_type, _window_type = _load_example_types()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--features",
@@ -630,7 +550,7 @@ def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
         ),
     )
     ns = parser.parse_args(list(argv) if argv is not None else None)
-    return ExampleOptions(
+    return options_type(
         feature_set=ns.features,
         config_strict=bool(ns.config_strict),
         log_level=ns.log_level,
@@ -659,23 +579,29 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = list(argv) if argv is not None else sys.argv[1:]
     if not args:
         return _interactive_menu()
-    if not _pyside_available():
-        bootstrap = _parse_bootstrap_args(args)
+    bootstrap = _parse_bootstrap_args(args)
+    if not _DEMO_ENVIRONMENTS.is_current_process(bootstrap.features):
         try:
-            _ensure_venv_ready(bootstrap.features, skip_install_if_present=True)
-        except subprocess.CalledProcessError as exc:
+            _DEMO_ENVIRONMENTS.ensure_ready(bootstrap.features)
+        except (
+            DemoEnvironmentError,
+            OSError,
+            subprocess.CalledProcessError,
+        ) as exc:
             print(f"\nError: {exc}")
             return 1
-        return _launch_in_venv(
+        return _DEMO_ENVIRONMENTS.launch(
             bootstrap.features,
-            log_level=bootstrap.log_level,
-            config_strict=bootstrap.config_strict,
-            sam_download_mode=bootstrap.sam_download_mode,
-            sam_model_path=bootstrap.sam_model_path,
-            sam_model_url=bootstrap.sam_model_url,
-            sam_model_hash=bootstrap.sam_model_hash,
+            DemoLaunchSettings(
+                log_level=bootstrap.log_level,
+                config_strict=bootstrap.config_strict,
+                sam_download_mode=bootstrap.sam_download_mode,
+                sam_model_path=bootstrap.sam_model_path,
+                sam_model_url=bootstrap.sam_model_url,
+                sam_model_hash=bootstrap.sam_model_hash,
+            ),
         )
-    _load_example_types()
+    _options_type, window_type = _load_example_types()
     from PySide6.QtGui import QImageReader
     from PySide6.QtWidgets import QApplication
 
@@ -698,7 +624,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             sam_overrides["sam_model_hash"] = opts.sam_model_hash
         if sam_overrides:
             config.configure(**sam_overrides)
-    window = ExampleWindow(opts, config=config)
+    window = window_type(opts, config=config)
     window.show()
     return app.exec()
 

@@ -18,14 +18,14 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtGui import QImage
 
+from ..composition.edit_controller import CompositionEditController
+from ..coverage import CoverageSnapshot, CoverageSurface
 from .history import MaskHistory
 from .mask_undo import (
     MaskHistoryChange,
     MaskPatch,
-    MaskUndoProvider,
     MaskUndoState,
 )
-from .surface import MaskSurface, MaskSurfaceSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,12 @@ class MaskLayer:
     """Identify one mask asset and expose detached pixel snapshots."""
 
     mask_id: uuid.UUID
-    surface: MaskSurface
+    surface: CoverageSurface
 
     def __post_init__(self) -> None:
         """Require authoritative storage for every mask asset."""
-        if not isinstance(self.surface, MaskSurface):
-            raise TypeError("MaskLayer requires a MaskSurface instance.")
+        if not isinstance(self.surface, CoverageSurface):
+            raise TypeError("MaskLayer requires a CoverageSurface instance.")
 
     @property
     def mask_image(self) -> QImage:
@@ -60,21 +60,19 @@ class MaskAssetStore:
         self,
         *,
         undo_limit: int = 20,
-        undo_provider: MaskUndoProvider | None = None,
     ) -> None:
-        """Initialize asset storage and its independent history owner."""
+        """Initialize asset storage before composition history is bound."""
         self._masks: dict[uuid.UUID, MaskLayer] = {}
         self._history = MaskHistory(
             self,
             undo_limit=undo_limit,
-            provider=undo_provider,
         )
 
     def get_layer(self, mask_id: uuid.UUID) -> MaskLayer | None:
         """Return one mask asset when it exists."""
         return self._masks.get(mask_id)
 
-    def get_surface(self, mask_id: uuid.UUID) -> MaskSurface | None:
+    def get_surface(self, mask_id: uuid.UUID) -> CoverageSurface | None:
         """Return authoritative pixel storage for one asset."""
         layer = self._masks.get(mask_id)
         return None if layer is None else layer.surface
@@ -88,25 +86,25 @@ class MaskAssetStore:
         """Return the history depth applied to mask assets."""
         return self._history.undo_limit
 
-    @property
-    def undo_provider(self) -> MaskUndoProvider:
-        """Return the independently owned history provider."""
-        return self._history.provider
-
     def set_undo_limit(self, undo_limit: int) -> None:
         """Update history depth for existing and future assets."""
         self._history.set_limit(undo_limit, self.mask_ids())
 
-    def set_undo_provider(self, undo_provider: MaskUndoProvider | None) -> None:
-        """Replace the history provider for all existing assets."""
-        self._history.set_provider(undo_provider, self.mask_ids())
+    def bind_composition_edits(
+        self,
+        edits: CompositionEditController,
+        scope_for_mask: Callable[[uuid.UUID], uuid.UUID | None],
+        completed: Callable[[MaskHistoryChange], None],
+    ) -> None:
+        """Bind mask commands to the authoritative composition timeline."""
+        self._history.bind(edits, scope_for_mask, completed)
 
     def create_mask(self, image: QImage) -> uuid.UUID:
         """Create a blank asset matching ``image`` dimensions."""
         mask_id = uuid.uuid4()
         self._masks[mask_id] = MaskLayer(
             mask_id=mask_id,
-            surface=MaskSurface.blank(image.size()),
+            surface=CoverageSurface.blank(image.size()),
         )
         self._history.initialize_mask(mask_id)
         return mask_id
@@ -114,18 +112,18 @@ class MaskAssetStore:
     def restore_mask(
         self,
         mask_id: uuid.UUID,
-        snapshot: MaskSurfaceSnapshot,
+        snapshot: CoverageSnapshot,
     ) -> None:
         """Install a validated durable mask snapshot with fresh edit history."""
         if not isinstance(mask_id, uuid.UUID):
             raise TypeError("mask_id must be a UUID")
-        if not isinstance(snapshot, MaskSurfaceSnapshot):
-            raise TypeError("snapshot must be MaskSurfaceSnapshot")
+        if not isinstance(snapshot, CoverageSnapshot):
+            raise TypeError("snapshot must be CoverageSnapshot")
         if mask_id in self._masks:
             self._history.dispose_mask(mask_id)
         self._masks[mask_id] = MaskLayer(
             mask_id=mask_id,
-            surface=MaskSurface(
+            surface=CoverageSurface(
                 snapshot.pixels,
                 bounds=snapshot.bounds,
                 extent_policy=snapshot.extent_policy,
@@ -185,8 +183,8 @@ class MaskAssetStore:
     def record_applied_surface(
         self,
         mask_id: uuid.UUID,
-        before: MaskSurfaceSnapshot,
-        after: MaskSurfaceSnapshot,
+        before: CoverageSnapshot,
+        after: CoverageSnapshot,
         *,
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
@@ -201,7 +199,7 @@ class MaskAssetStore:
     def commit_mask_surface(
         self,
         mask_id: uuid.UUID,
-        snapshot: MaskSurfaceSnapshot,
+        snapshot: CoverageSnapshot,
         *,
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:

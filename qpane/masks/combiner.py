@@ -23,10 +23,14 @@ import uuid
 import numpy as np
 from PySide6.QtGui import QImage
 
-from ..catalog.image_utils import numpy_to_qimage_grayscale8
+from ..coverage import (
+    CoverageCombineMode,
+    combine_coverage,
+    normalize_coverage_array,
+)
+from ..raster.image_conversion import numpy_to_qimage_grayscale8
 from .image_ops import resize_mask_nearest
 from .mask import MaskAssetStore
-from .surface import normalize_mask_array
 
 
 class MaskCombiner:
@@ -47,17 +51,17 @@ class MaskCombiner:
         layer = self._assets.get_layer(mask_id)
         if layer is None:
             return None
-        incoming = normalize_mask_array(new_mask)
+        incoming = normalize_coverage_array(new_mask)
         existing = self._assets.get_mask_image_as_numpy(mask_id)
         was_null = layer.surface.is_null()
         if existing is None:
             existing = np.zeros(incoming.shape, dtype=np.uint8)
         elif existing.shape != incoming.shape:
             incoming = resize_mask_nearest(incoming, existing.shape)
-        combined = (
-            np.bitwise_and(existing, np.bitwise_not(incoming))
-            if erase_mode
-            else np.bitwise_or(existing, incoming)
+        combined = combine_coverage(
+            existing,
+            incoming,
+            (CoverageCombineMode.SUBTRACT if erase_mode else CoverageCombineMode.ADD),
         )
         if not was_null and np.array_equal(existing, combined):
             return None

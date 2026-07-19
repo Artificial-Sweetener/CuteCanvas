@@ -15,10 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+import numpy as np
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage, QPixmap
 
+from ..coverage import CoverageSnapshot
 from ..scene.identity import SceneLayerAssetKey
+from ..scene.pixel_fragments import RasterPixelFormat
 from ..scene.sources import LayerSource, MaskLayerSource
 from .mask import MaskLayer
 
@@ -38,6 +41,10 @@ class MaskRenderLookup(Protocol):
         self, mask_id: uuid.UUID, *, scale: float | None = None
     ) -> QPixmap | None:
         """Return a colorized mask pixmap at the requested scale."""
+        ...
+
+    def present_pixels(self, mask_id: uuid.UUID, pixels: np.ndarray) -> QImage:
+        """Return canonical mask pixels with the mask's current presentation."""
         ...
 
 
@@ -100,3 +107,24 @@ class MaskLayerSourceResolver:
         x = int(point.x())
         y = int(point.y())
         return layer.surface.storage_value(x, y) > 0
+
+    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
+        """Return authoritative mask coverage as a detached snapshot."""
+        if not isinstance(source, MaskLayerSource):
+            return None
+        layer = self.assets.get_layer(source.mask_id)
+        return None if layer is None else layer.surface.snapshot()
+
+    def present_pixels(
+        self,
+        source: LayerSource,
+        pixel_format: RasterPixelFormat,
+        pixels: np.ndarray,
+    ) -> QImage | None:
+        """Colorize canonical mask pixels with their current layer appearance."""
+        if (
+            not isinstance(source, MaskLayerSource)
+            or pixel_format is not RasterPixelFormat.COVERAGE8
+        ):
+            return None
+        return self.renders.present_pixels(source.mask_id, pixels)

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from qpane.tools import ToolDependencies
 from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
@@ -31,6 +31,7 @@ def _sample(
     phase: PointerPhase,
     point: QPointF,
     device: PointerDeviceKind = PointerDeviceKind.TOUCH,
+    modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
 ) -> PointerSample:
     """Build one normalized touch sample for move-tool tests."""
     return PointerSample(
@@ -41,7 +42,7 @@ def _sample(
         global_position=point,
         pressure=1.0,
         buttons=Qt.MouseButton.LeftButton,
-        modifiers=Qt.KeyboardModifier.NoModifier,
+        modifiers=modifiers,
         timestamp_ms=0,
     )
 
@@ -76,10 +77,10 @@ def test_move_tool_routes_normalized_sequence_through_generic_operations(
     tool = MoveTool()
     tool.activate(
         ToolDependencies(
-            begin_layer_move=lambda point: calls.append(("begin", point)) or True,
-            update_layer_move=lambda point: calls.append(("update", point)) or True,
-            finish_layer_move=lambda point: calls.append(("finish", point)) or True,
-            cancel_layer_move=lambda: calls.append(("cancel", None)) or True,
+            begin_move=lambda point, _copy: calls.append(("begin", point)) or True,
+            update_move=lambda point: calls.append(("update", point)) or True,
+            finish_move=lambda point: calls.append(("finish", point)) or True,
+            cancel_move=lambda: calls.append(("cancel", None)) or True,
         )
     )
 
@@ -99,21 +100,45 @@ def test_move_tool_routes_normalized_sequence_through_generic_operations(
     ]
 
 
-def test_move_tool_cancels_transient_sequence_on_deactivation() -> None:
-    """Changing tools should discard preview state without a placement commit."""
-    cancelled: list[bool] = []
+def test_move_tool_forwards_alt_as_copy_intent() -> None:
+    """Alt at lift time should request a non-destructive floating copy."""
+    copy_intents: list[bool] = []
     tool = MoveTool()
     tool.activate(
         ToolDependencies(
-            begin_layer_move=lambda _point: True,
-            cancel_layer_move=lambda: cancelled.append(True) or True,
+            begin_move=lambda _point, copy: copy_intents.append(copy) or True,
+        )
+    )
+
+    assert tool.handle_pointer_sample(
+        _sample(
+            PointerPhase.BEGIN,
+            QPointF(4, 5),
+            modifiers=Qt.KeyboardModifier.AltModifier,
+        )
+    )
+
+    assert copy_intents == [True]
+
+
+def test_move_tool_suspends_pointer_sequence_without_cancelling_floating_edit() -> None:
+    """Temporary tool changes must release input without discarding editor state."""
+    cancelled: list[bool] = []
+    suspended: list[bool] = []
+    tool = MoveTool()
+    tool.activate(
+        ToolDependencies(
+            begin_move=lambda _point, _copy: True,
+            cancel_move=lambda: cancelled.append(True) or True,
+            suspend_move=lambda: suspended.append(True) or True,
         )
     )
 
     assert tool.handle_pointer_sample(_sample(PointerPhase.BEGIN, QPointF()))
     tool.deactivate()
 
-    assert cancelled == [True]
+    assert suspended == [True]
+    assert cancelled == []
 
 
 def test_move_tool_routes_mouse_drag_through_same_operations() -> None:
@@ -122,9 +147,9 @@ def test_move_tool_routes_mouse_drag_through_same_operations() -> None:
     tool = MoveTool()
     tool.activate(
         ToolDependencies(
-            begin_layer_move=lambda _point: calls.append("begin") or True,
-            update_layer_move=lambda _point: calls.append("update") or True,
-            finish_layer_move=lambda _point: calls.append("finish") or True,
+            begin_move=lambda _point, _copy: calls.append("begin") or True,
+            update_move=lambda _point: calls.append("update") or True,
+            finish_move=lambda _point: calls.append("finish") or True,
         )
     )
     press = _mouse_event(
@@ -159,9 +184,118 @@ def test_move_tool_routes_mouse_drag_through_same_operations() -> None:
 def test_move_tool_uses_four_direction_cursor_during_drag() -> None:
     """Move mode should retain its four-direction cursor while active."""
     tool = MoveTool()
-    tool.activate(ToolDependencies(begin_layer_move=lambda _point: True))
+    tool.activate(
+        ToolDependencies(
+            begin_move=lambda _point, _copy: True,
+            move_target_available=lambda: True,
+        )
+    )
     assert tool.getCursor().shape() == Qt.CursorShape.SizeAllCursor
 
     assert tool.handle_pointer_sample(_sample(PointerPhase.BEGIN, QPointF()))
 
     assert tool.getCursor().shape() == Qt.CursorShape.SizeAllCursor
+
+
+def test_move_tool_updates_hover_without_starting_a_drag() -> None:
+    """Pointer motion should preview its movable target until the widget is left."""
+    hovered: list[QPointF] = []
+    cleared: list[bool] = []
+    tool = MoveTool()
+    tool.activate(
+        ToolDependencies(
+            update_move_hover=lambda point: hovered.append(point) or True,
+            clear_move_hover=lambda: cleared.append(True) or True,
+        )
+    )
+    move = _mouse_event(
+        QEvent.Type.MouseMove,
+        QPointF(7.0, 9.0),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+    )
+
+    tool.mouseMoveEvent(move)
+    tool.leaveEvent(QEvent(QEvent.Type.Leave))
+
+    assert hovered == [QPointF(7.0, 9.0)]
+    assert cleared == [True]
+
+
+def test_move_tool_constrains_shift_drag_to_nearest_45_degree_axis() -> None:
+    """Shift should constrain pointer movement without changing editor ownership."""
+    updates: list[QPointF] = []
+    tool = MoveTool()
+    tool.activate(
+        ToolDependencies(
+            begin_move=lambda _point, _copy: True,
+            update_move=lambda point: updates.append(point) or True,
+        )
+    )
+
+    assert tool.handle_pointer_sample(_sample(PointerPhase.BEGIN, QPointF(2, 3)))
+    assert tool.handle_pointer_sample(
+        _sample(
+            PointerPhase.UPDATE,
+            QPointF(12, 5),
+            modifiers=Qt.KeyboardModifier.ShiftModifier,
+        )
+    )
+
+    assert updates[0].y() == pytest.approx(3.0)
+    assert updates[0].x() > 12.0
+
+
+def test_move_tool_nudges_one_or_ten_pixels_with_arrow_keys() -> None:
+    """Arrow keys should use standard one-pixel and Shift ten-pixel increments."""
+    nudges: list[tuple[int, int]] = []
+    tool = MoveTool()
+    tool.activate(
+        ToolDependencies(nudge_move=lambda x, y: nudges.append((x, y)) or True)
+    )
+    right = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_Right,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    up_fast = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_Up,
+        Qt.KeyboardModifier.ShiftModifier,
+    )
+
+    tool.keyPressEvent(right)
+    tool.keyPressEvent(up_fast)
+
+    assert right.isAccepted()
+    assert up_fast.isAccepted()
+    assert nudges == [(1, 0), (0, -10)]
+
+
+def test_move_tool_resolves_or_cancels_released_floating_pixels() -> None:
+    """Enter and Escape should act on a floating edit after pointer release."""
+    actions: list[str] = []
+    tool = MoveTool()
+    tool.activate(
+        ToolDependencies(
+            anchor_move=lambda: actions.append("anchor") or True,
+            cancel_move=lambda: actions.append("cancel") or True,
+        )
+    )
+    enter = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_Return,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    escape = QKeyEvent(
+        QEvent.Type.KeyPress,
+        Qt.Key.Key_Escape,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    tool.keyPressEvent(enter)
+    tool.keyPressEvent(escape)
+
+    assert enter.isAccepted()
+    assert escape.isAccepted()
+    assert actions == ["anchor", "cancel"]

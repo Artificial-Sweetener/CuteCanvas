@@ -26,7 +26,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QLineF, QPointF, QRect, QRectF, QSize
+from PySide6.QtCore import QLineF, QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QTransform
 
 if TYPE_CHECKING:
@@ -43,13 +43,18 @@ __all__ = [
     "ControlMode",
     "DiagnosticRecord",
     "DiagnosticsDomain",
+    "FloatingPixelMode",
     "LinkedGroup",
     "MaskInfo",
     "MaskSavedPayload",
     "OverlayState",
+    "PixelSelectionMode",
     "PlaceholderScaleMode",
     "QPaneCatalogImageLayerRequest",
+    "QPaneFloatingPixelEditState",
     "QPaneLayerInteractionPolicy",
+    "QPaneLayerSelectionState",
+    "QPanePixelSelectionState",
     "QPaneRasterSurfaceState",
     "QPaneScene",
     "QPaneSceneClip",
@@ -109,6 +114,9 @@ class ControlMode(str, Enum):
     MOVE = "move"
     DRAW_BRUSH = "draw-brush"
     SMART_SELECT = "smart-select"
+    SELECT_RECTANGLE = "select-rectangle"
+    SELECT_ELLIPSE = "select-ellipse"
+    SELECT_LASSO = "select-lasso"
 
 
 class RasterExtentPolicy(str, Enum):
@@ -116,6 +124,22 @@ class RasterExtentPolicy(str, Enum):
 
     FIXED = "fixed"
     EXPAND_ON_WRITE = "expand-on-write"
+
+
+class PixelSelectionMode(str, Enum):
+    """Control how incoming coverage combines with the active selection."""
+
+    REPLACE = "replace"
+    ADD = "add"
+    SUBTRACT = "subtract"
+    INTERSECT = "intersect"
+
+
+class FloatingPixelMode(str, Enum):
+    """Control whether a floating edit cuts or copies its source pixels."""
+
+    CUT = "cut"
+    COPY = "copy"
 
 
 class ComparisonOrientation(str, Enum):
@@ -269,6 +293,15 @@ class QPaneLayerInteractionPolicy:
 
     selectable: bool = False
     movable: bool = False
+    pixel_editable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class QPaneLayerSelectionState:
+    """Public identity of the selected layer in the active scene."""
+
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +319,45 @@ class QPaneRasterSurfaceState:
     def __post_init__(self) -> None:
         """Detach mutable Qt bounds from the source domain."""
         object.__setattr__(self, "bounds", QRect(self.bounds))
+
+
+@dataclass(frozen=True, slots=True)
+class QPanePixelSelectionState:
+    """Public snapshot of the active composition's pixel selection."""
+
+    scene_id: uuid.UUID
+    revision: int
+    bounds: QRect | None
+    coverage: QImage | None
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt raster and geometry values."""
+        if self.bounds is not None:
+            object.__setattr__(self, "bounds", QRect(self.bounds))
+        if self.coverage is not None:
+            object.__setattr__(self, "coverage", self.coverage.copy())
+
+    @property
+    def has_selection(self) -> bool:
+        """Return whether nonzero pixel-selection coverage is active."""
+        return self.coverage is not None
+
+
+@dataclass(frozen=True, slots=True)
+class QPaneFloatingPixelEditState:
+    """Public snapshot of one unresolved floating pixel edit."""
+
+    scene_id: uuid.UUID
+    source_layer_id: uuid.UUID
+    mode: FloatingPixelMode
+    offset: QPoint
+    bounds: QRect | None
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt geometry from editor-owned state."""
+        object.__setattr__(self, "offset", QPoint(self.offset))
+        if self.bounds is not None:
+            object.__setattr__(self, "bounds", QRect(self.bounds))
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,10 +460,10 @@ class QPaneSceneTemplateBindings:
 
 @dataclass(frozen=True, slots=True)
 class QPaneSceneLayer:
-    """Catalog-backed image layer in a public composed scene."""
+    """One source-backed layer in a public composed scene."""
 
     layer_id: uuid.UUID
-    image_id: uuid.UUID
+    image_id: uuid.UUID | None
     placement: QRectF
     visible: bool = True
     opacity: float = 1.0
@@ -400,11 +472,16 @@ class QPaneSceneLayer:
     role: str = "content"
     metadata: Mapping[str, object] = field(default_factory=dict)
     interaction: QPaneLayerInteractionPolicy = QPaneLayerInteractionPolicy()
+    source_kind: str = "catalog-image"
+    source_id: uuid.UUID | None = None
+    label: str | None = None
 
     def __post_init__(self) -> None:
         """Normalize mutable public layer inputs into QPane-owned values."""
         object.__setattr__(self, "placement", QRectF(self.placement))
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        if self.source_id is None:
+            object.__setattr__(self, "source_id", self.image_id)
 
 
 @dataclass(frozen=True, slots=True)

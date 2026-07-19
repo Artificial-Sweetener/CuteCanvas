@@ -80,14 +80,19 @@ def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
         assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
         scene = window.qpane.currentScene()
         assert scene is not None
-        assert all(not layer.interaction.selectable for layer in scene.layers)
-        assert all(not layer.interaction.movable for layer in scene.layers)
+        base_layers = [
+            layer for layer in scene.layers if layer.source_kind == "catalog-image"
+        ]
+        assert base_layers
+        assert all(not layer.interaction.selectable for layer in base_layers)
+        assert all(not layer.interaction.movable for layer in base_layers)
         mask_policies = {
             mask.mask_id: mask.interaction for mask in window.qpane.listMasksForImage()
         }
         assert mask_policies[mask_id].selectable
         assert mask_policies[mask_id].movable
-        assert not mask_policies[inactive_mask_id].selectable
+        assert mask_policies[mask_id].pixel_editable
+        assert mask_policies[inactive_mask_id].selectable
         assert not mask_policies[inactive_mask_id].movable
 
         assert window.qpane.setActiveMaskID(inactive_mask_id)
@@ -95,10 +100,11 @@ def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
         mask_policies = {
             mask.mask_id: mask.interaction for mask in window.qpane.listMasksForImage()
         }
-        assert not mask_policies[mask_id].selectable
+        assert mask_policies[mask_id].selectable
         assert not mask_policies[mask_id].movable
         assert mask_policies[inactive_mask_id].selectable
         assert mask_policies[inactive_mask_id].movable
+        assert mask_policies[inactive_mask_id].pixel_editable
         mask_item, image_item = _items()
         window.catalog_dock._handle_item_clicked(mask_item, 0)
         qapp.processEvents()

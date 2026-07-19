@@ -30,6 +30,7 @@ from qpane.composition.layers import (
     CompositionLayerSourceKind,
 )
 from qpane.core import CacheSettings
+from qpane.masks.descriptor_factory import MaskLayerDescriptorFactory
 from qpane.masks.source_resolver import MaskLayerSourceResolver
 from qpane.rendering import (
     RenderingPresenter,
@@ -43,7 +44,7 @@ from qpane.scene.identity import (
     default_scene_id,
     mask_layer_id,
 )
-from qpane.scene.mask_adapter import MaskCompositionSceneAdapter
+from qpane.scene.layer_assembly import CompositionLayerSceneAssembler
 from qpane.scene.model import (
     BlendMode,
     LayerDescriptor,
@@ -665,14 +666,18 @@ def test_presenter_render_plan_carries_mask_scene_layers(qapp):
         controller = StubMaskController({bottom_id: 4, top_id: 9})
         service = StubMaskService(manager, controller)
         harness.qpane.mask_service = service
-        harness.qpane.sceneProviderRegistry().register_geometry_adapter(
-            MaskCompositionSceneAdapter(
-                layer_instances=service.layer_instances_for_image,
-                revision_provider=service.scene_provider_revision,
-                assets=service.assets,
-                renders=service.controller.renders,
+        assembler = CompositionLayerSceneAssembler(
+            service.layer_instances_for_image,
+            service.scene_provider_revision,
+        )
+        assembler.register_factory(
+            MaskLayerDescriptorFactory(
+                service.assets,
+                service.controller.renders,
+                service.scene_provider_revision,
             )
         )
+        harness.qpane.sceneProviderRegistry().register_geometry_adapter(assembler)
         harness.qpane.layerSourceResolverRegistry().register(
             MaskLayerSourceResolver(
                 assets=service.assets,
@@ -748,14 +753,18 @@ def test_selection_hit_test_falls_through_transparent_mask_pixels(qapp) -> None:
 
         harness.qpane.mask_service = service
         harness.qpane._is_blank = False
-        harness.qpane.sceneProviderRegistry().register_geometry_adapter(
-            MaskCompositionSceneAdapter(
-                layer_instances=layer_instances,
-                revision_provider=service.scene_provider_revision,
-                assets=service.assets,
-                renders=service.controller.renders,
+        assembler = CompositionLayerSceneAssembler(
+            layer_instances,
+            service.scene_provider_revision,
+        )
+        assembler.register_factory(
+            MaskLayerDescriptorFactory(
+                service.assets,
+                service.controller.renders,
+                service.scene_provider_revision,
             )
         )
+        harness.qpane.sceneProviderRegistry().register_geometry_adapter(assembler)
         harness.qpane.layerSourceResolverRegistry().register(
             MaskLayerSourceResolver(
                 assets=service.assets,
@@ -972,14 +981,18 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
             ),
         )
         harness.qpane.mask_service = service
-        harness.qpane.sceneProviderRegistry().register_geometry_adapter(
-            MaskCompositionSceneAdapter(
-                layer_instances=service.layer_instances_for_image,
-                revision_provider=service.scene_provider_revision,
-                assets=service.assets,
-                renders=service.controller.renders,
+        assembler = CompositionLayerSceneAssembler(
+            service.layer_instances_for_image,
+            service.scene_provider_revision,
+        )
+        assembler.register_factory(
+            MaskLayerDescriptorFactory(
+                service.assets,
+                service.controller.renders,
+                service.scene_provider_revision,
             )
         )
+        harness.qpane.sceneProviderRegistry().register_geometry_adapter(assembler)
         harness.qpane.layerSourceResolverRegistry().register(
             MaskLayerSourceResolver(
                 assets=service.assets,

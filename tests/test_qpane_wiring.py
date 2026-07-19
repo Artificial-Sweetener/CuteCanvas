@@ -73,6 +73,15 @@ class RecordingMaskService:
     def scene_provider_revision(self):
         return ()
 
+    def bindCompositionEdits(self, _edits):
+        pass
+
+    def setStrokeConstraintProvider(self, _provider):
+        pass
+
+    def updateMaskRegion(self, _dirty_rect, _layer):
+        pass
+
     def connectUndoStackChanged(self, callback):
         self.connected_callback = callback
 

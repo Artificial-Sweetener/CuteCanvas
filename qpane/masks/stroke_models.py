@@ -88,6 +88,7 @@ class MaskStrokeJobSpec:
     generation: int
     dirty_rect: QRect
     before: np.ndarray
+    constraint: np.ndarray | None = None
     payload: MaskStrokePayload | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 

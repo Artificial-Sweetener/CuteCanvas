@@ -79,6 +79,9 @@ class ControlMode(str, Enum):
     MOVE = "move"
     DRAW_BRUSH = "draw-brush"
     SMART_SELECT = "smart-select"
+    SELECT_RECTANGLE = "select-rectangle"
+    SELECT_ELLIPSE = "select-ellipse"
+    SELECT_LASSO = "select-lasso"
 
 class ComparisonOrientation(str, Enum):
     VERTICAL = "vertical"
@@ -87,6 +90,16 @@ class ComparisonOrientation(str, Enum):
 class RasterExtentPolicy(str, Enum):
     FIXED = "fixed"
     EXPAND_ON_WRITE = "expand-on-write"
+
+class PixelSelectionMode(str, Enum):
+    REPLACE = "replace"
+    ADD = "add"
+    SUBTRACT = "subtract"
+    INTERSECT = "intersect"
+
+class FloatingPixelMode(str, Enum):
+    CUT = "cut"
+    COPY = "copy"
 
 class DiagnosticsDomain(str, Enum):
     CACHE: str
@@ -115,6 +128,11 @@ class QPaneSceneClip:
 class QPaneLayerInteractionPolicy:
     selectable: bool
     movable: bool
+    pixel_editable: bool
+
+class QPaneLayerSelectionState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
 
 class QPaneRasterSurfaceState:
     scene_id: uuid.UUID
@@ -125,9 +143,24 @@ class QPaneRasterSurfaceState:
     structure_revision: int
     pending_request_id: uuid.UUID | None
 
+class QPanePixelSelectionState:
+    scene_id: uuid.UUID
+    revision: int
+    bounds: QRect | None
+    coverage: QImage | None
+    @property
+    def has_selection(self) -> bool: ...
+
+class QPaneFloatingPixelEditState:
+    scene_id: uuid.UUID
+    source_layer_id: uuid.UUID
+    mode: FloatingPixelMode
+    offset: QPoint
+    bounds: QRect | None
+
 class QPaneSceneLayer:
     layer_id: uuid.UUID
-    image_id: uuid.UUID
+    image_id: uuid.UUID | None
     placement: QRectF
     visible: bool
     opacity: float
@@ -136,6 +169,9 @@ class QPaneSceneLayer:
     role: str
     metadata: Mapping[str, object]
     interaction: QPaneLayerInteractionPolicy
+    source_kind: str
+    source_id: uuid.UUID | None
+    label: str | None
 
 class QPaneCatalogImageLayerRequest:
     layer_id: uuid.UUID
@@ -293,6 +329,9 @@ class QPane(QWidget):
     CONTROL_MODE_MOVE: str
     CONTROL_MODE_DRAW_BRUSH: str
     CONTROL_MODE_SMART_SELECT: str
+    CONTROL_MODE_SELECT_RECTANGLE: str
+    CONTROL_MODE_SELECT_ELLIPSE: str
+    CONTROL_MODE_SELECT_LASSO: str
 
     imageLoaded: Signal
     zoomChanged: Signal
@@ -310,6 +349,9 @@ class QPane(QWidget):
     compositionSelectionChanged: Signal
     sceneChanged: Signal
     sceneEditHistoryChanged: Signal
+    pixelSelectionChanged: Signal
+    floatingPixelEditChanged: Signal
+    selectedLayerChanged: Signal
     rasterBoundsRequestCompleted: Signal
     samCheckpointStatusChanged: Signal
     samCheckpointProgress: Signal
@@ -421,6 +463,13 @@ class QPane(QWidget):
         layer_id: uuid.UUID,
         policy: QPaneLayerInteractionPolicy,
     ) -> bool: ...
+    def selectedLayer(self) -> QPaneLayerSelectionState | None: ...
+    def setSelectedLayer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> bool: ...
+    def clearSelectedLayer(self) -> bool: ...
     def setLayerPlacement(
         self,
         scene_id: uuid.UUID,
@@ -432,6 +481,20 @@ class QPane(QWidget):
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
     ) -> QPaneRasterSurfaceState | None: ...
+    def addEditableRasterLayer(
+        self,
+        image: QImage,
+        *,
+        placement: QRectF | None = ...,
+        label: str | None = ...,
+        interaction: QPaneLayerInteractionPolicy | None = ...,
+        extent_policy: RasterExtentPolicy = ...,
+    ) -> uuid.UUID | None: ...
+    def editableRasterLayerImage(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QImage | None: ...
     def setRasterExtentPolicy(
         self,
         scene_id: uuid.UUID,
@@ -444,6 +507,31 @@ class QPane(QWidget):
         layer_id: uuid.UUID,
         bounds: QRect,
     ) -> uuid.UUID | None: ...
+    def pixelSelectionState(self) -> QPanePixelSelectionState | None: ...
+    def setPixelSelection(
+        self,
+        coverage: QImage,
+        bounds: QRect,
+        mode: PixelSelectionMode = ...,
+    ) -> bool: ...
+    def clearPixelSelection(self) -> bool: ...
+    def selectAllPixels(self) -> bool: ...
+    def invertPixelSelection(self) -> bool: ...
+    def selectLayerCoverage(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        mode: PixelSelectionMode = ...,
+    ) -> bool: ...
+    def deleteSelectedPixels(self) -> bool: ...
+    def floatingPixelEditState(self) -> QPaneFloatingPixelEditState | None: ...
+    def anchorFloatingPixels(
+        self,
+        scene_id: uuid.UUID | None = ...,
+        layer_id: uuid.UUID | None = ...,
+    ) -> bool: ...
+    def promoteFloatingPixels(self, label: str | None = ...) -> uuid.UUID | None: ...
+    def cancelFloatingPixels(self) -> bool: ...
     def sceneEditUndoAvailable(self) -> bool: ...
     def sceneEditRedoAvailable(self) -> bool: ...
     def undoSceneEdit(self) -> bool: ...

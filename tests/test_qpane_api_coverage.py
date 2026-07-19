@@ -232,6 +232,15 @@ def test_mask_delegates_stub(qapp, monkeypatch):
             def scene_provider_revision(self):
                 return ()
 
+            def bindCompositionEdits(self, _edits):
+                pass
+
+            def setStrokeConstraintProvider(self, _provider):
+                pass
+
+            def updateMaskRegion(self, _dirty_rect, _layer):
+                pass
+
             def prefetchColorizedMasks(
                 self,
                 image_id: uuid.UUID,

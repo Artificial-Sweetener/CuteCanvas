@@ -26,12 +26,14 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPen, QRegion
 
 from ..scene.model import ClipCoordinateSpace
 from ..scene.render_plan import (
+    FloatingPixelRenderContribution,
     MaskLayerRenderItem,
     RasterLayerRenderItem,
     RenderStrategy,
     SceneRenderPlan,
 )
 from .coordinates import CoordinateContext
+from .floating_pixels import FloatingPixelRenderHandoff
 
 if TYPE_CHECKING:
     from ..qpane import QPane
@@ -75,6 +77,7 @@ class Renderer:
         self._scroll_misses = 0
         self._full_redraws = 0
         self._partial_redraws = 0
+        self._floating_pixel_handoff = FloatingPixelRenderHandoff()
 
     @property
     def qpane(self) -> "QPane":
@@ -84,6 +87,9 @@ class Renderer:
     def paint(self, plan: SceneRenderPlan):
         """Prepare offscreen buffers for the requested scene without drawing to the widget."""
         start_time = time.perf_counter()
+        plan, requires_full_redraw = self._floating_pixel_handoff.settled_plan(plan)
+        if requires_full_redraw:
+            self.markDirty()
         self._current_render_plan = plan
         # Ensure buffers are allocated. The QPane is responsible for calling
         # _allocate_buffers on resize, but we need to handle the initial case.
@@ -103,6 +109,7 @@ class Renderer:
             self._paint_duration_max_ms = max(
                 self._paint_duration_max_ms, self._last_paint_duration_ms
             )
+
         self._mark_diagnostics_dirty()
 
     def allocate_buffers(self, physical_size: QSize, dpr: float):
@@ -616,6 +623,8 @@ class Renderer:
     @staticmethod
     def _base_only_raster_item(plan: SceneRenderPlan) -> RasterLayerRenderItem | None:
         """Return the sole base raster item when a plan matches old-QPane shape."""
+        if plan.floating_pixels is not None:
+            return None
         if len(plan.render_items) != 1:
             return None
         item = plan.render_items[0]
@@ -704,10 +713,11 @@ class Renderer:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         painter.setTransform(item.transform, True)
         self._apply_layer_clip(painter, plan, item)
-        if item.strategy == RenderStrategy.DIRECT:
-            self._draw_direct_view(painter, item)
-        elif item.strategy == RenderStrategy.TILE:
-            self._draw_tiled_view(painter, plan, item)
+        preview = self._floating_pixel_contribution(plan, item)
+        if preview is None:
+            self._draw_raster_source(painter, plan, item)
+        else:
+            painter.drawImage(0, 0, preview.source_image)
 
     def _draw_mask_item(
         self,
@@ -721,7 +731,38 @@ class Renderer:
         painter.setTransform(item.transform, True)
         self._apply_layer_clip(painter, plan, item)
         painter.setOpacity(item.descriptor.opacity)
-        painter.drawPixmap(0, 0, item.pixmap)
+        preview = self._floating_pixel_contribution(plan, item)
+        if preview is None:
+            painter.drawPixmap(0, 0, item.pixmap)
+        else:
+            painter.drawPixmap(0, 0, preview.source_pixmap)
+
+    def _draw_raster_source(
+        self,
+        painter: QPainter,
+        plan: SceneRenderPlan,
+        item: RasterLayerRenderItem,
+    ) -> None:
+        """Draw one raster source through its selected direct or tiled strategy."""
+        if item.strategy == RenderStrategy.DIRECT:
+            self._draw_direct_view(painter, item)
+        elif item.strategy == RenderStrategy.TILE:
+            self._draw_tiled_view(painter, plan, item)
+
+    def _floating_pixel_contribution(
+        self,
+        plan: SceneRenderPlan,
+        item: RasterLayerRenderItem | MaskLayerRenderItem,
+    ) -> FloatingPixelRenderContribution | None:
+        """Return the contribution when this render item owns it."""
+        preview = plan.floating_pixels
+        if (
+            preview is None
+            or preview.scene_id != plan.scene_id
+            or preview.layer_id != item.descriptor.layer_id
+        ):
+            return None
+        return preview
 
     def _apply_layer_clip(
         self,

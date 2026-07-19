@@ -32,17 +32,18 @@ from .identity import (
     placeholder_source_id,
     scene_image_asset_key,
 )
-from .mask_adapter import MaskCompositionSceneAdapter
+from .layer_assembly import CompositionLayerSceneAssembler
+from .layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from .model import (
     BlendMode,
     ClipCoordinateSpace,
     LayerClip,
+    LayerContentCapabilities,
     LayerDescriptor,
     LayerHitTest,
     LayerInteractionPolicy,
     LayerKind,
     LayerPlacement,
-    LayerPlacementChange,
     SceneDescriptor,
     SceneKind,
 )
@@ -55,6 +56,7 @@ from .mutations import (
     SceneMutationStatus,
 )
 from .placeholder_scene import build_placeholder_scene
+from .placement_edit import LayerPlacementEdit
 from .placement_preview import LayerPlacementPreview, SceneLayerPlacementPreview
 from .providers import SceneContribution, SceneProvider, SceneResolver
 from .registry import (
@@ -76,7 +78,6 @@ from .render_plan import (
     SceneRenderPlan,
     TileRenderData,
 )
-from .selection import SceneLayerSelection, SceneLayerSelectionController
 from .sources import (
     CatalogImageSource,
     LayerSource,
@@ -90,20 +91,21 @@ __all__ = [
     "CatalogImageSource",
     "CatalogLayerSourceResolver",
     "ClipCoordinateSpace",
+    "CompositionLayerSceneAssembler",
     "DefaultCatalogSceneProvider",
     "LayerClip",
+    "LayerContentCapabilities",
     "LayerDescriptor",
     "LayerHitTest",
     "LayerInteractionPolicy",
     "LayerKind",
     "LayerMoveSession",
     "LayerPlacement",
-    "LayerPlacementChange",
+    "LayerPlacementEdit",
     "LayerPlacementPreview",
     "LayerSource",
     "LayerSourceResolver",
     "LayerSourceResolverRegistry",
-    "MaskCompositionSceneAdapter",
     "MaskLayerRenderItem",
     "MaskLayerSource",
     "PlaceholderImageSource",

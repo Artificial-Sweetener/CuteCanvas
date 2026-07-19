@@ -18,13 +18,12 @@
 
 from __future__ import annotations
 
-import os
 from itertools import product
-from time import perf_counter, process_time
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QCursor, QMouseEvent
+from PySide6.QtGui import QCursor, QImage, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -54,13 +53,10 @@ from tests.harness.scenarios import (
     repeated_touch_mouse_cursor_actions,
     touch_mouse_mask_switch_actions,
 )
-
-
-def _interaction_clock() -> float:
-    """Measure dispatch work without xdist scheduler contention."""
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        return process_time()
-    return perf_counter()
+from tests.harness.timing import (
+    absolute_latency_assertions_are_isolated,
+    interaction_clock,
+)
 
 
 class _CursorChangeCounter(QObject):
@@ -374,6 +370,311 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
         harness.close()
 
 
+def test_moved_mask_delete_clears_every_selected_visible_pixel(
+    qapp: QApplication,
+) -> None:
+    """A scene selection must clear the matching local pixels after movement."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 400),
+        widget_size=QSize(400, 400),
+        mask_count=1,
+        brush_size=32,
+    )
+    mask_id = harness.mask_ids[0]
+    mask_info = harness.viewer.listMasksForImage()[0]
+    driver = QtStrokeDriver(harness)
+    stroke = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(40, 200), HarnessPoint(360, 200)),
+        brush_size=32,
+    )
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QPaneLayerInteractionPolicy(
+                selectable=True,
+                movable=True,
+                pixel_editable=True,
+            ),
+        )
+        assert harness.viewer.setSelectedLayer(
+            mask_info.scene_id,
+            mask_info.layer_id,
+        )
+        driver.begin(stroke)
+        driver.move(stroke, 1)
+        driver.end(stroke)
+        assert harness.wait_for_mask_undo_depth(mask_id, 1)
+        assert harness.wait_for_mask_render_idle()
+
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_MOVE)
+        QTest.mousePress(
+            harness.viewer,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            QPoint(200, 200),
+        )
+        QTest.mouseMove(harness.viewer, QPoint(280, 200), delay=1)
+        QTest.mouseRelease(
+            harness.viewer,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            QPoint(280, 200),
+        )
+        harness.drain_events()
+        moved_scene = harness.viewer.currentScene()
+        assert moved_scene is not None
+        moved_layer = next(
+            candidate
+            for candidate in moved_scene.layers
+            if candidate.layer_id == mask_info.layer_id
+        )
+        assert moved_layer.placement == QRectF(80.0, 0.0, 400.0, 400.0)
+        layer = harness.viewer.mask_service.assets.get_layer(mask_id)
+        assert layer is not None
+        before = layer.surface.snapshot_array()
+        assert np.any(before[190:210, 30:200])
+
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_SELECT_RECTANGLE)
+        QTest.mousePress(
+            harness.viewer,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            QPoint(100, 150),
+        )
+        QTest.mouseMove(harness.viewer, QPoint(280, 250), delay=1)
+        QTest.mouseRelease(
+            harness.viewer,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            QPoint(280, 250),
+        )
+        harness.drain_events()
+        selection = harness.viewer.pixelSelectionState()
+        assert selection is not None
+        assert selection.has_selection
+
+        assert harness.viewer.deleteSelectedPixels()
+        assert harness.wait_for_mask_render_idle()
+        after = layer.surface.snapshot_array()
+
+        assert not np.any(after[160:240, 30:190])
+        assert (
+            harness.wait_for_background(QPoint(130, 200), timeout_ms=1000).latency_ms
+            is not None
+        )
+        assert (
+            harness.wait_for_background(QPoint(240, 200), timeout_ms=1000).latency_ms
+            is not None
+        )
+        assert np.array_equal(after[:, :19], before[:, :19])
+        assert np.array_equal(after[:, 201:], before[:, 201:])
+        retained_point = QPoint(360, 200)
+        assert harness.wait_for_mask_tint(retained_point).latency_ms is not None
+        with harness.observe_presented_frames() as undo_frames:
+            assert harness.viewer.undoSceneEdit()
+            assert harness.wait_for_mask_render_idle()
+            harness.viewer.repaint()
+        assert np.array_equal(layer.surface.snapshot_array(), before)
+        assert harness.wait_for_mask_tint(QPoint(130, 200)).latency_ms is not None
+        assert all(
+            harness.is_mask_tint(frame.color_at(retained_point))
+            for frame in undo_frames.frames
+        )
+        with harness.observe_presented_frames() as redo_frames:
+            assert harness.viewer.redoSceneEdit()
+            assert harness.wait_for_mask_render_idle()
+            harness.viewer.repaint()
+        assert not np.any(layer.surface.snapshot_array()[160:240, 30:190])
+        assert (
+            harness.wait_for_background(QPoint(130, 200), timeout_ms=1000).latency_ms
+            is not None
+        )
+        assert all(
+            harness.is_mask_tint(frame.color_at(retained_point))
+            for frame in redo_frames.frames
+        )
+    finally:
+        harness.close()
+
+
+def test_4096_moved_mask_delete_stays_within_interaction_budget(
+    qapp: QApplication,
+) -> None:
+    """Large transformed deletion must remain synchronous only for bounded work."""
+    size = 4096
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(size, size),
+        widget_size=QSize(500, 500),
+        mask_count=1,
+    )
+    mask_id = harness.mask_ids[0]
+    info = harness.viewer.listMasksForImage()[0]
+    try:
+        assert info.scene_id is not None
+        assert info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            info.scene_id,
+            info.layer_id,
+            QPaneLayerInteractionPolicy(
+                selectable=True,
+                movable=True,
+                pixel_editable=True,
+            ),
+        )
+        assert harness.viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert harness.viewer.setLayerPlacement(
+            info.scene_id,
+            info.layer_id,
+            QRectF(512.0, 0.0, float(size), float(size)),
+        )
+        layer = harness.viewer.mask_service.assets.get_layer(mask_id)
+        assert layer is not None
+        layer.surface.fill(255)
+        harness.viewer.invalidateActiveMaskCache()
+        harness.viewer.markDirty()
+        harness.viewer.update()
+        selected_panel = harness.viewer.activeMaskLayerCoordinates().source_to_panel(
+            QPoint(600, 1200)
+        )
+        retained_panel = harness.viewer.activeMaskLayerCoordinates().source_to_panel(
+            QPoint(1800, 1200)
+        )
+        assert selected_panel is not None
+        assert retained_panel is not None
+        selected_panel = QPoint(round(selected_panel.x()), round(selected_panel.y()))
+        retained_panel = QPoint(round(retained_panel.x()), round(retained_panel.y()))
+        assert (
+            harness.wait_for_mask_tint(selected_panel, timeout_ms=5000).latency_ms
+            is not None
+        )
+        assert (
+            harness.wait_for_mask_tint(retained_panel, timeout_ms=5000).latency_ms
+            is not None
+        )
+        selection = QImage(1024, 1024, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert harness.viewer.setPixelSelection(
+            selection,
+            QRect(1024, 1024, 1024, 1024),
+        )
+
+        latencies_ms: list[float] = []
+        for _cycle in range(8):
+            started = interaction_clock()
+            assert harness.viewer.deleteSelectedPixels()
+            latencies_ms.append((interaction_clock() - started) * 1000.0)
+            assert layer.surface.storage_value(600, 1200) == 0
+            started = interaction_clock()
+            assert harness.viewer.undoSceneEdit()
+            latencies_ms.append((interaction_clock() - started) * 1000.0)
+            assert layer.surface.storage_value(600, 1200) == 255
+        assert harness.viewer.deleteSelectedPixels()
+
+        if absolute_latency_assertions_are_isolated():
+            assert max(latencies_ms) < 100.0
+        pixels = layer.surface.snapshot_array()
+        assert not np.any(pixels[1024:2048, 512:1536])
+        assert np.all(pixels[1024:2048, :511] == 255)
+        assert np.all(pixels[1024:2048, 1537:] == 255)
+        assert harness.wait_for_mask_render_idle(timeout_ms=5000)
+        assert (
+            harness.wait_for_background(selected_panel, timeout_ms=5000).latency_ms
+            is not None
+        )
+        assert (
+            harness.wait_for_mask_tint(retained_panel, timeout_ms=5000).latency_ms
+            is not None
+        )
+    finally:
+        harness.close()
+
+
+def test_delete_and_history_follow_expanded_negative_mask_bounds(
+    qapp: QApplication,
+) -> None:
+    """Selection edits must refresh the correct storage after left-edge growth."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 400),
+        widget_size=QSize(400, 400),
+        mask_count=1,
+        brush_size=24,
+    )
+    mask_id = harness.mask_ids[0]
+    info = harness.viewer.listMasksForImage()[0]
+    driver = QtStrokeDriver(harness)
+    try:
+        assert info.scene_id is not None
+        assert info.layer_id is not None
+        assert harness.viewer.setLayerInteractionPolicy(
+            info.scene_id,
+            info.layer_id,
+            QPaneLayerInteractionPolicy(
+                selectable=True,
+                movable=True,
+                pixel_editable=True,
+            ),
+        )
+        assert harness.viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert harness.viewer.setRasterExtentPolicy(
+            info.scene_id,
+            info.layer_id,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+        )
+        assert harness.viewer.setLayerPlacement(
+            info.scene_id,
+            info.layer_id,
+            QRectF(100.0, 0.0, 400.0, 400.0),
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+        for depth, points in enumerate(
+            (
+                (HarnessPoint(40, 200), HarnessPoint(60, 200)),
+                (HarnessPoint(200, 200), HarnessPoint(220, 200)),
+            ),
+            start=1,
+        ):
+            stroke = StrokeAction(PointerKind.MOUSE, points, brush_size=24)
+            driver.begin(stroke)
+            driver.move(stroke, 1)
+            driver.end(stroke)
+            assert harness.wait_for_mask_undo_depth(mask_id, depth)
+        state = harness.viewer.rasterSurfaceState(info.scene_id, info.layer_id)
+        assert state is not None
+        assert state.bounds.x() < 0
+        layer = harness.viewer.mask_service.assets.get_layer(mask_id)
+        assert layer is not None
+        before = layer.surface.snapshot_array()
+
+        selection = QImage(60, 60, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert harness.viewer.setPixelSelection(selection, QRect(20, 170, 60, 60))
+        assert harness.viewer.deleteSelectedPixels()
+        assert harness.wait_for_mask_render_idle()
+
+        storage_x = -50 - state.bounds.x()
+        storage_y = 200 - state.bounds.y()
+        retained_x = 110 - state.bounds.x()
+        assert layer.surface.storage_value(storage_x, storage_y) == 0
+        assert layer.surface.storage_value(retained_x, storage_y) == 255
+        assert (
+            harness.wait_for_background(QPoint(50, 200), timeout_ms=1000).latency_ms
+            is not None
+        )
+        assert harness.wait_for_mask_tint(QPoint(210, 200)).latency_ms is not None
+        assert harness.viewer.undoSceneEdit()
+        assert np.array_equal(layer.surface.snapshot_array(), before)
+        assert harness.wait_for_mask_tint(QPoint(50, 200)).latency_ms is not None
+    finally:
+        harness.close()
+
+
 def test_expanding_mask_grows_every_edge_through_mounted_brush_input(
     qapp: QApplication,
 ) -> None:
@@ -503,13 +804,13 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
         harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
         harness.viewer.sceneChanged.connect(structural_scenes.append)
 
-        started = _interaction_clock()
+        started = interaction_clock()
         driver.begin(stroke)
-        dispatch_latencies_ms.append((_interaction_clock() - started) * 1000.0)
+        dispatch_latencies_ms.append((interaction_clock() - started) * 1000.0)
         for point_index in range(1, len(points)):
-            started = _interaction_clock()
+            started = interaction_clock()
             driver.move(stroke, point_index)
-            dispatch_latencies_ms.append((_interaction_clock() - started) * 1000.0)
+            dispatch_latencies_ms.append((interaction_clock() - started) * 1000.0)
         driver.end(stroke)
 
         ordered = sorted(dispatch_latencies_ms)
@@ -521,7 +822,8 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
             if duration >= 20.0
         ]
         assert percentile_95 < 20.0, slow_samples
-        assert max(dispatch_latencies_ms) < 35.0, slow_samples
+        if absolute_latency_assertions_are_isolated():
+            assert max(dispatch_latencies_ms) < 35.0, slow_samples
         assert harness.wait_for_mask_undo_depth(
             harness.mask_ids[0],
             1,

@@ -15,10 +15,10 @@ import uuid
 
 from PySide6.QtCore import QPoint
 
+from ..coverage import CoverageSnapshot, reframe_coverage_snapshot
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from .image_ops import adjust_connected_component, connected_component_extent
 from .mask import MaskAssetStore
-from .surface import MaskSurfaceSnapshot, reframe_mask_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class MaskComponentAdjustmentTool:
         point: QPoint,
         *,
         grow: bool,
-    ) -> MaskSurfaceSnapshot | None:
+    ) -> CoverageSnapshot | None:
         """Return a policy-aware component edit without committing it."""
         layer = self._assets.get_layer(mask_id)
         if layer is None:
@@ -74,7 +74,7 @@ class MaskComponentAdjustmentTool:
         adjusted = adjust_connected_component(snapshot.pixels, x=x, y=y, grow=grow)
         if adjusted is None:
             return None
-        return MaskSurfaceSnapshot(
+        return CoverageSnapshot(
             bounds=snapshot.bounds,
             extent_policy=snapshot.extent_policy,
             pixels=adjusted,
@@ -82,9 +82,9 @@ class MaskComponentAdjustmentTool:
 
     @staticmethod
     def _expand_touched_edges(
-        snapshot: MaskSurfaceSnapshot,
+        snapshot: CoverageSnapshot,
         extent: tuple[int, int, int, int],
-    ) -> MaskSurfaceSnapshot:
+    ) -> CoverageSnapshot:
         """Grow storage only across edges touched by the selected component."""
         bounds = snapshot.bounds
         if bounds is None:
@@ -102,4 +102,4 @@ class MaskComponentAdjustmentTool:
             bounds.width + int(grow_left) + int(grow_right),
             bounds.height + int(grow_top) + int(grow_bottom),
         )
-        return reframe_mask_snapshot(snapshot, expanded)
+        return reframe_coverage_snapshot(snapshot, expanded)

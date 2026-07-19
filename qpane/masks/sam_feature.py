@@ -281,7 +281,7 @@ def install_sam_feature(qpane: QPane, device: str | None = None) -> None:
             return
         new_surface = service.adjust_mask_component(
             active_mask_id,
-            QPoint(mask_point),
+            mask_point.toPoint(),
             grow=grow,
         )
         if new_surface is None:

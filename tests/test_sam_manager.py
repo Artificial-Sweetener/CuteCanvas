@@ -29,8 +29,9 @@ from PySide6.QtGui import QColor, QImage
 
 from qpane import Config, sam
 from qpane.core.config_features import MaskConfigSlice
+from qpane.coverage import CoverageSurface
 from qpane.masks.generated_edits import MaskGeneratedEditService
-from qpane.masks.mask import MaskAssetStore, MaskLayer, MaskSurface
+from qpane.masks.mask import MaskAssetStore, MaskLayer
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.projection import MaskCanvasProjectionService
 from qpane.sam.manager import SamManager, SamWorker
@@ -116,7 +117,7 @@ def test_mask_controller_handles_none_mask():
     mask_image.fill(0)
     mask_id = uuid.uuid4()
     mask_manager._masks[mask_id] = MaskLayer(
-        mask_id=mask_id, surface=MaskSurface.from_qimage(mask_image)
+        mask_id=mask_id, surface=CoverageSurface.from_qimage(mask_image)
     )
     controller._active_mask_id = mask_id
     emissions: list[tuple[uuid.UUID, object]] = []

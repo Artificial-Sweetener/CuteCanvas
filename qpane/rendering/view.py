@@ -22,6 +22,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize
+from PySide6.QtGui import QTransform
 
 from ..cache.registry import CacheRegistry
 from ..catalog import CatalogController, ImageCatalog, LinkManager
@@ -182,6 +183,10 @@ class View:
     def panel_to_scene_point(self, panel_pos: QPoint | QPointF) -> QPointF | None:
         """Project panel coordinates into active scene coordinates."""
         return self.presenter.panel_to_scene_point(panel_pos)
+
+    def scene_to_panel_transform(self) -> QTransform | None:
+        """Return the active absolute-scene to panel transform."""
+        return self.presenter.scene_to_panel_transform()
 
     def panel_to_layer_source_point(
         self,

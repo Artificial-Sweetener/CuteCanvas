@@ -24,13 +24,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
 
+from ..composition.edit_controller import CompositionEditController
+from ..composition.edit_history import CompositionEditCommand
 from .model import (
     LayerDescriptor,
     LayerInteractionPolicy,
     LayerPlacement,
-    LayerPlacementChange,
     SceneDescriptor,
 )
+from .placement_edit import LayerPlacementEdit
 
 
 class SceneMutationStatus(str, Enum):
@@ -122,30 +124,6 @@ class SceneMutationOwner(Protocol):
         ...
 
 
-class ScenePlacementHistory(Protocol):
-    """Composition-owned history used by scene placement mutation routing."""
-
-    def record(self, command: LayerPlacementChange) -> bool:
-        """Record one committed placement transition."""
-        ...
-
-    def undo_candidate(self, scene_id: uuid.UUID) -> LayerPlacementChange | None:
-        """Return the next placement transition to undo."""
-        ...
-
-    def redo_candidate(self, scene_id: uuid.UUID) -> LayerPlacementChange | None:
-        """Return the next placement transition to redo."""
-        ...
-
-    def commit_undo(self, command: LayerPlacementChange) -> bool:
-        """Advance one applied transition to the redo stack."""
-        ...
-
-    def commit_redo(self, command: LayerPlacementChange) -> bool:
-        """Advance one applied transition to the undo stack."""
-        ...
-
-
 class BaseSceneMutationOwner:
     """Base owner that rejects unsupported mutation requests explicitly."""
 
@@ -217,12 +195,18 @@ class SceneMutationCoordinator:
         self,
         scene_provider: Callable[[], SceneDescriptor | None],
         owners: tuple[SceneMutationOwner, ...] = (),
-        placement_history: ScenePlacementHistory | None = None,
+        edit_controller: CompositionEditController | None = None,
     ) -> None:
         """Capture the active-scene provider and initial mutation owners."""
         self._scene_provider = scene_provider
         self._owners: list[SceneMutationOwner] = list(owners)
-        self._placement_history = placement_history
+        self._edit_controller = edit_controller
+        if edit_controller is not None:
+            edit_controller.register_handler(
+                LayerPlacementEdit,
+                undo=self._undo_placement,
+                redo=self._redo_placement,
+            )
 
     def register_owner(self, owner: SceneMutationOwner) -> SceneMutationOwner:
         """Register ``owner`` for future mutation routing."""
@@ -343,53 +327,15 @@ class SceneMutationCoordinator:
                 message="layer interaction policy does not permit movement",
             )
         result = owner.set_placement(scene, layer, placement)
-        if result.changed and self._placement_history is not None:
-            self._placement_history.record(
-                LayerPlacementChange(
+        if result.changed and self._edit_controller is not None:
+            self._edit_controller.record_applied(
+                LayerPlacementEdit(
                     scene_id=scene.scene_id,
                     layer_id=layer.layer_id,
                     before=layer.placement,
                     after=placement,
                 )
             )
-        return result
-
-    def can_undo_placement(self, scene_id: uuid.UUID) -> bool:
-        """Return whether the composition history has a placement undo."""
-        return bool(
-            self._placement_history is not None
-            and self._placement_history.undo_candidate(scene_id) is not None
-        )
-
-    def can_redo_placement(self, scene_id: uuid.UUID) -> bool:
-        """Return whether the composition history has a placement redo."""
-        return bool(
-            self._placement_history is not None
-            and self._placement_history.redo_candidate(scene_id) is not None
-        )
-
-    def undo_placement(self, scene_id: uuid.UUID) -> SceneMutationResult:
-        """Restore the previous placement from composition-owned history."""
-        if self._placement_history is None:
-            return self._history_unavailable(scene_id)
-        command = self._placement_history.undo_candidate(scene_id)
-        if command is None:
-            return self._history_unavailable(scene_id)
-        result = self._restore_placement(command, command.before)
-        if result.accepted:
-            self._placement_history.commit_undo(command)
-        return result
-
-    def redo_placement(self, scene_id: uuid.UUID) -> SceneMutationResult:
-        """Reapply the next placement from composition-owned history."""
-        if self._placement_history is None:
-            return self._history_unavailable(scene_id)
-        command = self._placement_history.redo_candidate(scene_id)
-        if command is None:
-            return self._history_unavailable(scene_id)
-        result = self._restore_placement(command, command.after)
-        if result.accepted:
-            self._placement_history.commit_redo(command)
         return result
 
     def request_source_revision(
@@ -460,7 +406,7 @@ class SceneMutationCoordinator:
 
     def _restore_placement(
         self,
-        command: LayerPlacementChange,
+        command: LayerPlacementEdit,
         placement: LayerPlacement,
     ) -> SceneMutationResult:
         """Apply a history placement without recording another command."""
@@ -470,14 +416,17 @@ class SceneMutationCoordinator:
         scene, layer, owner = resolved
         return owner.set_placement(scene, layer, placement)
 
-    @staticmethod
-    def _history_unavailable(scene_id: uuid.UUID) -> SceneMutationResult:
-        """Return an unchanged result when no history command is available."""
-        return SceneMutationResult(
-            status=SceneMutationStatus.UNCHANGED,
-            scene_id=scene_id,
-            message="no layer placement history is available",
-        )
+    def _undo_placement(self, command: CompositionEditCommand) -> bool:
+        """Restore a placement command's previous domain-owned value."""
+        if not isinstance(command, LayerPlacementEdit):
+            return False
+        return self._restore_placement(command, command.before).accepted
+
+    def _redo_placement(self, command: CompositionEditCommand) -> bool:
+        """Restore a placement command's subsequent domain-owned value."""
+        if not isinstance(command, LayerPlacementEdit):
+            return False
+        return self._restore_placement(command, command.after).accepted
 
     @staticmethod
     def _invalid_request(

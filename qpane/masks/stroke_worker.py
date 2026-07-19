@@ -90,6 +90,7 @@ class MaskStrokeWorker(QRunnable, BaseWorker):
             dirty_rect=spec.dirty_rect,
             segments=segments,
             preview_stride=1 if payload is None else payload.stride,
+            constraint=spec.constraint,
         )
         return MaskStrokeJobResult(
             mask_id=spec.mask_id,

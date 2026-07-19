@@ -7,7 +7,7 @@ Modes define the relationship between the pointer and the image. Whether you are
 ## Switching Modes
 Use `QPane.setControlMode` to switch tools. You can check which mode is active with `QPane.getControlMode` or see the full list of registered tools via `QPane.availableControlModes`.
 
-Activate `QPane.CONTROL_MODE_MOVE` when the pointer should directly translate policy-enabled scene layers without changing their pixels.
+Activate `QPane.CONTROL_MODE_MOVE` for selection-aware direct manipulation. With an active pixel selection, dragging selected, nontransparent content lifts an unresolved fragment; transparent RGBA pixels and zero mask coverage are excluded. Release keeps the fragment floating, Enter anchors it, Escape cancels it, and Alt begins a copy. Switching tools preserves floating pixels, including temporary Spacebar Pan/Zoom. Without pixel selection, the same tool moves a policy-enabled layer. The demonstration clears committed selections with `Ctrl+D`.
 
 ```python
 from qpane import QPane
@@ -18,8 +18,11 @@ viewer.setControlMode(QPane.CONTROL_MODE_PANZOOM)
 # Switch to a static cursor (good for read-only states)
 viewer.setControlMode(QPane.CONTROL_MODE_CURSOR)
 
-# Move any scene layer whose host policy permits movement
+# Move selected pixels, or a movable layer when there is no pixel selection
 viewer.setControlMode(QPane.CONTROL_MODE_MOVE)
+
+# Pixel-selection tools share one composition-scoped selection.
+viewer.setControlMode(QPane.CONTROL_MODE_SELECT_RECTANGLE)
 ```
 
 > **Heads-up:** `QPane.setControlMode` will ignore requests for mask or selection modes if the catalog is empty (check `QPane.placeholderActive()` to see if the placeholder is currently shown).
@@ -43,7 +46,12 @@ QPane comes with core navigation modes ready to use. You can refer to them via t
 
 * **Pan/Zoom (`ControlMode.PANZOOM`):** The default. Mouse users drag to pan and scroll to zoom. Touch users drag with one finger, pan and pinch simultaneously with two fingers, and double tap to toggle between fit and 1:1. Wheel steps snap to 100% when crossing it, so you never skip the native scale. Use `QPane.CONTROL_MODE_PANZOOM` when a toolbar or shortcut should return to normal navigation.
 * **Cursor (`ControlMode.CURSOR`):** "Look but don't touch." The viewport stays locked, and drag/scroll events are ignored. Use `QPane.CONTROL_MODE_CURSOR` for read-only states, kiosks, or hosts that handle pointer events outside the viewer.
-* **Move (`ControlMode.MOVE`):** Selects the top covered layer and previews its placement while dragging. Mouse, pen, and one-finger touch use the same movement path. The tool moves images and masks alike; `QPaneLayerInteractionPolicy` determines which layers are selectable and movable.
+* **Move (`ControlMode.MOVE`):** Lifts active pixel selection coverage from the selected editable mask or RGBA layer. The live preview moves both pixels and marching ants without changing durable storage; pointer release retains the fragment for repeated movement or explicit resolution. Enter anchors to the source, Escape cancels losslessly, Alt starts a copy, and the public floating-pixel APIs support another compatible layer or a newly created layer. Tool switches release pointer ownership without resolving the fragment, so temporary Spacebar Pan/Zoom preserves its exact position. Resolution is one atomic undoable edit. An active selection owns the gesture, so pressing outside its coverage does not fall through to an underlying layer. When no pixel selection exists, dragging selects and moves the top covered layer whose policy allows both operations. Mouse, pen, and one-finger touch share this path. Arrow keys nudge by one local pixel, Shift+Arrow nudges by ten, and Shift constrains a drag to the nearest 45-degree direction.
+* **Rectangle, Ellipse, and Lasso:** Build antialiased 8-bit selection coverage in scene coordinates. Drag normally to replace, hold Shift to add, Alt to subtract, or Shift+Alt to intersect. Selection state belongs to the active composition and remains visible as animated marching ants when switching tools.
+
+The complete built-in selection IDs are `ControlMode.SELECT_RECTANGLE`, `ControlMode.SELECT_ELLIPSE`, and `ControlMode.SELECT_LASSO`, mirrored by `QPane.CONTROL_MODE_SELECT_RECTANGLE`, `QPane.CONTROL_MODE_SELECT_ELLIPSE`, and `QPane.CONTROL_MODE_SELECT_LASSO`.
+
+Programmatic selection uses `PixelSelectionMode`: choose `PixelSelectionMode.REPLACE`, `PixelSelectionMode.ADD`, `PixelSelectionMode.SUBTRACT`, or `PixelSelectionMode.INTERSECT` when calling `QPane.setPixelSelection`. Read `QPane.pixelSelectionState`, which returns `QPanePixelSelectionState`; its `QPanePixelSelectionState.scene_id`, `QPanePixelSelectionState.revision`, `QPanePixelSelectionState.bounds`, `QPanePixelSelectionState.coverage`, and `QPanePixelSelectionState.has_selection` values form a detached snapshot. Connect `QPane.pixelSelectionChanged` to refresh host controls, and use `QPane.selectAllPixels`, `QPane.invertPixelSelection`, or `QPane.clearPixelSelection` for standard commands.
 
 When the mask feature is active, `ControlMode.DRAW_BRUSH` provides the raster mask brush. Applications using the SAM extra can also activate `ControlMode.SMART_SELECT` for box selection. These modes are unavailable when the catalog is empty. See [Masks and SAM](masks-and-sam.md) for details.
 
@@ -67,6 +75,7 @@ Want to know how deep you are? `QPane.currentZoom` tells you the current multipl
 * **Validation:** `setControlMode` safely handles missing features (like trying to use Smart Select without SAM installed) by logging a warning and ignoring the request. However, it raises a `ValueError` if passed an unknown mode ID.
 * **Event Delivery:** Tools always expose the full Qt event surface via concrete no-op handlers, so dispatch is direct and predictable—override only what you need.
 * **Layer Policy:** Scene layers are locked by default. Hosts opt a layer into movement with `QPane.setLayerInteractionPolicy`; switching to Move mode never changes policy implicitly.
+* **Pixel-Move Policy:** Selected pixels require a selected layer with `pixel_editable=True` and an intrinsically editable raster source. Layer-level `movable` policy is used only by the no-selection branch.
 ### Comparison Divider Interaction
 Split comparison uses the normal viewer modes and belongs to the active composition. QPane owns built-in split-boundary dragging as interaction chrome, not image content. QPane does not paint a divider line or handle; the visible boundary between the base and comparison images is the drag target.
 

@@ -28,10 +28,13 @@ import numpy as np
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPixmap
 
+from ..composition.edit_controller import CompositionEditController
 from ..composition.layers import CompositionLayerInstance
 from ..concurrency import TaskExecutorProtocol
 from ..core import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
+from ..coverage import CoverageSnapshot
+from ..scene.identity import default_scene_id
 from ..types import DiagnosticRecord, DiagnosticsDomain
 from .activation import MaskActivationController
 from .autosave_coordination import MaskAutosaveCoordinator
@@ -42,7 +45,7 @@ from .layer_workflows import MaskLayerWorkflow
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
-from .mask_undo import MaskUndoProvider, MaskUndoState
+from .mask_undo import MaskUndoState
 from .projection import MaskCanvasProjectionService
 from .render_coordination import (
     SNIPPET_ASYNC_THRESHOLD_PX,
@@ -50,7 +53,6 @@ from .render_coordination import (
 )
 from .stroke_models import MaskStrokeSegmentPayload
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
-from .surface import MaskSurfaceSnapshot
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 
@@ -321,7 +323,7 @@ class MaskService:
 
     def adjust_mask_component(
         self, mask_id: uuid.UUID, point, *, grow: bool
-    ) -> MaskSurfaceSnapshot | None:
+    ) -> CoverageSnapshot | None:
         """Build a reusable connected-component edit for any mask-aware tool."""
         return self._component_adjustment.adjusted_surface(
             mask_id,
@@ -336,7 +338,7 @@ class MaskService:
     def apply_mask_surface(
         self,
         mask_id: uuid.UUID,
-        snapshot: MaskSurfaceSnapshot,
+        snapshot: CoverageSnapshot,
     ) -> bool:
         """Apply complete raster structure through the transactional edit owner."""
         return self._mask_controller.edits.apply_mask_surface(mask_id, snapshot)
@@ -351,13 +353,29 @@ class MaskService:
         """Register mask layer mutations with the internal scene coordinator."""
         self._layers.set_scene_mutation_coordinator(coordinator)
 
-    def getUndoProvider(self) -> MaskUndoProvider:
-        """Expose the undo provider used for mask history integration."""
-        return self._assets.undo_provider
+    def setStrokeConstraintProvider(
+        self,
+        provider: Callable[[uuid.UUID], CoverageSnapshot | None] | None,
+    ) -> None:
+        """Bind composition selection coverage used to constrain mask strokes."""
+        self._stroke_pipeline.set_selection_constraint(provider)
 
-    def setUndoProvider(self, provider: MaskUndoProvider | None) -> None:
-        """Install or replace the mask undo provider."""
-        self._assets.set_undo_provider(provider)
+    def bindCompositionEdits(self, edits: CompositionEditController) -> None:
+        """Bind mask commands to composition chronology after QPane attachment."""
+        self._assets.bind_composition_edits(
+            edits,
+            lambda mask_id: self._scope_for_mask(mask_id),
+            self._mask_controller.edits.present_history_change,
+        )
+
+    def _scope_for_mask(self, mask_id: uuid.UUID) -> uuid.UUID | None:
+        """Resolve a mask asset to its active or first owning image scene."""
+        image_ids = self._layers.image_ids_for_mask(mask_id)
+        if not image_ids:
+            return None
+        current_image_id = self._catalog.currentImageID()
+        image_id = current_image_id if current_image_id in image_ids else image_ids[0]
+        return default_scene_id(image_id)
 
     def connectUndoStackChanged(self, slot: Callable[[uuid.UUID], None]) -> None:
         """Register slot for undo stack change notifications."""

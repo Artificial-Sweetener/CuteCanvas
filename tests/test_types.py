@@ -94,6 +94,9 @@ def test_enum_values_match_facade_contract() -> None:
         "move",
         "draw-brush",
         "smart-select",
+        "select-rectangle",
+        "select-ellipse",
+        "select-lasso",
     }
 
 

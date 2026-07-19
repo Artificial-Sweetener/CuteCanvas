@@ -43,6 +43,7 @@ class LayerKind(str, Enum):
 
     IMAGE = "image"
     MASK = "mask"
+    RASTER = "raster"
 
 
 class BlendMode(str, Enum):
@@ -80,16 +81,6 @@ class LayerPlacement:
 
 
 @dataclass(frozen=True, slots=True)
-class LayerPlacementChange:
-    """Describe one durable scene-layer placement transition."""
-
-    scene_id: uuid.UUID
-    layer_id: uuid.UUID
-    before: LayerPlacement
-    after: LayerPlacement
-
-
-@dataclass(frozen=True, slots=True)
 class LayerClip:
     """Optional rectangle constraining layer visibility in a known space."""
 
@@ -119,6 +110,15 @@ class LayerInteractionPolicy:
 
     selectable: bool = False
     movable: bool = False
+    pixel_editable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LayerContentCapabilities:
+    """Intrinsic editing capabilities supplied by a layer source domain."""
+
+    raster_editable: bool = False
+    coverage_source: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,9 +136,11 @@ class LayerDescriptor:
     clip: LayerClip | None = None
     hit_test: LayerHitTest = LayerHitTest()
     interaction: LayerInteractionPolicy = LayerInteractionPolicy()
+    capabilities: LayerContentCapabilities = LayerContentCapabilities()
     source_revision: int = 0
     raster_bounds: RasterBounds | None = None
     transform: LayerTransform | None = None
+    label: str | None = None
 
     def __post_init__(self) -> None:
         """Validate stable descriptor values."""

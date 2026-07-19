@@ -73,10 +73,11 @@ from examples.demonstration.config.spec import (
     field_sets_for_sections,
 )
 from examples.demonstration.custom_tool import build_custom_cursor_tool
+from examples.demonstration.editor_controls import EditorControls
 from examples.demonstration.hooks_editor import HookEditorWindow
 from examples.demonstration.layer_inspector import RasterLayerInspector
 from examples.demonstration.workers import ImageLoaderWorker
-from qpane import ComparisonOrientation, Config, QPane, QPaneLayerInteractionPolicy
+from qpane import ComparisonOrientation, Config, QPane
 
 _DIAGNOSTIC_DOMAIN_FIELD = "diagnostics_domains_enabled"
 _SAM_CONFIG_FIELDS = ConfigDialog.SAM_FIELDS
@@ -478,10 +479,7 @@ class ExampleWindow(QMainWindow):
         self.status.addPermanentWidget(self._zoom_container)
 
     def _build_layer_inspector(self) -> None:
-        """Add the public-API raster layer inspector for mask-capable demos."""
-        self.layer_inspector: RasterLayerInspector | None = None
-        if not self._mask_tools_available():
-            return
+        """Add the public-API inspector shared by editable raster layer kinds."""
         self.layer_inspector = RasterLayerInspector(self.qpane, self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.layer_inspector)
 
@@ -517,9 +515,6 @@ class ExampleWindow(QMainWindow):
             shortcut.activated.connect(handler)
             self._shortcuts.append(shortcut)
 
-        if self._mask_tools_available():
-            _add_shortcut(QKeySequence.StandardKey.Undo, self.qpane.undoMaskEdit)
-            _add_shortcut(QKeySequence.StandardKey.Redo, self.qpane.redoMaskEdit)
         _add_shortcut(
             QKeySequence(Qt.Key_A),
             partial(self._step_image, -1),
@@ -527,10 +522,6 @@ class ExampleWindow(QMainWindow):
         _add_shortcut(
             QKeySequence(Qt.Key_D),
             partial(self._step_image, 1),
-        )
-        _add_shortcut(
-            QKeySequence(Qt.Key_Delete),
-            self._remove_current_image,
         )
         _add_shortcut(
             QKeySequence(Qt.Key_Backspace),
@@ -557,20 +548,21 @@ class ExampleWindow(QMainWindow):
 
     def _set_control_mode(self, mode: str) -> None:
         """Switch control modes, enforcing mask readiness for brush-based modes."""
-        if mode == QPane.CONTROL_MODE_MOVE:
-            self._apply_current_scene_movement_policy()
+        self.editor_controls.apply_layer_policy()
         if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
             if not self._mask_tools_available():
                 self._set_status("Brush mode unavailable in core demo.")
                 return
             if not self._ensure_active_mask():
                 return
+            self.editor_controls.select_active_mask_layer()
         if mode == QPane.CONTROL_MODE_SMART_SELECT:
             if not (self._mask_tools_available() and self._sam_tools_available()):
                 self._set_status("Smart Select requires Mask+SAM features.")
                 return
             if not self._ensure_active_mask():
                 return
+            self.editor_controls.select_active_mask_layer()
         self.qpane.setControlMode(mode)
         self._update_mode_checks(mode)
         self._set_status(f"Mode: {self._describe_mode(mode)}")
@@ -660,42 +652,16 @@ class ExampleWindow(QMainWindow):
         if mode == QPane.CONTROL_MODE_PANZOOM:
             return "Pan / Zoom"
         if mode == QPane.CONTROL_MODE_MOVE:
-            return "Move Layers"
+            return "Move"
         if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
             return "Brush"
         if mode == QPane.CONTROL_MODE_SMART_SELECT:
             return "Smart Select (SAM)"
         return mode
 
-    def _apply_current_scene_movement_policy(self) -> None:
-        """Make only the active mask directly movable in the demonstration host."""
-        scene = self.qpane.currentScene()
-        frozen = QPaneLayerInteractionPolicy()
-        movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
-        if scene is not None:
-            for layer in scene.layers:
-                self.qpane.setLayerInteractionPolicy(
-                    scene.scene_id,
-                    layer.layer_id,
-                    frozen,
-                )
-        if not self._mask_tools_available():
-            return
-        active_mask_id = self.qpane.activeMaskID()
-        for mask in self.qpane.listMasksForImage():
-            if mask.scene_id is None or mask.layer_id is None:
-                continue
-            policy = movable if mask.mask_id == active_mask_id else frozen
-            self.qpane.setLayerInteractionPolicy(
-                mask.scene_id,
-                mask.layer_id,
-                policy,
-            )
-
     def _refresh_current_scene_movement_policy(self, *_args: object) -> None:
-        """Follow active-layer changes while the demonstration is in Move mode."""
-        if self.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE:
-            self._apply_current_scene_movement_policy()
+        """Follow the selected authoring layer across editor modes."""
+        self.editor_controls.apply_layer_policy()
 
     def _catalog_prefers_mask_selection(self) -> bool:
         """Return True when the catalog should highlight the active mask."""
@@ -1052,6 +1018,9 @@ class ExampleWindow(QMainWindow):
             lambda _image_id: self._refresh_tool_enables()
         )
         self.qpane.currentImageChanged.connect(
+            self._refresh_current_scene_movement_policy
+        )
+        self.qpane.selectedLayerChanged.connect(
             self._refresh_current_scene_movement_policy
         )
         self.qpane.currentImageChanged.connect(
@@ -1804,7 +1773,11 @@ class ExampleWindow(QMainWindow):
         self.mode_cursor_action.triggered.connect(
             lambda: self._set_control_mode(QPane.CONTROL_MODE_CURSOR)
         )
-        self.mode_move_action = QAction("Move Layers", self, checkable=True)
+        self.mode_move_action = QAction("Move", self, checkable=True)
+        self.mode_move_action.setStatusTip(
+            "Drag inside marching ants to move selected pixels; without a selection, "
+            "drag a movable layer. Arrow keys nudge."
+        )
         self.mode_move_action.triggered.connect(
             lambda: self._set_control_mode(QPane.CONTROL_MODE_MOVE)
         )
@@ -1888,6 +1861,12 @@ class ExampleWindow(QMainWindow):
         ]
         for action in mask_actions:
             self._gallery_actions.append((action, True))
+        self.editor_controls = EditorControls(
+            self.qpane,
+            set_mode=self._set_control_mode,
+            show_status=self._set_status,
+            parent=self,
+        )
 
     def _create_menus(self) -> None:
         """Construct the menubar to illustrate how facade-backed actions are organized."""
@@ -1899,6 +1878,8 @@ class ExampleWindow(QMainWindow):
         file_menu.addSeparator()
         exit_action = file_menu.addAction("Exit")
         exit_action.triggered.connect(self.close)
+        edit_menu = menu_bar.addMenu("&Edit")
+        self.editor_controls.populate_edit_menu(edit_menu)
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.catalog_panel_action)
         if self.layer_inspector is not None:
@@ -1955,6 +1936,10 @@ class ExampleWindow(QMainWindow):
         self._tools_toolbar.setOrientation(Qt.Vertical)
         self._tools_toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.addToolBar(Qt.LeftToolBarArea, self._tools_toolbar)
+        if not hasattr(self, "_floating_pixels_toolbar"):
+            self._floating_pixels_toolbar = self.editor_controls.add_floating_toolbar(
+                self
+            )
 
         def _add_group(actions: list[QAction | None]) -> bool:
             """Add the provided actions to the tools toolbar, returning True if any were added."""
@@ -1992,6 +1977,8 @@ class ExampleWindow(QMainWindow):
         if (navigation_added or compare_added) and has_modes:
             self._tools_toolbar.addSeparator()
         modes_added = _add_group(mode_actions)
+        self.editor_controls.add_selection_button(self._tools_toolbar)
+        modes_added = True
         if self.cycle_mode_action is not None:
             self._tools_toolbar.addAction(self.cycle_mode_action)
             modes_added = True
@@ -2150,6 +2137,7 @@ class ExampleWindow(QMainWindow):
             self._custom_tool_action.setChecked(mode == _CUSTOM_TOOL_MODE)
         if self._lens_tool_action is not None:
             self._lens_tool_action.setChecked(mode == _LENS_TOOL_MODE)
+        self.editor_controls.sync_mode(mode)
 
     def _update_action_states(self, count: int) -> None:
         """Enable or disable actions based on catalog size and feature availability."""

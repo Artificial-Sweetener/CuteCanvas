@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from collections import deque
-from time import perf_counter
+from time import process_time
 
 import numpy as np
 import pytest
@@ -93,9 +93,9 @@ def test_4k_mask_operations_stay_within_background_work_bound() -> None:
         ),
     )
     for name, operation in operations:
-        started = perf_counter()
+        started = process_time()
         result = operation()
-        duration = perf_counter() - started
+        duration = process_time() - started
         assert result is not None
         assert duration < 1.0, f"{name} took {duration * 1000.0:.1f} ms"
 

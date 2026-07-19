@@ -14,6 +14,7 @@ import json
 import uuid
 import zipfile
 
+import numpy as np
 import pytest
 from PySide6.QtGui import QColor, QImage
 
@@ -29,6 +30,7 @@ from qpane.persistence import (
     CompositionArchiveRestorer,
     capture_image_composition,
 )
+from qpane.raster.assets import EditableRasterAssetStore
 from qpane.scene.model import LayerInteractionPolicy, LayerPlacement
 from qpane.scene.raster import LayerTransform, RasterBounds
 
@@ -41,6 +43,7 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     layers = ImageSceneLayerStore()
     layers.ensure_image(image_id, LayerPlacement(0.0, 0.0, 8.0, 6.0))
     masks = MaskAssetStore()
+    rasters = EditableRasterAssetStore()
     mask_id = masks.create_mask(QImage(8, 6, QImage.Format_Grayscale8))
     mask = masks.get_layer(mask_id)
     assert mask is not None
@@ -61,17 +64,43 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     )
     assert layers.add_layer(image_id, mask_instance)
     assert layers.reorder_layer(image_id, mask_instance.layer_id, 0)
+    raster_image = QImage(4, 3, QImage.Format_ARGB32_Premultiplied)
+    raster_image.fill(QColor(90, 30, 170, 211))
+    raster = rasters.create(
+        raster_image,
+        bounds=RasterBounds(-5, 7, 4, 3),
+        extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
+    )
+    expected_raster_pixels = raster.surface.snapshot().pixels
+    raster_instance = CompositionLayerInstance(
+        layer_id=uuid.uuid4(),
+        source_kind=CompositionLayerSourceKind.RASTER,
+        source_id=raster.raster_id,
+        transform=LayerTransform(0.75, 1.25, -8.0, 4.0),
+        interaction=LayerInteractionPolicy(
+            selectable=True,
+            movable=True,
+            pixel_editable=True,
+        ),
+        role="raster",
+        label="Paint",
+    )
+    assert layers.add_layer(image_id, raster_instance)
     archive_path = tmp_path / "composition.qpc"
     codec = CompositionArchiveCodec()
 
-    codec.write(capture_image_composition(image_id, layers, masks), archive_path)
+    codec.write(
+        capture_image_composition(image_id, layers, masks, rasters), archive_path
+    )
     decoded = codec.read(archive_path)
     restored_layers = ImageSceneLayerStore()
     restored_layers.ensure_image(image_id, LayerPlacement(0.0, 0.0, 8.0, 6.0))
     restored_masks = MaskAssetStore()
+    restored_rasters = EditableRasterAssetStore()
     CompositionArchiveRestorer(
         layers=restored_layers,
         masks=restored_masks,
+        rasters=restored_rasters,
     ).restore(decoded)
 
     assert restored_layers.layers_for_image(image_id) == layers.layers_for_image(
@@ -84,6 +113,12 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     assert restored.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
     assert restored.pixels[1, 1] == 217
     assert restored.pixels.shape == (10, 13)
+    restored_raster = restored_rasters.get(raster.raster_id)
+    assert restored_raster is not None
+    raster_snapshot = restored_raster.surface.snapshot()
+    assert raster_snapshot.bounds == RasterBounds(-5, 7, 4, 3)
+    assert raster_snapshot.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
+    assert np.array_equal(raster_snapshot.pixels, expected_raster_pixels)
 
 
 def test_archive_rejects_unknown_version_before_restoration(tmp_path) -> None:
@@ -111,11 +146,12 @@ def test_archive_write_replaces_destination_without_leaving_temp_files(
     layers = ImageSceneLayerStore()
     layers.ensure_image(image_id, LayerPlacement(0.0, 0.0, 2.0, 2.0))
     masks = MaskAssetStore()
+    rasters = EditableRasterAssetStore()
     path = tmp_path / "composition.qpc"
     path.write_bytes(b"old")
 
     CompositionArchiveCodec().write(
-        capture_image_composition(image_id, layers, masks),
+        capture_image_composition(image_id, layers, masks, rasters),
         path,
     )
 

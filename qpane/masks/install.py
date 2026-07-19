@@ -94,3 +94,6 @@ def install_mask_feature(qpane: QPane) -> None:
     tm_signals.undo_state_push_requested.connect(service.pushActiveMaskState)
     controller.mask_updated.connect(_handle_mask_updated)
     controller.active_mask_properties_changed.connect(qpane.refreshCursor)
+    controller.active_mask_properties_changed.connect(
+        qpane._synchronize_active_mask_layer_selection
+    )

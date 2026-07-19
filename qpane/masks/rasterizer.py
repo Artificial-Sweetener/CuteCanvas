@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtGui import QColor, QImage
 
-from ..catalog.image_utils import (
+from ..raster.image_conversion import (
     numpy_to_qimage_argb32,
     qimage_to_numpy_grayscale8,
 )

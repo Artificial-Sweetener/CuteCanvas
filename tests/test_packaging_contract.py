@@ -58,6 +58,14 @@ def test_examples_are_not_installed_as_package_modules() -> None:
     assert include_patterns == ["qpane", "qpane.*"]
 
 
+def test_runtime_dependencies_include_typing_extensions() -> None:
+    """Declare the compatibility types imported by production modules."""
+
+    pyproject = tomllib.loads((_PROJECT_ROOT / "pyproject.toml").read_text("utf-8"))
+
+    assert "typing-extensions>=4.0" in pyproject["project"]["dependencies"]
+
+
 def test_runtime_source_and_dependencies_do_not_require_opencv() -> None:
     """Keep mask processing on the existing Qt and NumPy runtime stack."""
     pyproject = tomllib.loads((_PROJECT_ROOT / "pyproject.toml").read_text("utf-8"))

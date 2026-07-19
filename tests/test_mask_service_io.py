@@ -26,7 +26,6 @@ from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QImage, Qt
 
 from qpane import RasterExtentPolicy
-from qpane.catalog.image_utils import numpy_to_qimage_grayscale8
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks import autosave_coordination
 from qpane.masks.autosave import AutosaveManager
@@ -34,6 +33,7 @@ from qpane.masks.combiner import MaskCombiner
 from qpane.masks.component_adjustment import MaskComponentAdjustmentTool
 from qpane.masks.layer_workflows import random_mask_color
 from qpane.masks.mask import MaskAssetStore
+from qpane.raster.image_conversion import numpy_to_qimage_grayscale8
 from qpane.scene.raster import RasterBounds
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer

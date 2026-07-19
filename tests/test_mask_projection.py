@@ -19,12 +19,12 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
 
 from qpane import RasterExtentPolicy
+from qpane.coverage import CoverageSnapshot
 from qpane.masks.mask import MaskAssetStore
 from qpane.masks.projection import (
     MaskCanvasProjectionService,
     project_mask_snapshot,
 )
-from qpane.masks.surface import MaskSurfaceSnapshot
 from qpane.scene.model import (
     LayerDescriptor,
     LayerKind,
@@ -61,7 +61,7 @@ def test_projection_clips_negative_and_positive_off_canvas_pixels() -> None:
     pixels[1, 2] = 10
     pixels[2, 3] = 20
     pixels[5, 7] = 30
-    snapshot = MaskSurfaceSnapshot(
+    snapshot = CoverageSnapshot(
         bounds,
         RasterExtentPolicy.EXPAND_ON_WRITE,
         pixels,
@@ -88,7 +88,7 @@ def test_projection_applies_layer_translation_before_canvas_clipping() -> None:
     bounds = RasterBounds(0, 0, 4, 4)
     pixels = np.zeros((4, 4), dtype=np.uint8)
     pixels[1, 1] = 255
-    snapshot = MaskSurfaceSnapshot(bounds, RasterExtentPolicy.FIXED, pixels)
+    snapshot = CoverageSnapshot(bounds, RasterExtentPolicy.FIXED, pixels)
     transform = LayerTransform(translate_x=2.0, translate_y=-1.0)
     layer = _descriptor(bounds, transform)
 
@@ -152,7 +152,7 @@ def test_4k_projection_stays_within_interactive_worker_budget() -> None:
     bounds = RasterBounds(0, 0, size, size)
     pixels = np.zeros((size, size), dtype=np.uint8)
     pixels[2048, 2048] = 255
-    snapshot = MaskSurfaceSnapshot(
+    snapshot = CoverageSnapshot(
         bounds,
         RasterExtentPolicy.EXPAND_ON_WRITE,
         pixels,

@@ -24,11 +24,11 @@ import pytest
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
-from qpane.catalog.image_utils import qimage_to_numpy_view_grayscale8
 from qpane.masks.stroke_models import MaskStrokeSegmentPayload
+from qpane.masks.stroke_preview import DecimatedStrokePreview
 from qpane.masks.stroke_render import render_stroke_segments
-from qpane.masks.strokes import _DecimatedStrokeState
 from qpane.masks.tools import BrushTool
+from qpane.raster.image_conversion import qimage_to_numpy_view_grayscale8
 from qpane.rendering.coordinates import PanelHitTest
 from qpane.tools import ToolDependencies
 from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
@@ -131,7 +131,7 @@ def _snapshot_array_region(
 
 
 def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
-    state = _DecimatedStrokeState(mask_id=uuid.uuid4(), stride=2)
+    state = DecimatedStrokePreview(mask_id=uuid.uuid4(), stride=2)
     mask_view = np.zeros((8, 8), dtype=np.uint8)
     dirty_rect = QRect(QPoint(0, 0), QPoint(3, 3))
     start = QPoint(0, 0)
@@ -172,7 +172,7 @@ def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
 
 @pytest.mark.parametrize("brush_size", [3, 5, 6, 11])
 def test_preview_matches_worker_single_point(brush_size):
-    state = _DecimatedStrokeState(mask_id=uuid.uuid4(), stride=1)
+    state = DecimatedStrokePreview(mask_id=uuid.uuid4(), stride=1)
     mask_view = np.zeros((64, 64), dtype=np.uint8)
     start = QPoint(10, 12)
     stroke_rect = QRect(start, start).normalized()

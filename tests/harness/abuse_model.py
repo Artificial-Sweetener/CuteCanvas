@@ -144,6 +144,13 @@ class MouseHoverAction:
     kind: str = "mouse-hover"
 
 
+@dataclass(frozen=True, slots=True)
+class EditorWorkflowAction:
+    """Exercise selections, editable RGBA, bounds, and chronological history."""
+
+    kind: str = "editor-workflow"
+
+
 AbuseAction: TypeAlias = (
     StrokeAction
     | UndoAction
@@ -155,6 +162,7 @@ AbuseAction: TypeAlias = (
     | PalmContactAction
     | PenHoverAction
     | MouseHoverAction
+    | EditorWorkflowAction
 )
 
 
@@ -247,4 +255,6 @@ def action_from_dict(payload: dict[str, Any]) -> AbuseAction:
                 payload.get("stale_touchscreen_metadata", False)
             ),
         )
+    if kind == "editor-workflow":
+        return EditorWorkflowAction()
     raise ValueError(f"Unknown abuse action kind: {kind}")

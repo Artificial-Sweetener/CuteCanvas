@@ -27,6 +27,11 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 from .base import BaseTool, CursorTool, ExtensionTool, PanZoomTool
 from .dependencies import ToolDependencies
 from .move import MoveTool
+from .selection_shapes import (
+    EllipseSelectionTool,
+    LassoSelectionTool,
+    RectangleSelectionTool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +80,9 @@ class Tools(QObject):
     CONTROL_MODE_MOVE = "move"
     CONTROL_MODE_DRAW_BRUSH = "draw-brush"
     CONTROL_MODE_SMART_SELECT = "smart-select"
+    CONTROL_MODE_SELECT_RECTANGLE = "select-rectangle"
+    CONTROL_MODE_SELECT_ELLIPSE = "select-ellipse"
+    CONTROL_MODE_SELECT_LASSO = "select-lasso"
 
     def __init__(self, parent=None):
         """Seed the manager with the default pan/zoom tool registration."""
@@ -100,6 +108,9 @@ class Tools(QObject):
             on_disconnect=self._disconnect_cursor_signals,
         )
         self.registerTool(self.CONTROL_MODE_MOVE, MoveTool)
+        self.registerTool(self.CONTROL_MODE_SELECT_RECTANGLE, RectangleSelectionTool)
+        self.registerTool(self.CONTROL_MODE_SELECT_ELLIPSE, EllipseSelectionTool)
+        self.registerTool(self.CONTROL_MODE_SELECT_LASSO, LassoSelectionTool)
 
     def _ensure_tool(self, mode: str) -> ExtensionTool:
         """Instantiate and cache the tool for the requested mode."""

@@ -23,15 +23,17 @@ import math
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 
+import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 
-from ..catalog.image_utils import numpy_to_qimage_grayscale8
 from ..core import CacheSettings, Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
+from ..raster.image_conversion import numpy_to_qimage_grayscale8
 from ..scene.raster import RasterBounds
 from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
@@ -123,6 +125,8 @@ class MaskRenderCache:
         self._async_pending: dict[uuid.UUID, int] = {}
         self._async_threshold_px = 512 * 512
         self._usage_callback: Callable[[], None] | None = None
+        self._usage_batch_depth = 0
+        self._usage_notification_pending = False
         self._admission_guard: Callable[[int], bool] | None = None
         self._rejected_keys: set[MaskRenderCacheKey] = set()
         self._hits = 0
@@ -379,13 +383,14 @@ class MaskRenderCache:
             )
             painter.end()
             reframed.append((scale_key, target))
-        self.invalidate(layer.mask_id, reason="surface_reframe")
-        for scale_key, pixmap in reframed:
-            self._insert(
-                self._key(layer.mask_id, scale_key),
-                pixmap,
-                mask_id=layer.mask_id,
-            )
+        with self._batch_usage_notifications():
+            self.invalidate(layer.mask_id, reason="surface_reframe")
+            for scale_key, pixmap in reframed:
+                self._insert(
+                    self._key(layer.mask_id, scale_key),
+                    pixmap,
+                    mask_id=layer.mask_id,
+                )
 
     def warm(self, mask_id: uuid.UUID | None, *, scale: float | None = None) -> None:
         """Generate the currently useful cached raster for a source when present."""
@@ -632,6 +637,15 @@ class MaskRenderCache:
         ):
             self._store_prefetched(mask_id, result)
         return result
+
+    def present_pixels(self, mask_id: uuid.UUID, pixels: np.ndarray) -> QImage:
+        """Colorize detached canonical pixels without admitting them to the cache."""
+        return self.colorize_image(
+            numpy_to_qimage_grayscale8(pixels),
+            self._color_for_mask(mask_id),
+            mask_id=None,
+            source="floating_edit",
+        )
 
     def _key(self, mask_id: uuid.UUID, scale_key: float | None) -> MaskRenderCacheKey:
         """Build one stable cache key."""
@@ -897,7 +911,7 @@ class MaskRenderCache:
         local_offset = QPoint(bounds.x, bounds.y)
         top_left = self._source_to_panel_point(image_rect.topLeft() + local_offset)
         bottom_right = self._source_to_panel_point(
-            image_rect.bottomRight() + local_offset
+            QPoint(image_rect.right() + 1, image_rect.bottom() + 1) + local_offset
         )
         if top_left is None or bottom_right is None:
             self._render_changed(mask_id, QRect())
@@ -907,6 +921,25 @@ class MaskRenderCache:
 
     def _notify_usage(self) -> None:
         """Notify cache coordination after an accounting change."""
+        if self._usage_batch_depth > 0:
+            self._usage_notification_pending = True
+            return
+        self._publish_usage()
+
+    @contextmanager
+    def _batch_usage_notifications(self) -> Iterator[None]:
+        """Coalesce accounting callbacks across one atomic cache transition."""
+        self._usage_batch_depth += 1
+        try:
+            yield
+        finally:
+            self._usage_batch_depth -= 1
+            if self._usage_batch_depth == 0 and self._usage_notification_pending:
+                self._usage_notification_pending = False
+                self._publish_usage()
+
+    def _publish_usage(self) -> None:
+        """Publish one immediate cache-accounting update."""
         if self._usage_callback is None:
             return
         try:

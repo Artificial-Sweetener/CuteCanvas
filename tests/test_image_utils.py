@@ -19,7 +19,7 @@
 import numpy as np
 from PySide6.QtGui import QColor, QImage
 
-from qpane.catalog.image_utils import (
+from qpane.raster.image_conversion import (
     numpy_to_qimage_argb32,
     qimage_to_numpy_grayscale8,
     qimage_to_numpy_view_grayscale8,

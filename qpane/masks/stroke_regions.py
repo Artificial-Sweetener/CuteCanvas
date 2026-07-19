@@ -17,10 +17,10 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPoint, QRect
 
+from ..coverage import CoverageSnapshot, WritableCoverageRegion
 from ..scene.raster import RasterBounds
 from .mask import MaskLayer
 from .stroke_models import MaskStrokeSegmentPayload
-from .surface import WritableMaskRegion
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +39,7 @@ class MaskStrokeRegionPlanner:
     def __init__(
         self,
         prepare_writable: Callable[
-            [uuid.UUID, RasterBounds], WritableMaskRegion | None
+            [uuid.UUID, RasterBounds], WritableCoverageRegion | None
         ],
     ) -> None:
         """Bind the source-owned writable-region boundary."""
@@ -50,9 +50,17 @@ class MaskStrokeRegionPlanner:
         mask_id: uuid.UUID,
         layer: MaskLayer,
         segment: MaskStrokeSegmentPayload,
+        constraint: CoverageSnapshot | None = None,
     ) -> PreparedMaskStrokeRegion | None:
         """Return storage-space geometry accepted for one semantic segment."""
         requested = self._requested_bounds(segment)
+        if constraint is not None:
+            constraint_bounds = constraint.bounds
+            if constraint_bounds is None:
+                return None
+            requested = requested.intersection(constraint_bounds)
+            if requested is None:
+                return None
         write = self._prepare_writable(mask_id, requested)
         if write is None or write.writable is None or write.after_bounds is None:
             return None

@@ -28,20 +28,31 @@ import numpy as np
 from PySide6.QtCore import QPoint, QRect, QSize
 from PySide6.QtGui import QImage
 
-from ..catalog.image_utils import (
+from ..coverage import CoverageSnapshot, WritableCoverageRegion
+from ..raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,
 )
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from .mask import MaskAssetStore, MaskLayer
 from .mask_diagnostics import MaskStrokeDiagnostics
-from .mask_undo import MaskHistoryChange, MaskPatch
+from .mask_undo import MaskHistoryChange, MaskImageCommand, MaskPatch
 from .render_cache import MaskRenderCache
 from .stroke_history import MaskStrokeHistorySession
 from .stroke_models import MaskStrokeJobResult, MaskStrokeJobSpec, MaskStrokePayload
-from .surface import MaskSurfaceSnapshot, WritableMaskRegion
+from .surface_history import MaskSurfaceCommand
 
 logger = logging.getLogger(__name__)
+
+
+def _command_changes_structure(change: MaskHistoryChange) -> bool:
+    """Return whether history replay can change storage bounds."""
+    command = change.command
+    if isinstance(command, MaskSurfaceCommand):
+        return command.before.bounds != command.after.bounds
+    if isinstance(command, MaskImageCommand):
+        return command.before.size() != command.after.size()
+    return False
 
 
 class MaskEditEpochs:
@@ -132,7 +143,7 @@ class MaskEditService:
         self,
         mask_id: uuid.UUID,
         requested: RasterBounds,
-    ) -> WritableMaskRegion | None:
+    ) -> WritableCoverageRegion | None:
         """Apply source extent policy and capture structural stroke history."""
         layer = self._get_layer(mask_id)
         if layer is None:
@@ -143,14 +154,17 @@ class MaskEditService:
             surface.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
             and (current is None or not current.contains(requested))
         )
-        before = surface.snapshot() if will_expand else None
         storage_request = (
             self._reserved_stroke_bounds(current, requested)
             if will_expand and current is not None
             else requested
         )
-        storage_write = surface.ensure_writable(storage_request)
-        writable = WritableMaskRegion(
+        if will_expand:
+            storage_write, before = surface.expand_with_snapshot(storage_request)
+        else:
+            storage_write = surface.ensure_writable(storage_request)
+            before = None
+        writable = WritableCoverageRegion(
             requested=requested,
             writable=(
                 requested
@@ -209,6 +223,7 @@ class MaskEditService:
         *,
         payload: MaskStrokePayload | None = None,
         metadata: Mapping[str, Any] | None = None,
+        constraint: np.ndarray | None = None,
     ) -> MaskStrokeJobSpec | None:
         """Snapshot the data required to process a stroke off the UI thread."""
         layer = self._get_layer(mask_id)
@@ -229,6 +244,16 @@ class MaskEditService:
         before_slice = layer.surface.snapshot_storage_region(
             RasterBounds(left, top, width, height)
         )
+        normalized_constraint = None
+        if constraint is not None:
+            normalized_constraint = np.asarray(constraint, dtype=np.uint8)
+            if normalized_constraint.shape != before_slice.shape:
+                raise ValueError("stroke constraint must match dirty storage bounds")
+            normalized_constraint = np.array(
+                normalized_constraint,
+                copy=True,
+                order="C",
+            )
         meta: MutableMapping[str, Any]
         if metadata is None:
             meta = {}
@@ -239,6 +264,7 @@ class MaskEditService:
             generation=self.async_epoch(mask_id),
             dirty_rect=bounded,
             before=before_slice,
+            constraint=normalized_constraint,
             payload=payload,
             metadata=meta,
         )
@@ -460,11 +486,12 @@ class MaskEditService:
         mask_id = self._active_mask_id()
         if mask_id is None:
             return False
-        layer_before = self._get_layer(mask_id)
-        bounds_before = None if layer_before is None else layer_before.surface.bounds
         change = operator(mask_id)
-        if change is None:
-            return False
+        return change is not None
+
+    def present_history_change(self, change: MaskHistoryChange) -> None:
+        """Refresh cached and structural presentation after history replay."""
+        mask_id = change.mask_id
         mask_layer = self._get_layer(mask_id)
         applied_delta = False
         if mask_layer is not None and change.has_snippets:
@@ -473,10 +500,9 @@ class MaskEditService:
             if mask_layer is not None:
                 self._renders.invalidate_layer(mask_layer)
             self._mask_changed(mask_id, QRect())
-        if mask_layer is not None and mask_layer.surface.bounds != bounds_before:
+        if _command_changes_structure(change):
             self._structure_changed()
         self._undo_changed(mask_id)
-        return True
 
     def undo(self) -> bool:
         """Undo the most recent mask change tracked for the active layer."""
@@ -604,7 +630,7 @@ class MaskEditService:
     def apply_mask_surface(
         self,
         mask_id: uuid.UUID,
-        snapshot: MaskSurfaceSnapshot,
+        snapshot: CoverageSnapshot,
     ) -> bool:
         """Commit one complete policy-aware surface edit and invalidate geometry."""
         layer_before = self._get_layer(mask_id)

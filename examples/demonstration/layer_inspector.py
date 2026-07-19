@@ -33,7 +33,7 @@ _COORDINATE_LIMIT = 1_000_000_000
 
 
 class RasterLayerInspector(QDockWidget):
-    """Let demo users inspect and resize active mask-backed raster layers."""
+    """Let demo users select, inspect, and resize editable raster layers."""
 
     def __init__(self, qpane: QPane, parent: QWidget | None = None) -> None:
         """Build the inspector and subscribe only to QPane's public contract."""
@@ -48,31 +48,40 @@ class RasterLayerInspector(QDockWidget):
         self.refresh()
 
     def refresh(self, *_args: object) -> None:
-        """Refresh the selectable mask layers and their raster surface state."""
-        selected_mask_id = self._selected_mask_id()
-        active_mask_id = self._qpane.activeMaskID()
-        masks = self._qpane.listMasksForImage()
-        self._layers = {
-            info.mask_id: (info.scene_id, info.layer_id)
-            for info in masks
-            if info.scene_id is not None and info.layer_id is not None
-        }
-        preferred = (
-            selected_mask_id
-            if selected_mask_id in self._layers
-            else (
-                active_mask_id
-                if active_mask_id in self._layers
-                else next(iter(self._layers), None)
+        """Refresh editable layers from the active public scene snapshot."""
+        selected_layer_id = self._selected_layer_id()
+        selected = self._qpane.selectedLayer()
+        scene = self._qpane.currentScene()
+        editable_layers = (
+            ()
+            if scene is None
+            else tuple(
+                layer
+                for layer in scene.layers
+                if layer.source_kind in {"mask", "raster"}
             )
         )
+        self._layers = {
+            layer.layer_id: (scene.scene_id, layer.layer_id)
+            for layer in editable_layers
+            if scene is not None
+        }
+        preferred = selected_layer_id
+        if preferred not in self._layers:
+            preferred = None if selected is None else selected.layer_id
+        if preferred not in self._layers:
+            preferred = next(iter(self._layers), None)
         self._layer_combo.blockSignals(True)
         self._layer_combo.clear()
-        for index, info in enumerate(masks, start=1):
-            if info.mask_id not in self._layers:
-                continue
-            label = info.label or f"Mask {index}"
-            self._layer_combo.addItem(label, info.mask_id)
+        kind_counts = {"mask": 0, "raster": 0}
+        for layer in editable_layers:
+            kind_counts[layer.source_kind] += 1
+            fallback = (
+                f"Mask {kind_counts['mask']}"
+                if layer.source_kind == "mask"
+                else f"Paint {kind_counts['raster']}"
+            )
+            self._layer_combo.addItem(layer.label or fallback, layer.layer_id)
         if preferred is not None:
             combo_index = self._layer_combo.findData(preferred)
             self._layer_combo.setCurrentIndex(combo_index)
@@ -123,25 +132,33 @@ class RasterLayerInspector(QDockWidget):
 
     def _connect_signals(self) -> None:
         """Connect host controls and public QPane state notifications."""
-        self._layer_combo.currentIndexChanged.connect(self._refresh_state)
+        self._layer_combo.currentIndexChanged.connect(self._activate_selected_layer)
         self._policy_combo.currentIndexChanged.connect(self._apply_policy)
         self._apply_button.clicked.connect(self._apply_bounds)
         self._pad_button.clicked.connect(self._pad_bounds)
         self._qpane.currentImageChanged.connect(self.refresh)
         self._qpane.catalogChanged.connect(self.refresh)
         self._qpane.sceneChanged.connect(self.refresh)
+        self._qpane.selectedLayerChanged.connect(self.refresh)
         self._qpane.maskUndoStackChanged.connect(self.refresh)
         self._qpane.rasterBoundsRequestCompleted.connect(self._handle_bounds_completion)
 
-    def _selected_mask_id(self) -> uuid.UUID | None:
-        """Return the UUID stored by the selected combo-box row."""
+    def _selected_layer_id(self) -> uuid.UUID | None:
+        """Return the layer UUID stored by the selected combo-box row."""
         value = self._layer_combo.currentData()
         return value if isinstance(value, uuid.UUID) else None
 
     def _selected_layer(self) -> tuple[uuid.UUID, uuid.UUID] | None:
         """Return the selected scene and layer identifiers."""
-        mask_id = self._selected_mask_id()
-        return None if mask_id is None else self._layers.get(mask_id)
+        layer_id = self._selected_layer_id()
+        return None if layer_id is None else self._layers.get(layer_id)
+
+    def _activate_selected_layer(self, _index: int) -> None:
+        """Select the inspector row as the active editor layer."""
+        layer = self._selected_layer()
+        if layer is not None:
+            self._qpane.setSelectedLayer(*layer)
+        self._refresh_state()
 
     def _state(self) -> QPaneRasterSurfaceState | None:
         """Query the selected raster layer through the facade."""

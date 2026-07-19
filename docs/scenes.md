@@ -104,7 +104,7 @@ viewer.setLayerPlacement(scene_id, layer_id, QRectF(24, 12, 320, 320))
 
 Selection respects actual source coverage. Transparent mask pixels fall through to covered layers, while painted mask pixels select the mask. Moving a mask also moves its brush, SAM selection, and component-adjustment coordinate space.
 
-`QPaneLayerInteractionPolicy.selectable` controls whether covered pixels participate in direct selection, and `QPaneLayerInteractionPolicy.movable` separately controls whether placement may change. The normalized `QPaneSceneLayer.interaction` value lets an inspector display the effective policy. Reusable layouts carry the same policy in `QPaneTemplateLayer.interaction`, so scenes composed from templates behave like directly authored scenes.
+`QPaneLayerInteractionPolicy` is the host-owned permission set for direct layer editing. Its `QPaneLayerInteractionPolicy.selectable` field controls whether covered pixels participate in direct selection, and `QPaneLayerInteractionPolicy.movable` separately controls whether placement may change. The normalized `QPaneSceneLayer.interaction` value lets an inspector display the effective policy. Reusable layouts carry the same policy in `QPaneTemplateLayer.interaction`, so scenes composed from templates behave like directly authored scenes.
 
 `QPane.composeScene` stores the request as a layered scene composition and returns the composition UUID. With the default `activate=True`, QPane opens the new composition immediately and fits the scene bounds when `fit_view=True`. With `activate=False`, QPane stores the composition without changing selection; if the request replaces the already active scene composition, QPane still emits `QPane.sceneChanged` because the active normalized scene changed.
 
@@ -293,7 +293,7 @@ Use the row entry to decide what the browser shows.
 
 ## Constraints
 
-Scene layers are catalog-backed image layers in this release. QPane does not accept raw `QImage` scene layers, and hosts should not flatten arranged scenes into temporary images just to render them. Keeping layers catalog-backed is what lets QPane reuse pyramid levels, tiles, culling, diagnostics, and hit testing.
+Scene layers include catalog-backed images, masks, and composition-owned editable RGBA rasters. Hosts should not flatten arranged scenes into temporary images just to render them; retaining source identity lets QPane reuse the normal rendering, culling, diagnostics, hit-testing, editing, and history paths.
 
 While a layered scene composition is active, image-scoped mask and comparison mutation APIs do not operate on a stale catalog selection. Open a generated default image composition or an explicit image composition before editing active image masks or comparison state.
 

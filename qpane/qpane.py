@@ -61,7 +61,6 @@ from .compare import (
     ComparisonChangeKind,
 )
 from .composition import CompositionKind, CompositionRecord, CompositionService
-from .composition.image_scene_adapter import ImageSceneLayerAdapter
 from .composition.mutations import (
     DefaultImageLayerMutationOwner,
     StoredSceneLayerMutationOwner,
@@ -82,21 +81,51 @@ from .core import (
     ToolSignalBinder,
 )
 from .core.diagnostics_broker import Diagnostics
+from .coverage import CoverageCombineMode, CoverageSnapshot
+from .editor import (
+    EditorInteractionCoordinator,
+    EditorMovementInteraction,
+    FloatingLayerPromotionRegistry,
+    LayerSelectionProjectionCache,
+    SelectedPixelMovementController,
+)
 from .masks.coordinates import ActiveMaskLayerCoordinates
+from .masks.descriptor_factory import MaskLayerDescriptorFactory
+from .masks.floating_layers import MaskFloatingLayerOwner
+from .masks.pixel_edits import (
+    MaskLayerPixelMutationOwner,
+    MaskPixelRenderSynchronizer,
+)
 from .masks.source_resolver import MaskLayerSourceResolver
 from .masks.workflow import MaskActivationSyncResult, MaskInfo, Masks
+from .raster.assets import EditableRasterAssetStore
+from .raster.descriptor_factory import EditableRasterLayerDescriptorFactory
+from .raster.floating_layers import EditableRasterFloatingLayerOwner
+from .raster.image_conversion import (
+    numpy_to_qimage_grayscale8,
+    qimage_to_numpy_grayscale8,
+)
+from .raster.layers import (
+    EditableRasterLayerController,
+    EditableRasterSceneMutationOwner,
+)
+from .raster.pixel_edits import EditableRasterPixelMutationOwner
+from .raster.source_resolver import EditableRasterSourceResolver
+from .raster.structure_mutations import EditableRasterStructureMutationOwner
 from .rendering import (
     RenderingPresenter,
     View,
     ViewportZoomMode,
 )
 from .rendering.coordinates import PanelHitTest
-from .scene.identity import base_image_layer_id
-from .scene.mask_adapter import MaskCompositionSceneAdapter
-from .scene.model import LayerInteractionPolicy, LayerPlacement
+from .scene.layer_assembly import CompositionLayerSceneAssembler
+from .scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
+from .scene.model import LayerDescriptor, LayerInteractionPolicy, LayerPlacement
 from .scene.movement import SceneLayerMovementController
 from .scene.movement_interaction import SceneLayerMovementInteraction
 from .scene.mutations import SceneMutationCoordinator
+from .scene.pixel_edits import LayerPixelMutationCoordinator
+from .scene.pixel_owners import LayerPixelOwnerRegistry
 from .scene.placement_preview import SceneLayerPlacementPreview
 from .scene.raster import RasterBounds
 from .scene.raster_mutations import (
@@ -109,7 +138,13 @@ from .scene.registry import (
     SceneProviderRegistry,
 )
 from .scene.render_plan import RasterLayerRenderItem, SceneLayerHitTestResult
-from .scene.selection import SceneLayerSelectionController
+from .scene.sources import (
+    CatalogImageSource,
+    EditableRasterSource,
+    MaskLayerSource,
+    PlaceholderImageSource,
+)
+from .selection import PixelSelectionEdit, PixelSelectionService, PixelSelectionState
 from .swap import SwapDelegate
 from .tools import Tools
 from .tools.base import ExtensionTool, ExtensionToolSignals
@@ -122,8 +157,13 @@ from .types import (
     ComparisonState,
     CompositionSnapshot,
     DiagnosticsDomain,
+    FloatingPixelMode,
     LinkedGroup,
+    PixelSelectionMode,
+    QPaneFloatingPixelEditState,
     QPaneLayerInteractionPolicy,
+    QPaneLayerSelectionState,
+    QPanePixelSelectionState,
     QPaneRasterSurfaceState,
     QPaneScene,
     QPaneSceneHit,
@@ -137,6 +177,7 @@ from .ui import (
     CursorBuilder,
 )
 from .ui.diagnostics_controller import DiagnosticsOverlayController
+from .ui.editor_overlays import EditorOverlayPresenter
 
 if TYPE_CHECKING:
     from .autosave import AutosaveManager
@@ -161,6 +202,9 @@ class QPane(QWidget):
     CONTROL_MODE_MOVE = Tools.CONTROL_MODE_MOVE
     CONTROL_MODE_DRAW_BRUSH = Tools.CONTROL_MODE_DRAW_BRUSH
     CONTROL_MODE_SMART_SELECT = Tools.CONTROL_MODE_SMART_SELECT
+    CONTROL_MODE_SELECT_RECTANGLE = Tools.CONTROL_MODE_SELECT_RECTANGLE
+    CONTROL_MODE_SELECT_ELLIPSE = Tools.CONTROL_MODE_SELECT_ELLIPSE
+    CONTROL_MODE_SELECT_LASSO = Tools.CONTROL_MODE_SELECT_LASSO
     imageLoaded: Signal = Signal(Path)
     """Emit the current image path after a swap applies; empty when unknown."""
     zoomChanged: Signal = Signal(float)
@@ -192,7 +236,13 @@ class QPane(QWidget):
     sceneChanged: Signal = Signal(object)
     """Emit the normalized active scene snapshot or ``None`` when it changes."""
     sceneEditHistoryChanged: Signal = Signal(bool, bool)
-    """Emit scene placement undo and redo availability after history changes."""
+    """Emit composition-edit undo and redo availability after history changes."""
+    pixelSelectionChanged: Signal = Signal(object)
+    """Emit active composition pixel-selection state after it changes."""
+    floatingPixelEditChanged: Signal = Signal(object)
+    """Emit unresolved floating-pixel state or ``None`` after it changes."""
+    selectedLayerChanged: Signal = Signal(object)
+    """Emit selected scene-layer identity or ``None`` after it changes."""
     rasterBoundsRequestCompleted: Signal = Signal(
         uuid.UUID, uuid.UUID, uuid.UUID, bool, str
     )
@@ -246,26 +296,47 @@ class QPane(QWidget):
         self._view: View | None = None
         self._catalog: Catalog | None = None
         self._composition_service: CompositionService | None = None
+        self._editable_raster_assets: EditableRasterAssetStore | None = None
+        self._editable_raster_layers: EditableRasterLayerController | None = None
+        self._pixel_selection: PixelSelectionService | None = None
         self.compare_service: CompareService | None = None
         self._compare_interaction: CompareDividerInteraction | None = None
         self._composition_scene_adapter: CompositionSceneAdapter | None = None
         self._scene_mutations: SceneMutationCoordinator | None = None
         self._raster_mutations: RasterLayerMutationCoordinator | None = None
+        self._layer_pixel_mutations: LayerPixelMutationCoordinator | None = None
+        self._layer_pixel_owners: LayerPixelOwnerRegistry | None = None
+        self._editor_interaction: EditorInteractionCoordinator | None = None
+        self._selection_layer_projections = LayerSelectionProjectionCache()
+        self._floating_layer_promotions = FloatingLayerPromotionRegistry()
+        self._raster_floating_layer_owner: EditableRasterFloatingLayerOwner | None = (
+            None
+        )
+        self._mask_floating_layer_owner: MaskFloatingLayerOwner | None = None
+        self._selected_pixel_movement: SelectedPixelMovementController | None = None
+        self._editor_movement_interaction: EditorMovementInteraction | None = None
+        self._last_pixel_move_dirty_rect: QRectF | None = None
+        self._last_floating_pixel_state: QPaneFloatingPixelEditState | None = None
         self._mask_raster_mutation_owner = None
+        self._mask_pixel_edit_owner: MaskLayerPixelMutationOwner | None = None
         self._raster_request_public_scenes: dict[uuid.UUID, uuid.UUID] = {}
-        self._scene_selection = SceneLayerSelectionController()
+        self._scene_selection = SceneLayerSelectionController(
+            self._handle_selected_layer_changed
+        )
         self._scene_placement_preview = SceneLayerPlacementPreview()
         self._scene_movement: SceneLayerMovementController | None = None
         self._scene_movement_interaction: SceneLayerMovementInteraction | None = None
         self._active_mask_coordinates: ActiveMaskLayerCoordinates | None = None
         self._scene_provider_registry: SceneProviderRegistry | None = None
         self._source_resolver_registry: LayerSourceResolverRegistry | None = None
-        self._mask_scene_provider: MaskCompositionSceneAdapter | None = None
+        self._composition_layer_assembler: CompositionLayerSceneAssembler | None = None
+        self._mask_descriptor_factory: MaskLayerDescriptorFactory | None = None
         self._mask_source_resolver: MaskLayerSourceResolver | None = None
         self._masks: Masks | None = None
         self._tools: Tools | None = None
         self._is_blank = False
         self._diagnostics_overlay_controller: DiagnosticsOverlayController | None = None
+        self._editor_overlays = EditorOverlayPresenter(self.update, self)
         self._tracked_window: QWindow | None = None
         self._tracked_screen: QScreen | None = None
         self._tracked_screen_connections: set[str] = set()
@@ -743,6 +814,7 @@ class QPane(QWidget):
             LayerInteractionPolicy(
                 selectable=policy.selectable,
                 movable=policy.movable,
+                pixel_editable=policy.pixel_editable,
             ),
         )
         if result.changed:
@@ -780,6 +852,8 @@ class QPane(QWidget):
             raise TypeError("layer_id must be a UUID")
         if not isinstance(placement, QRectF):
             raise TypeError("placement must be a QRectF")
+        if not self._anchor_floating_pixels_before_edit():
+            return False
         resolved_scene_id = self._resolve_public_scene_id(scene_id)
         result = self.sceneMutationCoordinator().set_placement(
             resolved_scene_id,
@@ -794,6 +868,39 @@ class QPane(QWidget):
         if result.changed:
             self._publish_scene_placement_change()
         return result.changed
+
+    def selectedLayer(self) -> QPaneLayerSelectionState | None:
+        """Return selected layer identity in the active scene, if any."""
+        selection = self.editorInteraction().selected_layer
+        if selection is None:
+            return None
+        current_scene = self.currentScene()
+        return QPaneLayerSelectionState(
+            scene_id=(
+                selection.scene_id if current_scene is None else current_scene.scene_id
+            ),
+            layer_id=selection.layer_id,
+        )
+
+    def setSelectedLayer(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
+        """Select one policy-enabled layer in the active scene."""
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        if not self._anchor_floating_pixels_before_edit():
+            return False
+        return self.editorInteraction().select_layer(
+            self._resolve_public_scene_id(scene_id),
+            layer_id,
+        )
+
+    def clearSelectedLayer(self) -> bool:
+        """Clear selected-layer identity without changing pixel selection."""
+        return bool(
+            self._anchor_floating_pixels_before_edit()
+            and self.editorInteraction().clear_selected_layer()
+        )
 
     def rasterSurfaceState(
         self,
@@ -832,6 +939,87 @@ class QPane(QWidget):
             pending_request_id=state.pending_request_id,
         )
 
+    def addEditableRasterLayer(
+        self,
+        image: QImage,
+        *,
+        placement: QRectF | None = None,
+        label: str | None = None,
+        interaction: QPaneLayerInteractionPolicy | None = None,
+        extent_policy: RasterExtentPolicy = RasterExtentPolicy.FIXED,
+    ) -> uuid.UUID | None:
+        """Add a detached editable color raster to the active image scene.
+
+        Args:
+            image: Non-null color raster copied into composition-owned storage.
+            placement: Optional scene placement; source dimensions are used by default.
+            label: Optional host-facing layer label.
+            interaction: Host policy for selection, movement, and pixel editing.
+            extent_policy: Fixed or expanding future write behavior.
+
+        Returns:
+            The stable layer UUID, or ``None`` when no catalog image is active.
+        """
+        if not isinstance(image, QImage):
+            raise TypeError("image must be a QImage")
+        if image.isNull():
+            raise ValueError("image must not be null")
+        if placement is not None and not isinstance(placement, QRectF):
+            raise TypeError("placement must be a QRectF or None")
+        if label is not None and not isinstance(label, str):
+            raise TypeError("label must be a string or None")
+        if interaction is not None and not isinstance(
+            interaction, QPaneLayerInteractionPolicy
+        ):
+            raise TypeError("interaction must be QPaneLayerInteractionPolicy or None")
+        if not isinstance(extent_policy, RasterExtentPolicy):
+            raise TypeError("extent_policy must be RasterExtentPolicy")
+        controller = self._editable_raster_layers
+        if controller is None:
+            return None
+        normalized_interaction = interaction or QPaneLayerInteractionPolicy(
+            selectable=True,
+            movable=True,
+            pixel_editable=True,
+        )
+        layer_id = controller.add(
+            image,
+            placement=placement,
+            interaction=LayerInteractionPolicy(
+                selectable=normalized_interaction.selectable,
+                movable=normalized_interaction.movable,
+                pixel_editable=normalized_interaction.pixel_editable,
+            ),
+            label=label,
+            extent_policy=extent_policy,
+        )
+        if layer_id is not None:
+            self._handle_internal_scene_content_changed()
+            self._emit_scene_changed()
+        return layer_id
+
+    def editableRasterLayerImage(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QImage | None:
+        """Return detached pixels for an active editable raster layer."""
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        resolved_scene_id = self._resolve_public_scene_id(scene_id)
+        resolved = self.sceneMutationCoordinator().find_layer(
+            lambda layer: (
+                layer.scene_id == resolved_scene_id and layer.layer_id == layer_id
+            )
+        )
+        if resolved is None or not isinstance(resolved[1].source, EditableRasterSource):
+            return None
+        assets = self._editable_raster_assets
+        asset = None if assets is None else assets.get(resolved[1].source.raster_id)
+        return None if asset is None else asset.surface.snapshot_qimage()
+
     def setRasterExtentPolicy(
         self,
         scene_id: uuid.UUID,
@@ -860,6 +1048,8 @@ class QPane(QWidget):
             raise TypeError("layer_id must be a UUID")
         if not isinstance(policy, RasterExtentPolicy):
             raise TypeError("policy must be RasterExtentPolicy")
+        if not self._anchor_floating_pixels_before_edit():
+            return False
         coordinator = self._raster_mutations
         return bool(
             coordinator is not None
@@ -901,6 +1091,8 @@ class QPane(QWidget):
             raise TypeError("bounds must be a QRect")
         if bounds.width() <= 0 or bounds.height() <= 0:
             raise ValueError("bounds dimensions must be positive")
+        if not self._anchor_floating_pixels_before_edit():
+            return None
         coordinator = self._raster_mutations
         if coordinator is None:
             return None
@@ -913,38 +1105,230 @@ class QPane(QWidget):
             self._raster_request_public_scenes[request_id] = scene_id
         return request_id
 
-    def sceneEditUndoAvailable(self) -> bool:
-        """Return whether the active scene has a layer-placement undo command."""
+    def pixelSelectionState(self) -> QPanePixelSelectionState | None:
+        """Return the active composition's detached pixel-selection state."""
+        scene_id = self._active_resolved_scene_id()
+        if scene_id is None:
+            return None
+        return self._public_pixel_selection_state(
+            self.editorInteraction().pixel_selection_state(scene_id)
+        )
+
+    def setPixelSelection(
+        self,
+        coverage: QImage,
+        bounds: QRect,
+        mode: PixelSelectionMode = PixelSelectionMode.REPLACE,
+    ) -> bool:
+        """Combine grayscale coverage into the active composition selection.
+
+        Args:
+            coverage: Grayscale or color image interpreted as selection coverage.
+            bounds: Scene-coordinate bounds occupied by ``coverage``.
+            mode: Replacement, addition, subtraction, or intersection behavior.
+
+        Returns:
+            True when active selection state changed.
+
+        Raises:
+            TypeError: If inputs use unsupported public types.
+            ValueError: If coverage is null or dimensions do not match bounds.
+        """
+        if not isinstance(coverage, QImage):
+            raise TypeError("coverage must be a QImage")
+        if not isinstance(bounds, QRect):
+            raise TypeError("bounds must be a QRect")
+        if not isinstance(mode, PixelSelectionMode):
+            raise TypeError("mode must be PixelSelectionMode")
+        if coverage.isNull():
+            raise ValueError("coverage must not be null")
+        if (
+            coverage.size() != bounds.size()
+            or bounds.width() <= 0
+            or bounds.height() <= 0
+        ):
+            raise ValueError("coverage dimensions must match positive bounds")
+        scene_id = self._active_resolved_scene_id()
+        if scene_id is None or not self._anchor_floating_pixels_before_edit():
+            return False
+        return self.editorInteraction().commit_pixel_selection(
+            scene_id,
+            CoverageSnapshot(
+                bounds=RasterBounds.from_qrect(bounds),
+                extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
+                pixels=qimage_to_numpy_grayscale8(coverage),
+            ),
+            CoverageCombineMode(mode.value),
+        )
+
+    def clearPixelSelection(self) -> bool:
+        """Clear pixel selection in the active composition."""
         scene_id = self._active_resolved_scene_id()
         return bool(
             scene_id is not None
-            and self.sceneMutationCoordinator().can_undo_placement(scene_id)
+            and self._anchor_floating_pixels_before_edit()
+            and self.editorInteraction().clear_pixel_selection(scene_id)
+        )
+
+    def selectAllPixels(self) -> bool:
+        """Select every pixel inside the active scene's finite canvas bounds."""
+        scene_id = self._active_resolved_scene_id()
+        return bool(
+            scene_id is not None
+            and self._anchor_floating_pixels_before_edit()
+            and self.editorInteraction().select_all_pixels(scene_id)
+        )
+
+    def invertPixelSelection(self) -> bool:
+        """Invert pixel selection inside the active scene's finite canvas bounds."""
+        scene_id = self._active_resolved_scene_id()
+        return bool(
+            scene_id is not None
+            and self._anchor_floating_pixels_before_edit()
+            and self.editorInteraction().invert_pixel_selection(scene_id)
+        )
+
+    def selectLayerCoverage(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        mode: PixelSelectionMode = PixelSelectionMode.REPLACE,
+    ) -> bool:
+        """Use a coverage-producing layer as composition pixel selection."""
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        if not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID")
+        if not isinstance(mode, PixelSelectionMode):
+            raise TypeError("mode must be PixelSelectionMode")
+        if not self._anchor_floating_pixels_before_edit():
+            return False
+        return self.editorInteraction().select_layer_coverage(
+            self._resolve_public_scene_id(scene_id),
+            layer_id,
+            CoverageCombineMode(mode.value),
+        )
+
+    def deleteSelectedPixels(self) -> bool:
+        """Clear selected coverage from the selected policy-enabled raster layer."""
+        return bool(
+            self._anchor_floating_pixels_before_edit()
+            and self.editorInteraction().delete_selected_pixels()
+        )
+
+    def floatingPixelEditState(self) -> QPaneFloatingPixelEditState | None:
+        """Return detached state for the active unresolved floating-pixel edit."""
+        movement = self._selected_pixel_movement
+        if movement is None or not movement.active:
+            return None
+        scene_id = movement.scene_id
+        source_layer_id = movement.source_layer_id
+        if scene_id is None or source_layer_id is None:
+            return None
+        public_scene = self.currentScene()
+        return QPaneFloatingPixelEditState(
+            scene_id=(scene_id if public_scene is None else public_scene.scene_id),
+            source_layer_id=source_layer_id,
+            mode=(
+                FloatingPixelMode.CUT if movement.cut_source else FloatingPixelMode.COPY
+            ),
+            offset=movement.offset,
+            bounds=movement.scene_bounds,
+        )
+
+    def anchorFloatingPixels(
+        self,
+        scene_id: uuid.UUID | None = None,
+        layer_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Resolve floating pixels into their source or a compatible layer.
+
+        Args:
+            scene_id: Optional public destination scene identifier.
+            layer_id: Optional destination layer identifier.
+
+        Returns:
+            True when an unresolved edit was resolved.
+
+        Raises:
+            TypeError: If supplied identifiers are not UUIDs.
+            ValueError: If exactly one destination identifier is supplied.
+        """
+        if (scene_id is None) != (layer_id is None):
+            raise ValueError("scene_id and layer_id must be supplied together")
+        if scene_id is not None and not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID or None")
+        if layer_id is not None and not isinstance(layer_id, uuid.UUID):
+            raise TypeError("layer_id must be a UUID or None")
+        movement = self._editor_movement_interaction
+        if movement is None:
+            return False
+        if scene_id is None:
+            return movement.anchor_floating_pixels()
+        return movement.anchor_floating_pixels_to(
+            self._resolve_public_scene_id(scene_id),
+            layer_id,
+        )
+
+    def promoteFloatingPixels(self, label: str | None = None) -> uuid.UUID | None:
+        """Resolve floating pixels into a newly created compatible layer."""
+        if label is not None and not isinstance(label, str):
+            raise TypeError("label must be a string or None")
+        movement = self._editor_movement_interaction
+        return None if movement is None else movement.promote_floating_pixels(label)
+
+    def cancelFloatingPixels(self) -> bool:
+        """Discard an unresolved floating edit without changing source pixels."""
+        movement = self._selected_pixel_movement
+        return bool(movement is not None and movement.cancel())
+
+    def sceneEditUndoAvailable(self) -> bool:
+        """Return whether the active scene has an undoable composition edit."""
+        movement = self._selected_pixel_movement
+        if movement is not None and movement.active:
+            return True
+        scene_id = self._active_resolved_scene_id()
+        return bool(
+            scene_id is not None
+            and self.compositionService().edit_controller.can_undo(scene_id)
         )
 
     def sceneEditRedoAvailable(self) -> bool:
-        """Return whether the active scene has a layer-placement redo command."""
+        """Return whether the active scene has a redoable composition edit."""
+        movement = self._selected_pixel_movement
+        if movement is not None and movement.active:
+            return False
         scene_id = self._active_resolved_scene_id()
         return bool(
             scene_id is not None
-            and self.sceneMutationCoordinator().can_redo_placement(scene_id)
+            and self.compositionService().edit_controller.can_redo(scene_id)
         )
 
     def undoSceneEdit(self) -> bool:
-        """Undo the latest layer-placement change in the active scene."""
+        """Undo the latest chronological editor change in the active scene."""
+        movement = self._selected_pixel_movement
+        if movement is not None and movement.active:
+            if movement.offset.isNull():
+                return movement.cancel()
+            if not movement.anchor_to_source():
+                return False
         scene_id = self._active_resolved_scene_id()
         if scene_id is None:
             return False
-        result = self.sceneMutationCoordinator().undo_placement(scene_id)
+        result = self.compositionService().edit_controller.undo(scene_id)
         if result.changed:
             self._publish_scene_placement_change()
         return result.changed
 
     def redoSceneEdit(self) -> bool:
-        """Redo the next layer-placement change in the active scene."""
+        """Redo the next chronological editor change in the active scene."""
+        movement = self._selected_pixel_movement
+        if movement is not None and movement.active:
+            return False
         scene_id = self._active_resolved_scene_id()
         if scene_id is None:
             return False
-        result = self.sceneMutationCoordinator().redo_placement(scene_id)
+        result = self.compositionService().edit_controller.redo(scene_id)
         if result.changed:
             self._publish_scene_placement_change()
         return result.changed
@@ -1033,6 +1417,7 @@ class QPane(QWidget):
         current_id: uuid.UUID,
     ):
         """Replace the catalog contents and navigate to ``current_id`` via the facade."""
+        self._cancel_floating_pixels_for_context_change()
         catalog = self.catalog()
         removed_image_ids = tuple(set(catalog.imageIDs()) - set(image_map))
         self._masks_controller.prepare_catalog_image_removal(removed_image_ids)
@@ -1043,16 +1428,21 @@ class QPane(QWidget):
 
     def clearImages(self):
         """Reset the catalog, linked views, and caches before showing the configured placeholder."""
+        self._cancel_floating_pixels_for_context_change()
         catalog = self.catalog()
         self._masks_controller.prepare_catalog_image_removal(tuple(catalog.imageIDs()))
         catalog.clearImages()
+        self._scene_selection.clear()
         if self.compositionService().clear():
+            if self._editable_raster_layers is not None:
+                self._editable_raster_layers.prune_orphaned_assets()
             self._emit_composition_changed()
             self._emit_composition_selection_changed(None)
             self._emit_scene_changed()
 
     def removeImageByID(self, image_id: uuid.UUID):
         """Remove ``image_id`` when present; callers remain responsible for navigation."""
+        self._cancel_floating_pixels_for_context_change()
         catalog = self.catalog()
         self._masks_controller.prepare_catalog_image_removal((image_id,))
         catalog.removeImageByID(image_id)
@@ -1060,6 +1450,7 @@ class QPane(QWidget):
 
     def removeImagesByID(self, image_ids: list[uuid.UUID]):
         """Remove the provided image IDs when present without selecting a fallback."""
+        self._cancel_floating_pixels_for_context_change()
         catalog = self.catalog()
         self._masks_controller.prepare_catalog_image_removal(tuple(image_ids))
         catalog.removeImagesByID(image_ids)
@@ -1071,6 +1462,7 @@ class QPane(QWidget):
         If ``image_id`` is None, the current image is deselected and the qpane
         reverts to its configured fallback state (placeholder or blank).
         """
+        self._cancel_floating_pixels_for_context_change()
         self.interaction.suspend_overlays_for_navigation()
         catalog = self.catalog()
         catalog.setCurrentImageID(image_id)
@@ -1247,6 +1639,7 @@ class QPane(QWidget):
             Emits ``catalogChanged`` with ``maskDeleted`` when removal succeeds.
             Emits ``catalogSelectionChanged`` for the active image when removal succeeds.
         """
+        self._cancel_floating_pixels_for_context_change()
         removed = self._masks_controller.remove_mask_from_image(image_id, mask_id)
         if removed:
             self._emit_catalog_mutation("maskDeleted", affected_ids=(mask_id,))
@@ -1255,6 +1648,7 @@ class QPane(QWidget):
 
     def setActiveMaskID(self, mask_id):
         """Set the active mask for editing while letting the service manage ordering."""
+        self._cancel_floating_pixels_for_context_change()
         self._raise_if_layered_scene_active("set the active mask")
         changed = self._masks_controller.set_active_mask_id(mask_id)
         if changed:
@@ -1295,21 +1689,29 @@ class QPane(QWidget):
 
     def cycleMasksForward(self):
         """Cycle the mask layer stack forward, moving the bottom layer to the top."""
+        self._cancel_floating_pixels_for_context_change()
         self._raise_if_layered_scene_active("cycle masks")
         return self._masks_controller.cycle_masks_forward()
 
     def cycleMasksBackward(self):
         """Cycle the mask layer stack backward, moving the top layer to the bottom."""
+        self._cancel_floating_pixels_for_context_change()
         self._raise_if_layered_scene_active("cycle masks")
         return self._masks_controller.cycle_masks_backward()
 
     def undoMaskEdit(self) -> bool:
         """Undo the last mask edit through the mask workflow."""
+        movement = self._selected_pixel_movement
+        if movement is not None and movement.active:
+            return self.undoSceneEdit()
         self._raise_if_layered_scene_active("undo a mask edit")
         return self._masks_controller.undo_mask_edit()
 
     def redoMaskEdit(self) -> bool:
         """Redo the last reverted mask edit through the mask workflow."""
+        movement = self._selected_pixel_movement
+        if movement is not None and movement.active:
+            return False
         self._raise_if_layered_scene_active("redo a mask edit")
         return self._masks_controller.redo_mask_edit()
 
@@ -1433,11 +1835,34 @@ class QPane(QWidget):
             )
         return coordinator
 
+    def pixelSelectionService(self) -> PixelSelectionService:
+        """Expose the composition-scoped pixel-selection owner internally."""
+        service = self._pixel_selection
+        if service is None:
+            raise AttributeError(
+                "Pixel selection service accessed before initialization"
+            )
+        return service
+
+    def editorInteraction(self) -> EditorInteractionCoordinator:
+        """Expose source-neutral editor interaction coordination internally."""
+        interaction = self._editor_interaction
+        if interaction is None:
+            raise AttributeError("Editor interaction accessed before initialization")
+        return interaction
+
     def sceneLayerMovementInteraction(self) -> SceneLayerMovementInteraction:
         """Expose private panel-to-scene movement adaptation."""
         interaction = self._scene_movement_interaction
         if interaction is None:
             raise AttributeError("Scene layer movement accessed before initialization")
+        return interaction
+
+    def editorMovementInteraction(self) -> EditorMovementInteraction:
+        """Expose private selection-aware movement arbitration."""
+        interaction = self._editor_movement_interaction
+        if interaction is None:
+            raise AttributeError("Editor movement accessed before initialization")
         return interaction
 
     def activeMaskLayerCoordinates(self) -> ActiveMaskLayerCoordinates:
@@ -1477,6 +1902,83 @@ class QPane(QWidget):
         """Invalidate scene pixels and schedule painting for transient placement."""
         self.view().mark_dirty()
         self.update()
+
+    def _refresh_selected_pixel_move_preview(self) -> None:
+        """Invalidate only old/new preview pixels and refresh translated ants."""
+        movement = self._selected_pixel_movement
+        current_dirty = (
+            None if movement is None else self._pixel_move_preview_panel_rect(movement)
+        )
+        dirty = self._last_pixel_move_dirty_rect
+        if current_dirty is not None:
+            dirty = current_dirty if dirty is None else dirty.united(current_dirty)
+        self._last_pixel_move_dirty_rect = current_dirty
+        self.view().mark_dirty(dirty)
+        scene_id = self._active_resolved_scene_id()
+        selection_state = None
+        if movement is not None:
+            selection_state = movement.preview_state
+        if selection_state is None and scene_id is not None:
+            selection_state = self.pixelSelectionService().state(scene_id)
+        self._editor_overlays.set_selection(selection_state)
+        floating_state = self.floatingPixelEditState()
+        if floating_state != self._last_floating_pixel_state:
+            self._last_floating_pixel_state = floating_state
+            self.floatingPixelEditChanged.emit(floating_state)
+            self.sceneEditHistoryChanged.emit(
+                self.sceneEditUndoAvailable(),
+                self.sceneEditRedoAvailable(),
+            )
+        self.update()
+
+    def _anchor_floating_pixels_before_edit(self) -> bool:
+        """Resolve transient content before an incompatible durable edit."""
+        movement = self._selected_pixel_movement
+        return bool(
+            movement is None or not movement.active or movement.anchor_to_source()
+        )
+
+    def _cancel_floating_pixels_for_context_change(self) -> None:
+        """Restore source pixels before abandoning their composition context."""
+        movement = self._selected_pixel_movement
+        if movement is not None:
+            movement.cancel()
+
+    def _pixel_move_preview_panel_rect(
+        self,
+        movement: SelectedPixelMovementController,
+    ) -> QRectF | None:
+        """Return the panel-space union touched by the active pixel preview."""
+        preview = movement.raster_preview
+        scene = self.view().current_scene_descriptor()
+        scene_to_panel = self.view().scene_to_panel_transform()
+        bounds = None if preview is None else preview.coverage.bounds
+        if preview is None or scene is None or scene_to_panel is None or bounds is None:
+            return None
+        layer = next(
+            (
+                candidate
+                for candidate in scene.layers
+                if candidate.layer_id == preview.layer_id
+                and candidate.scene_id == preview.scene_id
+            ),
+            None,
+        )
+        if layer is None or layer.transform is None:
+            return None
+        source = layer.transform.map_bounds(bounds)
+        destination = layer.transform.map_bounds(
+            bounds.translated(preview.delta_x, preview.delta_y)
+        )
+        scene_rect = QRectF(
+            min(source.x, destination.x),
+            min(source.y, destination.y),
+            max(source.x + source.width, destination.x + destination.width)
+            - min(source.x, destination.x),
+            max(source.y + source.height, destination.y + destination.height)
+            - min(source.y, destination.y),
+        )
+        return scene_to_panel.mapRect(scene_rect).adjusted(-2.0, -2.0, 2.0, 2.0)
 
     def sceneProviderRegistry(self) -> SceneProviderRegistry:
         """Expose private scene-provider registration for feature workflows."""
@@ -1624,12 +2126,36 @@ class QPane(QWidget):
         self.layerSourceResolverRegistry().register(
             CatalogLayerSourceResolver(self._image_catalog)
         )
-        self._composition_service = CompositionService()
+        self._composition_service = CompositionService(
+            history_changed=self._handle_composition_edit_history_changed,
+        )
+        self._editable_raster_assets = EditableRasterAssetStore()
+        self._editable_raster_layers = EditableRasterLayerController(
+            assets=self._editable_raster_assets,
+            layers=self._composition_service.image_layers,
+            current_image_id=self._image_catalog.getCurrentId,
+        )
+        self._pixel_selection = PixelSelectionService(
+            changed=self._handle_pixel_selection_changed,
+            record_edit=self._composition_service.edit_controller.record_applied,
+        )
+        self._composition_service.edit_controller.register_handler(
+            PixelSelectionEdit,
+            undo=lambda command: self.pixelSelectionService().undo_edit(command),
+            redo=lambda command: self.pixelSelectionService().redo_edit(command),
+        )
+        self._composition_layer_assembler = CompositionLayerSceneAssembler(
+            layer_instances=self._composition_service.image_layers.layers_for_image,
+            layer_revision=lambda: self._composition_service.image_layers.revision,
+        )
         self.sceneProviderRegistry().register_geometry_adapter(
-            ImageSceneLayerAdapter(
-                layer_instances=self._composition_service.image_layers.layers_for_image,
-                revision_provider=lambda: self._composition_service.image_layers.revision,
-            )
+            self._composition_layer_assembler
+        )
+        self._composition_layer_assembler.register_factory(
+            EditableRasterLayerDescriptorFactory(self._editable_raster_assets)
+        )
+        self.layerSourceResolverRegistry().register(
+            EditableRasterSourceResolver(self._editable_raster_assets)
         )
         view = View(
             qpane=self,
@@ -1640,7 +2166,7 @@ class QPane(QWidget):
         self._view = view
         self._scene_mutations = SceneMutationCoordinator(
             scene_provider=view.current_scene_descriptor,
-            placement_history=self._composition_service.placement_history,
+            edit_controller=self._composition_service.edit_controller,
         )
         self._scene_movement = SceneLayerMovementController(
             self._scene_selection,
@@ -1656,6 +2182,55 @@ class QPane(QWidget):
         )
         self._raster_mutations = RasterLayerMutationCoordinator(
             view.current_scene_descriptor
+        )
+        self._layer_pixel_owners = LayerPixelOwnerRegistry()
+        self._layer_pixel_mutations = LayerPixelMutationCoordinator(
+            scene_mutations=self._scene_mutations,
+            layer_selection=self._scene_selection,
+            pixel_selection=self.pixelSelectionService(),
+            owners=self._layer_pixel_owners,
+            edit_controller=self._composition_service.edit_controller,
+        )
+        self._editor_interaction = EditorInteractionCoordinator(
+            active_scene=view.current_scene_descriptor,
+            scene_mutations=self._scene_mutations,
+            layer_selection=self._scene_selection,
+            pixel_selection=self.pixelSelectionService(),
+            pixel_mutations=self._layer_pixel_mutations,
+            source_resolvers=self.layerSourceResolverRegistry(),
+            selection_projections=self._selection_layer_projections,
+        )
+        raster_floating_owner = EditableRasterFloatingLayerOwner(
+            assets=self._editable_raster_assets,
+            layers=self._composition_service.image_layers,
+            current_image_id=self._image_catalog.getCurrentId,
+            changed=self._handle_raster_structure_changed,
+        )
+        self._floating_layer_promotions.register(raster_floating_owner)
+        self._raster_floating_layer_owner = raster_floating_owner
+        self._selected_pixel_movement = SelectedPixelMovementController(
+            active_scene=view.current_scene_descriptor,
+            scene_mutations=self._scene_mutations,
+            layer_selection=self._scene_selection,
+            pixel_selection=self.pixelSelectionService(),
+            pixel_owners=self._layer_pixel_owners,
+            edits=self._composition_service.edit_controller,
+            selection_projections=self._selection_layer_projections,
+            preview_changed=self._refresh_selected_pixel_move_preview,
+            promotions=self._floating_layer_promotions,
+        )
+        self._editor_movement_interaction = EditorMovementInteraction(
+            pixels=self._selected_pixel_movement,
+            layers=self._scene_movement_interaction,
+            panel_to_scene=view.panel_to_scene_point,
+            refresh_preview=self._refresh_selected_pixel_move_preview,
+        )
+        view.presenter.set_pixel_move_preview_provider(
+            lambda: (
+                None
+                if self._selected_pixel_movement is None
+                else self._selected_pixel_movement.raster_preview
+            )
         )
         self._active_mask_coordinates = ActiveMaskLayerCoordinates(
             active_mask_id=lambda: (
@@ -1680,6 +2255,28 @@ class QPane(QWidget):
         )
         self.sceneMutationCoordinator().register_owner(
             StoredSceneLayerMutationOwner(self._composition_service)
+        )
+        self.sceneMutationCoordinator().register_owner(
+            EditableRasterSceneMutationOwner(
+                self._composition_service.image_layers,
+                self._editable_raster_assets,
+                self._image_catalog.getCurrentId,
+            )
+        )
+        raster_structure_owner = EditableRasterStructureMutationOwner(
+            self._editable_raster_assets,
+            edits=self._composition_service.edit_controller,
+            executor=self.executor,
+            changed=self._handle_raster_structure_changed,
+            completed=self._handle_raster_bounds_completion,
+        )
+        self._raster_mutations.register_owner(raster_structure_owner)
+        self._layer_pixel_owners.register(
+            EditableRasterPixelMutationOwner(
+                self._editable_raster_assets,
+                changed=lambda _bounds: self._handle_internal_scene_content_changed(),
+                structure_changed=self._handle_raster_structure_changed,
+            )
         )
         self._composition_scene_adapter = CompositionSceneAdapter(
             compositions=self._composition_service,
@@ -1823,14 +2420,20 @@ class QPane(QWidget):
             Emits ``catalogChanged`` with ``maskServiceAttached``.
         """
         self._masks_controller.attachMaskService(service)
-        provider = MaskCompositionSceneAdapter(
-            layer_instances=service.layer_instances_for_image,
-            revision_provider=service.scene_provider_revision,
+        service.bindCompositionEdits(self.compositionService().edit_controller)
+        service.setStrokeConstraintProvider(
+            self.editorInteraction().mask_stroke_constraint
+        )
+        factory = MaskLayerDescriptorFactory(
             assets=service.assets,
             renders=service.controller.renders,
+            dynamic_revision=service.scene_provider_revision,
         )
-        self.sceneProviderRegistry().register_geometry_adapter(provider)
-        self._mask_scene_provider = provider
+        assembler = self._composition_layer_assembler
+        if assembler is None:
+            raise RuntimeError("composition layer assembler is unavailable")
+        assembler.register_factory(factory)
+        self._mask_descriptor_factory = factory
         resolver = MaskLayerSourceResolver(
             assets=service.assets,
             renders=service.controller.renders,
@@ -1852,6 +2455,27 @@ class QPane(QWidget):
         if self._raster_mutations is not None:
             self._raster_mutations.register_owner(raster_owner)
         self._mask_raster_mutation_owner = raster_owner
+        render_synchronizer = MaskPixelRenderSynchronizer(
+            service.assets,
+            service.controller.renders,
+            service.updateMaskRegion,
+        )
+        pixel_owner = MaskLayerPixelMutationOwner(
+            service.assets,
+            changed=render_synchronizer.refresh,
+            structure_changed=self._handle_raster_structure_changed,
+        )
+        if self._layer_pixel_owners is not None:
+            self._layer_pixel_owners.register(pixel_owner)
+        self._mask_pixel_edit_owner = pixel_owner
+        mask_floating_owner = MaskFloatingLayerOwner(
+            assets=service.assets,
+            layers=self.compositionService().image_layers,
+            current_image_id=self._image_catalog.getCurrentId,
+            changed=lambda _mask_id: self._handle_raster_structure_changed(),
+        )
+        self._floating_layer_promotions.register(mask_floating_owner)
+        self._mask_floating_layer_owner = mask_floating_owner
         self._emit_catalog_mutation("maskServiceAttached", affected_ids=())
 
     def detachMaskService(self) -> None:
@@ -1860,14 +2484,26 @@ class QPane(QWidget):
         Side effects:
             Emits ``catalogChanged`` with ``maskServiceDetached``.
         """
+        service = self.mask_service
+        if service is not None:
+            service.setStrokeConstraintProvider(None)
         raster_owner = self._mask_raster_mutation_owner
         if raster_owner is not None and self._raster_mutations is not None:
             self._raster_mutations.unregister_owner(raster_owner)
         self._mask_raster_mutation_owner = None
-        provider = self._mask_scene_provider
-        if provider is not None:
-            self.sceneProviderRegistry().unregister_geometry_adapter(provider)
-            self._mask_scene_provider = None
+        pixel_owner = self._mask_pixel_edit_owner
+        if pixel_owner is not None and self._layer_pixel_owners is not None:
+            self._layer_pixel_owners.unregister(pixel_owner)
+        self._mask_pixel_edit_owner = None
+        floating_owner = self._mask_floating_layer_owner
+        if floating_owner is not None:
+            self._floating_layer_promotions.unregister(floating_owner)
+        self._mask_floating_layer_owner = None
+        factory = self._mask_descriptor_factory
+        assembler = self._composition_layer_assembler
+        if factory is not None and assembler is not None:
+            assembler.unregister_factory(factory)
+        self._mask_descriptor_factory = None
         resolver = self._mask_source_resolver
         if resolver is not None:
             self.layerSourceResolverRegistry().unregister(resolver)
@@ -2543,6 +3179,8 @@ class QPane(QWidget):
             path_lookup=self.imagePath,
             size_lookup=lambda image_id: self._image_catalog.getImage(image_id).size(),
         )
+        if self._editable_raster_layers is not None:
+            self._editable_raster_layers.prune_orphaned_assets()
         active = service.active_record()
         current_id = self.catalog().currentImageID()
         if active is None and current_id is not None:
@@ -2578,6 +3216,7 @@ class QPane(QWidget):
         fit_view: bool = True,
     ) -> None:
         """Apply a composition record to catalog selection and comparison state."""
+        self._cancel_floating_pixels_for_context_change()
         if record.kind == CompositionKind.LAYERED_SCENE:
             self._is_blank = False
             self.view().invalidate_content_cache()
@@ -2627,6 +3266,13 @@ class QPane(QWidget):
 
     def _emit_scene_changed(self) -> None:
         """Emit the current normalized scene snapshot."""
+        scene_id = self._active_resolved_scene_id()
+        state = (
+            None
+            if scene_id is None
+            else self.editorInteraction().pixel_selection_state(scene_id)
+        )
+        self._editor_overlays.set_selection(state)
         self.sceneChanged.emit(self._current_scene_snapshot())
         if self._scene_mutations is not None:
             self.sceneEditHistoryChanged.emit(
@@ -2666,49 +3312,69 @@ class QPane(QWidget):
         record = service.active_record()
         if record is None or record.primary_image_id is None:
             return None
-        image = self._image_catalog.getImage(record.primary_image_id)
-        if image is None or image.isNull():
+        resolved = self.view().current_scene_descriptor()
+        if resolved is None:
             return None
-        bounds = QRectF(0.0, 0.0, float(image.width()), float(image.height()))
-        base_layer_id = base_image_layer_id(record.primary_image_id)
-        base_instance = service.image_layers.layer(
-            record.primary_image_id,
-            base_layer_id,
-        )
-        if base_instance is None:
-            placement = bounds
-        else:
-            mapped = base_instance.transform.map_bounds(
-                RasterBounds.from_size(image.size())
-            )
-            placement = QRectF(mapped.x, mapped.y, mapped.width, mapped.height)
-        interaction = (
-            QPaneLayerInteractionPolicy()
-            if base_instance is None
-            else QPaneLayerInteractionPolicy(
-                selectable=base_instance.interaction.selectable,
-                movable=base_instance.interaction.movable,
-            )
-        )
         return QPaneScene(
             composition_id=record.composition_id,
             scene_id=record.composition_id,
             title=record.title,
-            bounds=bounds,
-            layers=(
-                QPaneSceneLayer(
-                    layer_id=base_layer_id,
-                    image_id=record.primary_image_id,
-                    placement=placement,
-                    visible=True,
-                    opacity=1.0,
-                    clip=None,
-                    hit_test=True,
-                    role="base-image",
-                    metadata={},
-                    interaction=interaction,
-                ),
+            bounds=QRectF(
+                resolved.bounds.x,
+                resolved.bounds.y,
+                resolved.bounds.width,
+                resolved.bounds.height,
             ),
+            layers=tuple(
+                self._public_resolved_layer(layer) for layer in resolved.layers
+            ),
+        )
+
+    @staticmethod
+    def _public_resolved_layer(layer: LayerDescriptor) -> QPaneSceneLayer:
+        """Convert one resolved source descriptor into a public layer snapshot."""
+        source = layer.source
+        if isinstance(source, CatalogImageSource):
+            source_kind = "catalog-image"
+            source_id = source.image_id
+            image_id = source.image_id
+        elif isinstance(source, MaskLayerSource):
+            source_kind = "mask"
+            source_id = source.mask_id
+            image_id = None
+        elif isinstance(source, EditableRasterSource):
+            source_kind = "raster"
+            source_id = source.raster_id
+            image_id = None
+        elif isinstance(source, PlaceholderImageSource):
+            source_kind = "placeholder-image"
+            source_id = source.source_id
+            image_id = None
+        else:  # pragma: no cover - closed LayerSource union guard
+            raise TypeError(f"unsupported layer source: {type(source)!r}")
+        placement = layer.placement
+        return QPaneSceneLayer(
+            layer_id=layer.layer_id,
+            image_id=image_id,
+            placement=QRectF(
+                placement.x,
+                placement.y,
+                placement.width,
+                placement.height,
+            ),
+            visible=layer.visible,
+            opacity=layer.opacity,
+            hit_test=layer.hit_test.enabled,
+            role=layer.hit_test.role,
+            metadata={},
+            interaction=QPaneLayerInteractionPolicy(
+                selectable=layer.interaction.selectable,
+                movable=layer.interaction.movable,
+                pixel_editable=layer.interaction.pixel_editable,
+            ),
+            source_kind=source_kind,
+            source_id=source_id,
+            label=layer.label,
         )
 
     def _handle_internal_scene_content_changed(
@@ -2722,6 +3388,86 @@ class QPane(QWidget):
         except RuntimeError:  # pragma: no cover - deleted Qt object during teardown
             return
         self.update()
+
+    def _handle_pixel_selection_changed(self, state: PixelSelectionState) -> None:
+        """Refresh active selection presentation and edit availability."""
+        if state.scene_id != self._active_resolved_scene_id():
+            return
+        self._editor_overlays.set_selection(state)
+        self.pixelSelectionChanged.emit(self._public_pixel_selection_state(state))
+
+    def _handle_composition_edit_history_changed(
+        self,
+        scope_id: uuid.UUID,
+    ) -> None:
+        """Publish undo and redo availability for the active edit scope."""
+        if scope_id != self._active_resolved_scene_id():
+            return
+        self.sceneEditHistoryChanged.emit(
+            self.sceneEditUndoAvailable(),
+            self.sceneEditRedoAvailable(),
+        )
+
+    def _handle_selected_layer_changed(
+        self,
+        _selection: SceneLayerSelection | None,
+    ) -> None:
+        """Publish selected-layer identity and refresh direct-edit feedback."""
+        self.selectedLayerChanged.emit(self.selectedLayer())
+        self.update()
+
+    def _synchronize_active_mask_layer_selection(self) -> None:
+        """Make the actively edited mask the generic selected scene layer."""
+        active_mask_id = self.activeMaskID()
+        scene = self.view().current_scene_descriptor()
+        current = self._scene_selection.current
+        if scene is None:
+            return
+        active_layer = next(
+            (
+                layer
+                for layer in scene.layers
+                if isinstance(layer.source, MaskLayerSource)
+                and layer.source.mask_id == active_mask_id
+                and layer.interaction.selectable
+            ),
+            None,
+        )
+        if active_layer is not None:
+            self._scene_selection.select(scene.scene_id, active_layer.layer_id)
+            return
+        if active_mask_id is not None or current is None:
+            return
+        selected_layer = next(
+            (layer for layer in scene.layers if layer.layer_id == current.layer_id),
+            None,
+        )
+        if selected_layer is not None and isinstance(
+            selected_layer.source,
+            MaskLayerSource,
+        ):
+            self._scene_selection.clear()
+
+    def _public_pixel_selection_state(
+        self,
+        state: PixelSelectionState,
+    ) -> QPanePixelSelectionState:
+        """Convert internal selection coverage to a detached public snapshot."""
+        coverage = state.coverage
+        current_scene = self.currentScene()
+        public_scene_id = (
+            state.scene_id if current_scene is None else current_scene.scene_id
+        )
+        return QPanePixelSelectionState(
+            scene_id=public_scene_id,
+            revision=state.revision,
+            bounds=None if coverage is None else coverage.bounds.to_qrect(),
+            coverage=(
+                None
+                if coverage is None
+                else numpy_to_qimage_grayscale8(coverage.pixels)
+            ),
+        )
 
     def _sync_view_to_scene_bounds(self, *, fit_view: bool) -> None:
         """Refresh viewport geometry after private scene layout changes."""
@@ -2828,6 +3574,13 @@ class QPane(QWidget):
 
     def _draw_interaction_overlays(self, painter: QPainter) -> None:
         """Draw the active tool overlay."""
+        movement = self._editor_movement_interaction
+        self._editor_overlays.draw(
+            painter,
+            self.view().scene_to_panel_transform(),
+            self.view().current_scene_descriptor(),
+            None if movement is None else movement.hovered,
+        )
         self._tools_manager.draw_overlay(painter)
 
     def wheelEvent(self, event: QWheelEvent):

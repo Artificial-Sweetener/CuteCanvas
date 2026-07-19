@@ -18,10 +18,10 @@ from dataclasses import dataclass
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
 
-from ..catalog.image_utils import (
+from ..concurrency import TaskExecutorProtocol, TaskHandle, TaskRejected
+from ..raster.image_conversion import (
     numpy_to_qimage_grayscale8,
 )
-from ..concurrency import TaskExecutorProtocol, TaskHandle, TaskRejected
 from ..scene.raster import RasterBounds
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController

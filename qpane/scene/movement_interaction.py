@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QPointF
 
+from .layer_selection import SceneLayerSelection
 from .movement import SceneLayerMovementController
 from .render_plan import SceneLayerHitTestResult
 
@@ -44,9 +45,38 @@ class SceneLayerMovementInteraction:
         self._panel_to_scene = panel_to_scene
         self._publish_change = publish_change
         self._refresh_preview = refresh_preview
+        self._hovered: SceneLayerSelection | None = None
+
+    @property
+    def hovered(self) -> SceneLayerSelection | None:
+        """Return the move target currently under the pointer."""
+        return self._hovered
+
+    def update_hover(self, panel_point: QPointF) -> bool:
+        """Resolve a movable hover target without changing layer selection."""
+        hit = self._hit_test(panel_point)
+        hovered = (
+            None
+            if hit is None or not self._movement.can_move(hit)
+            else SceneLayerSelection(hit.scene_id, hit.layer_id)
+        )
+        if hovered == self._hovered:
+            return False
+        self._hovered = hovered
+        self._refresh_preview()
+        return True
+
+    def clear_hover(self) -> bool:
+        """Clear move-target feedback without changing layer selection."""
+        if self._hovered is None:
+            return False
+        self._hovered = None
+        self._refresh_preview()
+        return True
 
     def begin(self, panel_point: QPointF) -> bool:
         """Begin movement for the top selectable covered scene layer."""
+        self.clear_hover()
         hit = self._hit_test(panel_point)
         scene_point = self._panel_to_scene(panel_point)
         if hit is None or scene_point is None:
@@ -81,3 +111,11 @@ class SceneLayerMovementInteraction:
         if changed:
             self._refresh_preview()
         return changed
+
+    def nudge(self, delta_x: int, delta_y: int) -> bool:
+        """Commit one keyboard movement for the selected movable layer."""
+        result = self._movement.nudge_selected(delta_x, delta_y)
+        if result is None or not result.changed:
+            return False
+        self._publish_change()
+        return True

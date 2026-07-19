@@ -21,14 +21,16 @@ import numpy as np
 from PySide6.QtGui import QColor
 
 from ..composition.layers import CompositionLayerInstance, CompositionLayerSourceKind
-from ..masks.surface import MaskSurfaceSnapshot
+from ..coverage import CoverageSnapshot
+from ..raster.color_surface import ColorRasterSnapshot
 from ..scene.model import LayerInteractionPolicy
 from ..scene.raster import LayerTransform, RasterBounds, RasterExtentPolicy
 from .model import CompositionArchiveSnapshot
 
 _FORMAT = "qpane-composition"
-_VERSION = 1
+_VERSION = 2
 _MAX_RASTER_PIXELS = 268_435_456
+_MAX_COLOR_RASTER_BYTES = _MAX_RASTER_PIXELS * 4
 
 
 class CompositionArchiveCodec:
@@ -59,6 +61,9 @@ class CompositionArchiveCodec:
                 for mask_id, snapshot in archive.masks.items():
                     with container.open(f"masks/{mask_id}.npy", "w") as stream:
                         np.save(stream, snapshot.pixels, allow_pickle=False)
+                for raster_id, snapshot in archive.rasters.items():
+                    with container.open(f"rasters/{raster_id}.npy", "w") as stream:
+                        np.save(stream, snapshot.pixels, allow_pickle=False)
             os.replace(temporary_path, destination)
             temporary_path = None
         finally:
@@ -76,7 +81,11 @@ class CompositionArchiveCodec:
                 uuid.UUID(mask_id): self._decode_mask(container, mask_id, item)
                 for mask_id, item in manifest["masks"].items()
             }
-        snapshot = CompositionArchiveSnapshot(image_id, layers, masks)
+            rasters = {
+                uuid.UUID(raster_id): self._decode_raster(container, raster_id, item)
+                for raster_id, item in manifest["rasters"].items()
+            }
+        snapshot = CompositionArchiveSnapshot(image_id, layers, masks, rasters)
         self._validate_references(snapshot)
         return snapshot
 
@@ -104,6 +113,19 @@ class CompositionArchiveCodec:
                 for mask_id, snapshot in archive.masks.items()
                 if snapshot.bounds is not None
             },
+            "rasters": {
+                str(raster_id): {
+                    "bounds": [
+                        snapshot.bounds.x,
+                        snapshot.bounds.y,
+                        snapshot.bounds.width,
+                        snapshot.bounds.height,
+                    ],
+                    "extent_policy": snapshot.extent_policy.value,
+                    "pixels": f"rasters/{raster_id}.npy",
+                }
+                for raster_id, snapshot in archive.rasters.items()
+            },
         }
 
     @staticmethod
@@ -128,6 +150,7 @@ class CompositionArchiveCodec:
             "interaction": [
                 layer.interaction.selectable,
                 layer.interaction.movable,
+                layer.interaction.pixel_editable,
             ],
             "role": layer.role,
             "label": layer.label,
@@ -142,8 +165,8 @@ class CompositionArchiveCodec:
         interaction_values = item["interaction"]
         if not isinstance(transform_values, list) or len(transform_values) != 4:
             raise ValueError("layer transform must contain four values")
-        if not isinstance(interaction_values, list) or len(interaction_values) != 2:
-            raise ValueError("layer interaction must contain two values")
+        if not isinstance(interaction_values, list) or len(interaction_values) != 3:
+            raise ValueError("layer interaction must contain three values")
         tint_values = item.get("tint")
         tint = None
         if tint_values is not None:
@@ -162,6 +185,7 @@ class CompositionArchiveCodec:
             interaction=LayerInteractionPolicy(
                 selectable=bool(interaction_values[0]),
                 movable=bool(interaction_values[1]),
+                pixel_editable=bool(interaction_values[2]),
             ),
             role=str(item["role"]),
             label=None if item.get("label") is None else str(item["label"]),
@@ -172,7 +196,7 @@ class CompositionArchiveCodec:
         container: zipfile.ZipFile,
         mask_id: str,
         item: object,
-    ) -> MaskSurfaceSnapshot:
+    ) -> CoverageSnapshot:
         """Validate and reconstruct one mask surface entry."""
         if not isinstance(item, dict):
             raise TypeError("mask entries must be objects")
@@ -191,7 +215,36 @@ class CompositionArchiveCodec:
             raise ValueError("mask pixel payload exceeds archive size limit")
         with container.open(expected_path) as stream:
             pixels = np.load(stream, allow_pickle=False)
-        return MaskSurfaceSnapshot(
+        return CoverageSnapshot(
+            bounds=bounds,
+            extent_policy=RasterExtentPolicy(item["extent_policy"]),
+            pixels=pixels,
+        )
+
+    @staticmethod
+    def _decode_raster(
+        container: zipfile.ZipFile,
+        raster_id: str,
+        item: object,
+    ) -> ColorRasterSnapshot:
+        """Validate and reconstruct one editable color raster payload."""
+        if not isinstance(item, dict):
+            raise TypeError("raster entries must be objects")
+        bounds_values = item["bounds"]
+        if not isinstance(bounds_values, list) or len(bounds_values) != 4:
+            raise ValueError("raster bounds must contain four integers")
+        bounds = RasterBounds(*(int(value) for value in bounds_values))
+        if bounds.width * bounds.height > _MAX_RASTER_PIXELS:
+            raise ValueError("color raster exceeds archive pixel limit")
+        expected_path = f"rasters/{raster_id}.npy"
+        if item["pixels"] != expected_path:
+            raise ValueError("raster pixel path does not match its identifier")
+        info = container.getinfo(expected_path)
+        if info.file_size > _MAX_COLOR_RASTER_BYTES + 4096:
+            raise ValueError("color raster payload exceeds archive size limit")
+        with container.open(expected_path) as stream:
+            pixels = np.load(stream, allow_pickle=False)
+        return ColorRasterSnapshot(
             bounds=bounds,
             extent_policy=RasterExtentPolicy(item["extent_policy"]),
             pixels=pixels,
@@ -210,6 +263,8 @@ class CompositionArchiveCodec:
             raise TypeError("archive layers must be a list")
         if not isinstance(manifest.get("masks"), dict):
             raise TypeError("archive masks must be an object")
+        if not isinstance(manifest.get("rasters"), dict):
+            raise TypeError("archive rasters must be an object")
 
     @staticmethod
     def _validate_references(archive: CompositionArchiveSnapshot) -> None:
@@ -221,6 +276,13 @@ class CompositionArchiveCodec:
         }
         if mask_ids != set(archive.masks):
             raise ValueError("archive mask sources and payloads must match")
+        raster_ids = {
+            layer.source_id
+            for layer in archive.layers
+            if layer.source_kind is CompositionLayerSourceKind.RASTER
+        }
+        if raster_ids != set(archive.rasters):
+            raise ValueError("archive raster sources and payloads must match")
         base_count = sum(
             layer.source_kind is CompositionLayerSourceKind.CATALOG_IMAGE
             and layer.source_id == archive.image_id

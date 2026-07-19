@@ -22,10 +22,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QApplication
 
-from qpane import Config, QPane
+from qpane import Config, QPane, QPaneLayerInteractionPolicy
 from qpane.features import FeatureInstallError
 from qpane.masks import sam_feature
 from qpane.masks.sam_feature import (
@@ -104,7 +105,6 @@ def qpane_with_sam(monkeypatch, qapp):
     )
     raw_catalog = catalog.imageCatalog()
     raw_catalog.getCurrentPath = lambda: Path("image.png")
-    qpane.activeMaskLayerCoordinates().scene_to_source = lambda point: QPoint(point)
     try:
         assert qpane.currentImagePath == Path("image.png")
         yield qpane
@@ -139,9 +139,15 @@ def test_sam_feature_ignores_empty_bbox(monkeypatch, qpane_with_sam, caplog):
     assert calls[-1] == (image_id, valid_bbox, True)
 
 
-def test_sam_feature_component_adjusts_mask(qpane_with_sam):
+def test_sam_feature_component_adjusts_mask_from_fractional_coordinates(
+    qpane_with_sam: QPane,
+) -> None:
     qpane = qpane_with_sam
     adjustments = []
+    qpane.activeMaskLayerCoordinates().scene_to_source = lambda _point: QPointF(
+        1.25,
+        2.75,
+    )
 
     def adjust(mask_id, point, *, grow):
         adjustments.append((mask_id, point, grow))
@@ -151,7 +157,59 @@ def test_sam_feature_component_adjusts_mask(qpane_with_sam):
     qpane._tools_manager.signals.mask_component_adjustment_requested.emit(
         QPoint(1, 2), True
     )
-    assert adjustments == [("mask-1", QPoint(1, 2), True)]
+    assert adjustments == [("mask-1", QPoint(1, 3), True)]
+
+
+def test_sam_component_adjustment_accepts_real_transformed_mask_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+) -> None:
+    """The factory adjustment hook must accept the mapper's QPointF contract."""
+    _stub_sam_service(monkeypatch)
+    qpane = QPane(features=("mask", "sam"), task_executor=StubExecutor())
+    try:
+        image_id = uuid.uuid4()
+        image = QImage(QSize(64, 64), QImage.Format_ARGB32)
+        image.fill(Qt.GlobalColor.white)
+        qpane.setImagesByID(
+            qpane.imageMapFromLists([image], [None], [image_id]),
+            image_id,
+        )
+        mask_id = qpane.createBlankMask(image.size())
+        assert mask_id is not None
+        assert qpane.setActiveMaskID(mask_id)
+        mask = qpane.listMasksForImage()[0]
+        assert mask.scene_id is not None
+        assert mask.layer_id is not None
+        assert qpane.setLayerInteractionPolicy(
+            mask.scene_id,
+            mask.layer_id,
+            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        )
+        assert qpane.setLayerPlacement(
+            mask.scene_id,
+            mask.layer_id,
+            QRectF(0.25, 0.25, 64.0, 64.0),
+        )
+        mapped = qpane.activeMaskLayerCoordinates().scene_to_source(QPoint(10, 10))
+        assert mapped is not None
+        assert not mapped.x().is_integer()
+        adjustments = []
+
+        def adjust(mask_id: uuid.UUID, point: QPoint, *, grow: bool) -> None:
+            """Capture the coordinate accepted by the component tool."""
+            adjustments.append((mask_id, point, grow))
+
+        qpane.mask_service.adjust_mask_component = adjust
+        qpane._tools_manager.signals.mask_component_adjustment_requested.emit(
+            QPoint(10, 10),
+            False,
+        )
+
+        assert adjustments == [(mask_id, mapped.toPoint(), False)]
+    finally:
+        qpane.deleteLater()
+        qapp.processEvents()
 
 
 def test_detach_sam_manager_cancels_pending_predictor_work(

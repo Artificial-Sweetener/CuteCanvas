@@ -35,6 +35,7 @@ class CompositionLayerSourceKind(str, Enum):
 
     CATALOG_IMAGE = "catalog-image"
     MASK = "mask"
+    RASTER = "raster"
 
 
 @dataclass(frozen=True, slots=True)

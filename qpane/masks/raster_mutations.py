@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QObject, QRect, QRunnable, Signal
 
 from ..concurrency import BaseWorker, TaskExecutorProtocol, TaskHandle, TaskRejected
+from ..coverage import CoverageSnapshot, CoverageSurface, reframe_coverage_snapshot
 from ..scene.model import LayerDescriptor, SceneDescriptor
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from ..scene.raster_mutations import RasterBoundsCompletion, RasterLayerState
@@ -25,7 +26,6 @@ from ..scene.sources import MaskLayerSource
 from .edit_service import MaskEditService
 from .mask import MaskAssetStore
 from .render_cache import MaskRenderCache
-from .surface import MaskSurface, MaskSurfaceSnapshot, reframe_mask_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ class MaskRasterMutationOwner:
             self._cancel_pending(request_id, "raster source detached")
         self._latest_by_layer.clear()
 
-    def _surface_for(self, layer: LayerDescriptor) -> MaskSurface | None:
+    def _surface_for(self, layer: LayerDescriptor) -> CoverageSurface | None:
         """Resolve authoritative storage from one supported descriptor."""
         if not isinstance(layer.source, MaskLayerSource):
             return None
@@ -287,7 +287,7 @@ class _MaskReframeWorker(QObject, QRunnable, BaseWorker):
     def __init__(
         self,
         request_id: uuid.UUID,
-        surface: MaskSurface,
+        surface: CoverageSurface,
         bounds: RasterBounds,
     ) -> None:
         """Store immutable request values and the synchronized source handle."""
@@ -298,8 +298,8 @@ class _MaskReframeWorker(QObject, QRunnable, BaseWorker):
         self._surface = surface
         self._bounds = bounds
         self.source_revisions: tuple[int, int] | None = None
-        self.source_snapshot: MaskSurfaceSnapshot | None = None
-        self.result: MaskSurfaceSnapshot | None = None
+        self.source_snapshot: CoverageSnapshot | None = None
+        self.result: CoverageSnapshot | None = None
         self.error: BaseException | None = None
 
     def run(self) -> None:
@@ -316,7 +316,7 @@ class _MaskReframeWorker(QObject, QRunnable, BaseWorker):
             if self.is_cancelled:
                 self.emit_finished(False, payload=self)
                 return
-            self.result = reframe_mask_snapshot(snapshot, self._bounds)
+            self.result = reframe_coverage_snapshot(snapshot, self._bounds)
         except BaseException as exc:  # pragma: no cover - defensive worker boundary
             self.error = exc
             logger.exception("Mask surface reframe failed")

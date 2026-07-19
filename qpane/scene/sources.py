@@ -48,4 +48,14 @@ class MaskLayerSource:
     revision: int
 
 
-LayerSource = CatalogImageSource | MaskLayerSource | PlaceholderImageSource
+@dataclass(frozen=True, slots=True)
+class EditableRasterSource:
+    """Reference an editable color-raster asset by stable identifier."""
+
+    raster_id: uuid.UUID
+    revision: int
+
+
+LayerSource = (
+    CatalogImageSource | EditableRasterSource | MaskLayerSource | PlaceholderImageSource
+)

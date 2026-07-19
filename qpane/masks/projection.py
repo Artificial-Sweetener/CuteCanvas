@@ -16,17 +16,19 @@ from collections.abc import Callable
 import numpy as np
 from PySide6.QtGui import QImage
 
-from ..catalog.image_utils import numpy_to_qimage_grayscale8
+from ..coverage import (
+    CoverageCombineMode,
+    CoverageSnapshot,
+    combine_coverage,
+    normalize_coverage_array,
+    reframe_coverage_snapshot,
+)
+from ..raster.image_conversion import numpy_to_qimage_grayscale8
 from ..scene.model import LayerDescriptor, SceneDescriptor
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from ..scene.sources import MaskLayerSource
 from .image_ops import resize_mask_nearest
 from .mask import MaskAssetStore
-from .surface import (
-    MaskSurfaceSnapshot,
-    normalize_mask_array,
-    reframe_mask_snapshot,
-)
 
 
 class MaskCanvasProjectionService:
@@ -82,7 +84,7 @@ class MaskCanvasProjectionService:
         incoming_mask: np.ndarray,
         *,
         erase: bool,
-    ) -> MaskSurfaceSnapshot | None:
+    ) -> CoverageSnapshot | None:
         """Map a canvas-sized generated mask into source-local authoring storage."""
         scene = self._active_scene()
         layer = self._layer_for_mask(scene, mask_id)
@@ -91,7 +93,7 @@ class MaskCanvasProjectionService:
             return None
         canvas_width = round(scene.bounds.width)
         canvas_height = round(scene.bounds.height)
-        incoming = normalize_mask_array(incoming_mask)
+        incoming = normalize_coverage_array(incoming_mask)
         if incoming.shape != (canvas_height, canvas_width):
             incoming = resize_mask_nearest(
                 incoming,
@@ -129,16 +131,16 @@ class MaskCanvasProjectionService:
             mapped[np.ix_(rows, columns)] = incoming[
                 np.ix_(canvas_y[valid_y], canvas_x[valid_x])
             ]
-        combined = (
-            np.bitwise_and(target.pixels, np.bitwise_not(mapped))
-            if erase
-            else np.bitwise_or(target.pixels, mapped)
+        combined = combine_coverage(
+            target.pixels,
+            mapped,
+            CoverageCombineMode.SUBTRACT if erase else CoverageCombineMode.ADD,
         )
         if target.bounds == snapshot.bounds and np.array_equal(
             combined, snapshot.pixels
         ):
             return None
-        return MaskSurfaceSnapshot(
+        return CoverageSnapshot(
             bounds=target.bounds,
             extent_policy=target.extent_policy,
             pixels=combined,
@@ -146,14 +148,14 @@ class MaskCanvasProjectionService:
 
     @staticmethod
     def _expanded_generated_target(
-        snapshot: MaskSurfaceSnapshot,
+        snapshot: CoverageSnapshot,
         layer: LayerDescriptor,
         incoming: np.ndarray,
         *,
         canvas_x: float,
         canvas_y: float,
         erase: bool,
-    ) -> MaskSurfaceSnapshot:
+    ) -> CoverageSnapshot:
         """Expand an authoring snapshot to generated foreground when policy permits."""
         bounds = snapshot.bounds
         transform = layer.transform
@@ -193,7 +195,7 @@ class MaskCanvasProjectionService:
         )
         if bounds.contains(requested):
             return snapshot
-        return reframe_mask_snapshot(snapshot, bounds.united(requested))
+        return reframe_coverage_snapshot(snapshot, bounds.united(requested))
 
     @staticmethod
     def _layer_for_mask(
@@ -215,7 +217,7 @@ class MaskCanvasProjectionService:
 
 
 def project_mask_snapshot(
-    snapshot: MaskSurfaceSnapshot,
+    snapshot: CoverageSnapshot,
     *,
     layer: LayerDescriptor,
     canvas_x: float,

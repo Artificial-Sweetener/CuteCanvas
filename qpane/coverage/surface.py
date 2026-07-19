@@ -6,7 +6,7 @@
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
 
-"""Thread-safe authoritative pixel surfaces for mask assets."""
+"""Thread-safe authoritative surfaces for grayscale editing coverage."""
 
 from __future__ import annotations
 
@@ -18,13 +18,13 @@ import numpy as np
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QImage
 
-from ..catalog.image_utils import qimage_to_numpy_view_grayscale8
+from ..raster.image_conversion import qimage_to_numpy_view_grayscale8
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 
 
 @dataclass(frozen=True, slots=True)
-class MaskSurfaceSnapshot:
-    """Capture authoritative mask pixels, local bounds, and extent policy."""
+class CoverageSnapshot:
+    """Capture authoritative coverage pixels, local bounds, and extent policy."""
 
     bounds: RasterBounds | None
     extent_policy: RasterExtentPolicy
@@ -32,17 +32,61 @@ class MaskSurfaceSnapshot:
 
     def __post_init__(self) -> None:
         """Validate snapshot geometry and detach writable pixel storage."""
-        pixels = normalize_mask_array(self.pixels)
+        pixels = normalize_coverage_array(self.pixels)
         if self.bounds is None:
             if pixels.size:
                 raise ValueError("null mask bounds require empty pixels")
         elif pixels.shape != (self.bounds.height, self.bounds.width):
             raise ValueError("mask snapshot pixels must match local bounds")
+        pixels.flags.writeable = False
         object.__setattr__(self, "pixels", pixels)
+
+    def translated(self, delta_x: int, delta_y: int) -> CoverageSnapshot:
+        """Return identical coverage shifted in its coordinate space."""
+        bounds = self.bounds
+        return self.with_bounds(
+            None if bounds is None else bounds.translated(delta_x, delta_y),
+        )
+
+    def with_bounds(
+        self,
+        bounds: RasterBounds | None,
+        *,
+        extent_policy: RasterExtentPolicy | None = None,
+    ) -> CoverageSnapshot:
+        """Return immutable pixels with replacement coordinate metadata."""
+        policy = self.extent_policy if extent_policy is None else extent_policy
+        return CoverageSnapshot._adopt_detached(bounds, policy, self.pixels)
+
+    @classmethod
+    def _adopt_detached(
+        cls,
+        bounds: RasterBounds | None,
+        extent_policy: RasterExtentPolicy,
+        pixels: np.ndarray,
+    ) -> CoverageSnapshot:
+        """Adopt storage detached from its surface without another full copy."""
+        if (
+            pixels.dtype != np.uint8
+            or pixels.ndim != 2
+            or not pixels.flags.c_contiguous
+        ):
+            raise ValueError("adopted coverage pixels must be contiguous uint8 storage")
+        if bounds is None:
+            if pixels.size:
+                raise ValueError("null coverage bounds require empty pixels")
+        elif pixels.shape != (bounds.height, bounds.width):
+            raise ValueError("adopted coverage pixels must match local bounds")
+        pixels.flags.writeable = False
+        snapshot = object.__new__(cls)
+        object.__setattr__(snapshot, "bounds", bounds)
+        object.__setattr__(snapshot, "extent_policy", extent_policy)
+        object.__setattr__(snapshot, "pixels", pixels)
+        return snapshot
 
 
 @dataclass(frozen=True, slots=True)
-class WritableMaskRegion:
+class WritableCoverageRegion:
     """Describe the layer-local region accepted for one surface write."""
 
     requested: RasterBounds
@@ -56,8 +100,8 @@ class WritableMaskRegion:
         return self.before_bounds != self.after_bounds
 
 
-def normalize_mask_array(array: np.ndarray | None) -> np.ndarray:
-    """Return a detached contiguous uint8 mask array."""
+def normalize_coverage_array(array: np.ndarray | None) -> np.ndarray:
+    """Return a detached contiguous uint8 coverage array."""
     if array is None:
         return np.zeros((0, 0), dtype=np.uint8)
     mask = np.asarray(array)
@@ -83,10 +127,10 @@ def normalize_mask_array(array: np.ndarray | None) -> np.ndarray:
     return result
 
 
-def reframe_mask_snapshot(
-    snapshot: MaskSurfaceSnapshot,
+def reframe_coverage_snapshot(
+    snapshot: CoverageSnapshot,
     bounds: RasterBounds,
-) -> MaskSurfaceSnapshot:
+) -> CoverageSnapshot:
     """Return ``snapshot`` padded or cropped to layer-local ``bounds``."""
     replacement = np.zeros((bounds.height, bounds.width), dtype=np.uint8)
     current = snapshot.bounds
@@ -104,14 +148,14 @@ def reframe_mask_snapshot(
                 source_y : source_y + overlap.height,
                 source_x : source_x + overlap.width,
             ]
-    return MaskSurfaceSnapshot(
+    return CoverageSnapshot(
         bounds=bounds,
         extent_policy=snapshot.extent_policy,
         pixels=replacement,
     )
 
 
-class MaskSurface:
+class CoverageSurface:
     """Own synchronized grayscale pixels and detached snapshots."""
 
     def __init__(
@@ -123,7 +167,7 @@ class MaskSurface:
     ) -> None:
         """Initialize normalized pixels and their zero-copy Qt view."""
         self._lock = threading.RLock()
-        self._buffer = normalize_mask_array(buffer)
+        self._buffer = normalize_coverage_array(buffer)
         self._bounds = self._normalized_bounds(bounds, self._buffer)
         self._extent_policy = RasterExtentPolicy(extent_policy)
         self._image = self._wrap_buffer(self._buffer)
@@ -133,7 +177,7 @@ class MaskSurface:
         self.structure_generation = 0
 
     @classmethod
-    def from_qimage(cls, image: QImage) -> MaskSurface:
+    def from_qimage(cls, image: QImage) -> CoverageSurface:
         """Build a surface from a detached image snapshot."""
         if image.isNull():
             return cls()
@@ -146,7 +190,7 @@ class MaskSurface:
         return cls(view)
 
     @classmethod
-    def blank(cls, size: QSize) -> MaskSurface:
+    def blank(cls, size: QSize) -> CoverageSurface:
         """Create a zero-filled surface of ``size``."""
         if not size.isValid():
             return cls()
@@ -178,22 +222,22 @@ class MaskSurface:
             self.structure_generation += 1
             return True
 
-    def snapshot(self) -> MaskSurfaceSnapshot:
+    def snapshot(self) -> CoverageSnapshot:
         """Return a detached structural and pixel snapshot."""
         with self._lock:
-            return MaskSurfaceSnapshot(
+            return CoverageSnapshot(
                 bounds=self._bounds,
                 extent_policy=self._extent_policy,
                 pixels=self._buffer,
             )
 
-    def versioned_snapshot(self) -> tuple[int, int, MaskSurfaceSnapshot]:
+    def versioned_snapshot(self) -> tuple[int, int, CoverageSnapshot]:
         """Return content/structure revisions with one atomic detached snapshot."""
         with self._lock:
             return (
                 self.generation,
                 self.structure_generation,
-                MaskSurfaceSnapshot(
+                CoverageSnapshot(
                     bounds=self._bounds,
                     extent_policy=self._extent_policy,
                     pixels=self._buffer,
@@ -258,7 +302,7 @@ class MaskSurface:
 
     def replace_with_array(self, array: np.ndarray) -> None:
         """Replace authoritative pixels and advance content revision."""
-        pixels = normalize_mask_array(array)
+        pixels = normalize_coverage_array(array)
         with self._lock:
             previous_bounds = self._bounds
             origin_x = 0 if self._bounds is None else self._bounds.x
@@ -277,7 +321,7 @@ class MaskSurface:
             self._image = self._wrap_buffer(self._buffer)
             self._mark_changed(structure=self._bounds != previous_bounds)
 
-    def replace_with_snapshot(self, snapshot: MaskSurfaceSnapshot) -> None:
+    def replace_with_snapshot(self, snapshot: CoverageSnapshot) -> None:
         """Replace authoritative structure and pixels from ``snapshot``."""
         with self._lock:
             self._buffer = np.array(snapshot.pixels, copy=True, order="C")
@@ -326,7 +370,7 @@ class MaskSurface:
             self._mark_changed(structure=True)
             return True
 
-    def ensure_writable(self, requested: RasterBounds) -> WritableMaskRegion:
+    def ensure_writable(self, requested: RasterBounds) -> WritableCoverageRegion:
         """Apply extent policy and return the accepted layer-local write region."""
         if not isinstance(requested, RasterBounds):
             raise TypeError("requested must be RasterBounds")
@@ -334,22 +378,49 @@ class MaskSurface:
             before = self._bounds
             if before is None:
                 if self._extent_policy is RasterExtentPolicy.FIXED:
-                    return WritableMaskRegion(requested, None, None, None)
+                    return WritableCoverageRegion(requested, None, None, None)
                 self._reframe_locked(requested)
                 self._mark_changed(structure=True)
-                return WritableMaskRegion(requested, requested, None, self._bounds)
+                return WritableCoverageRegion(requested, requested, None, self._bounds)
             if self._extent_policy is RasterExtentPolicy.FIXED:
-                return WritableMaskRegion(
+                return WritableCoverageRegion(
                     requested,
                     before.intersection(requested),
                     before,
                     before,
                 )
             if before.contains(requested):
-                return WritableMaskRegion(requested, requested, before, before)
+                return WritableCoverageRegion(requested, requested, before, before)
             self._reframe_locked(before.united(requested))
             self._mark_changed(structure=True)
-            return WritableMaskRegion(requested, requested, before, self._bounds)
+            return WritableCoverageRegion(requested, requested, before, self._bounds)
+
+    def expand_with_snapshot(
+        self,
+        requested: RasterBounds,
+    ) -> tuple[WritableCoverageRegion, CoverageSnapshot | None]:
+        """Expand storage while adopting the detached prior buffer for history."""
+        if not isinstance(requested, RasterBounds):
+            raise TypeError("requested must be RasterBounds")
+        with self._lock:
+            before = self._bounds
+            if self._extent_policy is not RasterExtentPolicy.EXPAND_ON_WRITE or (
+                before is not None and before.contains(requested)
+            ):
+                return self.ensure_writable(requested), None
+            old_buffer = self._buffer
+            snapshot = CoverageSnapshot._adopt_detached(
+                before,
+                self._extent_policy,
+                old_buffer,
+            )
+            target = requested if before is None else before.united(requested)
+            self._reframe_locked(target)
+            self._mark_changed(structure=True)
+            return (
+                WritableCoverageRegion(requested, requested, before, self._bounds),
+                snapshot,
+            )
 
     def storage_rect(self, layer_region: RasterBounds) -> RasterBounds | None:
         """Convert a local region into zero-origin storage coordinates."""

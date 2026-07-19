@@ -31,6 +31,7 @@ from .abuse_model import (
     AbuseAction,
     AbuseReport,
     AbuseViolation,
+    EditorWorkflowAction,
     HarnessPoint,
     IdleAction,
     MouseHoverAction,
@@ -45,6 +46,7 @@ from .abuse_model import (
     WaitAction,
     action_to_dict,
 )
+from .editor_workflow import MountedEditorWorkflow
 from .input_driver import QtStrokeDriver
 from .mounted_qpane import MountedQPaneHarness, PresentedMaskFrame
 from .release_probe import ReleaseFrame, ReleaseTransitionProbe
@@ -129,8 +131,20 @@ class MaskAbuseRunner:
             self._run_pen_hover(action)
         elif isinstance(action, MouseHoverAction):
             self._run_mouse_hover(action)
+        elif isinstance(action, EditorWorkflowAction):
+            self._run_editor_workflow()
         else:  # pragma: no cover - closed union guard
             raise TypeError(f"Unsupported abuse action: {type(action).__name__}")
+
+    def _run_editor_workflow(self) -> None:
+        """Require the mounted editor foundation to satisfy its focused invariants."""
+        result = MountedEditorWorkflow(self._harness).run()
+        self._max_feedback_latency_ms = max(
+            self._max_feedback_latency_ms,
+            result.max_latency_ms,
+        )
+        if not result.succeeded:
+            self._fail(result.phase, result.message)
 
     def _run_stroke(self, action: StrokeAction) -> None:
         """Require continuous live feedback and a durable committed stroke."""

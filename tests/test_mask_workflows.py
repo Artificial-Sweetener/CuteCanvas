@@ -28,27 +28,26 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, Qt, QTransfor
 
 from qpane import Config, QPane
 from qpane.catalog import NavigationEvent
-from qpane.catalog.image_utils import (
-    numpy_to_qimage_grayscale8,
-    qimage_to_numpy_view_grayscale8,
-)
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.autosave import AutosaveManager
 from qpane.masks.edit_service import MaskEditService
 from qpane.masks.mask import MaskAssetStore
 from qpane.masks.mask_controller import MaskController
 from qpane.masks.mask_service import MaskService
-from qpane.masks.mask_undo import MaskLayerUndoProvider, MaskUndoProvider
 from qpane.masks.render_coordination import MaskRenderWorkCoordinator
 from qpane.masks.stroke_models import (
     MaskStrokeJobResult,
     MaskStrokePayload,
     MaskStrokeSegmentPayload,
 )
+from qpane.masks.stroke_preview import DecimatedStrokePreview
 from qpane.masks.stroke_render import render_stroke_segments
 from qpane.masks.stroke_worker import MaskStrokeWorker
-from qpane.masks.strokes import _DecimatedStrokeState
 from qpane.masks.workers import MaskSnippetWorker, PrefetchedOverlay
+from qpane.raster.image_conversion import (
+    numpy_to_qimage_grayscale8,
+    qimage_to_numpy_view_grayscale8,
+)
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
@@ -1760,90 +1759,6 @@ def test_brush_single_click_undo(qpane_with_mask, qapp):
     _cleanup_qpane(qpane, qapp)
 
 
-class _TrackingUndoProvider(MaskUndoProvider):
-    def __init__(self) -> None:
-        self.delegate = MaskLayerUndoProvider()
-        self.initialized: list[uuid.UUID] = []
-        self.disposed: list[uuid.UUID] = []
-        self.submitted: list[uuid.UUID] = []
-        self.recorded_applied: list[uuid.UUID] = []
-        self.undos: list[uuid.UUID] = []
-        self.redos: list[uuid.UUID] = []
-        self.limits: list[tuple[uuid.UUID, int]] = []
-
-    def initialize_mask(self, mask_id: uuid.UUID, layer) -> None:
-        self.initialized.append(mask_id)
-        self.delegate.initialize_mask(mask_id, layer)
-
-    def dispose_mask(self, mask_id: uuid.UUID) -> None:
-        self.disposed.append(mask_id)
-        self.delegate.dispose_mask(mask_id)
-
-    def submit(self, mask_id: uuid.UUID, command, limit: int) -> None:
-        self.submitted.append(mask_id)
-        self.delegate.submit(mask_id, command, limit)
-
-    def record_applied(self, mask_id: uuid.UUID, command, limit: int) -> None:
-        self.recorded_applied.append(mask_id)
-        self.delegate.record_applied(mask_id, command, limit)
-
-    def set_limit(self, mask_id: uuid.UUID, limit: int) -> None:
-        self.limits.append((mask_id, limit))
-        self.delegate.set_limit(mask_id, limit)
-
-    def get_state(self, mask_id: uuid.UUID):
-        return self.delegate.get_state(mask_id)
-
-    def undo(self, mask_id: uuid.UUID):
-        change = self.delegate.undo(mask_id)
-        if change is not None:
-            self.undos.append(mask_id)
-        return change
-
-    def redo(self, mask_id: uuid.UUID):
-        change = self.delegate.redo(mask_id)
-        if change is not None:
-            self.redos.append(mask_id)
-        return change
-
-
-def test_mask_service_accepts_custom_undo_provider(qpane_with_mask):
-    qpane, _mask_manager, image_id = qpane_with_mask
-    service = qpane.mask_service
-    provider = _TrackingUndoProvider()
-    service.setUndoProvider(provider)
-    base_image = qpane.catalog().currentImage()
-    assert base_image is not None
-    mask_id = service.createBlankMask(base_image.size())
-    assert mask_id is not None
-    assert mask_id in provider.initialized
-    assert (mask_id, qpane.settings.mask_undo_limit) in provider.limits
-    state = service.getUndoState(mask_id)
-    assert state is not None
-    assert state.undo_depth == 0
-    assert qpane.setActiveMaskID(mask_id)
-    assert service.pushActiveMaskState()
-    updated_image = QImage(base_image.size(), QImage.Format_Grayscale8)
-    updated_image.fill(42)
-    assert service.controller.edits.apply_mask_image(mask_id, updated_image)
-    state_after_apply = service.getUndoState(mask_id)
-    assert state_after_apply is not None
-    assert state_after_apply.undo_depth == 1
-    assert provider.submitted
-    service.undoActiveMaskEdit()
-    assert provider.undos[-1] == mask_id
-    state_after_undo = service.getUndoState(mask_id)
-    assert state_after_undo is not None
-    assert state_after_undo.redo_depth == 1
-    service.redoActiveMaskEdit()
-    assert provider.redos[-1] == mask_id
-    state_after_redo = service.getUndoState(mask_id)
-    assert state_after_redo is not None
-    assert state_after_redo.undo_depth == 1
-    assert qpane.removeMaskFromImage(image_id, mask_id)
-    assert mask_id in provider.disposed
-
-
 def test_qpane_emits_mask_undo_signal(qpane_with_mask, qapp):
     qpane, _mask_manager, _image_id = qpane_with_mask
     service = qpane.mask_service
@@ -2461,7 +2376,7 @@ def test_prefetch_deferred_while_mask_busy(qpane_with_mask):
     controller.renders._prefetched_images.clear()
     controller.renders._prefetched_scaled.clear()
     controller.renders._cache.clear()
-    pipeline._preview_states[mask_id] = _DecimatedStrokeState(
+    pipeline._preview_states[mask_id] = DecimatedStrokePreview(
         mask_id=mask_id,
         stride=1,
     )
@@ -2934,7 +2849,7 @@ def test_durable_worker_preview_matches_live_decimated_preview() -> None:
             erase=False,
         ),
     )
-    state = _DecimatedStrokeState(mask_id=uuid.uuid4(), stride=4)
+    state = DecimatedStrokePreview(mask_id=uuid.uuid4(), stride=4)
 
     def snapshot_region(rect: QRect, stride: int) -> np.ndarray:
         """Return the requested durable preview slice from canonical storage."""
