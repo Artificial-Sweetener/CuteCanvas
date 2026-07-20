@@ -39,6 +39,11 @@ def combine_coverage(
     operation = CoverageCombineMode(mode)
     if operation is CoverageCombineMode.REPLACE:
         return np.array(source, copy=True, order="C")
+    if operation is CoverageCombineMode.INTERSECT and destination.size:
+        if int(destination.min()) == 255:
+            return np.array(source, copy=True, order="C")
+        if int(source.min()) == 255:
+            return np.array(destination, copy=True, order="C")
     destination_wide = destination.astype(np.uint16)
     source_wide = source.astype(np.uint16)
     if operation is CoverageCombineMode.ADD:

@@ -24,7 +24,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QPoint, QPointF
 
 from ..scene.model import SceneDescriptor
-from ..scene.sources import MaskLayerSource
+from .source_reference import MaskAssetReference
 
 
 class ActiveMaskLayerCoordinates:
@@ -91,6 +91,6 @@ class ActiveMaskLayerCoordinates:
             return None
         for layer in scene.layers:
             source = layer.source
-            if isinstance(source, MaskLayerSource) and source.mask_id == mask_id:
+            if isinstance(source, MaskAssetReference) and source.mask_id == mask_id:
                 return scene, layer
         return None

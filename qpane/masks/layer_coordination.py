@@ -16,25 +16,23 @@ from collections.abc import Callable
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor
 
+from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import (
     CompositionLayerInstance,
-    CompositionLayerSourceKind,
-    ImageSceneLayerStore,
+    CompositionLayerStore,
 )
-from ..composition.mutations import ImageSceneMaskMutationOwner
-from ..scene.identity import default_scene_id, mask_layer_id
+from ..composition.mutations import MaskSceneMutationOwner
+from ..scene.affine import LayerTransform
 from ..scene.model import (
     LayerDescriptor,
     LayerInteractionPolicy,
     LayerKind,
-    LayerPlacement,
     SceneDescriptor,
 )
 from ..scene.mutations import SceneMutationCoordinator
-from ..scene.raster import LayerTransform
-from ..scene.sources import MaskLayerSource
 from .mask import MaskAssetStore
 from .mask_controller import MaskController
+from .source_reference import MaskAssetReference
 
 
 class MaskLayerCoordinator:
@@ -43,46 +41,77 @@ class MaskLayerCoordinator:
     def __init__(
         self,
         *,
-        layers: ImageSceneLayerStore,
+        layers: CompositionLayerStore,
+        layer_edits: CompositionLayerEditService,
         assets: MaskAssetStore,
         controller: MaskController,
+        composition_for_image: Callable[[uuid.UUID], uuid.UUID | None],
+        image_for_composition: Callable[[uuid.UUID], uuid.UUID | None],
+        current_composition_id: Callable[[], uuid.UUID | None],
         current_image_id: Callable[[], uuid.UUID | None],
-        remove_mask: Callable[[uuid.UUID, uuid.UUID], bool],
     ) -> None:
         """Bind composition, asset, render, and host lifecycle collaborators."""
         self._layers = layers
+        self._layer_edits = layer_edits
         self._assets = assets
         self._controller = controller
+        self._composition_for_image = composition_for_image
+        self._image_for_composition = image_for_composition
+        self._current_composition_id = current_composition_id
         self._current_image_id = current_image_id
-        self._remove_mask = remove_mask
         self._scene_mutations: SceneMutationCoordinator | None = None
-        self._scene_mutation_owner: ImageSceneMaskMutationOwner | None = None
+        self._scene_mutation_owner: MaskSceneMutationOwner | None = None
 
     @property
-    def store(self) -> ImageSceneLayerStore:
+    def store(self) -> CompositionLayerStore:
         """Return the authoritative composition layer store."""
         return self._layers
 
     def mask_ids_for_image(self, image_id: uuid.UUID) -> list[uuid.UUID]:
         """Return mask asset IDs in composition-owned z-order."""
+        composition_id = self._composition_for_image(image_id)
+        if composition_id is None:
+            return []
         return [
-            instance.source_id
-            for instance in self._layers.layers_for_image(image_id)
-            if instance.source_kind == CompositionLayerSourceKind.MASK
+            instance.source.mask_id
+            for instance in self._layers.layers_for_composition(composition_id)
+            if isinstance(instance.source, MaskAssetReference)
+        ]
+
+    def mask_ids_for_composition(self, composition_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return mask asset IDs in one composition's authoritative z-order."""
+        return [
+            instance.source.mask_id
+            for instance in self._layers.layers_for_composition(composition_id)
+            if isinstance(instance.source, MaskAssetReference)
         ]
 
     def image_ids_for_mask(self, mask_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
         """Return image scenes containing an instance of one mask asset."""
-        return self._layers.image_ids_for_source(
-            CompositionLayerSourceKind.MASK,
-            mask_id,
+        return tuple(
+            image_id
+            for composition_id in self._layers.composition_ids_for_source(
+                MaskAssetReference(mask_id),
+            )
+            if (image_id := self._image_for_composition(composition_id)) is not None
+        )
+
+    def composition_ids_for_mask(self, mask_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
+        """Return compositions containing one or more instances of a mask."""
+        return self._layers.composition_ids_for_source(
+            MaskAssetReference(mask_id),
         )
 
     def instances_for_image(
         self, image_id: uuid.UUID
     ) -> tuple[CompositionLayerInstance, ...]:
         """Return the complete composition-owned image scene stack."""
-        return self._layers.layers_for_image(image_id)
+        composition_id = self._composition_for_image(image_id)
+        return (
+            ()
+            if composition_id is None
+            else self._layers.layers_for_composition(composition_id)
+        )
 
     def instance_for_mask(
         self,
@@ -90,22 +119,29 @@ class MaskLayerCoordinator:
         image_id: uuid.UUID | None = None,
     ) -> CompositionLayerInstance | None:
         """Return one presentation instance for a mask asset."""
-        resolved_image_id = image_id or self._current_image_id()
-        if resolved_image_id is not None:
+        current_composition_id = self._current_composition_id()
+        if current_composition_id is not None:
             instance = self._layers.layer_for_source(
-                resolved_image_id,
-                CompositionLayerSourceKind.MASK,
-                mask_id,
+                current_composition_id,
+                MaskAssetReference(mask_id),
             )
             if instance is not None:
                 return instance
-        image_ids = self.image_ids_for_mask(mask_id)
-        if not image_ids:
+        resolved_image_id = image_id or self._current_image_id()
+        if resolved_image_id is not None:
+            composition_id = self._composition_for_image(resolved_image_id)
+            instance = self._layers.layer_for_source(
+                composition_id or uuid.UUID(int=0),
+                MaskAssetReference(mask_id),
+            )
+            if instance is not None:
+                return instance
+        composition_ids = self.composition_ids_for_mask(mask_id)
+        if not composition_ids:
             return None
         return self._layers.layer_for_source(
-            image_ids[0],
-            CompositionLayerSourceKind.MASK,
-            mask_id,
+            composition_ids[0],
+            MaskAssetReference(mask_id),
         )
 
     def color(self, mask_id: uuid.UUID) -> QColor | None:
@@ -130,43 +166,59 @@ class MaskLayerCoordinator:
         bounds = asset.surface.bounds
         if bounds is None:
             return False
-        placement = LayerPlacement(
-            float(bounds.x),
-            float(bounds.y),
-            float(bounds.width),
-            float(bounds.height),
+        composition_id = self._composition_for_image(image_id)
+        if composition_id is None:
+            return False
+        return self.attach_to_composition(
+            mask_id,
+            composition_id,
+            color=color,
+            opacity=opacity,
+            undoable=False,
         )
-        if not self._layers.layers_for_image(image_id):
-            self._layers.ensure_image(image_id, placement)
-        return self._layers.add_layer(
-            image_id,
-            CompositionLayerInstance(
-                layer_id=mask_layer_id(default_scene_id(image_id), mask_id),
-                source_kind=CompositionLayerSourceKind.MASK,
-                source_id=mask_id,
-                transform=LayerTransform(),
-                opacity=opacity,
-                tint=color,
-                hit_test=True,
-                interaction=LayerInteractionPolicy(),
-                role="mask",
-            ),
+
+    def attach_to_composition(
+        self,
+        mask_id: uuid.UUID,
+        composition_id: uuid.UUID,
+        *,
+        color: QColor,
+        opacity: float = 0.5,
+        undoable: bool = True,
+    ) -> bool:
+        """Create a mask instance in an explicit composition document."""
+        asset = self._assets.get_layer(mask_id)
+        if asset is None or asset.mask_image.isNull() or asset.surface.bounds is None:
+            return False
+        instance = CompositionLayerInstance(
+            layer_id=uuid.uuid4(),
+            source=MaskAssetReference(mask_id),
+            transform=LayerTransform(),
+            opacity=opacity,
+            tint=color,
+            hit_test=True,
+            interaction=LayerInteractionPolicy(),
+            role="mask",
+        )
+        return (
+            self._layer_edits.add(composition_id, instance)
+            if undoable
+            else self._layers.add_layer(composition_id, instance)
         )
 
     def remove(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> bool:
         """Remove one mask instance and prune its asset only when orphaned."""
-        instance = self._layers.layer_for_source(
-            image_id,
-            CompositionLayerSourceKind.MASK,
-            mask_id,
-        )
-        if instance is None or not self._layers.remove_layer(
-            image_id, instance.layer_id
-        ):
+        composition_id = self._composition_for_image(image_id)
+        if composition_id is None:
             return False
-        if not self.image_ids_for_mask(mask_id):
-            self._assets.delete_mask(mask_id)
-        return True
+        instance = self._layers.layer_for_source(
+            composition_id,
+            MaskAssetReference(mask_id),
+        )
+        return instance is not None and self._layers.remove_layer(
+            composition_id,
+            instance.layer_id,
+        )
 
     def reorder_mask_slot(
         self,
@@ -174,17 +226,33 @@ class MaskLayerCoordinator:
         mask_id: uuid.UUID,
         target_mask_index: int,
     ) -> bool:
+        """Adapt image-addressed mask ordering to its generated composition."""
+        composition_id = self._composition_for_image(image_id)
+        return bool(
+            composition_id is not None
+            and self.reorder_mask_slot_in_composition(
+                composition_id,
+                mask_id,
+                target_mask_index,
+            )
+        )
+
+    def reorder_mask_slot_in_composition(
+        self,
+        composition_id: uuid.UUID,
+        mask_id: uuid.UUID,
+        target_mask_index: int,
+    ) -> bool:
         """Move a mask to another mask slot while preserving other layer kinds."""
-        layers = self._layers.layers_for_image(image_id)
+        layers = self._layers.layers_for_composition(composition_id)
         mask_positions = [
             index
             for index, instance in enumerate(layers)
-            if instance.source_kind == CompositionLayerSourceKind.MASK
+            if isinstance(instance.source, MaskAssetReference)
         ]
         instance = self._layers.layer_for_source(
-            image_id,
-            CompositionLayerSourceKind.MASK,
-            mask_id,
+            composition_id,
+            MaskAssetReference(mask_id),
         )
         if (
             instance is None
@@ -193,24 +261,24 @@ class MaskLayerCoordinator:
         ):
             return False
         return self._layers.reorder_layer(
-            image_id,
+            composition_id,
             instance.layer_id,
             mask_positions[target_mask_index],
         )
 
     def scene_provider_revision(self) -> tuple[object, ...]:
         """Return mask order and render revisions for scene compilation."""
-        image_id = self._current_image_id()
-        if image_id is None:
+        composition_id = self._current_composition_id()
+        if composition_id is None:
             return (None, ())
         mask_revisions = tuple(
             (
                 mask_id,
                 self._controller.renders.render_revision(mask_id),
             )
-            for mask_id in self.mask_ids_for_image(image_id)
+            for mask_id in self.mask_ids_for_composition(composition_id)
         )
-        return (image_id, self._layers.revision, mask_revisions)
+        return (composition_id, self._layers.revision, mask_revisions)
 
     def set_scene_mutation_coordinator(
         self, coordinator: SceneMutationCoordinator | None
@@ -222,10 +290,10 @@ class MaskLayerCoordinator:
         self._scene_mutation_owner = None
         if coordinator is None:
             return
-        owner = ImageSceneMaskMutationOwner(
+        owner = MaskSceneMutationOwner(
             self._layers,
-            self._current_image_id,
-            remove_mask=self._remove_mask,
+            self._layer_edits,
+            self._current_composition_id,
             notify_mask_opacity=self._controller.renders.notify_opacity_changed,
             request_mask_revision=lambda mask_id, reason: self.apply_revision_request(
                 mask_id,
@@ -282,16 +350,15 @@ class MaskLayerCoordinator:
         changed = False
         if color is not None:
             color_changed = False
-            for image_id in self.image_ids_for_mask(mask_id):
+            for composition_id in self.composition_ids_for_mask(mask_id):
                 instance = self._layers.layer_for_source(
-                    image_id,
-                    CompositionLayerSourceKind.MASK,
-                    mask_id,
+                    composition_id,
+                    MaskAssetReference(mask_id),
                 )
                 if instance is not None:
                     color_changed = (
                         self._layers.update_presentation(
-                            image_id,
+                            composition_id,
                             instance.layer_id,
                             tint=color,
                         )
@@ -304,16 +371,15 @@ class MaskLayerCoordinator:
             opacity_changed = self.route_opacity(mask_id, opacity)
             if opacity_changed is None:
                 opacity_changed = False
-                for image_id in self.image_ids_for_mask(mask_id):
+                for composition_id in self.composition_ids_for_mask(mask_id):
                     instance = self._layers.layer_for_source(
-                        image_id,
-                        CompositionLayerSourceKind.MASK,
-                        mask_id,
+                        composition_id,
+                        MaskAssetReference(mask_id),
                     )
                     if instance is not None:
                         opacity_changed = (
                             self._layers.update_presentation(
-                                image_id,
+                                composition_id,
                                 instance.layer_id,
                                 opacity=opacity,
                             )
@@ -349,6 +415,6 @@ class MaskLayerCoordinator:
         if self._scene_mutations is None:
             return None
         return self._scene_mutations.find_layer(
-            lambda layer: isinstance(layer.source, MaskLayerSource)
+            lambda layer: isinstance(layer.source, MaskAssetReference)
             and layer.source.mask_id == mask_id
         )

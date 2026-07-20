@@ -13,12 +13,14 @@ from .compositor import compose_selection_coverage, trim_selection_coverage
 from .geometry import SelectionGeometryRasterizer
 from .history import PixelSelectionEdit
 from .model import PixelSelectionState
+from .paint_target import PixelSelectionPaintTargetOwner
 from .projection import LayerCoverageProjector
 from .service import PixelSelectionService
 
 __all__ = [
     "LayerCoverageProjector",
     "PixelSelectionEdit",
+    "PixelSelectionPaintTargetOwner",
     "PixelSelectionService",
     "PixelSelectionState",
     "SelectionBoundaryBuilder",

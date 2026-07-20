@@ -18,14 +18,18 @@ from dataclasses import dataclass
 from PySide6.QtCore import QObject, QRect, QRunnable, Signal
 
 from ..concurrency import BaseWorker, TaskExecutorProtocol, TaskHandle, TaskRejected
-from ..coverage import CoverageSnapshot, CoverageSurface, reframe_coverage_snapshot
+from ..coverage import CoverageStateSnapshot, CoverageSurface
+from ..raster.sparse_grid import (
+    SparseRasterSnapshot,
+    reframe_sparse_raster_snapshot,
+)
 from ..scene.model import LayerDescriptor, SceneDescriptor
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from ..scene.raster_mutations import RasterBoundsCompletion, RasterLayerState
-from ..scene.sources import MaskLayerSource
 from .edit_service import MaskEditService
 from .mask import MaskAssetStore
 from .render_cache import MaskRenderCache
+from .source_reference import MaskAssetReference
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +76,7 @@ class MaskRasterMutationOwner:
 
     def supports_layer(self, layer: LayerDescriptor) -> bool:
         """Return True for mask-backed raster descriptors."""
-        return isinstance(layer.source, MaskLayerSource)
+        return isinstance(layer.source, MaskAssetReference)
 
     def state(
         self,
@@ -115,7 +119,7 @@ class MaskRasterMutationOwner:
         is_current: Callable[[], bool],
     ) -> uuid.UUID | None:
         """Replace prior work for this layer and submit one off-thread reframe."""
-        if self._closed or not isinstance(layer.source, MaskLayerSource):
+        if self._closed or not isinstance(layer.source, MaskAssetReference):
             return None
         surface = self._assets.get_surface(layer.source.mask_id)
         if surface is None:
@@ -176,7 +180,7 @@ class MaskRasterMutationOwner:
 
     def _surface_for(self, layer: LayerDescriptor) -> CoverageSurface | None:
         """Resolve authoritative storage from one supported descriptor."""
-        if not isinstance(layer.source, MaskLayerSource):
+        if not isinstance(layer.source, MaskAssetReference):
             return None
         return self._assets.get_surface(layer.source.mask_id)
 
@@ -249,7 +253,7 @@ class MaskRasterMutationOwner:
                 pending, worker.request_id, False, "source snapshot unavailable"
             )
             return
-        surface.replace_with_snapshot(after)
+        surface.replace_with_state_snapshot(after)
         if self._assets.record_applied_surface(pending.mask_id, before, after):
             self._undo_changed(pending.mask_id)
         layer = self._assets.get_layer(pending.mask_id)
@@ -298,8 +302,8 @@ class _MaskReframeWorker(QObject, QRunnable, BaseWorker):
         self._surface = surface
         self._bounds = bounds
         self.source_revisions: tuple[int, int] | None = None
-        self.source_snapshot: CoverageSnapshot | None = None
-        self.result: CoverageSnapshot | None = None
+        self.source_snapshot: CoverageStateSnapshot | None = None
+        self.result: SparseRasterSnapshot | None = None
         self.error: BaseException | None = None
 
     def run(self) -> None:
@@ -309,14 +313,14 @@ class _MaskReframeWorker(QObject, QRunnable, BaseWorker):
                 self.emit_finished(False, payload=self)
                 return
             content_revision, structure_revision, snapshot = (
-                self._surface.versioned_snapshot()
+                self._surface.versioned_state_snapshot()
             )
             self.source_revisions = (content_revision, structure_revision)
             self.source_snapshot = snapshot
             if self.is_cancelled:
                 self.emit_finished(False, payload=self)
                 return
-            self.result = reframe_coverage_snapshot(snapshot, self._bounds)
+            self.result = reframe_sparse_raster_snapshot(snapshot, self._bounds)
         except BaseException as exc:  # pragma: no cover - defensive worker boundary
             self.error = exc
             logger.exception("Mask surface reframe failed")

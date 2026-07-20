@@ -20,72 +20,149 @@ import uuid
 
 from PySide6.QtGui import QColor
 
+from qpane.catalog.source_reference import CatalogImageReference
 from qpane.composition.layers import (
     CompositionLayerInstance,
-    CompositionLayerSourceKind,
-    ImageSceneLayerStore,
+    CompositionLayerStore,
 )
+from qpane.composition.resource_lifetime import CompositionResourceLifetime
+from qpane.masks.source_reference import MaskAssetReference
+from qpane.scene.affine import LayerTransform
+from qpane.scene.identity import base_image_layer_id
 from qpane.scene.model import (
     LayerInteractionPolicy,
     LayerPlacement,
 )
-from qpane.scene.raster import LayerTransform, RasterBounds
+from qpane.scene.raster import RasterBounds
 
 _PLACEMENT = LayerPlacement(0.0, 0.0, 100.0, 80.0)
+
+
+class _RecordingMaskLifecycleOwner:
+    """Record final mask releases without owning test payloads."""
+
+    source_type = MaskAssetReference
+
+    def __init__(self) -> None:
+        """Initialize an empty release log."""
+        self.released: list[MaskAssetReference] = []
+
+    def release_unreachable(self, source) -> None:
+        """Record one unreachable typed mask source."""
+        assert isinstance(source, MaskAssetReference)
+        self.released.append(source)
 
 
 def _mask_instance(mask_id: uuid.UUID) -> CompositionLayerInstance:
     """Return a representative mask layer instance."""
     return CompositionLayerInstance(
         layer_id=uuid.uuid4(),
-        source_kind=CompositionLayerSourceKind.MASK,
-        source_id=mask_id,
+        source=MaskAssetReference(mask_id),
         opacity=0.5,
         tint=QColor(255, 0, 0),
         role="mask",
     )
 
 
+def _ensure_default(store: CompositionLayerStore, image_id: uuid.UUID) -> None:
+    """Create one representative generated composition stack."""
+    bounds = RasterBounds(0, 0, 100, 80)
+    store.ensure_composition(
+        image_id,
+        (
+            CompositionLayerInstance(
+                layer_id=base_image_layer_id(image_id),
+                source=CatalogImageReference(image_id),
+                transform=LayerTransform.from_placement(bounds, _PLACEMENT),
+                role="base-image",
+            ),
+        ),
+    )
+
+
 def test_layers_reorder_across_source_kinds_and_preserve_instances():
-    store = ImageSceneLayerStore()
+    store = CompositionLayerStore(CompositionResourceLifetime())
     image_id = uuid.uuid4()
-    store.ensure_image(image_id, _PLACEMENT)
+    _ensure_default(store, image_id)
     first = _mask_instance(uuid.uuid4())
     second = _mask_instance(uuid.uuid4())
     assert store.add_layer(image_id, first)
     assert store.add_layer(image_id, second)
     assert store.reorder_layer(image_id, second.layer_id, 0)
-    layers = store.layers_for_image(image_id)
+    layers = store.layers_for_composition(image_id)
     assert [layer.layer_id for layer in layers] == [
         second.layer_id,
         layers[1].layer_id,
         first.layer_id,
     ]
-    assert layers[1].source_kind == CompositionLayerSourceKind.CATALOG_IMAGE
+    assert isinstance(layers[1].source, CatalogImageReference)
 
 
 def test_layer_removal_does_not_delete_other_instances_of_source():
-    store = ImageSceneLayerStore()
+    store = CompositionLayerStore(CompositionResourceLifetime())
     source_id = uuid.uuid4()
     first_image = uuid.uuid4()
     second_image = uuid.uuid4()
-    store.ensure_image(first_image, _PLACEMENT)
-    store.ensure_image(second_image, _PLACEMENT)
+    _ensure_default(store, first_image)
+    _ensure_default(store, second_image)
     first = _mask_instance(source_id)
     second = _mask_instance(source_id)
     store.add_layer(first_image, first)
     store.add_layer(second_image, second)
     assert store.remove_layer(first_image, first.layer_id)
-    assert store.image_ids_for_source(CompositionLayerSourceKind.MASK, source_id) == (
+    assert store.composition_ids_for_source(MaskAssetReference(source_id)) == (
         second_image,
     )
     assert store.layer(second_image, second.layer_id) == second
 
 
-def test_presentation_updates_are_value_owned_by_layer_instance():
-    store = ImageSceneLayerStore()
+def test_one_composition_can_place_the_same_source_more_than_once():
+    """Shared source identity must not collapse independent layer instances."""
+    store = CompositionLayerStore(CompositionResourceLifetime())
     image_id = uuid.uuid4()
-    store.ensure_image(image_id, _PLACEMENT)
+    source_id = uuid.uuid4()
+    _ensure_default(store, image_id)
+    first = _mask_instance(source_id)
+    second = _mask_instance(source_id)
+
+    assert store.add_layer(image_id, first)
+    assert store.add_layer(image_id, second)
+    assert store.layer(image_id, first.layer_id) == first
+    assert store.layer(image_id, second.layer_id) == second
+    assert store.composition_ids_for_source(MaskAssetReference(source_id)) == (
+        image_id,
+    )
+
+    moved = LayerTransform(dx=19.0, dy=7.0)
+    assert store.update_transform(image_id, second.layer_id, moved)
+    assert store.layer(image_id, first.layer_id).transform == LayerTransform()
+    assert store.layer(image_id, second.layer_id).transform == moved
+
+
+def test_shared_source_releases_only_after_its_last_live_instance() -> None:
+    """Removing one of several placements must keep their shared source alive."""
+    lifetime = CompositionResourceLifetime()
+    owner = _RecordingMaskLifecycleOwner()
+    lifetime.register_owner(owner)
+    store = CompositionLayerStore(lifetime)
+    composition_id = uuid.uuid4()
+    source = MaskAssetReference(uuid.uuid4())
+    _ensure_default(store, composition_id)
+    first = _mask_instance(source.mask_id)
+    second = _mask_instance(source.mask_id)
+    assert store.add_layer(composition_id, first)
+    assert store.add_layer(composition_id, second)
+
+    assert store.remove_layer(composition_id, first.layer_id)
+    assert owner.released == []
+    assert store.remove_layer(composition_id, second.layer_id)
+    assert owner.released == [source]
+
+
+def test_presentation_updates_are_value_owned_by_layer_instance():
+    store = CompositionLayerStore(CompositionResourceLifetime())
+    image_id = uuid.uuid4()
+    _ensure_default(store, image_id)
     instance = _mask_instance(uuid.uuid4())
     store.add_layer(image_id, instance)
     assert store.update_presentation(
@@ -103,13 +180,13 @@ def test_presentation_updates_are_value_owned_by_layer_instance():
 
 def test_layer_instances_default_to_locked_scene_interaction():
     """Existing composition layers should not opt into scene selection implicitly."""
-    store = ImageSceneLayerStore()
+    store = CompositionLayerStore(CompositionResourceLifetime())
     image_id = uuid.uuid4()
-    store.ensure_image(image_id, _PLACEMENT)
+    _ensure_default(store, image_id)
     mask = _mask_instance(uuid.uuid4())
     assert store.add_layer(image_id, mask)
 
-    base, stored_mask = store.layers_for_image(image_id)
+    base, stored_mask = store.layers_for_composition(image_id)
     assert base.interaction.selectable is False
     assert base.interaction.movable is False
     assert stored_mask.interaction.selectable is False
@@ -118,9 +195,9 @@ def test_layer_instances_default_to_locked_scene_interaction():
 
 def test_layer_store_replaces_policy_and_transform_as_instance_state():
     """Policy and transform updates should replace only the targeted instance."""
-    store = ImageSceneLayerStore()
+    store = CompositionLayerStore(CompositionResourceLifetime())
     image_id = uuid.uuid4()
-    store.ensure_image(image_id, _PLACEMENT)
+    _ensure_default(store, image_id)
     mask = _mask_instance(uuid.uuid4())
     assert store.add_layer(image_id, mask)
     interaction = LayerInteractionPolicy(selectable=True, movable=True)

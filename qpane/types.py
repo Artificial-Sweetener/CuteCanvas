@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QLineF, QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QTransform
 
+from .placed.model import PlacedAssetMode, PlacedAssetStatus
+
 if TYPE_CHECKING:
     from .masks.workflow import MaskInfo
 __all__ = [
@@ -39,22 +41,31 @@ __all__ = [
     "ComparisonOrientation",
     "ComparisonState",
     "CompositionEntry",
+    "CompositionLayerEntry",
     "CompositionSnapshot",
     "ControlMode",
     "DiagnosticRecord",
     "DiagnosticsDomain",
+    "EditorCapability",
+    "EditorIntent",
     "FloatingPixelMode",
     "LinkedGroup",
     "MaskInfo",
     "MaskSavedPayload",
     "OverlayState",
+    "PaintTargetKind",
     "PixelSelectionMode",
     "PlaceholderScaleMode",
     "QPaneCatalogImageLayerRequest",
+    "QPaneCompositionPolicy",
+    "QPaneEditorOperationState",
+    "QPaneEditorPolicy",
     "QPaneFloatingPixelEditState",
     "QPaneLayerInteractionPolicy",
     "QPaneLayerSelectionState",
+    "QPanePaintTargetState",
     "QPanePixelSelectionState",
+    "QPanePlacedAssetState",
     "QPaneRasterSurfaceState",
     "QPaneScene",
     "QPaneSceneClip",
@@ -112,11 +123,16 @@ class ControlMode(str, Enum):
     CURSOR = "cursor"
     PANZOOM = "panzoom"
     MOVE = "move"
+    TRANSFORM = "transform"
     DRAW_BRUSH = "draw-brush"
     SMART_SELECT = "smart-select"
     SELECT_RECTANGLE = "select-rectangle"
     SELECT_ELLIPSE = "select-ellipse"
     SELECT_LASSO = "select-lasso"
+    VECTOR_SHAPE = "vector-shape"
+    VECTOR_PATH = "vector-path"
+    VECTOR_NODE = "vector-node"
+    VECTOR_TEXT = "vector-text"
 
 
 class RasterExtentPolicy(str, Enum):
@@ -124,6 +140,27 @@ class RasterExtentPolicy(str, Enum):
 
     FIXED = "fixed"
     EXPAND_ON_WRITE = "expand-on-write"
+    UNBOUNDED = "unbounded"
+
+
+class EditorCapability(str, Enum):
+    """Identify independently host-configurable editor capabilities."""
+
+    SELECT_PIXELS = "select-pixels"
+    EDIT_PIXELS = "edit-pixels"
+    PAINT = "paint"
+    MOVE_LAYERS = "move-layers"
+    TRANSFORM_LAYERS = "transform-layers"
+
+
+class EditorIntent(str, Enum):
+    """Identify a public editor operation that can be queried before use."""
+
+    SELECT_PIXELS = "select-pixels"
+    DELETE_PIXELS = "delete-pixels"
+    PAINT = "paint"
+    MOVE = "move"
+    TRANSFORM = "transform"
 
 
 class PixelSelectionMode(str, Enum):
@@ -133,6 +170,13 @@ class PixelSelectionMode(str, Enum):
     ADD = "add"
     SUBTRACT = "subtract"
     INTERSECT = "intersect"
+
+
+class PaintTargetKind(str, Enum):
+    """Public paint destinations owned by the active composition."""
+
+    LAYER = "layer"
+    PIXEL_SELECTION = "pixel-selection"
 
 
 class FloatingPixelMode(str, Enum):
@@ -178,6 +222,14 @@ class ComparisonState:
 
 
 @dataclass(frozen=True, slots=True)
+class QPaneCompositionPolicy:
+    """Host-controlled structural permissions for one composition document."""
+
+    removable: bool = True
+    comparison_enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class CompositionEntry:
     """Public snapshot entry for one composition."""
 
@@ -189,11 +241,14 @@ class CompositionEntry:
     comparison: ComparisonState
     scene_layer_count: int = 0
     scene_bounds: QRectF | None = None
+    layers: tuple[CompositionLayerEntry, ...] = ()
+    policy: QPaneCompositionPolicy = QPaneCompositionPolicy()
 
     def __post_init__(self) -> None:
         """Detach optional Qt geometry from composition snapshots."""
         if self.scene_bounds is not None:
             object.__setattr__(self, "scene_bounds", QRectF(self.scene_bounds))
+        object.__setattr__(self, "layers", tuple(self.layers))
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +349,56 @@ class QPaneLayerInteractionPolicy:
     selectable: bool = False
     movable: bool = False
     pixel_editable: bool = False
+    reorderable: bool = True
+    removable: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class QPaneEditorPolicy:
+    """Compose the editor capabilities enabled by one host application."""
+
+    capabilities: frozenset[EditorCapability] = field(
+        default_factory=lambda: frozenset(EditorCapability)
+    )
+
+    def __post_init__(self) -> None:
+        """Normalize caller iterables into one immutable capability set."""
+        object.__setattr__(
+            self,
+            "capabilities",
+            frozenset(EditorCapability(value) for value in self.capabilities),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class QPaneEditorOperationState:
+    """Describe whether one editor intent can execute against current state."""
+
+    intent: EditorIntent
+    allowed: bool
+    denial: str | None
+    alternatives: tuple[str, ...]
+    scene_id: uuid.UUID | None
+    layer_id: uuid.UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class CompositionLayerEntry:
+    """Detached browser metadata for one ordered composition layer."""
+
+    layer_id: uuid.UUID
+    source_kind: str
+    source_id: uuid.UUID
+    label: str | None
+    role: str
+    visible: bool
+    opacity: float
+    interaction: QPaneLayerInteractionPolicy
+    transform: QTransform
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt transform state from the composition owner."""
+        object.__setattr__(self, "transform", QTransform(self.transform))
 
 
 @dataclass(frozen=True, slots=True)
@@ -475,13 +580,41 @@ class QPaneSceneLayer:
     source_kind: str = "catalog-image"
     source_id: uuid.UUID | None = None
     label: str | None = None
+    transform: QTransform = field(default_factory=QTransform)
 
     def __post_init__(self) -> None:
         """Normalize mutable public layer inputs into QPane-owned values."""
         object.__setattr__(self, "placement", QRectF(self.placement))
+        object.__setattr__(self, "transform", QTransform(self.transform))
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         if self.source_id is None:
             object.__setattr__(self, "source_id", self.image_id)
+
+
+@dataclass(frozen=True, slots=True)
+class QPanePlacedAssetState:
+    """Detached provenance and availability state for one placed layer."""
+
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    asset_id: uuid.UUID
+    mode: PlacedAssetMode
+    status: PlacedAssetStatus
+    source_path: Path | None
+    error: str | None
+    keep_fallback: bool
+    content_revision: int
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class QPanePaintTargetState:
+    """Detached identity and source kind for the active paint destination."""
+
+    scene_id: uuid.UUID
+    kind: PaintTargetKind
+    layer_id: uuid.UUID | None
+    source_kind: str | None
 
 
 @dataclass(frozen=True, slots=True)

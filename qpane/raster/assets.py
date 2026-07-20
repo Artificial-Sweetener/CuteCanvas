@@ -18,6 +18,7 @@ from PySide6.QtGui import QImage
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from .color_surface import ColorRasterSnapshot, ColorRasterSurface
 from .image_conversion import numpy_to_qimage_argb32
+from .sparse_grid import SparseRasterSnapshot
 
 
 @dataclass(slots=True)
@@ -34,6 +35,14 @@ class EditableRasterAssetStore:
     def __init__(self) -> None:
         """Initialize an empty asset collection."""
         self._assets: dict[uuid.UUID, EditableRasterAsset] = {}
+
+    @property
+    def revision(self) -> tuple[tuple[uuid.UUID, int, int], ...]:
+        """Return all source revisions affecting assembled layer descriptors."""
+        return tuple(
+            (raster_id, *asset.surface.revisions())
+            for raster_id, asset in self._assets.items()
+        )
 
     def create(
         self,
@@ -62,20 +71,25 @@ class EditableRasterAssetStore:
     def restore(
         self,
         raster_id: uuid.UUID,
-        snapshot: ColorRasterSnapshot,
+        snapshot: ColorRasterSnapshot | SparseRasterSnapshot,
     ) -> None:
         """Install a validated durable raster snapshot at a stable identity."""
         if not isinstance(raster_id, uuid.UUID):
             raise TypeError("raster_id must be a UUID")
-        if not isinstance(snapshot, ColorRasterSnapshot):
-            raise TypeError("snapshot must be ColorRasterSnapshot")
-        self._assets[raster_id] = EditableRasterAsset(
-            raster_id,
-            ColorRasterSurface(
+        if not isinstance(snapshot, (ColorRasterSnapshot, SparseRasterSnapshot)):
+            raise TypeError("snapshot must be a color raster state snapshot")
+        surface = (
+            ColorRasterSurface.from_sparse_snapshot(snapshot)
+            if isinstance(snapshot, SparseRasterSnapshot)
+            else ColorRasterSurface(
                 numpy_to_qimage_argb32(snapshot.pixels),
                 bounds=snapshot.bounds,
                 extent_policy=snapshot.extent_policy,
-            ),
+            )
+        )
+        self._assets[raster_id] = EditableRasterAsset(
+            raster_id,
+            surface,
         )
 
     def remove(self, raster_id: uuid.UUID) -> bool:

@@ -23,7 +23,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, Signal
+from PySide6.QtCore import QItemSelectionModel, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QSizePolicy,
+    QStackedWidget,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
@@ -40,13 +41,13 @@ from PySide6.QtWidgets import (
 
 from examples.demonstration import demo_text
 from examples.demonstration.catalog.builders import build_catalog_snapshot
+from examples.demonstration.catalog.composition_browser import CompositionBrowser
 from examples.demonstration.catalog.models import (
     CatalogImage,
     CatalogMask,
     CatalogSnapshot,
 )
-from qpane import CompositionEntry, LinkedGroup, QPane
-from qpane import CompositionSnapshot as QPaneCompositionSnapshot
+from qpane import LinkedGroup, QPane, QPaneLayerInteractionPolicy
 
 FocusPolicy = Callable[[str], None]
 SelectionPolicy = Callable[[], bool]
@@ -60,6 +61,8 @@ class CatalogDock(QWidget):
     """Panel that mirrors QPane snapshots and exposes catalog actions."""
 
     visibilityChanged = Signal(bool)
+    layerPropertiesRequested = Signal(object, object)
+    compositionPropertiesRequested = Signal(object)
 
     def __init__(
         self,
@@ -77,7 +80,6 @@ class CatalogDock(QWidget):
         self._on_focus_requested = on_focus_requested
         self._set_status = set_status
         self._snapshot: CatalogSnapshot | None = None
-        self._composition_snapshot: QPaneCompositionSnapshot | None = None
         self._browser_mode = _BROWSER_COMPOSITIONS
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -107,6 +109,10 @@ class CatalogDock(QWidget):
             )
         )
         self._toolbar.addSeparator()
+        self._new_composition_action = self._toolbar.addAction(
+            "New", self._handle_new_composition
+        )
+        self._toolbar.addSeparator()
         self._link_action = self._toolbar.addAction("Link", self._handle_link_selected)
         self._unlink_action = self._toolbar.addAction(
             "Unlink", self._handle_unlink_selected
@@ -133,20 +139,28 @@ class CatalogDock(QWidget):
             QSizePolicy.Policy.Preferred,
         )
         layout.addWidget(self._hint_label)
-        self._tree = CatalogTree(self)
-        layout.addWidget(self._tree)
+        self._browser_stack = QStackedWidget(self)
+        self._composition_browser = CompositionBrowser(
+            qpane,
+            on_focus_requested=on_focus_requested,
+            parent=self._browser_stack,
+        )
+        self._composition_browser.layerPropertiesRequested.connect(
+            self.layerPropertiesRequested
+        )
+        self._composition_browser.compositionPropertiesRequested.connect(
+            self.compositionPropertiesRequested
+        )
+        self._tree = CatalogTree(self._browser_stack)
+        self._browser_stack.addWidget(self._composition_browser)
+        self._browser_stack.addWidget(self._tree)
+        layout.addWidget(self._browser_stack)
         self._tree.itemEntered.connect(self._handle_tree_item_entered)
         self._tree.itemClicked.connect(self._handle_item_clicked)
         self._tree.itemSelectionChanged.connect(self._update_button_states)
         self._tree.customContextMenuRequested.connect(self._handle_context_menu)
         qpane.catalogChanged.connect(self._on_catalog_changed)
         qpane.catalogSelectionChanged.connect(self._handle_selection_changed)
-        qpane.compositionChanged.connect(
-            lambda _snapshot: self._on_catalog_changed(None)
-        )
-        qpane.compositionSelectionChanged.connect(
-            self._handle_composition_selection_changed
-        )
         qpane.linkGroupsChanged.connect(lambda: self._on_catalog_changed(None))
         self._on_catalog_changed(None)
 
@@ -168,6 +182,9 @@ class CatalogDock(QWidget):
         if self._browser_mode == mode:
             return
         self._browser_mode = mode
+        self._browser_stack.setCurrentWidget(
+            self._composition_browser if mode == _BROWSER_COMPOSITIONS else self._tree
+        )
         self._on_catalog_changed(None)
         label = (
             "Composition browser"
@@ -179,7 +196,6 @@ class CatalogDock(QWidget):
     def _handle_selection_changed(self, image_id: uuid.UUID | None) -> None:
         """Sync tree selection when the QPane selection changes."""
         if self._browser_mode == _BROWSER_COMPOSITIONS:
-            self._tree.sync_composition_selection(self._qpane.currentCompositionID())
             return
         if (
             image_id is None
@@ -195,13 +211,6 @@ class CatalogDock(QWidget):
         """Resync the tree selection using the current qpane state."""
         self._handle_selection_changed(self._qpane.currentImageID())
 
-    def _handle_composition_selection_changed(
-        self, composition_id: uuid.UUID | None
-    ) -> None:
-        """Sync tree selection when the active composition changes."""
-        if self._browser_mode == _BROWSER_COMPOSITIONS:
-            self._tree.sync_composition_selection(composition_id)
-
     def showEvent(self, event) -> None:  # type: ignore[override]
         """Notify listeners that the dock has become visible."""
         super().showEvent(event)
@@ -216,10 +225,8 @@ class CatalogDock(QWidget):
         """Update the tree contents from the latest catalog snapshot."""
         snapshot = build_catalog_snapshot(self._qpane)
         self._snapshot = snapshot
-        self._composition_snapshot = self._qpane.getCompositionSnapshot()
         if self._browser_mode == _BROWSER_COMPOSITIONS:
-            self._tree.update_composition_snapshot(self._composition_snapshot)
-            self._tree.sync_composition_selection(self._qpane.currentCompositionID())
+            self._composition_browser.refresh(self._qpane.getCompositionSnapshot())
         else:
             self._tree.update_snapshot(snapshot)
             self._handle_selection_changed(self._qpane.currentImageID())
@@ -243,7 +250,16 @@ class CatalogDock(QWidget):
 
     def _update_button_states(self) -> None:
         """Enable or disable command buttons based on the current selection."""
-        if self._browser_mode == _BROWSER_COMPOSITIONS:
+        composition_mode = self._browser_mode == _BROWSER_COMPOSITIONS
+        self._new_composition_action.setVisible(composition_mode)
+        for action in (
+            self._link_action,
+            self._unlink_action,
+            self._clear_action,
+            self._remove_action,
+        ):
+            action.setVisible(not composition_mode)
+        if composition_mode:
             self._link_action.setEnabled(False)
             self._unlink_action.setEnabled(False)
             self._clear_action.setEnabled(False)
@@ -262,6 +278,57 @@ class CatalogDock(QWidget):
         self._unlink_action.setEnabled(can_unlink)
         self._clear_action.setEnabled(has_links)
         self._remove_action.setEnabled(can_remove)
+
+    def _handle_new_composition(self) -> None:
+        """Create an empty editable document using the visible canvas as a guide."""
+        scene = self._qpane.currentScene()
+        bounds = (
+            QRectF(0.0, 0.0, 1920.0, 1080.0) if scene is None else QRectF(scene.bounds)
+        )
+        count = len(self._qpane.compositionIDs()) + 1
+        self._qpane.createComposition(bounds, title=f"Untitled {count}")
+        self._on_focus_requested("image")
+        self._set_status("Created an empty composition.")
+
+    @staticmethod
+    def _frozen_image_policy() -> QPaneLayerInteractionPolicy:
+        """Return the demo host's policy for ordinary image layers."""
+        return QPaneLayerInteractionPolicy(
+            selectable=True,
+            movable=False,
+            pixel_editable=False,
+            reorderable=True,
+            removable=True,
+        )
+
+    def _create_from_catalog_image(self, image_id: uuid.UUID) -> None:
+        """Seed a new document from one reusable catalog resource."""
+        path = self._qpane.imagePath(image_id)
+        title = None if path is None else path.name
+        self._qpane.createCompositionFromImage(
+            image_id,
+            title=title,
+            interaction=self._frozen_image_policy(),
+        )
+        self._on_focus_requested("image")
+        self._set_status("Created a composition from the catalog image.")
+
+    def _add_catalog_image_to_composition(self, image_id: uuid.UUID) -> None:
+        """Place one catalog resource as a frozen ordinary layer."""
+        path = self._qpane.imagePath(image_id)
+        layer_id = self._qpane.addCatalogImageLayer(
+            image_id,
+            label=None if path is None else path.name,
+            interaction=self._frozen_image_policy(),
+        )
+        if layer_id is None:
+            self._set_status("Open or create a composition before adding an image.")
+            return
+        scene = self._qpane.currentScene()
+        if scene is not None:
+            self._qpane.setSelectedLayer(scene.scene_id, layer_id)
+        self._on_focus_requested("image")
+        self._set_status("Added the catalog image as a composition layer.")
 
     def _handle_link_selected(self) -> None:
         """Create a new link group from the currently selected images."""
@@ -316,11 +383,7 @@ class CatalogDock(QWidget):
         if not payload:
             return
         kind = payload[0]
-        if kind == "composition":
-            image_id = payload[2]
-            if image_id is not None:
-                self._qpane.prefetchMaskOverlays(image_id, reason="composition-hover")
-        elif kind == "image":
+        if kind == "image":
             self._qpane.prefetchMaskOverlays(payload[1], reason="catalog-hover")
         elif kind == "mask":
             image_id, _ = payload[1]
@@ -332,14 +395,7 @@ class CatalogDock(QWidget):
         if not payload:
             return
         kind = payload[0]
-        if kind == "composition":
-            composition_id = payload[1]
-            self._qpane.openComposition(composition_id)
-            image_id = payload[2]
-            if image_id is not None:
-                self._qpane.prefetchMaskOverlays(image_id, reason="composition-click")
-            self._on_focus_requested("image")
-        elif kind == "image":
+        if kind == "image":
             image_id = payload[1]
             self._qpane.prefetchMaskOverlays(image_id, reason="catalog-click")
             self._qpane.setCurrentImageID(image_id)
@@ -361,6 +417,13 @@ class CatalogDock(QWidget):
             return
         payload = item.data(0, _IMAGE_ROLE)
         menu = QMenu(self)
+        create_composition_action: QAction | None = None
+        add_layer_action: QAction | None = None
+        if payload and payload[0] == "image":
+            create_composition_action = menu.addAction("New Composition from Image")
+            add_layer_action = menu.addAction("Add to Active Composition")
+            add_layer_action.setEnabled(self._qpane.currentCompositionID() is not None)
+            menu.addSeparator()
         link_action = menu.addAction("Link Selected")
         link_action.setEnabled(self._link_action.isEnabled())
         unlink_action = menu.addAction("Unlink Selected")
@@ -390,6 +453,12 @@ class CatalogDock(QWidget):
             reveal_action.setEnabled(reveal_path is not None)
         chosen = menu.exec(self._tree.viewport().mapToGlobal(position))
         if chosen is None:
+            return
+        if chosen is create_composition_action:
+            self._create_from_catalog_image(payload[1])
+            return
+        if chosen is add_layer_action:
+            self._add_catalog_image_to_composition(payload[1])
             return
         if chosen is link_action:
             self._handle_link_selected()
@@ -500,41 +569,11 @@ class CatalogTree(QTreeWidget):
         self.setExpandsOnDoubleClick(False)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self._image_items: dict[uuid.UUID, QTreeWidgetItem] = {}
-        self._composition_items: dict[uuid.UUID, QTreeWidgetItem] = {}
         self._mask_items: dict[tuple[uuid.UUID, uuid.UUID], QTreeWidgetItem] = {}
         self._mask_lookup: dict[tuple[uuid.UUID, uuid.UUID], MaskEntry] = {}
         self._syncing_selection = False
         self._preserve_multi_selection = False
         self._icon_cache: dict[int, QIcon] = {}
-
-    def update_composition_snapshot(self, snapshot: QPaneCompositionSnapshot) -> None:
-        """Rebuild tree contents from a public QPane composition snapshot."""
-        selected_payloads = [item.data(0, _IMAGE_ROLE) for item in self.selectedItems()]
-        self._syncing_selection = True
-        self.clear()
-        self._image_items.clear()
-        self._composition_items.clear()
-        self._mask_items.clear()
-        self._mask_lookup.clear()
-        root = QTreeWidgetItem(["Compositions"])
-        root.setFlags(Qt.ItemIsEnabled)
-        self.addTopLevelItem(root)
-        for index, composition_id in enumerate(snapshot.order):
-            entry = snapshot.compositions.get(composition_id)
-            if entry is None:
-                continue
-            item = QTreeWidgetItem(root, [self._format_composition_label(index, entry)])
-            item.setData(
-                0,
-                _IMAGE_ROLE,
-                ("composition", composition_id, entry.current_image_id),
-            )
-            item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-            item.setToolTip(0, self._format_composition_tooltip(entry))
-            self._composition_items[composition_id] = item
-        self.expandAll()
-        self._restore_selection(selected_payloads)
-        self._syncing_selection = False
 
     def update_snapshot(self, snapshot: CatalogSnapshot) -> None:
         """Rebuild tree contents from ``snapshot`` while preserving selection."""
@@ -542,7 +581,6 @@ class CatalogTree(QTreeWidget):
         self._syncing_selection = True
         self.clear()
         self._image_items.clear()
-        self._composition_items.clear()
         self._mask_items.clear()
         self._mask_lookup.clear()
         for group in snapshot.groups:
@@ -612,27 +650,6 @@ class CatalogTree(QTreeWidget):
             self._preserve_multi_selection = False
             self._syncing_selection = False
 
-    def sync_composition_selection(self, composition_id: uuid.UUID | None) -> None:
-        """Align tree selection with the active composition."""
-        if self._syncing_selection:
-            return
-        self._syncing_selection = True
-        try:
-            if composition_id is None:
-                self.clearSelection()
-                return
-            item = self._composition_items.get(composition_id)
-            if item is None:
-                self.clearSelection()
-                return
-            self.clearSelection()
-            item.setSelected(True)
-            self.setCurrentItem(
-                item, 0, QItemSelectionModel.Select | QItemSelectionModel.Current
-            )
-        finally:
-            self._syncing_selection = False
-
     def selected_image_ids(self) -> list[uuid.UUID]:
         """Return the UUIDs for all selected image nodes."""
         ids: list[uuid.UUID] = []
@@ -672,31 +689,6 @@ class CatalogTree(QTreeWidget):
             return f"{index}. {image.label}"
         return f"Image {index}"
 
-    def _format_composition_label(self, index: int, entry: CompositionEntry) -> str:
-        """Return the label shown for a composition row."""
-        prefix = index + 1
-        if entry.kind == "layered-scene":
-            return f"{prefix}. {entry.title} ({entry.scene_layer_count} layers)"
-        compare_suffix = " + compare" if entry.comparison.enabled else ""
-        return f"{prefix}. {entry.title}{compare_suffix}"
-
-    def _format_composition_tooltip(self, entry: CompositionEntry) -> str:
-        """Return a concise composition source summary."""
-        count = len(entry.source_image_ids)
-        noun = "image" if count == 1 else "images"
-        if entry.kind == "layered-scene" and entry.scene_bounds is not None:
-            bounds = entry.scene_bounds
-            return (
-                f"Scene; {entry.scene_layer_count} layers; "
-                f"{count} source {noun}; "
-                f"{bounds.width():.0f} x {bounds.height():.0f}"
-            )
-        if entry.kind == "default-image":
-            return f"Default image view; {count} source {noun}"
-        if entry.kind == "explicit":
-            return f"Saved image composition; {count} source {noun}"
-        return f"{entry.kind}; {count} source {noun}"
-
     def _color_icon(self, color: QColor) -> QIcon:
         """Return a cached square icon representing ``color``."""
         key = (color.red() << 16) | (color.green() << 8) | color.blue()
@@ -718,11 +710,6 @@ class CatalogTree(QTreeWidget):
             if kind == "image":
                 image_id = payload[1]
                 item = self._image_items.get(image_id)
-                if item is not None:
-                    item.setSelected(True)
-            elif kind == "composition":
-                composition_id = payload[1]
-                item = self._composition_items.get(composition_id)
                 if item is not None:
                     item.setSelected(True)
             elif kind == "mask":

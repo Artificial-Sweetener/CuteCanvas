@@ -17,8 +17,8 @@ from qpane import Config
 from qpane.core.config_features import MaskConfigSlice
 from qpane.masks.mask import MaskAssetStore
 from qpane.masks.mask_controller import MaskController
-from qpane.masks.source_resolver import MaskLayerSourceResolver
-from qpane.scene.sources import MaskLayerSource
+from qpane.masks.source_reference import MaskAssetReference
+from qpane.masks.source_resolver import MaskSourceCapabilities
 
 
 def test_scaled_mask_render_does_not_materialize_full_surface(
@@ -37,14 +37,14 @@ def test_scaled_mask_render_does_not_materialize_full_surface(
         config=Config(),
         mask_config=MaskConfigSlice(),
     )
-    resolver = MaskLayerSourceResolver(assets=assets, renders=controller.renders)
+    resolver = MaskSourceCapabilities(assets=assets, renders=controller.renders)
 
     def reject_full_snapshot() -> QImage:
         raise AssertionError("scaled rendering requested a full mask snapshot")
 
     monkeypatch.setattr(layer.surface, "snapshot_qimage", reject_full_snapshot)
 
-    assert resolver.source_size(MaskLayerSource(mask_id, revision=0)) == QSize(64, 48)
+    assert resolver.source_size(MaskAssetReference(mask_id)) == QSize(64, 48)
     pixmap = controller.renders.get(layer, scale=0.25)
 
     assert pixmap is not None

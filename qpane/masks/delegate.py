@@ -292,9 +292,6 @@ class MaskDelegate:
         if service is None:
             logger.error("cycleMasksForward aborted: mask service is unavailable.")
             return False
-        if current_id is None:
-            logger.info("cycleMasksForward aborted: no current image selected.")
-            return False
         service.cycleMasks(current_id, forward=True)
         return True
 
@@ -308,9 +305,6 @@ class MaskDelegate:
         current_id = self._catalog().currentImageID()
         if service is None:
             logger.error("cycleMasksBackward aborted: mask service is unavailable.")
-            return False
-        if current_id is None:
-            logger.info("cycleMasksBackward aborted: no current image selected.")
             return False
         service.cycleMasks(current_id, forward=False)
         return True

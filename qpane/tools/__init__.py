@@ -25,6 +25,7 @@ from .base import CursorTool, ExtensionTool, ExtensionToolSignals, PanZoomTool
 from .dependencies import ToolDependencies
 from .move import MoveTool
 from .tools import ToolManagerSignals, Tools
+from .transform import TransformTool
 
 __all__ = [
     "CursorTool",
@@ -35,6 +36,7 @@ __all__ = [
     "ToolDependencies",
     "ToolManagerSignals",
     "Tools",
+    "TransformTool",
 ]
 
 # Expose the module under a stable attribute so qpane.__getattr__("tools") returns it.

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..composition.layers import CompositionLayerInstance, CompositionLayerSourceKind
+from ..composition.layers import CompositionLayerInstance
 from ..scene.model import (
     BlendMode,
     LayerContentCapabilities,
@@ -21,8 +21,8 @@ from ..scene.model import (
     LayerKind,
     SceneDescriptor,
 )
-from ..scene.sources import EditableRasterSource
 from .assets import EditableRasterAssetStore
+from .source_reference import EditableRasterReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,11 +30,11 @@ class EditableRasterLayerDescriptorFactory:
     """Resolve editable raster instances without owning composition order."""
 
     assets: EditableRasterAssetStore
-    source_kind = CompositionLayerSourceKind.RASTER
+    source_type = EditableRasterReference
 
     def revision(self) -> object:
         """Return per-asset revisions through stable on-demand descriptors."""
-        return id(self.assets)
+        return self.assets.revision
 
     def descriptor(
         self,
@@ -42,7 +42,9 @@ class EditableRasterLayerDescriptorFactory:
         instance: CompositionLayerInstance,
     ) -> LayerDescriptor | None:
         """Resolve one editable raster composition instance."""
-        asset = self.assets.get(instance.source_id)
+        if not isinstance(instance.source, EditableRasterReference):
+            return None
+        asset = self.assets.get(instance.source.raster_id)
         if asset is None:
             return None
         surface = asset.surface
@@ -52,12 +54,13 @@ class EditableRasterLayerDescriptorFactory:
             scene_id=scene.scene_id,
             layer_id=instance.layer_id,
             kind=LayerKind.RASTER,
-            source=EditableRasterSource(asset.raster_id, content_revision),
+            source=instance.source,
             placement=instance.transform.map_bounds(bounds),
             visible=instance.visible,
             opacity=instance.opacity,
             blend_mode=BlendMode.NORMAL,
-            clip=None,
+            clip=instance.clip,
+            effects=instance.effects,
             hit_test=LayerHitTest(enabled=instance.hit_test, role=instance.role),
             interaction=instance.interaction,
             capabilities=LayerContentCapabilities(raster_editable=True),

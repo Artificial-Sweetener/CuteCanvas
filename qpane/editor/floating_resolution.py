@@ -14,11 +14,11 @@ import uuid
 from typing import TypeAlias
 
 from ..coverage import CoverageSnapshot
+from ..scene.affine import LayerTransform
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from ..scene.model import LayerDescriptor
 from ..scene.pixel_owners import LayerPixelMutationOwner
 from ..scene.pixel_transitions import RasterPixelTransition
-from ..scene.raster import LayerTransform
 from ..selection import LayerCoverageProjector, PixelSelectionService
 from .floating_history import (
     FloatingPixelCommitEdit,
@@ -70,14 +70,23 @@ class FloatingPixelResolutionOwner:
 
     def anchor_to_source(self, session: FloatingPixelSession) -> bool:
         """Apply current displacement to the original editable layer."""
-        delta_x, delta_y = session.delta
-        if delta_x == 0 and delta_y == 0:
+        translation = _integer_translation(session.fragment_transform)
+        if translation == (0, 0):
             return True
         resolved = self._targets.resolve_layer(session.scene_id, session.layer_id)
         if resolved is None:
             return False
         _scene, layer, owner = resolved
-        transition = session.preview_transition
+        if translation is None:
+            return self._anchor_affine_to_source(session, layer, owner)
+        delta_x, delta_y = translation
+        transition = session.settled_transition or owner.preview_move(
+            layer,
+            session.lift,
+            delta_x,
+            delta_y,
+            cut_source=session.cut_source,
+        )
         if transition is None or not owner.transition_matches(
             layer, transition, use_after=False
         ):
@@ -100,6 +109,72 @@ class FloatingPixelResolutionOwner:
             local_after=local_after,
             target_transform=layer.transform,
             rollback=((layer, owner, transition),),
+        )
+
+    def _anchor_affine_to_source(
+        self,
+        session: FloatingPixelSession,
+        layer: LayerDescriptor,
+        owner: LayerPixelMutationOwner,
+    ) -> bool:
+        """Resample an affine fragment once and resolve it atomically to its source."""
+        transform = layer.transform
+        if transform is None or not owner.accepts_fragment(
+            layer, session.lift.fragment
+        ):
+            return False
+        projected = self._fragment_projector.project(
+            session.lift.fragment,
+            source_transform=transform,
+            fragment_transform=session.fragment_transform,
+            destination_transform=transform,
+        )
+        if projected is None:
+            return False
+        applied_source = self._apply_source_cut(session, layer, owner)
+        if session.cut_source and not applied_source:
+            return False
+        placed = owner.place_fragment(layer, projected, projected.bounds)
+        if placed is None:
+            self._restore_source_cut(session, layer, owner, applied_source)
+            return False
+        local_after = translated_coverage_within(
+            projected.coverage,
+            0,
+            0,
+            placed.after_surface_bounds,
+        )
+        selection_after = self._coverage_projector.project(local_after, transform)
+        if selection_after is None:
+            owner.restore_transition(layer, placed, use_after=False)
+            self._restore_source_cut(session, layer, owner, applied_source)
+            return False
+        transitions = (
+            (
+                LayerPixelTransition(
+                    session.scene_id,
+                    session.layer_id,
+                    session.lift.source_transition,
+                ),
+            )
+            if session.cut_source
+            else ()
+        ) + (LayerPixelTransition(session.scene_id, session.layer_id, placed),)
+        rollback = (
+            ((layer, owner, session.lift.source_transition),)
+            if session.cut_source
+            else ()
+        ) + (
+            (layer, owner, placed),
+        )
+        return self._finalize(
+            session=session,
+            transitions=transitions,
+            selection_after=selection_after,
+            selected_after=session.selected_layer,
+            local_after=local_after,
+            target_transform=transform,
+            rollback=rollback,
         )
 
     def anchor_to(
@@ -133,7 +208,7 @@ class FloatingPixelResolutionOwner:
         placed = self._fragment_projector.project(
             session.lift.fragment,
             source_transform=source_layer.transform,
-            source_delta=session.delta,
+            fragment_transform=session.fragment_transform,
             destination_transform=target_layer.transform,
         )
         if placed is None:
@@ -218,7 +293,7 @@ class FloatingPixelResolutionOwner:
             scene=scene,
             source_layer=source_layer,
             fragment=session.lift.fragment,
-            delta=session.delta,
+            transform=session.fragment_transform.followed_by(source_layer.transform),
             label=label,
         )
         if promotion is None:
@@ -372,5 +447,21 @@ class FloatingPixelResolutionOwner:
     @staticmethod
     def _rollback_transitions(rollback: tuple[_AppliedTransition, ...]) -> None:
         """Restore before-state for already-applied transitions."""
-        for layer, owner, transition in rollback:
+        for layer, owner, transition in reversed(rollback):
             owner.restore_transition(layer, transition, use_after=False)
+
+
+def _integer_translation(transform: LayerTransform) -> tuple[int, int] | None:
+    """Return an exact integer translation when affine geometry is lossless."""
+    delta_x = round(transform.dx)
+    delta_y = round(transform.dy)
+    if (
+        transform.m11 != 1.0
+        or transform.m12 != 0.0
+        or transform.m21 != 0.0
+        or transform.m22 != 1.0
+        or abs(transform.dx - delta_x) > 1e-9
+        or abs(transform.dy - delta_y) > 1e-9
+    ):
+        return None
+    return delta_x, delta_y

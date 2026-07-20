@@ -24,9 +24,9 @@ from ..scene.pixel_fragments import (
 )
 from ..scene.pixel_transitions import RasterPixelTransition
 from ..scene.raster import RasterBounds, RasterExtentPolicy
-from ..scene.sources import EditableRasterSource
 from .assets import EditableRasterAssetStore
 from .pixel_translation import ColorPixelTranslator
+from .source_reference import EditableRasterReference
 
 
 class EditableRasterPixelMutationOwner:
@@ -46,7 +46,7 @@ class EditableRasterPixelMutationOwner:
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
         """Return whether ``layer`` references an editable raster asset."""
-        return isinstance(layer.source, EditableRasterSource)
+        return isinstance(layer.source, EditableRasterReference)
 
     def extent_policy(self, layer: LayerDescriptor) -> RasterExtentPolicy | None:
         """Return the color surface's authoritative extent policy."""
@@ -65,11 +65,19 @@ class EditableRasterPixelMutationOwner:
         overlap = asset.surface.bounds.intersection(bounds)
         if overlap is None:
             return None
-        pixels = asset.surface.capture_patch(overlap)
-        if pixels is None:
+        occupancy = asset.surface.capture_alpha_occupancy(overlap)
+        if occupancy is None:
             return None
-        occupancy = np.where(pixels[:, :, 3] != 0, 255, 0).astype(np.uint8)
-        return CoverageSnapshot(overlap, asset.surface.extent_policy, occupancy)
+        return CoverageSnapshot._adopt_detached(
+            overlap,
+            asset.surface.extent_policy,
+            occupancy,
+        )
+
+    def content_bounds(self, layer: LayerDescriptor) -> RasterBounds | None:
+        """Return cached alpha-supported source-local bounds."""
+        asset = self._asset(layer)
+        return None if asset is None else asset.surface.content_bounds()
 
     def capture_patch(
         self,
@@ -269,6 +277,6 @@ class EditableRasterPixelMutationOwner:
         source = layer.source
         return (
             None
-            if not isinstance(source, EditableRasterSource)
+            if not isinstance(source, EditableRasterReference)
             else self._assets.get(source.raster_id)
         )

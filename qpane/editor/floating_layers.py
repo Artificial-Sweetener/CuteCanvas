@@ -14,9 +14,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..scene.affine import LayerTransform
 from ..scene.model import LayerDescriptor, SceneDescriptor
 from ..scene.pixel_fragments import RasterPixelFragment
-from ..scene.raster import LayerTransform
+from ..scene.source_references import LayerSourceReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,11 +30,17 @@ class FloatingLayerTransition:
     state: object
     retained_bytes: int
     transform: LayerTransform
+    resources: tuple[LayerSourceReference, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate bounded history accounting."""
         if self.retained_bytes < 0:
             raise ValueError("floating layer retained bytes must be non-negative")
+        object.__setattr__(self, "resources", tuple(self.resources))
+        if not all(
+            isinstance(source, LayerSourceReference) for source in self.resources
+        ):
+            raise TypeError("floating layer resources must be source references")
 
 
 class FloatingLayerPromotionOwner(Protocol):
@@ -51,7 +58,7 @@ class FloatingLayerPromotionOwner(Protocol):
         scene: SceneDescriptor,
         source_layer: LayerDescriptor,
         fragment: RasterPixelFragment,
-        delta: tuple[int, int],
+        transform: LayerTransform,
         label: str | None,
     ) -> FloatingLayerTransition | None:
         """Create a layer and return exact state for undo and redo."""

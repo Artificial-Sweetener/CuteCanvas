@@ -18,6 +18,11 @@ from PySide6.QtCore import QPointF
 
 from ..scene.layer_selection import SceneLayerSelection
 from ..scene.movement_interaction import SceneLayerMovementInteraction
+from .operation_resolution import (
+    EditorOperation,
+    EditorOperationResolver,
+    EditorOperationTarget,
+)
 from .pixel_movement import SelectedPixelMovementController
 
 
@@ -29,12 +34,14 @@ class EditorMovementInteraction:
         *,
         pixels: SelectedPixelMovementController,
         layers: SceneLayerMovementInteraction,
+        operations: EditorOperationResolver,
         panel_to_scene: Callable[[QPointF], QPointF | None],
         refresh_preview: Callable[[], None],
     ) -> None:
         """Bind selected-pixel and layer-placement movement branches."""
         self._pixels = pixels
         self._layers = layers
+        self._operations = operations
         self._panel_to_scene = panel_to_scene
         self._refresh_preview = refresh_preview
         self._active: Literal["pixels", "layer"] | None = None
@@ -43,26 +50,34 @@ class EditorMovementInteraction:
     @property
     def hovered(self) -> SceneLayerSelection | None:
         """Return layer hover only when whole-layer movement is eligible."""
-        return None if self._pixels.has_selection() else self._layers.hovered
+        return self._layers.hovered
 
     @property
     def target_available(self) -> bool:
         """Return whether current hover identifies a valid movement target."""
-        if self._pixels.has_selection():
-            return self._selection_hover_valid
-        return self._layers.hovered is not None
+        return self._selection_hover_valid or self._layers.hovered is not None
 
     def update_hover(self, panel_point: QPointF) -> bool:
         """Refresh target feedback without changing durable selection state."""
-        if not self._pixels.has_selection():
-            changed = self._selection_hover_valid
-            self._selection_hover_valid = False
-            return self._layers.update_hover(panel_point) or changed
-        layer_changed = self._layers.clear_hover()
+        candidate = self._layers.candidate_at(panel_point)
         scene_point = self._panel_to_scene(panel_point)
-        valid = scene_point is not None and self._pixels.can_begin(scene_point)
+        resolution = self._operations.resolve(
+            EditorOperation.MOVE,
+            scene_point=scene_point,
+            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+        )
+        pixel_target = resolution.target in {
+            EditorOperationTarget.FLOATING_PIXELS,
+            EditorOperationTarget.SELECTED_PIXELS,
+        }
+        valid = resolution.allowed and pixel_target
         changed = valid != self._selection_hover_valid
         self._selection_hover_valid = valid
+        layer_changed = self._layers.set_hover(
+            candidate
+            if resolution.allowed and resolution.target is EditorOperationTarget.LAYER
+            else None
+        )
         if changed or layer_changed:
             self._refresh_preview()
         return changed or layer_changed
@@ -81,13 +96,31 @@ class EditorMovementInteraction:
         if self._active is not None:
             return False
         self.clear_hover()
-        if self._pixels.has_selection():
-            scene_point = self._panel_to_scene(panel_point)
-            if scene_point is None or not self._pixels.begin(scene_point, copy):
+        candidate = self._layers.candidate_at(panel_point)
+        scene_point = self._panel_to_scene(panel_point)
+        resolution = self._operations.resolve(
+            EditorOperation.MOVE,
+            scene_point=scene_point,
+            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+        )
+        if resolution.target in {
+            EditorOperationTarget.FLOATING_PIXELS,
+            EditorOperationTarget.SELECTED_PIXELS,
+        }:
+            if (
+                not resolution.allowed
+                or scene_point is None
+                or not self._pixels.begin(scene_point, copy)
+            ):
                 return False
             self._active = "pixels"
             return True
-        if not self._layers.begin(panel_point):
+        if (
+            not resolution.allowed
+            or resolution.target is not EditorOperationTarget.LAYER
+            or candidate is None
+            or not self._layers.begin(candidate)
+        ):
             return False
         self._active = "layer"
         return True
@@ -129,12 +162,18 @@ class EditorMovementInteraction:
         if active == "pixels":
             return self._pixels.suspend_drag()
         if active == "layer":
-            return self._layers.cancel()
+            return self._layers.suspend()
         return False
 
     def nudge(self, delta_x: int, delta_y: int) -> bool:
         """Move selected pixels first, or the selected movable layer otherwise."""
-        if self._pixels.has_selection():
+        resolution = self._operations.resolve(EditorOperation.MOVE)
+        if not resolution.allowed:
+            return False
+        if resolution.target in {
+            EditorOperationTarget.FLOATING_PIXELS,
+            EditorOperationTarget.SELECTED_PIXELS,
+        }:
             return self._pixels.nudge(delta_x, delta_y)
         return self._layers.nudge(delta_x, delta_y)
 

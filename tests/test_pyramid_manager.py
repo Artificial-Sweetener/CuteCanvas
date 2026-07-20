@@ -28,7 +28,7 @@ from PySide6.QtGui import QImage, Qt
 
 from qpane import Config
 from qpane.rendering import ImagePyramid, PyramidManager, PyramidStatus
-from qpane.scene.identity import SceneLayerAssetKey, default_catalog_asset_key
+from qpane.scene.identity import SourceRenderAssetKey, catalog_source_asset_key
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
@@ -70,11 +70,11 @@ def _asset_key(
     source_path: Path | None = None,
     *,
     revision: int = 0,
-) -> SceneLayerAssetKey:
+) -> SourceRenderAssetKey:
     """Return a default-scene asset key for pyramid tests."""
     if image_id is None:
         image_id = uuid.uuid4()
-    return default_catalog_asset_key(
+    return catalog_source_asset_key(
         image_id,
         revision=revision,
         source_path=source_path,
@@ -259,7 +259,7 @@ class TestPyramidManager:
         image_id = uuid.uuid4()
         source_path = Path("throttled.png")
         key = _asset_key(image_id, source_path)
-        throttled: list[tuple[SceneLayerAssetKey, int]] = []
+        throttled: list[tuple[SourceRenderAssetKey, int]] = []
         manager.pyramidThrottled.connect(
             lambda predictor_id, attempt: throttled.append((predictor_id, attempt))
         )

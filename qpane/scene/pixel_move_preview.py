@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..coverage import CoverageSnapshot
-    from .pixel_fragments import RasterPixelFormat
+    from .affine import LayerTransform
+    from .pixel_fragments import RasterPixelFormat, RasterPixelLift
     from .pixel_transitions import RasterPixelTransition
+    from .raster import RasterBounds
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,8 +29,18 @@ class RasterPixelMovePreview:
     session_id: uuid.UUID
     scene_id: uuid.UUID
     layer_id: uuid.UUID
-    coverage: CoverageSnapshot
-    transition: RasterPixelTransition
-    pixel_format: RasterPixelFormat
-    delta_x: int
-    delta_y: int
+    lift: RasterPixelLift
+    cut_source: bool
+    settled_transition: RasterPixelTransition | None
+    fragment_transform: LayerTransform
+    extent_clip_bounds: RasterBounds | None
+
+    @property
+    def pixel_format(self) -> RasterPixelFormat:
+        """Return the immutable lifted fragment's canonical pixel format."""
+        return self.lift.fragment.pixel_format
+
+    @property
+    def coverage(self) -> CoverageSnapshot:
+        """Return immutable source-local selection coverage for damage mapping."""
+        return self.lift.fragment.coverage

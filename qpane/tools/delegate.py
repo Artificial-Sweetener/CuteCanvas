@@ -35,11 +35,25 @@ from PySide6.QtWidgets import QApplication
 
 from .. import ui
 from ..core import CursorProvider, OverlayDrawFn, SceneOverlayDrawFn
+from ..editor import EditorOperation, EditorOperationTarget
 from ..ui import (
     apply_widget_defaults,
 )
-from .dependencies import ToolDependencies
+from ..vector.public import VectorShapeKind
 from .input import PointerInputController
+from .ports import (
+    CursorInteractionPort,
+    MoveInteractionPort,
+    NavigationInteractionPort,
+    PaintingInteractionPort,
+    PixelSelectionInteractionPort,
+    SmartSelectionInteractionPort,
+    TransformInteractionPort,
+    VectorInteractionPort,
+    VectorNodeInteractionPort,
+    VectorTextInteractionPort,
+    tool_activation_ports,
+)
 from .tools import Tools
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
@@ -220,6 +234,10 @@ class ToolInteractionDelegate:
         self._overlays_suspended = True
         self._overlays_resume_pending = True
 
+    def cancel_active_editor_input(self) -> None:
+        """Cancel captured pointer work before host editor policy changes."""
+        self._pointer_input.cancel_active_sequences()
+
     def resume_overlays(self) -> None:
         """Resume overlays immediately without forcing a repaint."""
         ui.resume_overlays(self)
@@ -275,99 +293,191 @@ class ToolInteractionDelegate:
         tools = qpane._tools_manager
         viewport = self._viewport()
         if mode == Tools.CONTROL_MODE_DRAW_BRUSH:
-            if not qpane.maskFeatureAvailable():
-                qpane.featureFallbacks().get("mask", "setControlMode", default=None)
-                return
+            resolution = qpane.editorOperationResolver().resolve(EditorOperation.PAINT)
             mask_service = getattr(qpane, "mask_service", None)
-            if mask_service is not None:
+            if (
+                resolution.target is EditorOperationTarget.DEFAULT_PAINT_TARGET
+                and mask_service is not None
+            ):
                 current_image_id = qpane.catalog().currentImageID()
-                if not mask_service.ensureTopMaskActiveForImage(current_image_id):
-                    logger.info(
-                        "Brush activation aborted: no usable mask for image %s; falling back to pan/zoom.",
-                        current_image_id,
-                    )
-                    mode = Tools.CONTROL_MODE_PANZOOM
-                else:
+                if mask_service.ensureTopMaskActiveForImage(current_image_id):
                     mask_service.prepareBrushInteraction()
                     qpane.view().coordinate_scene_descriptor()
+                    resolution = qpane.editorOperationResolver().resolve(
+                        EditorOperation.PAINT
+                    )
+            if resolution.allowed and mask_service is not None:
+                mask_service.prepareBrushInteraction()
         elif mode == Tools.CONTROL_MODE_SMART_SELECT:
             if not qpane.samFeatureAvailable():
                 qpane.featureFallbacks().get("sam", "setControlMode", default=None)
                 return
-        dependencies: ToolDependencies = ToolDependencies()
-        dependencies.update(
-            {
-                "is_alt_held": lambda: self._alt_key_held,
-                "panel_hit_test": qpane.panelHitTest,
-                "panel_hit_test_precise": viewport.panel_hit_test,
-                "panel_to_content_point": viewport.panel_to_content_point,
-                "panel_to_scene_point": qpane.view().panel_to_scene_point,
-                "image_to_panel_point": viewport.content_to_panel_point,
-                "panel_to_active_mask_point": qpane.activeMaskLayerCoordinates().panel_to_source,
-                "active_mask_to_panel_point": qpane.activeMaskLayerCoordinates().source_to_panel,
-                "is_pan_zoom_locked": viewport.is_locked,
-                "is_image_null": lambda: not qpane.view().has_renderable_content(),
-                "is_drag_out_allowed": qpane.isDragOutAllowed,
-                "is_point_in_widget": lambda point: qpane.rect().contains(point),
-                "get_image_rect": qpane.view().content_rect,
-                "get_pan": lambda: viewport.pan,
-                "get_zoom": lambda: viewport.zoom,
-                "get_native_zoom": viewport.nativeZoom,
-                "get_fit_zoom": viewport.computeFitZoom,
-                "can_pan": lambda: (
-                    False
-                    if not qpane.view().has_renderable_content()
-                    else viewport.can_pan(
-                        zoom=viewport.zoom,
-                        image_size=qpane.view().content_rect().size(),
-                        panel_size=qpane.physicalViewportRect().size(),
-                    )
-                ),
-                "get_zoom_mode": viewport.get_zoom_mode,
-                "set_zoom_fit": viewport.setZoomFit,
-                "set_zoom_fit_interpolated": qpane._apply_zoom_fit_interpolated,
-                "set_zoom_one_to_one": viewport.setZoom1To1,
-                "set_zoom_one_to_one_interpolated": qpane._apply_zoom_one_to_one_interpolated,
-                "is_shift_held": lambda: self._shift_key_held,
-                "get_brush_size": lambda: self._brush_size,
-                "get_preview_pens": lambda: (
-                    self._preview_outline_pen,
-                    self._preview_inline_pen,
-                ),
-                "get_brush_increment": lambda: qpane.settings.brush_scroll_increment,
-                "get_pen_pressure_min_ratio": lambda: qpane.settings.pen_pressure_min_ratio,
-                "get_pen_pressure_gamma": lambda: qpane.settings.pen_pressure_gamma,
-                "get_pen_pressure_enabled": lambda: qpane.settings.pen_pressure_enabled,
-                "get_dpr": qpane.devicePixelRatioF,
-                "get_min_selection_size": lambda: qpane.settings.smart_select_min_size,
-                "get_active_mask_color": lambda: (
-                    qpane.mask_service.getActiveMaskColor()
-                    if qpane.mask_service
-                    else None
-                ),
-                "request_overlay_update": qpane.update,
-                "begin_move": qpane.editorMovementInteraction().begin,
-                "update_move": qpane.editorMovementInteraction().update,
-                "finish_move": qpane.editorMovementInteraction().finish,
-                "suspend_move": qpane.editorMovementInteraction().suspend,
-                "cancel_move": qpane.editorMovementInteraction().cancel,
-                "anchor_move": (
-                    qpane.editorMovementInteraction().anchor_floating_pixels
-                ),
-                "update_move_hover": qpane.editorMovementInteraction().update_hover,
-                "clear_move_hover": qpane.editorMovementInteraction().clear_hover,
-                "move_target_available": lambda: (
-                    qpane.editorMovementInteraction().target_available
-                ),
-                "nudge_move": qpane.editorMovementInteraction().nudge,
-                "commit_pixel_selection": (
-                    qpane.editorInteraction().commit_active_pixel_selection
-                ),
-            }
+        is_image_null = lambda: not qpane.view().has_renderable_content()
+        can_pan = lambda: (
+            False
+            if is_image_null()
+            else viewport.can_pan(
+                zoom=viewport.zoom,
+                image_size=qpane.view().content_rect().size(),
+                panel_size=qpane.physicalViewportRect().size(),
+            )
         )
+        active_mask_color = lambda: (
+            qpane.mask_service.getActiveMaskColor() if qpane.mask_service else None
+        )
+        panel_to_active_mask = qpane.activeMaskLayerCoordinates().panel_to_source
+        active_mask_to_panel = qpane.activeMaskLayerCoordinates().source_to_panel
+        cursor_port = CursorInteractionPort(
+            is_drag_out_allowed=qpane.isDragOutAllowed,
+            is_image_null=is_image_null,
+        )
+        navigation_port = NavigationInteractionPort(
+            is_pan_zoom_locked=viewport.is_locked,
+            is_image_null=is_image_null,
+            is_drag_out_allowed=qpane.isDragOutAllowed,
+            can_pan=can_pan,
+            get_pan=lambda: viewport.pan,
+            get_zoom=lambda: viewport.zoom,
+            get_native_zoom=viewport.nativeZoom,
+            get_fit_zoom=viewport.computeFitZoom,
+            get_zoom_mode=viewport.get_zoom_mode,
+            set_zoom_fit=viewport.setZoomFit,
+            set_zoom_fit_interpolated=qpane._apply_zoom_fit_interpolated,
+            set_zoom_one_to_one=viewport.setZoom1To1,
+            set_zoom_one_to_one_interpolated=(
+                qpane._apply_zoom_one_to_one_interpolated
+            ),
+            get_dpr=qpane.devicePixelRatioF,
+        )
+        movement = qpane.editorMovementInteraction()
+        movement_port = MoveInteractionPort(
+            begin_move=movement.begin,
+            update_move=movement.update,
+            finish_move=movement.finish,
+            suspend_move=movement.suspend,
+            cancel_move=movement.cancel,
+            anchor_move=movement.anchor_floating_pixels,
+            update_move_hover=movement.update_hover,
+            clear_move_hover=movement.clear_hover,
+            move_target_available=lambda: movement.target_available,
+            nudge_move=movement.nudge,
+        )
+        transform = qpane.sceneLayerTransformInteraction()
+        transform_port = TransformInteractionPort(
+            transform_presentation=transform.presentation,
+            begin_transform=transform.begin,
+            update_transform=transform.update,
+            end_transform_gesture=transform.end_gesture,
+            commit_transform=transform.commit,
+            cancel_transform=transform.cancel,
+            suspend_transform=transform.suspend,
+        )
+        selection_port = PixelSelectionInteractionPort(
+            panel_to_scene_point=qpane.view().panel_to_scene_point,
+            can_select=lambda: qpane.editorOperationResolver()
+            .resolve(EditorOperation.SELECT_PIXELS)
+            .allowed,
+            commit_pixel_selection=(
+                qpane.editorInteraction().commit_active_pixel_selection
+            ),
+            is_shift_held=lambda: self._shift_key_held,
+            is_alt_held=lambda: self._alt_key_held,
+        )
+        painting_port = PaintingInteractionPort(
+            is_alt_held=lambda: self._alt_key_held,
+            is_shift_held=lambda: self._shift_key_held,
+            can_paint=lambda: qpane.editorOperationResolver()
+            .resolve(EditorOperation.PAINT)
+            .allowed,
+            get_brush_size=lambda: self._brush_size,
+            get_preview_pens=lambda: (
+                self._preview_outline_pen,
+                self._preview_inline_pen,
+            ),
+            panel_hit_test=qpane.panelHitTest,
+            panel_hit_test_precise=viewport.panel_hit_test,
+            panel_to_content_point=viewport.panel_to_content_point,
+            image_to_panel_point=viewport.content_to_panel_point,
+            panel_to_target_point=qpane.paintingCoordinator().panel_to_target,
+            target_to_panel_point=qpane.paintingCoordinator().target_to_panel,
+            is_point_in_widget=lambda point: qpane.rect().contains(point),
+            get_image_rect=qpane.view().content_rect,
+            get_brush_increment=lambda: qpane.settings.brush_scroll_increment,
+            get_pen_pressure_min_ratio=(lambda: qpane.settings.pen_pressure_min_ratio),
+            get_pen_pressure_gamma=lambda: qpane.settings.pen_pressure_gamma,
+            get_pen_pressure_enabled=(lambda: qpane.settings.pen_pressure_enabled),
+            get_pressure_diameter=qpane.paintingCoordinator().diameter_for_pressure,
+            get_smoothing=lambda: qpane.paintingCoordinator().preset.smoothing,
+            get_zoom=lambda: viewport.zoom,
+            get_dpr=qpane.devicePixelRatioF,
+            get_preview_color=qpane.paintingCoordinator().preview_color,
+            request_overlay_update=qpane.update,
+        )
+        smart_selection_port = SmartSelectionInteractionPort(
+            is_alt_held=lambda: self._alt_key_held,
+            get_dpr=qpane.devicePixelRatioF,
+            panel_to_content_point=viewport.panel_to_content_point,
+            image_to_panel_point=viewport.content_to_panel_point,
+            panel_to_active_mask_point=panel_to_active_mask,
+            active_mask_to_panel_point=active_mask_to_panel,
+            get_min_selection_size=(lambda: qpane.settings.smart_select_min_size),
+            get_active_mask_color=active_mask_color,
+        )
+        vector_interaction = qpane._vector_interaction_controller()
+        vector_port = VectorInteractionPort(
+            panel_to_source=vector_interaction.panel_to_active_source,
+            commit_shape=vector_interaction.commit_shape,
+            commit_path=lambda points, closed: vector_interaction.commit_path(
+                points,
+                closed=closed,
+            ),
+            shape_is_ellipse=lambda: (
+                vector_interaction.shape is VectorShapeKind.ELLIPSE
+            ),
+        )
+        vector_nodes = qpane._vector_node_controller()
+        vector_node_port = VectorNodeInteractionPort(
+            begin=vector_nodes.begin,
+            update=vector_nodes.update,
+            finish=vector_nodes.finish,
+            cancel=vector_nodes.cancel,
+            overlay_state=vector_nodes.overlay_state,
+        )
+        vector_text = qpane._vector_text_controller()
+        vector_text_port = VectorTextInteractionPort(
+            begin_at=vector_text.begin_at,
+            insert=vector_text.insert,
+            backspace=vector_text.backspace,
+            delete=vector_text.delete,
+            move_cursor=vector_text.move_cursor,
+            move_cursor_to=vector_text.move_cursor_to,
+            text_length=lambda: (
+                0 if vector_text.state() is None else len(vector_text.state().text)
+            ),
+            commit=vector_text.commit,
+            cancel=vector_text.cancel,
+            active=lambda: vector_text.active,
+            overlay_state=vector_text.overlay_state,
+        )
+        ports = tool_activation_ports(
+            cursor=cursor_port,
+            navigation=navigation_port,
+            movement=movement_port,
+            transform=transform_port,
+            pixel_selection=selection_port,
+            painting=painting_port,
+            smart_selection=smart_selection_port,
+            domain_ports={
+                qpane.CONTROL_MODE_VECTOR_SHAPE: vector_port,
+                qpane.CONTROL_MODE_VECTOR_PATH: vector_port,
+                qpane.CONTROL_MODE_VECTOR_NODE: vector_node_port,
+                qpane.CONTROL_MODE_VECTOR_TEXT: vector_text_port,
+            },
+        )
+
         if tools.get_control_mode() != mode:
             self._pointer_input.cancel_active_sequences()
-        tools.set_mode(mode, dependencies)
+        tools.set_mode(mode, ports)
         self._tools_activated = True
 
     def get_control_mode(self) -> str:
@@ -423,13 +533,34 @@ class ToolInteractionDelegate:
             qpane.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
     def update_brush_cursor(self, *, erase_indicator: bool = False) -> None:
-        """Delegate brush cursor updates to the mask workflow or fall back to the default arrow."""
+        """Render target-neutral brush feedback for the active paint destination."""
         qpane = self._qpane
-        if not qpane.maskFeatureAvailable():
+        resolution = qpane.editorOperationResolver().resolve(EditorOperation.PAINT)
+        if not resolution.allowed:
+            qpane.interaction.custom_cursor = None
+            qpane.setCursor(QCursor(Qt.CursorShape.ForbiddenCursor))
+            return
+        color = qpane.paintingCoordinator().preview_color()
+        if color is None:
             qpane.interaction.custom_cursor = None
             qpane.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
             return
-        qpane._masks_controller.update_brush_cursor(erase_indicator=erase_indicator)
+        zoom = max(1e-6, float(qpane.view().viewport.zoom))
+        dpr = max(1e-6, float(qpane.devicePixelRatioF()))
+        source_size = max(1, int(qpane.interaction.brush_size))
+        logical_size = source_size * zoom / dpr
+        viewport_size = qpane.size()
+        if logical_size > min(viewport_size.width(), viewport_size.height()):
+            qpane.interaction.custom_cursor = None
+            qpane.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            return
+        cursor = qpane.cursor_builder.create_brush_cursor(
+            max(2, round(logical_size)),
+            color,
+            erase_indicator=erase_indicator,
+        )
+        qpane.interaction.custom_cursor = cursor
+        qpane.setCursor(cursor)
 
     def update_modifier_key_cursor(self) -> None:
         """Refresh mode-sensitive cursors when Alt or Shift toggles."""
@@ -623,6 +754,12 @@ class ToolInteractionDelegate:
             event.accept()
             return True
         if event.key() == Qt.Key_Space:
+            active_tool = qpane._tools_manager.get_active_tool()
+            captures_space = getattr(active_tool, "captures_space_key", None)
+            if callable(captures_space) and captures_space():
+                event.ignore()
+                qpane._tools_manager.keyPressEvent(event)
+                return event.isAccepted()
             if not event.isAutoRepeat():
                 current_mode = self.get_control_mode()
                 if current_mode != Tools.CONTROL_MODE_PANZOOM:

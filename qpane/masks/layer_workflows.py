@@ -58,16 +58,29 @@ class MaskLayerWorkflow:
         self._publish_status = publish_status
 
     def load_from_path(self, path: str) -> uuid.UUID | None:
-        """Import a mask from path and attach it to the current image."""
+        """Import a mask from path and attach it to the active composition."""
         image = self._qpane.original_image
-        if image is None or image.isNull():
+        scene = self._qpane.currentScene()
+        composition_id = self._qpane.currentCompositionID()
+        if composition_id is None or (
+            (image is None or image.isNull()) and scene is None
+        ):
             self._publish_status(
-                "Cannot load a mask before an image is set.", label="Mask Error"
+                "Cannot load a mask without an active composition.",
+                label="Mask Error",
             )
             return None
+        target_size = (
+            image.size()
+            if image is not None and not image.isNull()
+            else QSize(
+                max(1, round(scene.bounds.width())),
+                max(1, round(scene.bounds.height())),
+            )
+        )
         prepared = self._prepare_from_path(
             path,
-            target_size=image.size(),
+            target_size=target_size,
             failure_message=f"Failed to load or prepare mask from {path}",
         )
         if prepared is None:
@@ -75,18 +88,13 @@ class MaskLayerWorkflow:
         mask_id = self._assets.create_mask(image)
         if not self._commit_image(mask_id, prepared):
             return None
-        current_image_id = self._catalog.currentImageID()
-        if current_image_id is None:
-            self._publish_status(
-                "Cannot attach a mask without an active image.", label="Mask Error"
-            )
-            return None
         layer = self._assets.get_layer(mask_id)
-        layer_index = len(self._layers.mask_ids_for_image(current_image_id))
-        if layer is None or not self._layers.attach(
+        layer_index = len(self._layers.mask_ids_for_composition(composition_id))
+        if layer is None or not self._layers.attach_to_composition(
             mask_id,
-            current_image_id,
+            composition_id,
             color=random_mask_color(layer_index),
+            undoable=not self._is_legacy_image_composition(composition_id),
         ):
             self._assets.delete_mask(mask_id)
             return None
@@ -121,25 +129,30 @@ class MaskLayerWorkflow:
         return True
 
     def create_blank(self, size: QSize) -> uuid.UUID | None:
-        """Create a blank mask layer for the current image."""
+        """Create a blank mask layer in the active composition."""
         if size.isNull() or not size.isValid():
             self._publish_status(
                 "Cannot create blank mask with invalid size.", label="Mask Error"
             )
             return None
-        current_image_id = self._catalog.currentImageID()
-        if current_image_id is None:
+        composition_id = self._qpane.currentCompositionID()
+        if composition_id is None:
             self._publish_status(
-                "Cannot create blank mask without an active image.",
+                "Cannot create blank mask without an active composition.",
                 label="Mask Error",
             )
             return None
         template = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
         template.fill(Qt.transparent)
-        layer_index = len(self._layers.mask_ids_for_image(current_image_id))
+        layer_index = len(self._layers.mask_ids_for_composition(composition_id))
         mask_id = self._assets.create_mask(template)
         color = random_mask_color(layer_index)
-        if not self._layers.attach(mask_id, current_image_id, color=color):
+        if not self._layers.attach_to_composition(
+            mask_id,
+            composition_id,
+            color=color,
+            undoable=not self._is_legacy_image_composition(composition_id),
+        ):
             self._assets.delete_mask(mask_id)
             return None
         self._layers.update_presentation(mask_id, color=color)
@@ -147,6 +160,15 @@ class MaskLayerWorkflow:
         self._qpane.update()
         self._publish_status(f"Created blank mask layer ({mask_id}).", label="Mask")
         return mask_id
+
+    def _is_legacy_image_composition(self, composition_id: uuid.UUID) -> bool:
+        """Return whether image-scoped compatibility owns this generated document."""
+        image_id = self._catalog.currentImageID()
+        return bool(
+            image_id is not None
+            and self._qpane.compositionService().default_composition_for_image(image_id)
+            == composition_id
+        )
 
     def remove_from_image(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> bool:
         """Remove a mask instance and refresh edit/render lifecycle state."""
@@ -197,12 +219,24 @@ class MaskLayerWorkflow:
             opacity=opacity,
         )
 
-    def cycle(self, image_id: uuid.UUID, *, forward: bool) -> None:
-        """Cycle mask ordering for image_id and refresh edit state."""
+    def cycle(self, image_id: uuid.UUID | None, *, forward: bool) -> None:
+        """Cycle masks in an image adapter or the active composition."""
         previous_active = self._controller.get_active_mask_id()
-        mask_ids = self._layers.mask_ids_for_image(image_id)
+        composition_id = (
+            self._qpane.currentCompositionID()
+            if image_id is None
+            else self._qpane.compositionService().default_composition_for_image(
+                image_id
+            )
+        )
+        mask_ids = (
+            []
+            if composition_id is None
+            else self._layers.mask_ids_for_composition(composition_id)
+        )
         moved = False
         if len(mask_ids) >= 2:
+            assert composition_id is not None
             moving_mask = mask_ids[0] if forward else mask_ids[-1]
             target_index = self._layers.mask_stack_end_index(forward=forward)
             routed = (
@@ -211,15 +245,19 @@ class MaskLayerWorkflow:
                 else None
             )
             moved = (
-                self._layers.reorder_mask_slot(
-                    image_id,
+                self._layers.reorder_mask_slot_in_composition(
+                    composition_id,
                     moving_mask,
                     len(mask_ids) - 1 if forward else 0,
                 )
                 if routed is None
                 else routed
             )
-        new_order = self._layers.mask_ids_for_image(image_id)
+        new_order = (
+            []
+            if composition_id is None
+            else self._layers.mask_ids_for_composition(composition_id)
+        )
         new_top = new_order[-1] if moved and new_order else None
         direction = "forward" if forward else "backward"
         if new_top:
@@ -238,14 +276,15 @@ class MaskLayerWorkflow:
             )
 
     def promote_to_top(self, mask_id: uuid.UUID) -> bool:
-        """Bring mask_id to the top of the active image mask stack."""
-        current_image_id = self._catalog.currentImageID()
-        if current_image_id is None:
+        """Bring mask_id to the top of the active composition's mask stack."""
+        composition_id = self._qpane.currentCompositionID()
+        if composition_id is None:
             self._publish_status(
-                "Cannot promote a mask without an active image.", label="Mask Error"
+                "Cannot promote a mask without an active composition.",
+                label="Mask Error",
             )
             return False
-        mask_ids = self._layers.mask_ids_for_image(current_image_id)
+        mask_ids = self._layers.mask_ids_for_composition(composition_id)
         if mask_id not in mask_ids:
             was_moved = False
         else:
@@ -256,8 +295,8 @@ class MaskLayerWorkflow:
                 else None
             )
             was_moved = (
-                self._layers.reorder_mask_slot(
-                    current_image_id,
+                self._layers.reorder_mask_slot_in_composition(
+                    composition_id,
                     mask_id,
                     len(mask_ids) - 1,
                 )

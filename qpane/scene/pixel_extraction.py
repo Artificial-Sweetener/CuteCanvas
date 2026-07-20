@@ -30,12 +30,26 @@ def build_pixel_lift(
     if bounds is None:
         raise ValueError("pixel lift requires bounded selection coverage")
     before = np.ascontiguousarray(source_pixels, dtype=np.uint8)
-    selection = coverage.pixels.astype(np.uint16)
-    if before.ndim == 3:
-        selection = selection[:, :, np.newaxis]
-    after = np.ascontiguousarray(
-        ((before.astype(np.uint16) * (255 - selection) + 127) // 255).astype(np.uint8)
-    )
+    minimum_coverage = int(coverage.pixels.min())
+    maximum_coverage = int(coverage.pixels.max())
+    if minimum_coverage == 255:
+        after = np.zeros_like(before)
+    elif (
+        minimum_coverage == 0
+        and maximum_coverage == 255
+        and not np.any((coverage.pixels != 0) & (coverage.pixels != 255))
+    ):
+        after = np.array(before, copy=True, order="C")
+        after[coverage.pixels != 0] = 0
+    else:
+        selection = coverage.pixels.astype(np.uint16)
+        if before.ndim == 3:
+            selection = selection[:, :, np.newaxis]
+        after = np.ascontiguousarray(
+            ((before.astype(np.uint16) * (255 - selection) + 127) // 255).astype(
+                np.uint8
+            )
+        )
     fragment = RasterPixelFragment._adopt_detached(
         bounds,
         pixel_format,

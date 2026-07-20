@@ -39,6 +39,7 @@ class PrefetchedOverlay:
     render_revision: int
     image: QImage
     scaled: tuple[tuple[float, QImage], ...] = ()
+    colorize_duration_ms: float | None = None
 
 
 class MaskPrefetchWorker(QRunnable, BaseWorker):
@@ -101,9 +102,11 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                     if self.is_cancelled:
                         error = RuntimeError("prefetch cancelled")
                         break
-                    image = self._controller.renders.prepare_image(
+                    colorize_started = monotonic()
+                    image = self._controller.renders.prepare_image_detached(
                         layer, mask_id=mask_id
                     )
+                    colorize_duration_ms = (monotonic() - colorize_started) * 1000.0
                 except Exception as exc:  # noqa: BLE001 - isolate one corrupt mask
                     failures[mask_id] = str(exc)
                     continue
@@ -134,6 +137,7 @@ class MaskPrefetchWorker(QRunnable, BaseWorker):
                             render_revision=render_revision,
                             image=image,
                             scaled=tuple(scaled_outputs),
+                            colorize_duration_ms=colorize_duration_ms,
                         )
                     )
         except Exception as exc:  # pragma: no cover - defensive
@@ -222,14 +226,15 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
             self.emit_finished(True)
             return
         colorized_image: QImage | None = None
+        colorize_duration_ms: float | None = None
         error: BaseException | None = None
         try:
-            colorized_image = self._controller.renders.colorize_image(
+            colorize_started = monotonic()
+            colorized_image = self._controller.renders.rasterize_detached(
                 self._snippet,
                 self._color,
-                mask_id=self._mask_id,
-                source="snippet_async",
             )
+            colorize_duration_ms = (monotonic() - colorize_started) * 1000.0
         except Exception as exc:  # pragma: no cover - defensive
             error = exc
             self.logger.exception(
@@ -238,10 +243,14 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
         if self.is_cancelled:
             self.emit_finished(True)
             return
-        self._dispatch_finalize(colorized_image)
+        self._dispatch_finalize(colorized_image, colorize_duration_ms)
         self.emit_finished(error is None, error=error)
 
-    def _dispatch_finalize(self, colorized_image: QImage | None) -> None:
+    def _dispatch_finalize(
+        self,
+        colorized_image: QImage | None,
+        colorize_duration_ms: float | None,
+    ) -> None:
         """Deliver snippet colorization results back to the service on the GUI thread."""
         coordinator = self._coordinator_ref()
         if coordinator is None:
@@ -262,6 +271,7 @@ class MaskSnippetWorker(QRunnable, BaseWorker):
                 handle=handle,
                 dirty_rect=rect,
                 colorized_image=colorized_image,
+                colorize_duration_ms=colorize_duration_ms,
             )
 
         executor = getattr(self, "_executor", None)

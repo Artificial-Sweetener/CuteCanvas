@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 
 from PySide6.QtCore import QRect, QRectF
 from PySide6.QtGui import QColor, QImage
@@ -206,7 +207,7 @@ def test_editable_raster_participates_in_normal_render_plan(qpane_with_mask) -> 
     qpane, _manager, _image_id = qpane_with_mask
     layer_id = qpane.addEditableRasterLayer(
         _opaque_image(32, 24),
-        placement=QRectF(12.0, 18.0, 32.0, 24.0),
+        placement=QRectF(0.0, 0.0, 8.0, 8.0),
         label="Rendered paint",
     )
     assert layer_id is not None
@@ -221,3 +222,83 @@ def test_editable_raster_participates_in_normal_render_plan(qpane_with_mask) -> 
     )
     assert isinstance(item, RasterLayerRenderItem)
     assert item.descriptor.label == "Rendered paint"
+
+
+def test_shared_editable_raster_instances_edit_together_but_place_independently(
+    qpane_with_mask,
+) -> None:
+    """A shared raster source must not collapse independent layer presentation."""
+    qpane, _manager, _image_id = qpane_with_mask
+    scene = qpane.currentScene()
+    composition_id = qpane.currentCompositionID()
+    assert scene is not None
+    assert composition_id is not None
+    original_id = qpane.addEditableRasterLayer(
+        _opaque_image(8, 8),
+        placement=QRectF(0.0, 0.0, 8.0, 8.0),
+        interaction=QPaneLayerInteractionPolicy(
+            selectable=True,
+            movable=True,
+            pixel_editable=True,
+        ),
+        label="Shared paint",
+    )
+    assert original_id is not None
+    store = qpane.compositionService().layers
+    original_instance = store.layer(composition_id, original_id)
+    assert original_instance is not None
+    duplicate_id = uuid.uuid4()
+    duplicate = store.duplicate_layer(
+        composition_id,
+        original_id,
+        duplicate_id,
+        transform=original_instance.transform.translated(16.0, 0.0),
+    )
+    assert duplicate is not None
+    qpane.view().invalidate_content_cache()
+
+    original_before = qpane.editableRasterLayerImage(scene.scene_id, original_id)
+    duplicate_before = qpane.editableRasterLayerImage(scene.scene_id, duplicate_id)
+    assert original_before == duplicate_before
+    assert qpane.setSelectedLayer(scene.scene_id, original_id)
+    selection = QImage(1, 1, QImage.Format_Grayscale8)
+    selection.fill(128)
+    assert qpane.setPixelSelection(selection, QRect(0, 0, 1, 1))
+    assert qpane.deleteSelectedPixels()
+    assert qpane.editableRasterLayerImage(
+        scene.scene_id, original_id
+    ) == qpane.editableRasterLayerImage(scene.scene_id, duplicate_id)
+
+    assert qpane.setLayerPlacement(
+        scene.scene_id,
+        duplicate_id,
+        QRectF(4.0, 0.0, 4.0, 8.0),
+    )
+    moved = qpane.currentScene()
+    assert moved is not None
+    placements = {layer.layer_id: layer.placement for layer in moved.layers}
+    assert placements[original_id] == QRectF(0.0, 0.0, 8.0, 8.0)
+    assert placements[duplicate_id] == QRectF(4.0, 0.0, 4.0, 8.0)
+    plan = qpane.view().calculateRenderPlan(is_blank=False)
+    assert plan is not None
+    shared_items = [
+        item
+        for item in plan.render_items
+        if item.descriptor.layer_id in {original_id, duplicate_id}
+    ]
+    assert len(shared_items) == 2
+    assert shared_items[0].asset_key != shared_items[1].asset_key
+    assert shared_items[0].pyramid_asset_key == shared_items[1].pyramid_asset_key
+    assert qpane.undoSceneEdit()
+    restored = qpane.currentScene()
+    assert restored is not None
+    restored_placements = {layer.layer_id: layer.placement for layer in restored.layers}
+    assert restored_placements[duplicate_id] == QRectF(16.0, 0.0, 8.0, 8.0)
+
+    source_id = original_instance.source.resource_id
+    assert store.remove_layer(composition_id, duplicate_id)
+    assert qpane._editable_raster_assets.get(source_id) is not None
+    assert store.remove_layer(composition_id, original_id)
+    assert qpane._editable_raster_assets.get(source_id) is not None
+    qpane.compositionService().edit_history.clear_scope(composition_id)
+    assert qpane._editable_raster_assets.get(source_id) is None

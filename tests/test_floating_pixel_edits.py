@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -285,6 +285,88 @@ def test_rgba_fragment_promotes_as_real_rendered_layer_with_atomic_history(
         )
         assert redone_source is not None
         assert redone_source.pixelColor(20, 20).alpha() == 0
+    finally:
+        harness.close()
+
+
+def test_affine_rgba_fragment_promotes_without_flattening_transform(
+    qapp: QApplication,
+) -> None:
+    """New-layer resolution must preserve the same affine preview and chronology."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(256, 256),
+        widget_size=QSize(512, 512),
+        mask_count=1,
+    )
+    viewer = harness.viewer
+    scene = viewer.currentScene()
+    assert scene is not None
+    source_layer_id = viewer.addEditableRasterLayer(
+        _soft_rgba_payload(),
+        placement=QRectF(0.0, 0.0, 64.0, 64.0),
+        label="Affine paint",
+    )
+    try:
+        assert source_layer_id is not None
+        assert viewer.setSelectedLayer(scene.scene_id, source_layer_id)
+        selection = QImage(32, 32, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert viewer.setPixelSelection(selection, QRect(16, 16, 32, 32))
+        viewer.setControlMode(viewer.CONTROL_MODE_TRANSFORM)
+        harness.drain_events()
+        interaction = viewer.sceneLayerTransformInteraction()
+        box = interaction.presentation()
+        assert box is not None
+        start = next(
+            point for handle, point in box.handles if handle.value == "bottom-right"
+        ).toPoint()
+        finish = start + QPoint(64, 32)
+
+        QTest.mousePress(viewer, Qt.LeftButton, Qt.ShiftModifier, start)
+        QTest.mouseMove(viewer, finish, delay=0)
+        QTest.mouseRelease(viewer, Qt.LeftButton, Qt.ShiftModifier, finish)
+        harness.drain_events()
+
+        preview = viewer._selected_pixel_movement.raster_preview
+        assert preview is not None
+        expected = preview.fragment_transform
+        floating = viewer.floatingPixelEditState()
+        assert floating is not None
+        expected_placement = expected.map_rect(QRectF(16.0, 16.0, 32.0, 32.0))
+        assert floating.bounds == expected_placement.toAlignedRect()
+        source_before = viewer.editableRasterLayerImage(
+            scene.scene_id,
+            source_layer_id,
+        )
+        assert source_before is not None
+
+        promoted_layer_id = viewer.promoteFloatingPixels("Affine fragment")
+
+        assert promoted_layer_id is not None
+        promoted_transform = viewer.layerTransform(scene.scene_id, promoted_layer_id)
+        assert promoted_transform is not None
+        assert promoted_transform.map(QPointF(16.0, 16.0)) == expected.map_point(
+            QPointF(16.0, 16.0)
+        )
+        promoted = viewer.editableRasterLayerImage(
+            scene.scene_id,
+            promoted_layer_id,
+        )
+        assert promoted is not None and promoted.size() == QSize(32, 32)
+        assert viewer.undoSceneEdit()
+        assert (
+            viewer.editableRasterLayerImage(scene.scene_id, source_layer_id)
+            == source_before
+        )
+        assert (
+            viewer.editableRasterLayerImage(scene.scene_id, promoted_layer_id) is None
+        )
+        assert viewer.redoSceneEdit()
+        assert (
+            viewer.editableRasterLayerImage(scene.scene_id, promoted_layer_id)
+            == promoted
+        )
     finally:
         harness.close()
 

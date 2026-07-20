@@ -86,6 +86,19 @@ class PixelSelectionService:
         self._publish(scene_id)
         return True
 
+    def record_preview(
+        self,
+        scene_id: uuid.UUID,
+        before: CoverageSnapshot | None,
+    ) -> bool:
+        """Record a live-preview transition without republishing or replacing it."""
+        after = self._coverage_by_scene.get(scene_id)
+        if _coverage_equal(before, after):
+            return False
+        if self._record_edit is not None:
+            self._record_edit(PixelSelectionEdit(scene_id, before, after))
+        return True
+
     def undo_edit(self, command: PixelSelectionEdit) -> bool:
         """Restore the selection captured before ``command``."""
         return self.restore(command.scene_id, command.before)

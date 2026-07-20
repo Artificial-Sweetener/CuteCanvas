@@ -63,7 +63,10 @@ def test_mask_service_load_mask_records_success(qpane_with_mask, tmp_path):
     assert str(mask_path) in message
 
 
-def test_mask_service_load_mask_requires_image(qpane_with_mask, tmp_path):
+def test_mask_service_load_mask_uses_active_composition_canvas(
+    qpane_with_mask,
+    tmp_path,
+):
     qpane, _, _ = qpane_with_mask
     service = _mask_service(qpane)
     service._status_messages.clear()
@@ -73,10 +76,11 @@ def test_mask_service_load_mask_requires_image(qpane_with_mask, tmp_path):
     mask_path = tmp_path / "mask_missing.png"
     assert grayscale.save(str(mask_path))
     result = service.loadMaskFromPath(str(mask_path))
-    assert result is None
+    assert result is not None
+    assert service.layer_instance_for_mask(result) is not None
     label, message = service._status_messages[-1]
-    assert label == "Mask Error"
-    assert message == "Cannot load a mask before an image is set."
+    assert label == "Mask"
+    assert str(mask_path) in message
 
 
 def test_mask_service_update_mask_missing_layer(qpane_with_mask, tmp_path):

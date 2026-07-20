@@ -23,6 +23,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize
 
+from qpane.catalog.source_reference import CatalogImageReference
 from qpane.scene.default_scene import (
     DefaultCatalogSceneProvider,
     build_default_catalog_scene,
@@ -36,7 +37,6 @@ from qpane.scene.identity import (
 )
 from qpane.scene.model import BlendMode, LayerKind, SceneKind
 from qpane.scene.providers import SceneResolver
-from qpane.scene.sources import CatalogImageSource
 
 
 def test_default_scene_and_base_layer_ids_are_deterministic() -> None:
@@ -76,10 +76,8 @@ def test_default_catalog_scene_contains_one_full_bounds_image_layer() -> None:
     assert layer.scene_id == scene.scene_id
     assert layer.layer_id == base_image_layer_id(image_id)
     assert layer.kind == LayerKind.IMAGE
-    assert isinstance(layer.source, CatalogImageSource)
+    assert isinstance(layer.source, CatalogImageReference)
     assert layer.source.image_id == image_id
-    assert layer.source.source_path == path
-    assert layer.source.revision == 3
     assert layer.source_revision == 3
     assert layer.placement == scene.bounds
     assert layer.visible is True
@@ -159,8 +157,4 @@ def test_scene_resolver_returns_ordered_default_provider_scene() -> None:
     scene = resolver.resolve()
     assert scene is not None
     assert scene.scene_id == default_scene_id(image_id)
-    assert scene.layers[0].source == CatalogImageSource(
-        image_id=image_id,
-        source_path=None,
-        revision=1,
-    )
+    assert scene.layers[0].source == CatalogImageReference(image_id=image_id)

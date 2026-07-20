@@ -20,6 +20,8 @@ from PySide6.QtCore import QPoint, QRect
 from PySide6.QtGui import QImage, QPainter
 
 from ..coverage import CoverageSnapshot
+from ..painting import BrushCompositor, BrushDab, BrushDabEngine, BrushStrokeSegment
+from ..painting.rendering import apply_coverage_constraint, paint_coverage_segment
 from ..raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,
@@ -28,9 +30,7 @@ from .mask_controller import MaskController
 from .stroke_models import (
     MaskStrokeJobSpec,
     MaskStrokePayload,
-    MaskStrokeSegmentPayload,
 )
-from .stroke_render import apply_coverage_constraint, paint_stroke_segment
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,10 @@ class DecimatedStrokePreview:
 
     mask_id: UUID
     stride: int
+    compositor: BrushCompositor = field(default_factory=BrushCompositor)
     constraint: CoverageSnapshot | None = None
     constraint_region: Callable[[QRect, int], np.ndarray] | None = None
-    _segments: list[MaskStrokeSegmentPayload] = field(default_factory=list)
+    _segments: list[BrushStrokeSegment] = field(default_factory=list)
     _dirty_rect: QRect | None = None
     _preview_image: QImage | None = None
 
@@ -85,7 +86,7 @@ class DecimatedStrokePreview:
         self,
         *,
         dirty_rect: QRect,
-        segment: MaskStrokeSegmentPayload,
+        segment: BrushStrokeSegment,
         snapshot_region: Callable[[QRect, int], np.ndarray],
     ) -> MaskStrokePreview:
         """Record a segment and render its accumulated provisional mask."""
@@ -249,17 +250,20 @@ class DecimatedStrokePreview:
 
     def _paint_preview_segments(
         self,
-        segments: tuple[MaskStrokeSegmentPayload, ...] | list[MaskStrokeSegmentPayload],
+        segments: tuple[BrushStrokeSegment, ...] | list[BrushStrokeSegment],
     ) -> None:
         """Paint only the supplied semantic segments into the cached preview."""
         preview = self._preview_image
         dirty_rect = self._dirty_rect
         if preview is None or dirty_rect is None:
             return
+        if any(segment.texture_strength > 0.0 for segment in segments):
+            self._paint_textured_preview(preview, dirty_rect, segments)
+            return
         painter = QPainter(preview)
         try:
             for segment in segments:
-                paint_stroke_segment(
+                paint_coverage_segment(
                     painter,
                     dirty_rect.topLeft(),
                     segment,
@@ -267,6 +271,42 @@ class DecimatedStrokePreview:
                 )
         finally:
             painter.end()
+
+    def _paint_textured_preview(
+        self,
+        preview: QImage,
+        dirty_rect: QRect,
+        segments: tuple[BrushStrokeSegment, ...] | list[BrushStrokeSegment],
+    ) -> None:
+        """Composite cached textured tips in preview-local coordinates."""
+        stride = max(1, self.stride)
+        pixels = qimage_to_numpy_grayscale8(preview)
+        engine = BrushDabEngine()
+        patch_bounds = QRect(0, 0, preview.width(), preview.height())
+        for segment in segments:
+            dabs = tuple(
+                BrushDab(
+                    center=(
+                        (dab.center[0] - dirty_rect.left()) / stride,
+                        (dab.center[1] - dirty_rect.top()) / stride,
+                    ),
+                    diameter=max(1.0, dab.diameter / stride),
+                    hardness=dab.hardness,
+                    opacity=dab.opacity,
+                    angle=dab.angle,
+                    texture_strength=dab.texture_strength,
+                    texture_scale=max(0.25, dab.texture_scale / stride),
+                    texture_seed=dab.texture_seed,
+                )
+                for dab in engine.segment_dabs(segment)
+            )
+            pixels = self.compositor.render_coverage_dabs(
+                before=pixels,
+                patch_bounds=patch_bounds,
+                dabs=dabs,
+                operation=segment.operation,
+            )
+        self._preview_image = numpy_to_qimage_grayscale8(pixels)
 
     def _build_payload(self) -> MaskStrokePayload:
         """Return the recorded segments packaged for worker execution."""

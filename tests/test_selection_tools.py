@@ -14,7 +14,7 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 from qpane.coverage import CoverageCombineMode
-from qpane.tools import ToolDependencies
+from qpane.tools.ports import PixelSelectionInteractionPort
 from qpane.tools.selection_shapes import (
     EllipseSelectionTool,
     LassoSelectionTool,
@@ -73,7 +73,7 @@ def test_rectangle_tool_commits_scene_geometry_once() -> None:
     commits = []
     tool = RectangleSelectionTool()
     tool.activate(
-        ToolDependencies(
+        PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: point + QPointF(10.0, 20.0),
             commit_pixel_selection=lambda coverage, mode: commits.append(
                 (coverage, mode)
@@ -95,7 +95,7 @@ def test_selection_modifiers_choose_add_subtract_and_intersect() -> None:
     modes = []
     tool = EllipseSelectionTool()
     tool.activate(
-        ToolDependencies(
+        PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: point,
             is_shift_held=lambda: modifier["shift"],
             is_alt_held=lambda: modifier["alt"],
@@ -118,7 +118,7 @@ def test_lasso_requires_area_and_commits_accumulated_points() -> None:
     commits = []
     tool = LassoSelectionTool()
     tool.activate(
-        ToolDependencies(
+        PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: point,
             commit_pixel_selection=lambda coverage, mode: commits.append(
                 (coverage, mode)
@@ -143,7 +143,7 @@ def test_escape_cancels_active_geometry_without_committing() -> None:
     commits = []
     tool = RectangleSelectionTool()
     tool.activate(
-        ToolDependencies(
+        PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: point,
             commit_pixel_selection=lambda coverage, mode: commits.append(
                 (coverage, mode)

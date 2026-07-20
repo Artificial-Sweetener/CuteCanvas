@@ -92,11 +92,16 @@ def test_enum_values_match_facade_contract() -> None:
         "cursor",
         "panzoom",
         "move",
+        "transform",
         "draw-brush",
         "smart-select",
         "select-rectangle",
         "select-ellipse",
         "select-lasso",
+        "vector-shape",
+        "vector-path",
+        "vector-node",
+        "vector-text",
     }
 
 

@@ -14,7 +14,8 @@ import uuid
 from dataclasses import dataclass
 
 from ..coverage import CoverageSnapshot
-from ..scene.raster import LayerTransform, RasterBounds
+from ..scene.affine import LayerTransform
+from ..scene.raster import RasterBounds
 
 
 @dataclass(frozen=True, slots=True)

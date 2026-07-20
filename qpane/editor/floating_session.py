@@ -13,14 +13,16 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QRect, QRectF
 
 from ..coverage import CoverageSnapshot
+from ..scene.affine import LayerTransform
 from ..scene.layer_selection import SceneLayerSelection
 from ..scene.model import LayerDescriptor
 from ..scene.pixel_fragments import RasterPixelLift
 from ..scene.pixel_move_preview import RasterPixelMovePreview
 from ..scene.pixel_transitions import RasterPixelTransition
+from ..scene.raster import RasterExtentPolicy
 from ..selection import PixelSelectionState
 from .pixel_move_target import SelectedPixelMoveTarget, coverage_contains
 
@@ -37,13 +39,15 @@ class FloatingPixelSession:
     local_coverage: CoverageSnapshot
     lift: RasterPixelLift
     selected_layer: SceneLayerSelection
+    extent_policy: RasterExtentPolicy
     cut_source: bool
     session_id: uuid.UUID = field(default_factory=uuid.uuid4)
     delta: tuple[int, int] = (0, 0)
     drag_origin: QPointF | None = None
     drag_start_delta: tuple[int, int] = (0, 0)
     preview_revision: int = 0
-    preview_transition: RasterPixelTransition | None = None
+    settled_transition: RasterPixelTransition | None = None
+    fragment_transform: LayerTransform = field(default_factory=LayerTransform)
 
     @classmethod
     def create(
@@ -64,6 +68,7 @@ class FloatingPixelSession:
             local_coverage=target.local_coverage,
             lift=lift,
             selected_layer=selected_layer,
+            extent_policy=target.extent_policy,
             cut_source=not copy,
         )
 
@@ -84,18 +89,22 @@ class FloatingPixelSession:
 
     @property
     def raster_preview(self) -> RasterPixelMovePreview | None:
-        """Return the exact transient transition for rendering when displaced."""
-        if self.preview_transition is None:
+        """Return stable lifted pixels plus their transient displacement."""
+        if self.fragment_transform == LayerTransform():
             return None
         return RasterPixelMovePreview(
             session_id=self.session_id,
             scene_id=self.scene_id,
             layer_id=self.layer_id,
-            coverage=self.local_coverage,
-            transition=self.preview_transition,
-            pixel_format=self.lift.fragment.pixel_format,
-            delta_x=self.delta[0],
-            delta_y=self.delta[1],
+            lift=self.lift,
+            cut_source=self.cut_source,
+            settled_transition=self.settled_transition,
+            fragment_transform=self.fragment_transform,
+            extent_clip_bounds=(
+                self.layer.raster_bounds
+                if self.extent_policy is RasterExtentPolicy.FIXED
+                else None
+            ),
         )
 
     @property
@@ -104,14 +113,41 @@ class FloatingPixelSession:
         transform = self.layer.transform
         if transform is None:
             return 0, 0
-        return (
-            round(self.delta[0] * transform.scale_x),
-            round(self.delta[1] * transform.scale_y),
+        mapped = transform.map_vector(
+            QPointF(float(self.delta[0]), float(self.delta[1]))
         )
+        return round(mapped.x()), round(mapped.y())
 
     def contains(self, scene_point: QPointF) -> bool:
-        """Return whether the translated selection covers ``scene_point``."""
-        return coverage_contains(self.preview_state.coverage, scene_point)
+        """Return whether transformed fragment coverage contains ``scene_point``."""
+        transform = self.scene_transform
+        local_point = transform.inverse_map(scene_point)
+        return bool(
+            local_point is not None
+            and coverage_contains(self.lift.fragment.coverage, local_point)
+        )
+
+    @property
+    def scene_transform(self) -> LayerTransform:
+        """Return current fragment-local to scene geometry."""
+        layer_transform = self.layer.transform
+        return (
+            self.fragment_transform
+            if layer_transform is None
+            else self.fragment_transform.followed_by(layer_transform)
+        )
+
+    @property
+    def scene_bounds(self) -> QRect:
+        """Return the conservative scene rectangle of transformed pixels."""
+        bounds = self.lift.fragment.bounds
+        placement = self.scene_transform.map_bounds(bounds)
+        return QRectF(
+            placement.x,
+            placement.y,
+            placement.width,
+            placement.height,
+        ).toAlignedRect()
 
     def begin_drag(self, scene_point: QPointF) -> None:
         """Capture a pointer origin for an additional drag."""
@@ -124,13 +160,21 @@ class FloatingPixelSession:
         if self.drag_origin is None or transform is None:
             return False
         drag_delta = scene_point - self.drag_origin
+        mapped_delta = transform.inverse_map_vector(drag_delta)
+        if mapped_delta is None:
+            return False
         local_delta = (
-            self.drag_start_delta[0] + round(drag_delta.x() / transform.scale_x),
-            self.drag_start_delta[1] + round(drag_delta.y() / transform.scale_y),
+            self.drag_start_delta[0] + round(mapped_delta.x()),
+            self.drag_start_delta[1] + round(mapped_delta.y()),
         )
         if local_delta == self.delta:
             return False
         self.delta = local_delta
+        self.fragment_transform = LayerTransform(
+            dx=float(local_delta[0]),
+            dy=float(local_delta[1]),
+        )
+        self.settled_transition = None
         self.advance_preview()
         return True
 
@@ -155,9 +199,23 @@ class FloatingPixelSession:
     def nudge(self, delta_x: int, delta_y: int) -> None:
         """Apply one integer keyboard displacement."""
         self.delta = (self.delta[0] + int(delta_x), self.delta[1] + int(delta_y))
+        self.fragment_transform = LayerTransform(
+            dx=float(self.delta[0]),
+            dy=float(self.delta[1]),
+        )
         self.drag_start_delta = self.delta
+        self.settled_transition = None
         self.advance_preview()
 
     def advance_preview(self) -> None:
         """Advance transient identity after presentation-affecting state changes."""
         self.preview_revision += 1
+
+    def set_fragment_transform(self, transform: LayerTransform) -> bool:
+        """Replace affine fragment geometry and advance transient identity."""
+        if transform == self.fragment_transform:
+            return False
+        self.fragment_transform = transform
+        self.settled_transition = None
+        self.advance_preview()
+        return True

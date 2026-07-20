@@ -24,23 +24,25 @@ from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage, QPixmap, Qt
 from PySide6.QtWidgets import QWidget
 
-import qpane.rendering.presenter as presenter_module
-from qpane.composition.layers import (
-    CompositionLayerInstance,
-    CompositionLayerSourceKind,
-)
+import qpane.rendering.scene_compiler as scene_compiler_module
+from qpane.catalog.descriptor_factory import CatalogLayerDescriptorFactory
+from qpane.catalog.source_capabilities import CatalogSourceCapabilities
+from qpane.catalog.source_reference import CatalogImageReference
+from qpane.composition.layers import CompositionLayerInstance
 from qpane.core import CacheSettings
 from qpane.masks.descriptor_factory import MaskLayerDescriptorFactory
-from qpane.masks.source_resolver import MaskLayerSourceResolver
+from qpane.masks.source_reference import MaskAssetReference
+from qpane.masks.source_resolver import MaskSourceCapabilities
 from qpane.rendering import (
     RenderingPresenter,
     ViewportZoomMode,
 )
+from qpane.scene.effects import LayerEffectRenderRegistry
 from qpane.scene.identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
     base_image_layer_id,
-    default_catalog_asset_key,
+    catalog_source_asset_key,
     default_scene_id,
     mask_layer_id,
 )
@@ -57,13 +59,9 @@ from qpane.scene.model import (
 )
 from qpane.scene.providers import SceneContribution
 from qpane.scene.raster import RasterBounds
-from qpane.scene.registry import (
-    CatalogLayerSourceResolver,
-    LayerSourceResolverRegistry,
-    SceneProviderRegistry,
-)
+from qpane.scene.registry import SceneProviderRegistry
 from qpane.scene.render_plan import RenderStrategy
-from qpane.scene.sources import MaskLayerSource
+from qpane.scene.source_capabilities import LayerSourceCapabilities
 
 
 def _cleanup_qpane(widget: QWidget, qapp) -> None:
@@ -79,6 +77,19 @@ def _make_image(
     image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
     image.fill(color)
     return image
+
+
+def _register_mask_capabilities(
+    qpane: StubQPane,
+    owner: MaskSourceCapabilities,
+) -> None:
+    """Register every focused capability supplied by one mask owner."""
+    capabilities = qpane.layerSourceCapabilities()
+    capabilities.metadata.register(MaskAssetReference, owner)
+    capabilities.rasters.register(MaskAssetReference, owner)
+    capabilities.hit_tests.register(MaskAssetReference, owner)
+    capabilities.coverage.register(MaskAssetReference, owner)
+    capabilities.pixel_presentation.register(MaskAssetReference, owner)
 
 
 class StubSettings:
@@ -130,7 +141,7 @@ class StubQPane(QWidget):
         self.currentImagePath: Path | None = Path("stub.png")
         self.mask_service = None
         self._scene_providers = SceneProviderRegistry()
-        self._source_resolvers = LayerSourceResolverRegistry()
+        self._source_capabilities = LayerSourceCapabilities.create()
         self._current_image_id = uuid.uuid4()
         self._is_blank = True
         self.resize(*size)
@@ -164,9 +175,9 @@ class StubQPane(QWidget):
         """Return the private scene-provider registry used by the presenter."""
         return self._scene_providers
 
-    def layerSourceResolverRegistry(self) -> LayerSourceResolverRegistry:
-        """Return the private source resolver registry used by the presenter."""
-        return self._source_resolvers
+    def layerSourceCapabilities(self) -> LayerSourceCapabilities:
+        """Return focused source capabilities used by the presenter."""
+        return self._source_capabilities
 
 
 class StubCatalog:
@@ -217,13 +228,33 @@ class StubCatalog:
             return self._resolver(asset_key, width)
         return self._base_image
 
+    def pyramid_for_asset(self, asset_key):  # pragma: no cover - product stub
+        """Report an existing product so tests control best-fit selection."""
+        return self
+
+    def generate_pyramid_for_asset(
+        self, asset_key, image
+    ):  # pragma: no cover - product stub
+        """Reject unexpected generation by retaining the supplied base image."""
+        self._base_image = image
+
+    def get_best_fit_image_for_asset(
+        self, asset_key, width
+    ):  # pragma: no cover - product stub
+        """Route shared product selection through the configured resolver."""
+        return self.getBestFitImageForAsset(asset_key, width)
+
+    def remove_pyramid(self, asset_key):  # pragma: no cover - product stub
+        """Accept source invalidation without durable test state."""
+        return
+
     def getRevision(self, image_id):  # pragma: no cover - simple passthrough
         return self.revision
 
     def defaultAssetKeyForImage(
         self, image_id
     ):  # pragma: no cover - simple passthrough
-        return default_catalog_asset_key(
+        return catalog_source_asset_key(
             image_id,
             revision=self.revision,
             source_path=self._current_path,
@@ -282,16 +313,27 @@ class PresenterHarness:
             image_id=self.qpane._current_image_id,
             path=self.qpane.currentImagePath,
         )
-        self.qpane.layerSourceResolverRegistry().register(
-            CatalogLayerSourceResolver(self.catalog)
-        )
+        catalog_capabilities = CatalogSourceCapabilities(self.catalog)
+        capabilities = self.qpane.layerSourceCapabilities()
+        capabilities.metadata.register(CatalogImageReference, catalog_capabilities)
+        capabilities.rasters.register(CatalogImageReference, catalog_capabilities)
+        capabilities.hit_tests.register(CatalogImageReference, catalog_capabilities)
         self.executor = NoopExecutor()
         self.qpane.original_image = base_image
         self.presenter = RenderingPresenter(
             qpane=self.qpane,
             catalog=self.catalog,
+            pyramid_products=self.catalog,
             cache_registry=None,
             executor=self.executor,
+            scene_providers=self.qpane.sceneProviderRegistry(),
+            source_metadata=capabilities.metadata,
+            raster_sources=capabilities.rasters,
+            raster_patches=capabilities.raster_patches,
+            source_hit_tests=capabilities.hit_tests,
+            pixel_presentation=capabilities.pixel_presentation,
+            vector_sources=capabilities.vectors,
+            layer_effects=LayerEffectRenderRegistry(),
         )
         self.qpane.attach_presenter(self.presenter)
         self.viewport = self.presenter.viewport
@@ -397,6 +439,8 @@ class StubMaskController:
     def __init__(self, revisions: dict[uuid.UUID, int]) -> None:
         self._revisions = revisions
         self._pixmap_resolver = None
+        self.live_preview_ids: set[uuid.UUID] = set()
+        self.peek_available = True
 
     @property
     def renders(self):
@@ -407,10 +451,26 @@ class StubMaskController:
         """Return the configured render revision for ``mask_id``."""
         return self._revisions[mask_id]
 
+    def is_live_preview(self, mask_id: uuid.UUID) -> bool:
+        """Return whether the test mask currently has volatile preview pixels."""
+        return mask_id in self.live_preview_ids
+
     def get_by_id(self, mask_id: uuid.UUID, *, scale: float | None = None) -> QPixmap:
         """Resolve a derived test raster through the configured service stub."""
         assert self._pixmap_resolver is not None
         return self._pixmap_resolver(mask_id, scale=scale)
+
+    def peek_by_id(
+        self, mask_id: uuid.UUID, *, scale: float | None = None
+    ) -> QPixmap | None:
+        """Resolve an already-derived test raster without background work."""
+        if not self.peek_available:
+            return None
+        return self.get_by_id(mask_id, scale=scale)
+
+    def get_best_by_id(self, mask_id: uuid.UUID, *, scale: float) -> QPixmap:
+        """Resolve one density-suitable sampled raster for presenter tests."""
+        return self.get_by_id(mask_id, scale=scale)
 
 
 def _old_qpane_visible_tile_range(
@@ -475,15 +535,13 @@ class StubMaskService:
         return (
             CompositionLayerInstance(
                 layer_id=base_image_layer_id(image_id),
-                source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
-                source_id=image_id,
+                source=CatalogImageReference(image_id),
                 role="base-image",
             ),
             *(
                 CompositionLayerInstance(
                     layer_id=mask_layer_id(scene_id, mask_id),
-                    source_kind=CompositionLayerSourceKind.MASK,
-                    source_id=mask_id,
+                    source=MaskAssetReference(mask_id),
                     opacity=0.25 + index * 0.5,
                     role="mask",
                 )
@@ -548,7 +606,7 @@ def test_presenter_render_plan_uses_best_fit_source_and_transform(qapp):
         harness.viewport.zoom = 0.5
         harness.viewport.pan = QPointF(12.0, -8.0)
 
-        expected_key = default_catalog_asset_key(
+        expected_key = catalog_source_asset_key(
             image_id,
             revision=0,
             source_path=Path("best-fit.png"),
@@ -635,7 +693,11 @@ def test_presenter_render_plan_carries_default_scene_metadata(qapp):
         assert raster_item.asset_key.source_kind == "catalog-image"
         assert raster_item.asset_key.source_revision == 4
         assert raster_item.asset_key.source_path == image_path
-        assert raster_item.pyramid_asset_key == raster_item.asset_key
+        assert raster_item.pyramid_asset_key == catalog_source_asset_key(
+            image_id,
+            revision=4,
+            source_path=image_path,
+        )
         mapped_center = raster_item.transform.map(QPointF(100, 50))
         assert math.isclose(mapped_center.x(), 162.0)
         assert math.isclose(mapped_center.y(), 92.0)
@@ -670,6 +732,7 @@ def test_presenter_render_plan_carries_mask_scene_layers(qapp):
             service.layer_instances_for_image,
             service.scene_provider_revision,
         )
+        assembler.register_factory(CatalogLayerDescriptorFactory(harness.catalog))
         assembler.register_factory(
             MaskLayerDescriptorFactory(
                 service.assets,
@@ -678,11 +741,12 @@ def test_presenter_render_plan_carries_mask_scene_layers(qapp):
             )
         )
         harness.qpane.sceneProviderRegistry().register_geometry_adapter(assembler)
-        harness.qpane.layerSourceResolverRegistry().register(
-            MaskLayerSourceResolver(
+        _register_mask_capabilities(
+            harness.qpane,
+            MaskSourceCapabilities(
                 assets=service.assets,
                 renders=service.controller.renders,
-            )
+            ),
         )
 
         plan = harness.presenter.calculateRenderPlan(is_blank=False)
@@ -693,8 +757,8 @@ def test_presenter_render_plan_carries_mask_scene_layers(qapp):
         assert base_item.descriptor.kind == LayerKind.IMAGE
         assert bottom_item.descriptor.kind == LayerKind.MASK
         assert top_item.descriptor.kind == LayerKind.MASK
-        assert isinstance(bottom_item.descriptor.source, MaskLayerSource)
-        assert isinstance(top_item.descriptor.source, MaskLayerSource)
+        assert isinstance(bottom_item.descriptor.source, MaskAssetReference)
+        assert isinstance(top_item.descriptor.source, MaskAssetReference)
         assert bottom_item.descriptor.source.mask_id == bottom_id
         assert top_item.descriptor.source.mask_id == top_id
         assert bottom_item.descriptor.source_revision == 4
@@ -710,9 +774,94 @@ def test_presenter_render_plan_carries_mask_scene_layers(qapp):
         assert top_item.descriptor.placement == bottom_item.descriptor.placement
         assert bottom_item.descriptor.interaction.selectable is False
         assert top_item.descriptor.interaction.selectable is False
-        assert bottom_item.transform == base_item.transform
-        assert top_item.transform == base_item.transform
-        assert service.calls == [(bottom_id, 0.5), (top_id, 0.5)]
+        base_panel_bounds = base_item.transform.mapRect(
+            QRectF(
+                0.0,
+                0.0,
+                base_item.source_image.width(),
+                base_item.source_image.height(),
+            )
+        )
+        bottom_panel_bounds = bottom_item.transform.mapRect(
+            QRectF(
+                0.0,
+                0.0,
+                bottom_item.source_image.width(),
+                bottom_item.source_image.height(),
+            )
+        )
+        top_panel_bounds = top_item.transform.mapRect(
+            QRectF(
+                0.0, 0.0, top_item.source_image.width(), top_item.source_image.height()
+            )
+        )
+        assert bottom_panel_bounds == base_panel_bounds
+        assert top_panel_bounds == base_panel_bounds
+        assert service.calls == [(bottom_id, None), (top_id, None)]
+    finally:
+        _cleanup_qpane(harness.qpane, qapp)
+
+
+def test_mask_uses_shared_products_when_stable_and_direct_sample_while_live(qapp):
+    """Mask previews must bypass stale products without retaining a mask renderer."""
+    harness = PresenterHarness(
+        qpane_size=(256, 256),
+        image_size=(2048, 2048),
+        color=Qt.red,
+    )
+    try:
+        harness.viewport.zoom = 0.125
+        mask_id = uuid.uuid4()
+        mask_image = QImage(2048, 2048, QImage.Format_Grayscale8)
+        mask_image.fill(255)
+        manager = StubMaskAssets({mask_id: StubMaskLayer(mask_image)})
+        controller = StubMaskController({mask_id: 7})
+        service = StubMaskService(manager, controller)
+        assembler = CompositionLayerSceneAssembler(
+            service.layer_instances_for_image,
+            service.scene_provider_revision,
+        )
+        assembler.register_factory(CatalogLayerDescriptorFactory(harness.catalog))
+        assembler.register_factory(
+            MaskLayerDescriptorFactory(
+                service.assets,
+                service.controller.renders,
+                service.scene_provider_revision,
+            )
+        )
+        harness.qpane.sceneProviderRegistry().register_geometry_adapter(assembler)
+        _register_mask_capabilities(
+            harness.qpane,
+            MaskSourceCapabilities(
+                assets=service.assets,
+                renders=service.controller.renders,
+            ),
+        )
+
+        stable_plan = harness.presenter.calculateRenderPlan(is_blank=False)
+
+        assert stable_plan is not None
+        stable_mask = stable_plan.render_items[1]
+        assert stable_mask.strategy is RenderStrategy.DIRECT
+        assert service.calls[-1] == (mask_id, None)
+        assert any(
+            key is not None and key.source_id == mask_id
+            for key, _target_width in harness.catalog.best_fit_calls
+        )
+
+        service.calls.clear()
+        harness.catalog.best_fit_calls.clear()
+        controller.live_preview_ids.add(mask_id)
+        live_plan = harness.presenter.calculateRenderPlan(is_blank=False)
+
+        assert live_plan is not None
+        live_mask = live_plan.render_items[1]
+        assert live_mask.strategy is RenderStrategy.DIRECT
+        assert service.calls[-1] == (mask_id, 0.125)
+        assert not any(
+            key is not None and key.source_id == mask_id
+            for key, _target_width in harness.catalog.best_fit_calls
+        )
     finally:
         _cleanup_qpane(harness.qpane, qapp)
 
@@ -737,15 +886,13 @@ def test_selection_hit_test_falls_through_transparent_mask_pixels(qapp) -> None:
             return (
                 CompositionLayerInstance(
                     layer_id=base_image_layer_id(image_id),
-                    source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
-                    source_id=image_id,
+                    source=CatalogImageReference(image_id),
                     role="base-image",
                     interaction=selectable,
                 ),
                 CompositionLayerInstance(
                     layer_id=mask_layer_id(scene_id, mask_id),
-                    source_kind=CompositionLayerSourceKind.MASK,
-                    source_id=mask_id,
+                    source=MaskAssetReference(mask_id),
                     role="mask",
                     interaction=selectable,
                 ),
@@ -757,6 +904,7 @@ def test_selection_hit_test_falls_through_transparent_mask_pixels(qapp) -> None:
             layer_instances,
             service.scene_provider_revision,
         )
+        assembler.register_factory(CatalogLayerDescriptorFactory(harness.catalog))
         assembler.register_factory(
             MaskLayerDescriptorFactory(
                 service.assets,
@@ -765,11 +913,12 @@ def test_selection_hit_test_falls_through_transparent_mask_pixels(qapp) -> None:
             )
         )
         harness.qpane.sceneProviderRegistry().register_geometry_adapter(assembler)
-        harness.qpane.layerSourceResolverRegistry().register(
-            MaskLayerSourceResolver(
+        _register_mask_capabilities(
+            harness.qpane,
+            MaskSourceCapabilities(
                 assets=service.assets,
                 renders=service.controller.renders,
-            )
+            ),
         )
         plan = harness.presenter.calculateRenderPlan(is_blank=False)
         assert plan is not None
@@ -841,14 +990,15 @@ def test_current_content_snapshot_reuses_cached_resolution(qapp, monkeypatch):
     )
     try:
         presenter = harness.presenter
-        original = presenter._resolve_active_scene_content
+        compiler = presenter._scene_compiler
+        original = compiler._resolve_active_content
         calls = []
 
         def resolve_once():
             calls.append("resolve")
             return original()
 
-        monkeypatch.setattr(presenter, "_resolve_active_scene_content", resolve_once)
+        monkeypatch.setattr(compiler, "_resolve_active_content", resolve_once)
 
         first = presenter.current_content_snapshot()
         second = presenter.current_content_snapshot()
@@ -874,14 +1024,15 @@ def test_calculate_render_plan_reuses_cached_active_content(qapp, monkeypatch):
     )
     try:
         presenter = harness.presenter
-        original = presenter._resolve_active_scene_content
+        compiler = presenter._scene_compiler
+        original = compiler._resolve_active_content
         calls = []
 
         def resolve_once():
             calls.append("resolve")
             return original()
 
-        monkeypatch.setattr(presenter, "_resolve_active_scene_content", resolve_once)
+        monkeypatch.setattr(compiler, "_resolve_active_content", resolve_once)
 
         first = presenter.calculateRenderPlan(is_blank=False)
         second = presenter.calculateRenderPlan(is_blank=False)
@@ -909,7 +1060,7 @@ def test_calculate_render_plan_reuses_compiled_hit_test_projection(qapp, monkeyp
     )
     try:
         presenter = harness.presenter
-        original = presenter_module.hit_test_items_for_scene
+        original = scene_compiler_module.hit_test_items_for_scene
         calls = []
 
         def project_once(scene):
@@ -917,7 +1068,7 @@ def test_calculate_render_plan_reuses_compiled_hit_test_projection(qapp, monkeyp
             return original(scene)
 
         monkeypatch.setattr(
-            presenter_module,
+            scene_compiler_module,
             "hit_test_items_for_scene",
             project_once,
         )
@@ -961,21 +1112,18 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
         service.layer_instances_for_image = lambda _image_id: (
             CompositionLayerInstance(
                 layer_id=mask_layer_id(scene_id, mask_ids[0]),
-                source_kind=CompositionLayerSourceKind.MASK,
-                source_id=mask_ids[0],
+                source=MaskAssetReference(mask_ids[0]),
                 opacity=0.25,
                 role="mask",
             ),
             CompositionLayerInstance(
                 layer_id=base_image_layer_id(image_id),
-                source_kind=CompositionLayerSourceKind.CATALOG_IMAGE,
-                source_id=image_id,
+                source=CatalogImageReference(image_id),
                 role="base-image",
             ),
             CompositionLayerInstance(
                 layer_id=mask_layer_id(scene_id, mask_ids[1]),
-                source_kind=CompositionLayerSourceKind.MASK,
-                source_id=mask_ids[1],
+                source=MaskAssetReference(mask_ids[1]),
                 opacity=0.75,
                 role="mask",
             ),
@@ -985,6 +1133,7 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
             service.layer_instances_for_image,
             service.scene_provider_revision,
         )
+        assembler.register_factory(CatalogLayerDescriptorFactory(harness.catalog))
         assembler.register_factory(
             MaskLayerDescriptorFactory(
                 service.assets,
@@ -993,11 +1142,12 @@ def test_presenter_preserves_cross_kind_composition_order(qapp):
             )
         )
         harness.qpane.sceneProviderRegistry().register_geometry_adapter(assembler)
-        harness.qpane.layerSourceResolverRegistry().register(
-            MaskLayerSourceResolver(
+        _register_mask_capabilities(
+            harness.qpane,
+            MaskSourceCapabilities(
                 assets=service.assets,
                 renders=service.controller.renders,
-            )
+            ),
         )
         plan = harness.presenter.calculateRenderPlan(is_blank=False)
         assert plan is not None
@@ -1026,7 +1176,7 @@ def test_presenter_builds_mask_only_replacement_scene(qapp):
                     scene_id=scene_id,
                     layer_id=layer_id,
                     kind=LayerKind.MASK,
-                    source=MaskLayerSource(mask_id=mask_id, revision=3),
+                    source=MaskAssetReference(mask_id=mask_id),
                     placement=placement,
                     opacity=0.5,
                     blend_mode=BlendMode.NORMAL,
@@ -1037,19 +1187,22 @@ def test_presenter_builds_mask_only_replacement_scene(qapp):
         )
         mask_image = QImage(400, 200, QImage.Format_Grayscale8)
         mask_image.fill(255)
+        controller = StubMaskController({mask_id: 3})
+        controller.peek_available = False
         service = StubMaskService(
             StubMaskAssets({mask_id: StubMaskLayer(mask_image)}),
-            StubMaskController({mask_id: 3}),
+            controller,
         )
         harness.qpane.mask_service = service
         harness.qpane.sceneProviderRegistry().register_replacement(
             _ReplacementSceneProvider(scene)
         )
-        harness.qpane.layerSourceResolverRegistry().register(
-            MaskLayerSourceResolver(
+        _register_mask_capabilities(
+            harness.qpane,
+            MaskSourceCapabilities(
                 assets=service.assets,
                 renders=service.controller.renders,
-            )
+            ),
         )
         plan = harness.presenter.calculateRenderPlan(is_blank=False)
         assert plan is not None
@@ -1071,14 +1224,15 @@ def test_calculate_render_plan_reuses_compiled_scene_across_pan_frames(
     )
     try:
         presenter = harness.presenter
-        original = presenter._compile_render_scene
+        compiler = presenter._scene_compiler
+        original = compiler._compile
         calls = []
 
         def compile_once(active_content):
             calls.append("compile")
             return original(active_content)
 
-        monkeypatch.setattr(presenter, "_compile_render_scene", compile_once)
+        monkeypatch.setattr(compiler, "_compile", compile_once)
 
         harness.viewport.zoom = 1.5
         harness.viewport.pan = QPointF(0.0, 0.0)
@@ -1160,7 +1314,11 @@ def test_presenter_calculate_render_plan_enters_tile_mode_when_zoomed(qapp):
             assert isinstance(identifier, SceneLayerTileKey)
             assert identifier.asset_key.source_id == harness.qpane.currentImageID()
             assert identifier.asset_key.source_path == Path("tile.png")
-            assert identifier.pyramid_asset_key == identifier.asset_key
+            assert identifier.pyramid_asset_key == catalog_source_asset_key(
+                harness.qpane.currentImageID(),
+                revision=0,
+                source_path=Path("tile.png"),
+            )
             assert math.isclose(identifier.pyramid_scale, item.pyramid_scale)
             expected_pos = presenter.get_tile_draw_position(identifier)
             assert tile_data.draw_pos == expected_pos
@@ -1231,7 +1389,11 @@ def test_presenter_scene_render_plan_carries_tile_metadata(qapp):
             assert isinstance(identifier, SceneLayerTileKey)
             assert identifier.asset_key.source_id == harness.qpane.currentImageID()
             assert identifier.asset_key.source_path == Path("tile-scene.png")
-            assert identifier.pyramid_asset_key == identifier.asset_key
+            assert identifier.pyramid_asset_key == catalog_source_asset_key(
+                harness.qpane.currentImageID(),
+                revision=0,
+                source_path=Path("tile-scene.png"),
+            )
             assert math.isclose(identifier.pyramid_scale, raster_item.pyramid_scale)
             assert tile_data.draw_pos == presenter.get_tile_draw_position(identifier)
     finally:

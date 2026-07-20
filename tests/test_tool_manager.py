@@ -25,6 +25,17 @@ from PySide6.QtWidgets import QApplication
 
 from qpane.tools import ToolDependencies
 from qpane.tools.base import BaseTool, CursorTool, ExtensionTool, PanZoomTool
+from qpane.tools.ports import (
+    CursorInteractionPort,
+    MoveInteractionPort,
+    NavigationInteractionPort,
+    PaintingInteractionPort,
+    PixelSelectionInteractionPort,
+    SmartSelectionInteractionPort,
+    ToolActivationPorts,
+    TransformInteractionPort,
+    tool_activation_ports,
+)
 from qpane.tools.tools import Tools
 
 pytestmark = [
@@ -68,7 +79,7 @@ class EmptyTool(ExtensionTool):
 def test_extension_tool_defaults_are_inert(qapp):
     manager = Tools()
     manager.registerTool("empty", EmptyTool)
-    manager.set_mode("empty", ToolDependencies())
+    manager.set_mode("empty", ToolActivationPorts())
     tool = manager.get_active_tool()
     assert isinstance(tool, EmptyTool)
 
@@ -119,15 +130,37 @@ def test_tool_manager_register_and_unregister(qapp):
         on_connect=on_connect,
         on_disconnect=on_disconnect,
     )
-    manager.set_mode("inspect", ToolDependencies())
+    manager.set_mode("inspect", ToolActivationPorts())
     assert "connected" in events
     assert isinstance(manager.get_active_tool(), DummyTool)
     with pytest.raises(RuntimeError):
         manager.unregisterTool("inspect")
-    manager.set_mode(manager.CONTROL_MODE_PANZOOM, ToolDependencies())
+    manager.set_mode(manager.CONTROL_MODE_PANZOOM, ToolActivationPorts())
     manager.unregisterTool("inspect")
     assert "disconnected" in events
     assert manager.get_active_tool() is not None
+
+
+def test_custom_tool_receives_frozen_dependency_mapping_projection(qapp) -> None:
+    """Custom tools should retain the public mapping activation contract."""
+    manager = Tools()
+    manager.registerTool("inspect", DummyTool)
+    ports = tool_activation_ports(
+        cursor=CursorInteractionPort(),
+        navigation=NavigationInteractionPort(get_zoom=lambda: 2.0),
+        movement=MoveInteractionPort(),
+        transform=TransformInteractionPort(),
+        pixel_selection=PixelSelectionInteractionPort(),
+        painting=PaintingInteractionPort(get_brush_size=lambda: 31),
+        smart_selection=SmartSelectionInteractionPort(),
+    )
+
+    manager.set_mode("inspect", ports)
+
+    tool = manager.get_active_tool()
+    assert isinstance(tool, DummyTool)
+    assert tool.received_dependencies["get_zoom"]() == 2.0
+    assert tool.received_dependencies["get_brush_size"]() == 31
 
 
 def test_tool_manager_rejects_duplicate_mode_registration(qapp):
@@ -163,7 +196,7 @@ def test_tool_manager_swallows_tool_exception(qapp, caplog):
             return None
 
     manager.registerTool("exploding", ExplodingTool)
-    manager.set_mode("exploding", ToolDependencies())
+    manager.set_mode("exploding", ToolActivationPorts())
     caplog.clear()
     with caplog.at_level(logging.ERROR):
         manager.mousePressEvent(object())
@@ -200,7 +233,7 @@ def test_tool_manager_logs_disconnect_warning(qapp, caplog, monkeypatch):
             return None
 
     manager.registerTool("warn", WarnTool)
-    manager.set_mode("warn", ToolDependencies())
+    manager.set_mode("warn", ToolActivationPorts())
     signal = manager.get_active_tool().signals.cursor_update_requested
     signal_cls = type(signal)
     original_disconnect = signal_cls.disconnect
@@ -211,7 +244,7 @@ def test_tool_manager_logs_disconnect_warning(qapp, caplog, monkeypatch):
     monkeypatch.setattr(signal_cls, "disconnect", boom, raising=False)
     caplog.clear()
     with caplog.at_level(logging.WARNING):
-        manager.set_mode(manager.CONTROL_MODE_PANZOOM, ToolDependencies())
+        manager.set_mode(manager.CONTROL_MODE_PANZOOM, ToolActivationPorts())
     assert any(
         record.levelname == "WARNING"
         and "Failed to disconnect signal" in record.getMessage()
@@ -226,9 +259,11 @@ def test_cursor_tool_is_registered_and_inert(qapp):
     manager = Tools()
     manager.set_mode(
         Tools.CONTROL_MODE_CURSOR,
-        ToolDependencies(
-            is_drag_out_allowed=lambda: True,
-            is_image_null=lambda: False,
+        ToolActivationPorts(
+            cursor=CursorInteractionPort(
+                is_drag_out_allowed=lambda: True,
+                is_image_null=lambda: False,
+            ),
         ),
     )
     tool = manager.get_active_tool()
@@ -281,10 +316,12 @@ def test_panzoom_tool_emits_drag_out_via_shared_path(qapp):
     manager = Tools()
     manager.set_mode(
         Tools.CONTROL_MODE_PANZOOM,
-        ToolDependencies(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
-            is_drag_out_allowed=lambda: True,
+        ToolActivationPorts(
+            navigation=NavigationInteractionPort(
+                is_pan_zoom_locked=lambda: False,
+                is_image_null=lambda: False,
+                is_drag_out_allowed=lambda: True,
+            ),
         ),
     )
     tool = manager.get_active_tool()

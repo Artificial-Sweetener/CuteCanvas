@@ -21,7 +21,7 @@ from dataclasses import replace
 
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF
-from PySide6.QtGui import QImage, QPixmap, Qt
+from PySide6.QtGui import QImage, Qt
 
 from qpane import (
     QPane,
@@ -29,15 +29,14 @@ from qpane import (
     QPaneSceneClip,
     QPaneSceneRequest,
 )
+from qpane.masks.source_reference import MaskAssetReference
 from qpane.rendering.render import Renderer
-from qpane.scene.identity import mask_layer_asset_key
+from qpane.scene.identity import scene_image_asset_key, source_render_asset_key
 from qpane.scene.model import ClipCoordinateSpace, LayerClip, LayerKind
 from qpane.scene.render_plan import (
-    MaskLayerRenderItem,
     RenderStrategy,
     TileRenderData,
 )
-from qpane.scene.sources import MaskLayerSource
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.render_compare import (
     assert_images_match,
@@ -71,21 +70,25 @@ def _make_mask_plan(qpane_rect: QRect):
         base_item.descriptor,
         layer_id=uuid.uuid4(),
         kind=LayerKind.MASK,
-        source=MaskLayerSource(mask_id=mask_id, revision=0),
+        source=MaskAssetReference(mask_id=mask_id),
     )
-    mask_item = MaskLayerRenderItem(
+    mask_item = replace(
+        base_item,
         descriptor=mask_descriptor,
-        pixmap=QPixmap.fromImage(base_item.source_image),
-        asset_key=mask_layer_asset_key(
+        asset_key=scene_image_asset_key(
             scene_id=plan.scene_id,
-            mask_id=mask_id,
+            layer_id=mask_descriptor.layer_id,
+            source_id=mask_id,
+            source_kind="mask",
             revision=0,
+            source_path=None,
         ),
-        transform=base_item.transform,
-        placement=base_item.placement,
-        clip=None,
-        render_hint_enabled=False,
-        scale=1.0,
+        pyramid_asset_key=source_render_asset_key(
+            source_id=mask_id,
+            source_kind="mask",
+            revision=0,
+            source_path=None,
+        ),
     )
     return replace(plan, render_items=(base_item, mask_item)), mask_item
 
@@ -214,7 +217,7 @@ def test_base_scroll_strip_repair_uses_direct_fast_path(
     def fail_generic_draw(*_args, **_kwargs):
         raise AssertionError("base strip repair should not draw the whole scene")
 
-    monkeypatch.setattr(renderer, "_draw_visible_scene_items", fail_generic_draw)
+    monkeypatch.setattr(renderer._items, "draw_visible_items", fail_generic_draw)
     monkeypatch.setattr(
         renderer,
         "_repair_base_raster_strips_directly",
@@ -808,9 +811,9 @@ def test_base_dirty_redraw_uses_direct_fast_path(
     def fail_generic_draw(*_args, **_kwargs):
         raise AssertionError("base dirty redraw should not draw the whole scene")
 
-    monkeypatch.setattr(renderer, "_draw_visible_scene_items", fail_generic_draw)
+    monkeypatch.setattr(renderer._items, "draw_visible_items", fail_generic_draw)
     monkeypatch.setattr(
-        renderer,
+        renderer._items,
         "_draw_direct_view",
         lambda painter, item: direct_calls.append(item),
     )
@@ -833,23 +836,15 @@ def test_layered_strip_repair_uses_normal_item_draw_paths(
     assert base_item is not None
     repair_rects = [QRect(0, 0, 16, 16)]
     raster_calls = []
-    mask_calls = []
-
     monkeypatch.setattr(
-        renderer,
-        "_draw_raster_item",
+        renderer._items,
+        "draw_raster_item",
         lambda painter, render_plan, item: raster_calls.append((render_plan, item)),
-    )
-    monkeypatch.setattr(
-        renderer,
-        "_draw_mask_item",
-        lambda painter, render_plan, item: mask_calls.append((render_plan, item)),
     )
 
     assert renderer._repair_layered_strips(repair_rects, plan) is True
 
-    assert raster_calls == [(plan, base_item)]
-    assert mask_calls == [(plan, mask_item)]
+    assert raster_calls == [(plan, base_item), (plan, mask_item)]
 
 
 def test_try_scroll_buffers_accepts_near_integer_float_noise(

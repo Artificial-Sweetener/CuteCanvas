@@ -28,6 +28,7 @@ from qpane.scene.default_scene import build_default_catalog_scene
 from qpane.scene.identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
+    catalog_source_asset_key,
     default_catalog_asset_key,
 )
 from qpane.scene.render_plan import (
@@ -85,7 +86,11 @@ def make_render_plan(
         descriptor=layer,
         source_image=source_image,
         asset_key=asset_key,
-        pyramid_asset_key=asset_key,
+        pyramid_asset_key=catalog_source_asset_key(
+            image_id,
+            revision=0,
+            source_path=source_path,
+        ),
         pyramid_scale=pyramid_scale,
         transform=transform if transform is not None else QTransform(),
         placement=layer.placement,
@@ -99,6 +104,7 @@ def make_render_plan(
         max_tile_cols=max_tile_cols,
         max_tile_rows=max_tile_rows,
         visible_tile_range=visible_tile_range,
+        is_base_raster=True,
     )
     return SceneRenderPlan(
         scene_id=scene.scene_id,
@@ -140,7 +146,11 @@ def make_tile_key(
     )
     return SceneLayerTileKey(
         asset_key=asset_key,
-        pyramid_asset_key=asset_key,
+        pyramid_asset_key=catalog_source_asset_key(
+            image_id,
+            revision=revision,
+            source_path=source_path,
+        ),
         pyramid_scale=pyramid_scale,
         row=row,
         col=col,

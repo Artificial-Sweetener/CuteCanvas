@@ -80,12 +80,12 @@ def test_redraw_base_image_buffer_respects_strategy(
     direct_calls = []
     tile_calls = []
     monkeypatch.setattr(
-        renderer,
+        renderer._items,
         "_draw_direct_view",
         lambda painter, item: direct_calls.append(item),
     )
     monkeypatch.setattr(
-        renderer,
+        renderer._items,
         "_draw_tiled_view",
         lambda painter, plan, item: tile_calls.append((plan, item)),
     )

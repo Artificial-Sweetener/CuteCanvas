@@ -24,10 +24,14 @@ from pathlib import Path
 from PySide6.QtGui import QColor, QImage, Qt
 
 from qpane import ComparisonOrientation, QPane
-from qpane.scene.identity import SceneLayerTileKey, default_catalog_asset_key
+from qpane.catalog.source_reference import CatalogImageReference
+from qpane.scene.identity import (
+    SceneLayerTileKey,
+    catalog_source_asset_key,
+    default_catalog_asset_key,
+)
 from qpane.scene.model import ClipCoordinateSpace, LayerKind
 from qpane.scene.render_plan import RasterLayerRenderItem, RenderStrategy
-from qpane.scene.sources import CatalogImageSource
 from tests.helpers.render_compare import rendered_overscanned_widget_frame
 
 
@@ -135,14 +139,14 @@ def test_compare_catalog_image_resolves_as_second_scene_raster(qapp) -> None:
         base_item, compare_item = raster_items
         assert base_item.descriptor.kind == LayerKind.IMAGE
         assert compare_item.descriptor.kind == LayerKind.IMAGE
-        assert isinstance(base_item.descriptor.source, CatalogImageSource)
-        assert isinstance(compare_item.descriptor.source, CatalogImageSource)
+        assert isinstance(base_item.descriptor.source, CatalogImageReference)
+        assert isinstance(compare_item.descriptor.source, CatalogImageReference)
         assert base_item.descriptor.source.image_id == base_id
         assert compare_item.descriptor.source.image_id == compare_id
         assert compare_item.asset_key.scene_id == plan.scene_id
         assert compare_item.asset_key.source_id == compare_id
         assert compare_item.asset_key.layer_id == compare_item.descriptor.layer_id
-        assert compare_item.pyramid_asset_key == default_catalog_asset_key(
+        assert compare_item.pyramid_asset_key == catalog_source_asset_key(
             compare_id,
             revision=1,
             source_path=Path("compare.png"),

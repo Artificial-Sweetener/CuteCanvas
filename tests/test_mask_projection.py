@@ -25,6 +25,8 @@ from qpane.masks.projection import (
     MaskCanvasProjectionService,
     project_mask_snapshot,
 )
+from qpane.masks.source_reference import MaskAssetReference
+from qpane.scene.affine import LayerTransform
 from qpane.scene.model import (
     LayerDescriptor,
     LayerKind,
@@ -32,8 +34,7 @@ from qpane.scene.model import (
     SceneDescriptor,
     SceneKind,
 )
-from qpane.scene.raster import LayerTransform, RasterBounds
-from qpane.scene.sources import MaskLayerSource
+from qpane.scene.raster import RasterBounds
 
 
 def _descriptor(
@@ -47,7 +48,7 @@ def _descriptor(
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.MASK,
-        source=MaskLayerSource(mask_id=mask_id, revision=1),
+        source=MaskAssetReference(mask_id=mask_id),
         placement=transform.map_bounds(bounds),
         raster_bounds=bounds,
         transform=transform,
@@ -89,7 +90,7 @@ def test_projection_applies_layer_translation_before_canvas_clipping() -> None:
     pixels = np.zeros((4, 4), dtype=np.uint8)
     pixels[1, 1] = 255
     snapshot = CoverageSnapshot(bounds, RasterExtentPolicy.FIXED, pixels)
-    transform = LayerTransform(translate_x=2.0, translate_y=-1.0)
+    transform = LayerTransform(dx=2.0, dy=-1.0)
     layer = _descriptor(bounds, transform)
 
     projected = project_mask_snapshot(
@@ -111,12 +112,12 @@ def test_generated_canvas_mask_obeys_fixed_and_expand_on_write_policy() -> None:
     mask_id = assets.create_mask(QImage(QSize(4, 4), QImage.Format_Grayscale8))
     scene_id = uuid.uuid4()
     bounds = RasterBounds(0, 0, 4, 4)
-    transform = LayerTransform(translate_x=2.0)
+    transform = LayerTransform(dx=2.0)
     layer = LayerDescriptor(
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.MASK,
-        source=MaskLayerSource(mask_id=mask_id, revision=0),
+        source=MaskAssetReference(mask_id=mask_id),
         placement=transform.map_bounds(bounds),
         raster_bounds=bounds,
         transform=transform,
@@ -159,7 +160,7 @@ def test_4k_projection_stays_within_interactive_worker_budget() -> None:
     )
     layer = _descriptor(
         bounds,
-        LayerTransform(translate_x=12.0, translate_y=-8.0),
+        LayerTransform(dx=12.0, dy=-8.0),
     )
 
     started = perf_counter()

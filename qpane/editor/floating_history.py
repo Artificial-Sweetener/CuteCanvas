@@ -17,6 +17,7 @@ from typing import TypeAlias
 from ..composition.edit_controller import CompositionEditController
 from ..composition.edit_history import CompositionEditCommand
 from ..coverage import CoverageSnapshot
+from ..scene.affine import LayerTransform
 from ..scene.layer_selection import (
     SceneLayerSelection,
     SceneLayerSelectionController,
@@ -24,7 +25,7 @@ from ..scene.layer_selection import (
 from ..scene.model import LayerDescriptor
 from ..scene.pixel_owners import LayerPixelMutationOwner
 from ..scene.pixel_transitions import RasterPixelTransition
-from ..scene.raster import LayerTransform
+from ..scene.source_references import LayerSourceReference
 from ..selection import PixelSelectionService
 from .floating_layers import FloatingLayerPromotionRegistry, FloatingLayerTransition
 from .pixel_move_target import SelectedPixelMoveTargetResolver
@@ -72,6 +73,11 @@ class FloatingPixelCommitEdit:
             + self.local_after.pixels.nbytes
             + (0 if self.promotion is None else self.promotion.retained_bytes)
         )
+
+    @property
+    def retained_resources(self) -> tuple[LayerSourceReference, ...]:
+        """Return source payloads kept reachable by this history command."""
+        return () if self.promotion is None else self.promotion.resources
 
 
 _ResolvedTransition: TypeAlias = tuple[
@@ -121,18 +127,11 @@ class FloatingPixelHistory:
         if not isinstance(command, FloatingPixelCommitEdit):
             return False
         resolved: list[_ResolvedTransition] = []
-        expected_after = not use_after
         for item in command.transitions:
             target = self._targets.resolve_layer(item.scene_id, item.layer_id)
             if target is None:
                 return False
             _scene, layer, owner = target
-            if not owner.transition_matches(
-                layer,
-                item.raster,
-                use_after=expected_after,
-            ):
-                return False
             resolved.append((item, layer, owner))
         promotion = command.promotion
         promotion_owner = (
@@ -140,6 +139,7 @@ class FloatingPixelHistory:
             if promotion is None
             else self._promotions.owner_for_transition(promotion)
         )
+        expected_after = not use_after
         if promotion is not None and (
             promotion_owner is None
             or not promotion_owner.matches(promotion, use_after=expected_after)
@@ -153,7 +153,15 @@ class FloatingPixelHistory:
         applied: list[_ResolvedTransition] = []
         ordered = resolved if use_after else list(reversed(resolved))
         for item, layer, owner in ordered:
-            if not owner.restore_transition(layer, item.raster, use_after=use_after):
+            if not owner.transition_matches(
+                layer,
+                item.raster,
+                use_after=not use_after,
+            ) or not owner.restore_transition(
+                layer,
+                item.raster,
+                use_after=use_after,
+            ):
                 self._rollback(applied, use_after=not use_after)
                 if promotion_changed:
                     promotion_owner.restore(promotion, use_after=True)

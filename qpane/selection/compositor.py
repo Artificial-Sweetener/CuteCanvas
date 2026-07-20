@@ -36,10 +36,10 @@ def compose_selection_coverage(
     source = _project_snapshot(incoming, output_bounds)
     combined = combine_coverage(destination, source, operation)
     return trim_selection_coverage(
-        CoverageSnapshot(
-            bounds=output_bounds,
-            extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
-            pixels=combined,
+        CoverageSnapshot._adopt_detached(
+            output_bounds,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+            combined,
         )
     )
 
@@ -51,6 +51,8 @@ def trim_selection_coverage(
     bounds = snapshot.bounds
     if bounds is None or snapshot.pixels.size == 0:
         return None
+    if int(snapshot.pixels.min()) > 0:
+        return snapshot
     occupied_rows = np.flatnonzero(np.any(snapshot.pixels != 0, axis=1))
     if occupied_rows.size == 0:
         return None

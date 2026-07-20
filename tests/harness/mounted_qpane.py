@@ -33,7 +33,8 @@ from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 from typing_extensions import Self
 
 from qpane import QPane
-from qpane.scene.render_plan import MaskLayerRenderItem, SceneRenderPlan
+from qpane.scene.model import LayerKind
+from qpane.scene.render_plan import SceneRenderPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +82,7 @@ class PresentedFrameProbe:
             if buffer is None:
                 return
             mask_layer_count = sum(
-                isinstance(item, MaskLayerRenderItem) for item in plan.render_items
+                item.descriptor.kind is LayerKind.MASK for item in plan.render_items
             )
             self.frames.append(
                 PresentedMaskFrame(
@@ -241,6 +242,34 @@ class MountedQPaneHarness:
             self.qapp.processEvents()
             service = getattr(self.viewer, "mask_service", None)
             if service is not None and not service.hasPendingRenderWork():
+                self.qapp.processEvents()
+                return True
+            QTest.qWait(1)
+        return False
+
+    def wait_for_raster_render_idle(
+        self,
+        *,
+        timeout_ms: int = 3000,
+    ) -> bool:
+        """Wait through pyramid completion and a continuous queued-event quiescence."""
+        deadline = time.perf_counter() + timeout_ms / 1000.0
+        idle_since: float | None = None
+        while time.perf_counter() < deadline:
+            self.qapp.processEvents()
+            pyramids = self.viewer.view()._pyramid_manager
+            tile_metrics = self.viewer.view().tile_manager.snapshot_metrics()
+            idle = (
+                not pyramids.pending_asset_keys()
+                and not pyramids.pending_retry_asset_keys()
+                and tile_metrics.active_jobs == 0
+                and tile_metrics.pending_retries == 0
+            )
+            now = time.perf_counter()
+            idle_since = now if idle and idle_since is None else idle_since
+            if not idle:
+                idle_since = None
+            if idle_since is not None and now - idle_since >= 0.025:
                 self.qapp.processEvents()
                 return True
             QTest.qWait(1)

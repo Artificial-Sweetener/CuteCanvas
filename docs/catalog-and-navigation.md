@@ -2,7 +2,7 @@
 
 # Catalog and Navigation
 
-The catalog is the source inventory for host-facing image identity. It maps UUIDs to images, paths, and ordering. A composition is the renderable view QPane is showing. Loading catalog images creates generated one-image default compositions, so image navigation keeps working while hosts can also browse, open, and remove stored compositions.
+The catalog is a host-facing source inventory and navigation convenience. It maps UUIDs to images, paths, and ordering. A composition is the independent document QPane renders: it owns a canvas and an ordered stack of layer instances. Loading catalog images creates generated one-image compositions, so existing image-navigation workflows continue to work while editor hosts can create empty or seeded documents.
 
 ## Build an Image Catalog
 To populate the viewer, you convert your images into an ordered map. QPane handles the ID generation and internal mapping, letting you focus on the content.
@@ -37,7 +37,9 @@ viewer.setImagesByID(image_map, current_id=start_id)
 * **Pruning:** Use `QPane.removeImageByID` or `QPane.removeImagesByID` to drop specific items. This happens in-place and won't force a full reload.
 
 ## Work With Compositions
-Use compositions when your host is browsing what the viewer renders rather than raw source inventory. Every catalog image gets a generated default composition. `QPane.compose` creates a persistent explicit composition from one or two catalog image IDs and opens it immediately.
+Use compositions when your host is browsing or editing what QPane renders rather than raw source inventory. A catalog image can be referenced by any number of independent layer instances; those instances reuse source render products without sharing transform, order, effects, or policy.
+
+Create an empty canvas with `QPane.createComposition`, seed a new document with `QPane.createCompositionFromImage`, and add another catalog resource with `QPane.addCatalogImageLayer`. Every catalog image also gets a generated default composition. `QPane.compose` remains the concise compatibility workflow for a persistent one- or two-image review composition.
 
 ```python
 ids = viewer.imageIDs()
@@ -64,16 +66,19 @@ Treat each `CompositionEntry` as the row model for one stored view.
 
 * Use `CompositionEntry.composition_id` for the row action that calls `QPane.openComposition`.
 * Use `CompositionEntry.title` as the visible label when rendering the browser row.
-* Use `CompositionEntry.kind` to choose row styling such as "Image", "Comparison", or "Scene".
+* Use `CompositionEntry.kind` as descriptive origin metadata when choosing optional row styling; it does not grant or deny document operations.
 * Use `CompositionEntry.source_image_ids` when a row needs thumbnails or source-count badges.
+* Iterate `CompositionEntry.layers` in reverse when a nested editor tree should show the topmost layer first. Each `CompositionLayerEntry` supplies stable layer/source identity, label, role, visibility, opacity, interaction policy, and a detached exact transform without opening the composition.
+  `CompositionLayerEntry.layer_id` identifies the instance, while `CompositionLayerEntry.source_kind` and `CompositionLayerEntry.source_id` identify its source presentation and shared resource. Use `CompositionLayerEntry.label` and `CompositionLayerEntry.role` for row text, `CompositionLayerEntry.visible` and `CompositionLayerEntry.opacity` for presentation state, `CompositionLayerEntry.interaction` for host permissions, and `CompositionLayerEntry.transform` for detached exact geometry.
 
 Image-backed rows and scene rows expose different shortcuts.
 
 * `CompositionEntry.current_image_id` is the base catalog image for generated default and explicit image compositions, so image-specific actions can use it directly.
-* Layered scene rows use `None` for the current image; show scene summary text from `CompositionEntry.scene_layer_count` and `CompositionEntry.scene_bounds` instead.
+* Layered scene rows use `None` for the current image; show scene summary text from `CompositionEntry.scene_layer_count` and `CompositionEntry.scene_bounds` instead. Generated and explicit image compositions also report their complete ordered layer stacks.
 * `CompositionEntry.comparison` gives compare controls the state they should mirror when a compared row opens.
+* `CompositionEntry.policy` controls whether the host should offer removal and comparison commands.
 
-`QPane.compositionIDs` is useful for simple previous/next navigation when you do not need full row data. `QPane.currentCompositionID` returns the active stored view. Use `QPane.openComposition` when the user selects a browser row, and use `QPane.removeComposition` for host-created explicit and layered scene compositions. Generated default compositions are removed by removing their catalog image.
+`QPane.compositionIDs` is useful for simple previous/next navigation when you do not need full row data. `QPane.currentCompositionID` returns the active document. Use `QPane.openComposition` when the user selects a browser row, `QPane.setCompositionPolicy` when the host changes document permissions, and `QPane.removeComposition` when `CompositionEntry.policy.removable` is true. Generated navigation compositions are removed with their catalog image.
 
 ## Navigate Between Images
 To move through source-backed default views, use `QPane.setCurrentImageID`. Pass a UUID to navigate to an image's generated default composition, or `None` to clear the active view. This handles the heavy lifting: it suspends overlays, swaps the render buffers, and fires the selection signals.

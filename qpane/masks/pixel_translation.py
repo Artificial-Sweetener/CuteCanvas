@@ -15,7 +15,7 @@ from PySide6.QtGui import QImage
 
 from ..coverage import CoverageSnapshot
 from ..scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
-from ..scene.pixel_transitions import RasterPixelTransition
+from ..scene.pixel_transitions import RasterPixelTransition, raster_edit_patch_bounds
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from .mask import MaskLayer
 
@@ -68,8 +68,10 @@ class MaskPixelTranslator:
             if mask.surface.extent_policy is RasterExtentPolicy.FIXED
             else surface_bounds.united(destination_bounds)
         )
-        patch_bounds = source_bounds.united(destination_bounds).intersection(
-            after_bounds
+        patch_bounds = raster_edit_patch_bounds(
+            source_bounds,
+            destination_bounds,
+            after_bounds,
         )
         if patch_bounds is None:
             return None
@@ -168,15 +170,9 @@ class MaskPixelTranslator:
 
         def apply(destination: np.ndarray, _image: QImage) -> None:
             """Copy restored local coverage into canonical storage."""
-            np.copyto(
-                destination[
-                    storage.y : storage.bottom,
-                    storage.x : storage.right,
-                ],
-                source,
-            )
+            np.copyto(destination, source)
 
-        mask.surface.mutate(apply)
+        mask.surface.mutate_storage_region(storage, apply)
         return True
 
     def place(

@@ -36,7 +36,7 @@ from qpane.concurrency import (
 from qpane.masks.autosave import AutosaveManager
 from qpane.rendering import PyramidManager, TileManager
 from qpane.sam.manager import SamManager
-from qpane.scene.identity import SceneLayerTileKey, default_catalog_asset_key
+from qpane.scene.identity import SceneLayerTileKey, catalog_source_asset_key
 from tests.helpers.render_plan import make_tile_key
 
 
@@ -108,7 +108,7 @@ def test_concurrency_managers_operate_cleanly(tmp_path, monkeypatch, qapp) -> No
     sam_manager.predictorReady.connect(
         lambda predictor, predictor_id: predictors.append((predictor, predictor_id))
     )
-    asset_key = default_catalog_asset_key(
+    asset_key = catalog_source_asset_key(
         image_id,
         revision=0,
         source_path=source_path,

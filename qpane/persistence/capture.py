@@ -10,40 +10,60 @@
 
 from __future__ import annotations
 
-import uuid
-
-from ..composition.layers import CompositionLayerSourceKind, ImageSceneLayerStore
+from ..composition.layers import CompositionLayerStore, instance_resources
+from ..composition.model import CompositionRecord
 from ..masks.mask import MaskAssetStore
+from ..masks.source_reference import MaskAssetReference
+from ..placed.source_reference import PlacedAssetReference
+from ..placed.store import PlacedAssetStore
 from ..raster.assets import EditableRasterAssetStore
+from ..raster.source_reference import EditableRasterReference
+from ..vector.source_reference import VectorDocumentReference
+from ..vector.store import VectorAssetStore
 from .model import CompositionArchiveSnapshot
 
 
-def capture_image_composition(
-    image_id: uuid.UUID,
-    layers: ImageSceneLayerStore,
+def capture_composition(
+    document: CompositionRecord,
+    layers: CompositionLayerStore,
     masks: MaskAssetStore,
     rasters: EditableRasterAssetStore,
+    placed_assets: PlacedAssetStore,
+    vectors: VectorAssetStore,
 ) -> CompositionArchiveSnapshot:
-    """Return a detached durable snapshot for one catalog image composition."""
-    instances = layers.layers_for_image(image_id)
-    if not instances:
-        raise KeyError("image composition does not exist")
+    """Return a detached durable snapshot for one composition document."""
+    instances = layers.layers_for_composition(document.composition_id)
     mask_surfaces = {}
     color_surfaces = {}
+    placed_snapshots = {}
+    vector_documents = {}
     for instance in instances:
-        if instance.source_kind is CompositionLayerSourceKind.MASK:
-            layer = masks.get_layer(instance.source_id)
-            if layer is None:
-                raise KeyError(f"mask source {instance.source_id} does not exist")
-            mask_surfaces[instance.source_id] = layer.surface.snapshot()
-        elif instance.source_kind is CompositionLayerSourceKind.RASTER:
-            asset = rasters.get(instance.source_id)
-            if asset is None:
-                raise KeyError(f"raster source {instance.source_id} does not exist")
-            color_surfaces[instance.source_id] = asset.surface.snapshot()
+        for source in instance_resources(instance):
+            if isinstance(source, MaskAssetReference):
+                layer = masks.get_layer(source.mask_id)
+                if layer is None:
+                    raise KeyError(f"mask source {source.mask_id} does not exist")
+                mask_surfaces[source.mask_id] = layer.surface.sparse_snapshot()
+            elif isinstance(source, EditableRasterReference):
+                asset = rasters.get(source.raster_id)
+                if asset is None:
+                    raise KeyError(f"raster source {source.raster_id} does not exist")
+                color_surfaces[source.raster_id] = asset.surface.sparse_snapshot()
+            elif isinstance(source, PlacedAssetReference):
+                snapshot = placed_assets.get(source.asset_id)
+                if snapshot is None:
+                    raise KeyError(f"placed source {source.asset_id} does not exist")
+                placed_snapshots[source.asset_id] = snapshot
+            elif isinstance(source, VectorDocumentReference):
+                vector_document = vectors.get(source.vector_id)
+                if vector_document is None:
+                    raise KeyError(f"vector source {source.vector_id} does not exist")
+                vector_documents[source.vector_id] = vector_document
     return CompositionArchiveSnapshot(
-        image_id=image_id,
+        document=document,
         layers=instances,
         masks=mask_surfaces,
         rasters=color_surfaces,
+        placed_assets=placed_snapshots,
+        vectors=vector_documents,
     )

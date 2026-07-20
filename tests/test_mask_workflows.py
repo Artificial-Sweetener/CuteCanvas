@@ -38,12 +38,12 @@ from qpane.masks.render_coordination import MaskRenderWorkCoordinator
 from qpane.masks.stroke_models import (
     MaskStrokeJobResult,
     MaskStrokePayload,
-    MaskStrokeSegmentPayload,
 )
 from qpane.masks.stroke_preview import DecimatedStrokePreview
-from qpane.masks.stroke_render import render_stroke_segments
 from qpane.masks.stroke_worker import MaskStrokeWorker
 from qpane.masks.workers import MaskSnippetWorker, PrefetchedOverlay
+from qpane.painting import BrushStrokeSegment
+from qpane.painting.rendering import render_coverage_stroke
 from qpane.raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_view_grayscale8,
@@ -99,6 +99,9 @@ def _attach_test_mask(service, manager, mask_id, image_id) -> None:
     """Attach a test mask through the composition-owned layer boundary."""
     layer = manager.get_layer(mask_id)
     assert layer is not None
+    if image_id not in service._catalog.imageIDs():
+        source = layer.mask_image.convertToFormat(QImage.Format_RGB32)
+        service._catalog.addImage(image_id, source, None)
     assert service.layers.attach(
         mask_id,
         image_id,
@@ -883,7 +886,7 @@ def _emit_brush_stroke(qpane, start, end=None, erase=False):
     tools.signals.undo_state_push_requested.emit()
     end_point = start if end is None else end
     tools.signals.stroke_applied.emit(
-        MaskStrokeSegmentPayload.fixed(
+        BrushStrokeSegment.fixed(
             (start.x(), start.y()),
             (end_point.x(), end_point.y()),
             qpane.interaction.brush_size,
@@ -921,7 +924,7 @@ def _queue_pending_stroke(qpane, start, end=None, erase=False):
     tools.signals.undo_state_push_requested.emit()
     end_point = start if end is None else end
     tools.signals.stroke_applied.emit(
-        MaskStrokeSegmentPayload.fixed(
+        BrushStrokeSegment.fixed(
             (start.x(), start.y()),
             (end_point.x(), end_point.y()),
             qpane.interaction.brush_size,
@@ -944,16 +947,14 @@ def test_cancelled_provisional_preview_does_not_drop_next_stroke(qapp):
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)
     try:
-        service.applyStrokeSegment(
-            MaskStrokeSegmentPayload.fixed((8, 8), (8, 8), 5, False)
-        )
+        service.applyStrokeSegment(BrushStrokeSegment.fixed((8, 8), (8, 8), 5, False))
         assert mask_id in service.strokeDebugSnapshot().preview_state_ids
         service.cancelStroke()
         assert mask_id not in service.strokeDebugSnapshot().preview_state_ids
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
 
         service.applyStrokeSegment(
-            MaskStrokeSegmentPayload.fixed((20, 20), (24, 20), 5, False)
+            BrushStrokeSegment.fixed((20, 20), (24, 20), 5, False)
         )
         service.commitStroke()
         executor.drain_all()
@@ -976,7 +977,7 @@ def test_cancelled_preview_restores_only_its_durable_region(qapp, monkeypatch):
     assert qpane.setActiveMaskID(mask_id)
     try:
         service.applyStrokeSegment(
-            MaskStrokeSegmentPayload.fixed((200, 200), (220, 220), 20, False)
+            BrushStrokeSegment.fixed((200, 200), (220, 220), 20, False)
         )
         updates: list[tuple[QRect, QImage | None]] = []
         original_update = qpane.updateMaskRegion
@@ -1060,7 +1061,7 @@ def test_cancelled_stroke_discards_preview_without_changing_mask(qapp) -> None:
         before = snapshot_mask_layer(layer)
         qpane._tools_manager.signals.undo_state_push_requested.emit()
         qpane._tools_manager.signals.stroke_applied.emit(
-            MaskStrokeSegmentPayload.fixed((4, 4), (8, 8), 5, False)
+            BrushStrokeSegment.fixed((4, 4), (8, 8), 5, False)
         )
 
         qpane._tools_manager.signals.stroke_cancelled.emit()
@@ -1189,7 +1190,7 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
         def queue_stroke(point: QPoint) -> None:
             tools.signals.undo_state_push_requested.emit()
             tools.signals.stroke_applied.emit(
-                MaskStrokeSegmentPayload.fixed(
+                BrushStrokeSegment.fixed(
                     (point.x(), point.y()),
                     (point.x(), point.y()),
                     qpane.interaction.brush_size,
@@ -2800,7 +2801,7 @@ def test_mask_stroke_worker_matches_render_output(qpane_with_mask):
     _attach_test_mask(service, mask_manager, mask_id, image_id)
     controller.setActiveMaskID(mask_id)
     dirty_rect = QRect(0, 0, 8, 8)
-    segment = MaskStrokeSegmentPayload.fixed(
+    segment = BrushStrokeSegment.fixed(
         start=(1, 1),
         end=(6, 6),
         diameter=5,
@@ -2819,7 +2820,7 @@ def test_mask_stroke_worker_matches_render_output(qpane_with_mask):
     executor.submit(worker, category="mask_stroke")
     assert results, "Worker finalize callback should capture a result"
     result = results[0]
-    expected_after, expected_preview = render_stroke_segments(
+    expected_after, expected_preview = render_coverage_stroke(
         before=spec.before,
         dirty_rect=spec.dirty_rect,
         segments=payload.segments,
@@ -2836,13 +2837,13 @@ def test_durable_worker_preview_matches_live_decimated_preview() -> None:
     mask_view = np.zeros((128, 128), dtype=np.uint8)
     dirty_rect = QRect(12, 18, 92, 84)
     segments = (
-        MaskStrokeSegmentPayload.fixed(
+        BrushStrokeSegment.fixed(
             start=(20, 30),
             end=(92, 78),
             diameter=31,
             erase=False,
         ),
-        MaskStrokeSegmentPayload.fixed(
+        BrushStrokeSegment.fixed(
             start=(92, 78),
             end=(54, 96),
             diameter=23,
@@ -2873,7 +2874,7 @@ def test_durable_worker_preview_matches_live_decimated_preview() -> None:
         final_rect.left() : final_rect.right() + 1,
     ]
 
-    _, durable_preview = render_stroke_segments(
+    _, durable_preview = render_coverage_stroke(
         before=before,
         dirty_rect=final_rect,
         segments=segments,
@@ -3131,7 +3132,7 @@ def test_worker_job_matches_render_result(qapp, monkeypatch, brush_size, erase):
     layer.surface.fill(fill_value)
     controller = service.controller
     rect = QRect(0, 0, 8, 8)
-    segment = MaskStrokeSegmentPayload.fixed(
+    segment = BrushStrokeSegment.fixed(
         start=(2, 2),
         end=(6, 6),
         diameter=brush_size,
@@ -3149,7 +3150,7 @@ def test_worker_job_matches_render_result(qapp, monkeypatch, brush_size, erase):
         metadata=dict(payload.metadata),
     )
     assert spec is not None
-    after_slice, preview_image = render_stroke_segments(
+    after_slice, preview_image = render_coverage_stroke(
         before=spec.before,
         dirty_rect=spec.dirty_rect,
         segments=payload.segments,

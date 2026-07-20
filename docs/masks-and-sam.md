@@ -17,21 +17,21 @@ Applications can check feature availability at runtime:
 * **Graceful degradation:** If an optional SAM dependency or model fails to load, QPane initializes safely and reports the feature as unavailable.
 
 ## The Mask Lifecycle
-QPane treats masks as independent 8-bit grayscale layers associated with an image. You can have multiple masks per image, but only one is "active" (editable) at a time. During painting, QPane renders masks as part of the image content stack so panning, zooming, cache warming, and diagnostics stay aligned with the displayed image.
+QPane treats masks as independent 8-bit grayscale resources placed as ordinary composition layers. A composition may contain multiple masks, but only one mask is active for mask-specific editing at a time. Masks do not require a catalog image: an empty composition can create, paint, move, reorder, and persist them against its own canvas. During painting, QPane renders masks through the same composition and raster-product pipeline as other layers.
 
 ### Create and Load
 You can start with a blank slate or import existing work.
 
-* **New Layer:** `QPane.createBlankMask(size)` adds a transparent layer. Pass `image.size()` to match the current image.
+* **New Layer:** `QPane.createBlankMask(size)` adds a transparent layer to the active composition. Pass the canvas size or another intentional local raster size.
 * **Import:** `QPane.loadMaskFromFile(path)` reads an image from disk, converts it to a mask layer, and returns its UUID.
 
 ```python
-# Create a new layer for the current image
+from PySide6.QtCore import QSize
+
+# Create a new layer in the active composition
 if viewer.maskFeatureAvailable():
-    image = viewer.currentImage
-    if image is not None:
-        mask_id = viewer.createBlankMask(image.size())
-        viewer.setActiveMaskID(mask_id)
+    mask_id = viewer.createBlankMask(QSize(1920, 1080))
+    viewer.setActiveMaskID(mask_id)
 ```
 
 ### Manage Layers
@@ -46,7 +46,7 @@ if viewer.maskFeatureAvailable():
 
 A mask has two independent pieces of geometry: a scene placement and integer raster bounds in the mask's own local coordinate space. Moving a mask changes only its scene placement. It does not translate, crop, or rewrite the stored pixels, so painted content can move outside the image canvas and return later.
 
-New masks use `RasterExtentPolicy.FIXED` and image-sized local bounds. Fixed masks clip brush, SAM, and component-adjustment writes at those bounds. Hosts that want an unbounded drawing experience can switch a mask to `RasterExtentPolicy.EXPAND_ON_WRITE`; edits then enlarge local storage only along the edges they reach. The local origin may become negative, while the scene placement continues to be controlled independently by the normal layer movement API.
+New masks use `RasterExtentPolicy.FIXED` and image-sized local bounds. Fixed masks clip brush, SAM, and component-adjustment writes at those bounds. Hosts that want a Photoshop-style drawing surface can switch a mask to `RasterExtentPolicy.UNBOUNDED`; arbitrary local coordinates remain durable while storage allocates only touched tiles. The local origin may become negative, while the scene placement continues to be controlled independently by the normal layer movement API. `EXPAND_ON_WRITE` remains supported for hosts preserving that named policy and uses the same sparse storage.
 
 `RasterExtentPolicy` is the host-visible choice between those fixed and expanding write behaviors. `QPane.setRasterExtentPolicy` applies that choice to a supported layer without moving it or modifying its pixels.
 
@@ -58,7 +58,7 @@ if mask.scene_id is not None and mask.layer_id is not None:
     viewer.setRasterExtentPolicy(
         mask.scene_id,
         mask.layer_id,
-        RasterExtentPolicy.EXPAND_ON_WRITE,
+        RasterExtentPolicy.UNBOUNDED,
     )
 ```
 
@@ -88,32 +88,13 @@ if state is not None:
 
 Mask export and autosave always produce an image-sized raster containing the intersection of the transformed mask with the image canvas. Pixels held outside that canvas remain in the authoring layer for later movement, but do not appear in that clipped export.
 
-### Masks While A Layered Scene Is Active
+### Masks In Composition Documents
 
-A layered scene can show several catalog images at once, so QPane does not treat it as a single active image for mask editing.
+Mask authoring targets the active composition and its active mask layer. `QPane.activeMaskID`, `QPane.getActiveMaskImage`, mask undo/redo, mask cycling, brush painting, and generated-mask edits therefore work in image-free documents as well as seeded ones. Layer selection, movement, transform, ordering, and removal use the same generic policies and commands as other layer kinds.
 
-Active-image reads return inactive state while the layered scene stays active:
+Use `QPane.getMaskUndoState` to seed host action availability, then route actions through `QPane.undoMaskEdit` and `QPane.redoMaskEdit`. These compatibility-named methods participate in the active composition's single chronological edit history.
 
-* `QPane.activeMaskID()` returns `None`.
-* `QPane.maskIDsForImage()` without an image ID returns an empty list.
-* `QPane.listMasksForImage()` without an image ID returns an empty tuple.
-* `QPane.getActiveMaskImage()` returns `None`.
-
-Active-image mask mutations raise while the layered scene stays active. Open a generated default image composition or explicit image composition first, then call the editing operation:
-
-* `QPane.createBlankMask` creates a new mask for the active image.
-* `QPane.loadMaskFromFile` imports a mask for the active image.
-* `QPane.setActiveMaskID` switches the active editable mask.
-* `QPane.cycleMasksForward` and `QPane.cycleMasksBackward` reorder the active image's masks.
-* `QPane.undoMaskEdit` and `QPane.redoMaskEdit` work on the active mask edit history.
-
-Explicit-image APIs still work because the host names the target image or mask:
-
-* Use `QPane.maskIDsForImage(image_id)` and `QPane.listMasksForImage(image_id)` to inspect a specific catalog image.
-* Use `QPane.removeMaskFromImage` to detach a known mask from a known image.
-* Use `QPane.setMaskProperties` to update a known mask's appearance.
-* Use `QPane.getMaskUndoState` to inspect a known undo stack before enabling undo and redo controls.
-* Use `QPane.prefetchMaskOverlays(image_id)` to warm mask renders for a specific image.
+The image-centric helpers remain available for catalog-oriented hosts. Passing an image ID to `QPane.maskIDsForImage`, `QPane.listMasksForImage`, `QPane.removeMaskFromImage`, or `QPane.prefetchMaskOverlays` addresses the generated navigation composition for that catalog resource. Omitting the image ID from list helpers addresses the active composition.
 
 ### Appearance
 Masks are grayscale internally but rendered with a color overlay in image order. Use `QPane.setMaskProperties` to customize how they look.

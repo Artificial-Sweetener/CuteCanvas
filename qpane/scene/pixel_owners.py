@@ -40,6 +40,10 @@ class LayerPixelMutationOwner(Protocol):
         """Return binary occupancy for meaningful source pixels in ``bounds``."""
         ...
 
+    def content_bounds(self, layer: LayerDescriptor) -> RasterBounds | None:
+        """Return the smallest local bounds containing meaningful pixels."""
+        ...
+
     def capture_patch(
         self,
         layer: LayerDescriptor,
@@ -161,3 +165,12 @@ class LayerPixelOwnerRegistry:
             (owner for owner in self._owners if owner.supports_layer(scene, layer)),
             None,
         )
+
+    def content_bounds(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+    ) -> RasterBounds | None:
+        """Return source-owned meaningful bounds for one editable layer."""
+        owner = self.owner_for(scene, layer)
+        return None if owner is None else owner.content_bounds(layer)

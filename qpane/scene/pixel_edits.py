@@ -22,6 +22,7 @@ from .layer_selection import SceneLayerSelectionController
 from .mutations import SceneMutationCoordinator
 from .pixel_owners import LayerPixelOwnerRegistry
 from .raster import RasterBounds
+from .source_references import LayerSourceReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,7 @@ class RasterPixelEdit:
 
     scene_id: uuid.UUID
     layer_id: uuid.UUID
+    source: LayerSourceReference
     bounds: RasterBounds
     before: np.ndarray
     after: np.ndarray
@@ -48,6 +50,11 @@ class RasterPixelEdit:
     def retained_bytes(self) -> int:
         """Return patch bytes retained for undo and redo."""
         return int(self.before.nbytes + self.after.nbytes)
+
+    @property
+    def retained_resources(self) -> tuple[LayerSourceReference, ...]:
+        """Retain the edited source while this command remains replayable."""
+        return (self.source,)
 
 
 class LayerPixelMutationCoordinator:
@@ -122,6 +129,7 @@ class LayerPixelMutationCoordinator:
             RasterPixelEdit(
                 scene_id=scene.scene_id,
                 layer_id=layer.layer_id,
+                source=layer.source,
                 bounds=local_coverage.bounds,
                 before=before,
                 after=after,

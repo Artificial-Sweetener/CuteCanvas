@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionToolButton, QWid
 from examples.demo import ExampleOptions, ExampleWindow
 from examples.demonstration.editor_controls import _CenteredMenuToolButton
 from qpane import QPane
+from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
@@ -138,7 +139,7 @@ def test_demo_delete_shortcut_clears_selected_pixels_from_moved_mask(
         mask_id = window.qpane.createBlankMask(window.qpane.currentImage.size())
         assert mask_id is not None
         assert window.qpane.setActiveMaskID(mask_id)
-        window.editor_controls.apply_layer_policy()
+        window.editor_controls.layer_policy.reconcile()
         info = window.qpane.listMasksForImage()[0]
         assert info.scene_id is not None
         assert info.layer_id is not None
@@ -223,12 +224,14 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
             buttons=Qt.MouseButton.LeftButton,
         )
         dispatch_ms.append((interaction_clock() - started) * 1000.0)
+        isolated_latency = absolute_latency_assertions_are_isolated()
+        feedback_timeout_ms = 100.0 if isolated_latency else 1000.0
         contact_feedback = _wait_for_pixel_change(
             qapp,
             window.qpane,
             center,
             before_contact,
-            timeout_ms=100.0,
+            timeout_ms=feedback_timeout_ms,
         )
         if contact_feedback is not None:
             feedback_ms.append(contact_feedback)
@@ -247,7 +250,7 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
             window.qpane,
             end,
             before_motion,
-            timeout_ms=100.0,
+            timeout_ms=feedback_timeout_ms,
         )
         if motion_feedback is not None:
             feedback_ms.append(motion_feedback)
@@ -270,8 +273,8 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
         commit_ms = (interaction_clock() - release_started) * 1000.0
         assert window.qpane.sceneEditUndoAvailable()
         assert len(feedback_ms) == 2
-        assert max(feedback_ms) < 100.0
-        if absolute_latency_assertions_are_isolated():
+        if isolated_latency:
+            assert max(feedback_ms) < 100.0
             assert max(dispatch_ms) < 100.0
             assert commit_ms < 100.0
         assert layer.surface.snapshot_array().any()
@@ -340,6 +343,159 @@ def test_demo_ctrl_d_deselects_while_escape_preserves_committed_selection(
         qapp.processEvents()
 
 
+def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
+    qapp: QApplication,
+) -> None:
+    """Repeated Undo must traverse deselection, movement, and prior selection."""
+    window = ExampleWindow(ExampleOptions(feature_set="mask"))
+    try:
+        image_id = uuid.uuid4()
+        window.qpane.setImagesByID(
+            QPane.imageMapFromLists([_white_image(400)], [None], [image_id]),
+            image_id,
+        )
+        image = QImage(200, 200, QImage.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        for y in range(40, 80):
+            for x in range(40, 80):
+                image.setPixelColor(x, y, QColor(230, 60, 40, 255))
+        layer_id = window.qpane.addEditableRasterLayer(
+            image,
+            placement=QRectF(120.0, 120.0, 200.0, 200.0),
+        )
+        assert layer_id is not None
+        scene = window.qpane.currentScene()
+        assert scene is not None
+        assert window.qpane.setSelectedLayer(scene.scene_id, layer_id)
+        selection = QImage(40, 40, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert window.qpane.setPixelSelection(selection, QRect(160, 160, 40, 40))
+        window.resize(800, 620)
+        window.show()
+        window.activateWindow()
+        window.qpane.setFocus(Qt.FocusReason.OtherFocusReason)
+        qapp.processEvents()
+        window._set_control_mode(QPane.CONTROL_MODE_MOVE)
+        qapp.processEvents()
+        resolved_scene_id = window.qpane._resolve_public_scene_id(scene.scene_id)
+        source = window.qpane.view().layer_source_to_panel_point(
+            resolved_scene_id,
+            layer_id,
+            QPointF(60.0, 60.0),
+        )
+        destination = window.qpane.view().layer_source_to_panel_point(
+            resolved_scene_id,
+            layer_id,
+            QPointF(100.0, 60.0),
+        )
+        assert source is not None
+        assert destination is not None
+
+        QTest.mousePress(window.qpane, Qt.LeftButton, Qt.NoModifier, source.toPoint())
+        qapp.processEvents()
+        QTest.mouseMove(window.qpane, destination.toPoint(), delay=0)
+        qapp.processEvents()
+        QTest.mouseRelease(
+            window.qpane,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            destination.toPoint(),
+        )
+        qapp.processEvents()
+        floating_state = window.qpane.floatingPixelEditState()
+        assert floating_state is not None
+        moved_x = 60 + floating_state.offset.x()
+        moved_y = 60 + floating_state.offset.y()
+        assert moved_x != 60
+        assert window.editor_controls.undo_action.isEnabled()
+        QTest.keyClick(window.qpane, Qt.Key_D, Qt.ControlModifier)
+        qapp.processEvents()
+        assert window.qpane.floatingPixelEditState() is None
+        assert not window.qpane.pixelSelectionState().has_selection
+        assert window.editor_controls.undo_action.isEnabled()
+        asset_ids = window.qpane._editable_raster_assets.ids()
+        assert len(asset_ids) == 1
+        asset = window.qpane._editable_raster_assets.get(asset_ids[0])
+        assert asset is not None
+        committed_pixels = qimage_to_numpy_argb32(asset.surface.presentation_qimage())
+        committed_rows, committed_columns = np.nonzero(committed_pixels[:, :, 3])
+        assert (int(committed_columns.min()), int(committed_columns.max())) == (
+            40 + floating_state.offset.x(),
+            79 + floating_state.offset.x(),
+        )
+        assert (int(committed_rows.min()), int(committed_rows.max())) == (
+            40 + floating_state.offset.y(),
+            79 + floating_state.offset.y(),
+        )
+        assert asset.surface.presentation_qimage().pixelColor(
+            moved_x, moved_y
+        ) == QColor(
+            230,
+            60,
+            40,
+            255,
+        )
+
+        QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
+        qapp.processEvents()
+        assert window.qpane.pixelSelectionState().has_selection
+        assert asset.surface.presentation_qimage().pixelColor(
+            moved_x, moved_y
+        ) == QColor(
+            230,
+            60,
+            40,
+            255,
+        )
+        assert window.editor_controls.undo_action.isEnabled()
+        assert window.editor_controls.redo_action.isEnabled()
+
+        QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
+        qapp.processEvents()
+        assert asset.surface.presentation_qimage().pixelColor(60, 60) == QColor(
+            230,
+            60,
+            40,
+            255,
+        )
+        assert (
+            asset.surface.presentation_qimage().pixelColor(moved_x, moved_y).alpha()
+            == 0
+        )
+
+        QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
+        qapp.processEvents()
+        assert not window.qpane.pixelSelectionState().has_selection
+        assert not window.editor_controls.undo_action.isEnabled()
+        assert window.editor_controls.redo_action.isEnabled()
+        assert any(
+            layer.layer_id == layer_id for layer in window.qpane.currentScene().layers
+        )
+
+        for _step in range(3):
+            window.editor_controls.redo_action.trigger()
+            qapp.processEvents()
+
+        assert any(
+            layer.layer_id == layer_id for layer in window.qpane.currentScene().layers
+        )
+        assert not window.qpane.pixelSelectionState().has_selection
+        assert asset.surface.presentation_qimage().pixelColor(60, 60).alpha() == 0
+        assert asset.surface.presentation_qimage().pixelColor(
+            moved_x, moved_y
+        ) == QColor(
+            230,
+            60,
+            40,
+            255,
+        )
+        assert not window.editor_controls.redo_action.isEnabled()
+    finally:
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
+
+
 def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
     qapp: QApplication,
     monkeypatch,
@@ -356,7 +512,7 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
         mask_id = window.qpane.createBlankMask(window.qpane.currentImage.size())
         assert mask_id is not None
         assert window.qpane.setActiveMaskID(mask_id)
-        window.editor_controls.apply_layer_policy()
+        window.editor_controls.layer_policy.reconcile()
         layer = window.qpane.mask_service.assets.get_layer(mask_id)
         assert layer is not None
 

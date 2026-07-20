@@ -16,11 +16,19 @@ from collections.abc import Callable
 from PySide6.QtCore import QPoint, QPointF, QRect
 
 from ..composition.edit_controller import CompositionEditController
+from ..scene.affine import LayerTransform
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.model import SceneDescriptor
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_move_preview import RasterPixelMovePreview
 from ..scene.pixel_owners import LayerPixelOwnerRegistry
+from ..scene.transform_geometry import (
+    AffineTransformGeometry,
+    TransformLocalBounds,
+    TransformModifiers,
+    TransformOperation,
+)
+from ..scene.transform_session import LayerTransformBoxState, LayerTransformGesture
 from ..selection import PixelSelectionService, PixelSelectionState
 from .floating_history import FloatingPixelHistory
 from .floating_layers import FloatingLayerPromotionRegistry
@@ -74,11 +82,17 @@ class SelectedPixelMovementController:
             promotions=promotion_registry,
         )
         self._session: FloatingPixelSession | None = None
+        self._transform_gesture: LayerTransformGesture | None = None
 
     @property
     def active(self) -> bool:
         """Return whether selected content is floating unresolved."""
         return self._session is not None
+
+    @property
+    def target_resolver(self) -> SelectedPixelMoveTargetResolver:
+        """Expose the sole selected-pixel eligibility owner."""
+        return self._targets
 
     @property
     def dragging(self) -> bool:
@@ -109,9 +123,7 @@ class SelectedPixelMovementController:
     @property
     def scene_bounds(self) -> QRect | None:
         """Return current floating selection bounds in scene coordinates."""
-        preview = self.preview_state
-        bounds = None if preview is None else preview.coverage.bounds
-        return None if bounds is None else bounds.to_qrect()
+        return None if self._session is None else self._session.scene_bounds
 
     @property
     def preview_state(self) -> PixelSelectionState | None:
@@ -123,9 +135,133 @@ class SelectedPixelMovementController:
         """Return transient render geometry without copying source pixels."""
         return None if self._session is None else self._session.raster_preview
 
+    @property
+    def transforming(self) -> bool:
+        """Return whether floating content owns an affine transform session."""
+        session = self._session
+        translated = (
+            LayerTransform()
+            if session is None
+            else LayerTransform(dx=float(session.delta[0]), dy=float(session.delta[1]))
+        )
+        return self._transform_gesture is not None or bool(
+            session is not None and session.fragment_transform != translated
+        )
+
+    def transform_box_state(self) -> LayerTransformBoxState | None:
+        """Return affine box geometry for selected or already floating pixels."""
+        session = self._session
+        if session is None:
+            target = self._targets.resolve_selected()
+            bounds = None if target is None else target.local_coverage.bounds
+            transform = None if target is None else target.layer.transform
+            if target is None or bounds is None or transform is None:
+                return None
+            return LayerTransformBoxState(
+                target.scene.scene_id,
+                target.layer.layer_id,
+                TransformLocalBounds(
+                    float(bounds.x),
+                    float(bounds.y),
+                    float(bounds.width),
+                    float(bounds.height),
+                ),
+                transform,
+                False,
+            )
+        if session.layer.transform is None:
+            return None
+        bounds = session.lift.fragment.bounds
+        return LayerTransformBoxState(
+            session.scene_id,
+            session.layer_id,
+            TransformLocalBounds(
+                float(bounds.x),
+                float(bounds.y),
+                float(bounds.width),
+                float(bounds.height),
+            ),
+            session.fragment_transform.followed_by(session.layer.transform),
+            session.fragment_transform != LayerTransform(),
+        )
+
+    def begin_transform(
+        self,
+        operation: TransformOperation,
+        scene_point: QPointF,
+    ) -> bool:
+        """Begin one affine gesture against selected floating pixels."""
+        if self._session is None and not self._begin_selected_session():
+            return False
+        state = self.transform_box_state()
+        if state is None:
+            return False
+        self._transform_gesture = LayerTransformGesture(
+            QPointF(scene_point),
+            operation,
+            AffineTransformGeometry(state.bounds, state.transform),
+        )
+        self._changed()
+        return True
+
+    def update_transform(
+        self,
+        scene_point: QPointF,
+        modifiers: TransformModifiers,
+    ) -> bool:
+        """Update affine floating geometry without resampling source pixels."""
+        session = self._session
+        gesture = self._transform_gesture
+        layer_transform = None if session is None else session.layer.transform
+        if session is None or gesture is None or layer_transform is None:
+            return False
+        scene_transform = gesture.geometry.transform_for_drag(
+            gesture.operation,
+            gesture.origin,
+            scene_point,
+            modifiers,
+        )
+        layer_inverse = layer_transform.inverted()
+        if scene_transform is None or layer_inverse is None:
+            return False
+        changed = session.set_fragment_transform(
+            scene_transform.followed_by(layer_inverse)
+        )
+        if changed:
+            self._preview_changed()
+        return changed
+
+    def finish_transform(
+        self,
+        scene_point: QPointF,
+        modifiers: TransformModifiers,
+    ) -> bool:
+        """Release affine pointer ownership while retaining unresolved pixels."""
+        if self._transform_gesture is None:
+            return False
+        changed = self.update_transform(scene_point, modifiers)
+        self._transform_gesture = None
+        self._preview_changed()
+        return changed or self._session is not None
+
+    def suspend_transform(self) -> bool:
+        """Release affine pointer ownership without changing its preview."""
+        had_gesture = self._transform_gesture is not None
+        self._transform_gesture = None
+        return had_gesture or self._session is not None
+
+    def commit_transform(self) -> bool:
+        """Resolve current affine pixels to their source as one history edit."""
+        self._transform_gesture = None
+        return self.anchor_to_source()
+
     def has_selection(self) -> bool:
         """Return whether the active scene owns nonempty pixel selection coverage."""
         return self._targets.has_selection()
+
+    def has_movable_pixels(self) -> bool:
+        """Return whether the selection contains editable selected-layer pixels."""
+        return self._session is not None or self._targets.resolve_selected() is not None
 
     def can_begin(self, scene_point: QPointF) -> bool:
         """Return whether selected editable content can move from ``scene_point``."""
@@ -161,7 +297,6 @@ class SelectedPixelMovementController:
         """Update quantized layer-local displacement without mutating pixels."""
         if self._session is None or not self._session.update_drag(scene_point):
             return False
-        self._compose_preview_transition()
         self._preview_changed()
         return True
 
@@ -169,11 +304,9 @@ class SelectedPixelMovementController:
         """Finish one drag while retaining the unresolved floating edit."""
         if self._session is None:
             return False
-        previous_delta = self._session.delta
         if not self._session.finish_drag(scene_point):
             return False
-        if self._session.delta != previous_delta:
-            self._compose_preview_transition()
+        self._settle_preview_transition()
         self._preview_changed()
         return True
 
@@ -188,7 +321,7 @@ class SelectedPixelMovementController:
         if self._session is None and not self._begin_selected_session():
             return False
         self._session.nudge(delta_x, delta_y)
-        self._compose_preview_transition()
+        self._settle_preview_transition()
         self._preview_changed()
         return True
 
@@ -225,6 +358,7 @@ class SelectedPixelMovementController:
 
     def cancel(self) -> bool:
         """Discard transient displacement without changing durable owners."""
+        self._transform_gesture = None
         if self._session is None:
             return False
         self._clear()
@@ -250,21 +384,22 @@ class SelectedPixelMovementController:
     def _clear(self) -> None:
         """Release transient session state and request presentation."""
         self._session = None
+        self._transform_gesture = None
         self._preview_changed()
 
-    def _compose_preview_transition(self) -> None:
-        """Refresh the exact immutable-source transition for current displacement."""
+    def _settle_preview_transition(self) -> None:
+        """Compose the exact durable candidate once after interactive movement."""
         session = self._session
         if session is None or session.delta == (0, 0):
             if session is not None:
-                session.preview_transition = None
+                session.settled_transition = None
             return
         resolved = self._targets.resolve_layer(session.scene_id, session.layer_id)
         if resolved is None:
-            session.preview_transition = None
+            session.settled_transition = None
             return
         _scene, layer, owner = resolved
-        session.preview_transition = owner.preview_move(
+        session.settled_transition = owner.preview_move(
             layer,
             session.lift,
             session.delta[0],

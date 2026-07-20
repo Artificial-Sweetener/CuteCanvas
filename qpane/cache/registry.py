@@ -28,7 +28,7 @@ from .consumers import (
     SamPredictorCacheConsumer,
     TileCacheConsumer,
 )
-from .coordinator import CacheCoordinator, CachePriority
+from .coordinator import CacheConsumerCallbacks, CacheCoordinator, CachePriority
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,156 @@ class CacheRegistry:
             priority=CachePriority.MASK_OVERLAYS,
             missing_warning="Mask controller missing; skipping cache registry attachment",
         )
+
+    def attach_brush_tip_cache(
+        self,
+        cache: Any,
+        *,
+        consumer_id: str = "brush_tips",
+    ) -> Any:
+        """Register one byte-bounded brush-tip cache with shared budgeting."""
+        if consumer_id in self.consumers:
+            return self.consumers[consumer_id]
+        cache.set_usage_changed(
+            lambda usage: self.coordinator.update_usage(consumer_id, usage)
+        )
+        self.coordinator.register_consumer(
+            consumer_id,
+            priority=CachePriority.BRUSH_TIPS,
+            callbacks=CacheConsumerCallbacks(
+                get_usage=lambda: cache.usage_bytes,
+                set_budget=cache.set_budget,
+                trim_to=cache.trim_to,
+            ),
+            preferred_bytes=8 * 1024 * 1024,
+        )
+        self.consumers[consumer_id] = cache
+        return cache
+
+    def attach_vector_render_cache(
+        self,
+        cache: Any,
+        *,
+        consumer_id: str = "vector_products",
+    ) -> Any:
+        """Register one byte-bounded vector-product cache."""
+        if consumer_id in self.consumers:
+            return self.consumers[consumer_id]
+        cache.set_usage_changed(
+            lambda usage: self.coordinator.update_usage(consumer_id, usage)
+        )
+        self.coordinator.register_consumer(
+            consumer_id,
+            priority=CachePriority.VECTOR_PRODUCTS,
+            callbacks=CacheConsumerCallbacks(
+                get_usage=lambda: cache.usage_bytes,
+                set_budget=cache.set_budget,
+                trim_to=cache.trim_to,
+            ),
+            preferred_bytes=16 * 1024 * 1024,
+        )
+        self.consumers[consumer_id] = cache
+        return cache
+
+    def attach_raster_render_products(
+        self,
+        products: Any,
+        *,
+        consumer_id: str = "raster_previews",
+    ) -> Any:
+        """Register bounded pending-pyramid previews with shared budgeting."""
+        if consumer_id in self.consumers:
+            return self.consumers[consumer_id]
+        self.coordinator.register_consumer(
+            consumer_id,
+            priority=CachePriority.RASTER_PREVIEWS,
+            callbacks=CacheConsumerCallbacks(
+                get_usage=lambda: products.usage_bytes,
+                set_budget=products.set_budget,
+                trim_to=products.trim_to,
+            ),
+            preferred_bytes=32 * 1024 * 1024,
+        )
+        products.set_usage_changed(
+            lambda usage: self.coordinator.update_usage(consumer_id, usage)
+        )
+        self.consumers[consumer_id] = products
+        return products
+
+    def attach_vector_mask_cache(
+        self,
+        cache: Any,
+        *,
+        consumer_id: str = "vector_mask_paths",
+    ) -> Any:
+        """Register one byte-bounded vector-mask geometry cache."""
+        if consumer_id in self.consumers:
+            return self.consumers[consumer_id]
+        cache.set_usage_changed(
+            lambda usage: self.coordinator.update_usage(consumer_id, usage)
+        )
+        self.coordinator.register_consumer(
+            consumer_id,
+            priority=CachePriority.VECTOR_PRODUCTS,
+            callbacks=CacheConsumerCallbacks(
+                get_usage=lambda: cache.usage_bytes,
+                set_budget=cache.set_budget,
+                trim_to=cache.trim_to,
+            ),
+            preferred_bytes=8 * 1024 * 1024,
+        )
+        self.consumers[consumer_id] = cache
+        return cache
+
+    def attach_vector_tile_cache(
+        self,
+        cache: Any,
+        *,
+        consumer_id: str = "vector_tiles",
+    ) -> Any:
+        """Register one byte-bounded refined vector-tile cache."""
+        if consumer_id in self.consumers:
+            return self.consumers[consumer_id]
+        cache.set_usage_changed(
+            lambda usage: self.coordinator.update_usage(consumer_id, usage)
+        )
+        self.coordinator.register_consumer(
+            consumer_id,
+            priority=CachePriority.VECTOR_PRODUCTS,
+            callbacks=CacheConsumerCallbacks(
+                get_usage=lambda: cache.usage_bytes,
+                set_budget=cache.set_budget,
+                trim_to=cache.trim_to,
+            ),
+            preferred_bytes=32 * 1024 * 1024,
+        )
+        self.consumers[consumer_id] = cache
+        return cache
+
+    def attach_text_layout_cache(
+        self,
+        cache: Any,
+        *,
+        consumer_id: str = "vector_text_layouts",
+    ) -> Any:
+        """Register one byte-bounded semantic text-layout cache."""
+        if consumer_id in self.consumers:
+            return self.consumers[consumer_id]
+        cache.set_usage_changed(
+            lambda usage: self.coordinator.update_usage(consumer_id, usage)
+        )
+        self.coordinator.register_consumer(
+            consumer_id,
+            priority=CachePriority.VECTOR_PRODUCTS,
+            callbacks=CacheConsumerCallbacks(
+                get_usage=lambda: cache.usage_bytes,
+                set_budget=cache.set_budget,
+                trim_to=cache.trim_to,
+            ),
+            preferred_bytes=8 * 1024 * 1024,
+        )
+        self.consumers[consumer_id] = cache
+        return cache
 
     def attachSamManager(
         self,

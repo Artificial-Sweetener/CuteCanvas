@@ -16,12 +16,12 @@ from collections.abc import Callable
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
 
+from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import (
     CompositionLayerInstance,
-    CompositionLayerSourceKind,
-    ImageSceneLayerStore,
+    CompositionLayerStore,
 )
-from ..scene.identity import default_scene_id, editable_raster_layer_id
+from ..scene.affine import LayerTransform
 from ..scene.model import (
     LayerDescriptor,
     LayerInteractionPolicy,
@@ -33,9 +33,9 @@ from ..scene.mutations import (
     SceneMutationResult,
     SceneMutationStatus,
 )
-from ..scene.raster import LayerTransform, RasterExtentPolicy
-from ..scene.sources import EditableRasterSource
+from ..scene.raster import RasterExtentPolicy
 from .assets import EditableRasterAssetStore
+from .source_reference import EditableRasterReference
 
 
 class EditableRasterLayerController:
@@ -45,13 +45,17 @@ class EditableRasterLayerController:
         self,
         *,
         assets: EditableRasterAssetStore,
-        layers: ImageSceneLayerStore,
-        current_image_id: Callable[[], uuid.UUID | None],
+        layers: CompositionLayerStore,
+        layer_edits: CompositionLayerEditService,
+        current_composition_id: Callable[[], uuid.UUID | None],
+        is_generated_default: Callable[[uuid.UUID], bool],
     ) -> None:
-        """Bind raster assets, composition order, and active image identity."""
+        """Bind raster assets and the active composition document."""
         self.assets = assets
         self._layers = layers
-        self._current_image_id = current_image_id
+        self._layer_edits = layer_edits
+        self._current_composition_id = current_composition_id
+        self._is_generated_default = is_generated_default
 
     def add(
         self,
@@ -62,9 +66,9 @@ class EditableRasterLayerController:
         label: str | None,
         extent_policy: RasterExtentPolicy,
     ) -> uuid.UUID | None:
-        """Create and attach one editable raster to the active image scene."""
-        image_id = self._current_image_id()
-        if image_id is None:
+        """Create and attach one editable raster to the active composition."""
+        composition_id = self._current_composition_id()
+        if composition_id is None:
             return None
         asset = self.assets.create(image, extent_policy=extent_policy)
         bounds = asset.surface.bounds
@@ -84,47 +88,33 @@ class EditableRasterLayerController:
             )
         )
         instance = CompositionLayerInstance(
-            layer_id=editable_raster_layer_id(
-                default_scene_id(image_id), asset.raster_id
-            ),
-            source_kind=CompositionLayerSourceKind.RASTER,
-            source_id=asset.raster_id,
+            layer_id=uuid.uuid4(),
+            source=EditableRasterReference(asset.raster_id),
             transform=LayerTransform.from_placement(bounds, destination),
             interaction=interaction,
             role="raster",
             label=label,
         )
-        if self._layers.add_layer(image_id, instance):
+        added = (
+            self._layers.add_layer(composition_id, instance)
+            if self._is_generated_default(composition_id)
+            else self._layer_edits.add(composition_id, instance)
+        )
+        if added:
             return instance.layer_id
         self.assets.remove(asset.raster_id)
         return None
 
-    def remove(self, image_id: uuid.UUID, raster_id: uuid.UUID) -> bool:
+    def remove(self, composition_id: uuid.UUID, raster_id: uuid.UUID) -> bool:
         """Remove one instance and delete an orphaned editable raster asset."""
         instance = self._layers.layer_for_source(
-            image_id,
-            CompositionLayerSourceKind.RASTER,
-            raster_id,
+            composition_id,
+            EditableRasterReference(raster_id),
         )
-        if instance is None or not self._layers.remove_layer(
-            image_id, instance.layer_id
-        ):
-            return False
-        if not self._layers.image_ids_for_source(
-            CompositionLayerSourceKind.RASTER,
-            raster_id,
-        ):
-            self.assets.remove(raster_id)
-        return True
-
-    def prune_orphaned_assets(self) -> None:
-        """Delete assets no longer referenced by any composition layer instance."""
-        for raster_id in self.assets.ids():
-            if not self._layers.image_ids_for_source(
-                CompositionLayerSourceKind.RASTER,
-                raster_id,
-            ):
-                self.assets.remove(raster_id)
+        return instance is not None and self._layer_edits.remove(
+            composition_id,
+            instance.layer_id,
+        )
 
 
 class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
@@ -134,49 +124,38 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
 
     def __init__(
         self,
-        layers: ImageSceneLayerStore,
-        assets: EditableRasterAssetStore,
-        current_image_id: Callable[[], uuid.UUID | None],
+        layers: CompositionLayerStore,
+        current_composition_id: Callable[[], uuid.UUID | None],
     ) -> None:
-        """Bind composition placement and raster asset lifecycle."""
+        """Bind composition placement for editable raster instances."""
         self._layers = layers
-        self._assets = assets
-        self._current_image_id = current_image_id
+        self._current_composition_id = current_composition_id
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
         """Return whether ``layer`` references an editable raster."""
-        return isinstance(layer.source, EditableRasterSource)
+        return isinstance(layer.source, EditableRasterReference)
 
     def remove_layer(
         self, scene: SceneDescriptor, layer: LayerDescriptor
     ) -> SceneMutationResult:
         """Remove one editable raster instance and orphaned source asset."""
-        image_id = self._current_image_id()
+        composition_id = self._current_composition_id()
         source = layer.source
         changed = bool(
-            image_id is not None
-            and isinstance(source, EditableRasterSource)
-            and self._layers.remove_layer(image_id, layer.layer_id)
+            composition_id is not None
+            and isinstance(source, EditableRasterReference)
+            and self._layers.remove_layer(composition_id, layer.layer_id)
         )
-        if (
-            changed
-            and isinstance(source, EditableRasterSource)
-            and not self._layers.image_ids_for_source(
-                CompositionLayerSourceKind.RASTER,
-                source.raster_id,
-            )
-        ):
-            self._assets.remove(source.raster_id)
         return _result(self.name, scene, layer, changed)
 
     def reorder_layer(
         self, scene: SceneDescriptor, layer: LayerDescriptor, target_index: int
     ) -> SceneMutationResult:
         """Move one editable raster to an exact scene z-order index."""
-        image_id = self._current_image_id()
+        composition_id = self._current_composition_id()
         changed = bool(
-            image_id is not None
-            and self._layers.reorder_layer(image_id, layer.layer_id, target_index)
+            composition_id is not None
+            and self._layers.reorder_layer(composition_id, layer.layer_id, target_index)
         )
         return _result(self.name, scene, layer, changed)
 
@@ -184,11 +163,11 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
         self, scene: SceneDescriptor, layer: LayerDescriptor, opacity: float
     ) -> SceneMutationResult:
         """Update composition-owned raster opacity."""
-        image_id = self._current_image_id()
+        composition_id = self._current_composition_id()
         changed = bool(
-            image_id is not None
+            composition_id is not None
             and self._layers.update_presentation(
-                image_id, layer.layer_id, opacity=opacity
+                composition_id, layer.layer_id, opacity=opacity
             )
         )
         return _result(self.name, scene, layer, changed)
@@ -200,10 +179,12 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
         interaction: LayerInteractionPolicy,
     ) -> SceneMutationResult:
         """Update composition-owned raster interaction policy."""
-        image_id = self._current_image_id()
+        composition_id = self._current_composition_id()
         changed = bool(
-            image_id is not None
-            and self._layers.update_interaction(image_id, layer.layer_id, interaction)
+            composition_id is not None
+            and self._layers.update_interaction(
+                composition_id, layer.layer_id, interaction
+            )
         )
         return _result(self.name, scene, layer, changed)
 
@@ -214,14 +195,32 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
         placement: LayerPlacement,
     ) -> SceneMutationResult:
         """Update composition-owned raster transform."""
-        image_id = self._current_image_id()
+        composition_id = self._current_composition_id()
         changed = bool(
-            image_id is not None
+            composition_id is not None
             and layer.raster_bounds is not None
             and self._layers.update_transform(
-                image_id,
+                composition_id,
                 layer.layer_id,
                 LayerTransform.from_placement(layer.raster_bounds, placement),
+            )
+        )
+        return _result(self.name, scene, layer, changed)
+
+    def set_transform(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        transform: LayerTransform,
+    ) -> SceneMutationResult:
+        """Update exact composition-owned raster geometry."""
+        composition_id = self._current_composition_id()
+        changed = bool(
+            composition_id is not None
+            and self._layers.update_transform(
+                composition_id,
+                layer.layer_id,
+                transform,
             )
         )
         return _result(self.name, scene, layer, changed)

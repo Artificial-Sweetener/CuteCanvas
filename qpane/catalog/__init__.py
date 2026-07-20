@@ -5,29 +5,47 @@
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-#
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU General Public License for more details.
-#
-#    You should have received a copy of the GNU General Public License
-#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Catalog package public API surface."""
+"""Lazily expose catalog collaborators without importing rendering eagerly."""
 
-from .catalog import Catalog, CatalogMutationEvent, NavigationEvent
-from .controller import CatalogController
-from .image_catalog import ImageCatalog
-from .image_map import ImageMap
-from .link import LinkManager
+from __future__ import annotations
 
-__all__ = [
-    "Catalog",
-    "CatalogController",
-    "CatalogMutationEvent",
-    "ImageCatalog",
-    "ImageMap",
-    "LinkManager",
-    "NavigationEvent",
-]
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .catalog import (
+        Catalog as Catalog,
+    )
+    from .catalog import (
+        CatalogMutationEvent as CatalogMutationEvent,
+    )
+    from .catalog import (
+        NavigationEvent as NavigationEvent,
+    )
+    from .controller import CatalogController as CatalogController
+    from .image_catalog import ImageCatalog as ImageCatalog
+    from .image_map import ImageMap as ImageMap
+    from .link import LinkManager as LinkManager
+
+_EXPORTS = {
+    "Catalog": (".catalog", "Catalog"),
+    "CatalogController": (".controller", "CatalogController"),
+    "CatalogMutationEvent": (".catalog", "CatalogMutationEvent"),
+    "ImageCatalog": (".image_catalog", "ImageCatalog"),
+    "ImageMap": (".image_map", "ImageMap"),
+    "LinkManager": (".link", "LinkManager"),
+    "NavigationEvent": (".catalog", "NavigationEvent"),
+}
+
+__all__ = tuple(_EXPORTS)
+
+
+def __getattr__(name: str) -> object:
+    """Load one catalog collaborator only when requested."""
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(target[0], __name__), target[1])
+    globals()[name] = value
+    return value

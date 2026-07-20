@@ -23,14 +23,13 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject
 from PySide6.QtGui import QImage
 
-from ..concurrency import TaskExecutorProtocol
 from ..core import Config
 from ..raster.image_conversion import images_differ
 from ..rendering import PyramidManager
-from ..scene.identity import SceneLayerAssetKey, default_catalog_asset_key
+from ..scene.identity import SourceRenderAssetKey, catalog_source_asset_key
 from ..types import CatalogEntry
 from .image_map import ImageMap
 
@@ -44,7 +43,7 @@ class CatalogMutationResult:
     removed_ids: tuple[uuid.UUID, ...] = ()
     content_changed_ids: tuple[uuid.UUID, ...] = ()
     path_changed_ids: tuple[uuid.UUID, ...] = ()
-    cache_asset_keys_to_evict: tuple[SceneLayerAssetKey, ...] = ()
+    cache_asset_keys_to_evict: tuple[SourceRenderAssetKey, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,30 +58,22 @@ class _CatalogImageRecord:
 class ImageCatalog(QObject):
     """Qt-backed data model tracking catalog images, paths, masks, and pyramids."""
 
-    pyramidReady = Signal(object)
-
     def __init__(
         self,
-        config: Config,
-        executor: TaskExecutorProtocol,
+        pyramid_manager: PyramidManager,
         parent=None,
     ):
         """Initialize the Qt-backed catalog and its managers.
 
         Args:
-            config: Active configuration snapshot for cache/pyramid policies.
-            executor: Shared task executor powering pyramid generation.
+            pyramid_manager: Rendering-owned derived raster-product manager.
             parent: Optional QObject parent used for Qt ownership.
         """
         super().__init__(parent)
-        self._config = config
         self._image_order: list[uuid.UUID] = []
         self._records_by_id: dict[uuid.UUID, _CatalogImageRecord] = {}
         self._current_id: uuid.UUID | None = None
-        self.pyramid_manager = PyramidManager(
-            config=config, parent=self, executor=executor
-        )
-        self.pyramid_manager.pyramidReady.connect(self.pyramidReady)
+        self.pyramid_manager = pyramid_manager
 
     def apply_config(self, config: Config) -> None:
         """Propagate configuration updates to dependent managers.
@@ -139,7 +130,7 @@ class ImageCatalog(QObject):
         ids_to_remove = [iid for iid in self._image_order if iid not in new_ids]
         ids_with_changed_content: list[uuid.UUID] = []
         ids_with_changed_paths: list[uuid.UUID] = []
-        asset_keys_to_evict: list[SceneLayerAssetKey] = []
+        asset_keys_to_evict: list[SourceRenderAssetKey] = []
         next_records: dict[uuid.UUID, _CatalogImageRecord] = {}
         for iid, entry in image_map.items():
             existing = self._records_by_id.get(iid)
@@ -380,8 +371,10 @@ class ImageCatalog(QObject):
         record = self._records_by_id.get(image_id)
         return record.revision if record is not None else None
 
-    def defaultAssetKeyForImage(self, image_id: uuid.UUID) -> SceneLayerAssetKey | None:
-        """Return the default-scene cache key for a catalog image."""
+    def defaultAssetKeyForImage(
+        self, image_id: uuid.UUID
+    ) -> SourceRenderAssetKey | None:
+        """Return reusable source-product identity for a catalog image."""
         record = self._records_by_id.get(image_id)
         if record is None:
             return None
@@ -428,7 +421,7 @@ class ImageCatalog(QObject):
         return [self.getPath(iid) for iid in self._image_order]
 
     def getBestFitImageForAsset(
-        self, asset_key: SceneLayerAssetKey | None, target_width: float
+        self, asset_key: SourceRenderAssetKey | None, target_width: float
     ) -> QImage | None:
         """Retrieve the best-fit pyramid image for the requested width.
 
@@ -457,9 +450,9 @@ class ImageCatalog(QObject):
     @staticmethod
     def _asset_key_for_record(
         image_id: uuid.UUID, record: _CatalogImageRecord
-    ) -> SceneLayerAssetKey:
-        """Return the default-scene cache identity for a catalog record."""
-        return default_catalog_asset_key(
+    ) -> SourceRenderAssetKey:
+        """Return reusable source-product identity for a catalog record."""
+        return catalog_source_asset_key(
             image_id,
             revision=record.revision,
             source_path=record.path,

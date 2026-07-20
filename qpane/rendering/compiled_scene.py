@@ -21,11 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QSize
 
-from ..scene.identity import SceneLayerAssetKey
+from ..scene.identity import SceneLayerAssetKey, SourceRenderAssetKey
 from ..scene.model import LayerDescriptor, SceneDescriptor
 from ..scene.render_plan import SceneContentSnapshot, SceneHitTestItem
+from ..scene.source_capabilities import RasterPresentation
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +36,7 @@ class CompiledRenderScene:
     scene: SceneDescriptor
     content_snapshot: SceneContentSnapshot
     layers: tuple[CompiledRenderLayer, ...]
-    mask_layers: tuple[LayerDescriptor, ...]
+    vector_layers: tuple[LayerDescriptor, ...]
     hit_test_items: tuple[SceneHitTestItem, ...]
 
 
@@ -45,16 +46,17 @@ class CompiledRenderLayer:
 
     descriptor: LayerDescriptor
     asset_key: SceneLayerAssetKey
-    pyramid_asset_key: SceneLayerAssetKey
-    full_image: QImage
+    pyramid_asset_key: SourceRenderAssetKey
+    source_size: QSize
+    presentation: RasterPresentation
     source_path: Path | None
     source_revision: int
     is_base_raster: bool
     uses_default_base_tile_math: bool
 
     def __post_init__(self) -> None:
-        """Detach mutable Qt image data from caller-owned render inputs."""
-        object.__setattr__(self, "full_image", QImage(self.full_image))
+        """Detach mutable Qt geometry from caller-owned render inputs."""
+        object.__setattr__(self, "source_size", QSize(self.source_size))
 
 
 def hit_test_items_for_scene(

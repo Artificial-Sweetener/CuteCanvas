@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from ..coverage import CoverageSnapshot
+from ..coverage import CoverageStateSnapshot
 from .mask_undo import MaskUndoSnippet
 
 
@@ -23,9 +23,9 @@ class MaskSurfaceCommand:
     """Swap complete raster structure and pixels for undoable reframes."""
 
     mask_id: uuid.UUID
-    before: CoverageSnapshot
-    after: CoverageSnapshot
-    apply: Callable[[uuid.UUID, CoverageSnapshot], None]
+    before: CoverageStateSnapshot
+    after: CoverageStateSnapshot
+    apply: Callable[[uuid.UUID, CoverageStateSnapshot], None]
     notify: Callable[[uuid.UUID], None] | None = None
     description: str = "mask-surface-change"
 

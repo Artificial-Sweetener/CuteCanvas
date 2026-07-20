@@ -18,18 +18,16 @@
 
 from .model import (
     CompositionComparison,
-    CompositionKind,
+    CompositionDocumentPolicy,
+    CompositionOrigin,
     CompositionRecord,
-    CompositionScene,
-    CompositionSceneLayer,
 )
 from .service import CompositionService
 
 __all__ = [
     "CompositionComparison",
-    "CompositionKind",
+    "CompositionDocumentPolicy",
+    "CompositionOrigin",
     "CompositionRecord",
-    "CompositionScene",
-    "CompositionSceneLayer",
     "CompositionService",
 ]

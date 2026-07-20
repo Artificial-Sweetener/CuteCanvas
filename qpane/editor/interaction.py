@@ -15,13 +15,13 @@ from collections.abc import Callable
 from math import ceil, floor
 
 from ..coverage import CoverageCombineMode, CoverageSnapshot
+from ..masks.source_reference import MaskAssetReference
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from ..scene.model import SceneDescriptor
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_edits import LayerPixelMutationCoordinator
 from ..scene.raster import RasterBounds
-from ..scene.registry import LayerSourceResolverRegistry
-from ..scene.sources import MaskLayerSource
+from ..scene.source_capabilities import SourceCoverageRegistry
 from ..selection import (
     LayerCoverageProjector,
     PixelSelectionService,
@@ -41,7 +41,7 @@ class EditorInteractionCoordinator:
         layer_selection: SceneLayerSelectionController,
         pixel_selection: PixelSelectionService,
         pixel_mutations: LayerPixelMutationCoordinator,
-        source_resolvers: LayerSourceResolverRegistry,
+        source_coverage: SourceCoverageRegistry,
         selection_projections: LayerSelectionProjectionCache,
     ) -> None:
         """Bind authoritative scene, selection, mutation, and source owners."""
@@ -50,7 +50,7 @@ class EditorInteractionCoordinator:
         self._layer_selection = layer_selection
         self._pixel_selection = pixel_selection
         self._pixel_mutations = pixel_mutations
-        self._source_resolvers = source_resolvers
+        self._source_coverage = source_coverage
         self._selection_projections = selection_projections
         self._coverage_projector = LayerCoverageProjector()
 
@@ -128,10 +128,25 @@ class EditorInteractionCoordinator:
         if resolved is None:
             return False
         layer = resolved[1]
-        coverage = self._source_resolvers.coverage_snapshot(layer.source)
-        if coverage is None or layer.transform is None:
+        canvas_bounds = self._active_scene_bounds(scene_id)
+        transform = layer.transform
+        if canvas_bounds is None or transform is None:
             return False
-        projected = self._coverage_projector.project(coverage, layer.transform)
+        inverse = transform.inverted()
+        if inverse is None:
+            return False
+        local_canvas = inverse.map_bounds(canvas_bounds)
+        requested = RasterBounds(
+            floor(local_canvas.x),
+            floor(local_canvas.y),
+            max(1, ceil(local_canvas.x + local_canvas.width) - floor(local_canvas.x)),
+            max(1, ceil(local_canvas.y + local_canvas.height) - floor(local_canvas.y)),
+        )
+        coverage = self._source_coverage.coverage_snapshot(layer.source, requested)
+        if coverage is None:
+            return False
+        projected = self._coverage_projector.project(coverage, transform)
+        projected = None if projected is None else projected.clipped_to(canvas_bounds)
         if projected is None or not self._pixel_selection.commit(
             scene_id,
             projected,
@@ -144,7 +159,7 @@ class EditorInteractionCoordinator:
                 scene_id=scene_id,
                 layer_id=layer_id,
                 selection_revision=state.revision,
-                transform=layer.transform,
+                transform=transform,
                 coverage=coverage,
             )
         return True
@@ -168,7 +183,7 @@ class EditorInteractionCoordinator:
             (
                 candidate
                 for candidate in scene.layers
-                if isinstance(candidate.source, MaskLayerSource)
+                if isinstance(candidate.source, MaskAssetReference)
                 and candidate.source.mask_id == mask_id
             ),
             None,

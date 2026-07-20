@@ -22,7 +22,8 @@ import uuid
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
-from PySide6.QtGui import QColor, QImage, Qt
+from PySide6.QtGui import QColor, QImage, Qt, QTransform
+from PySide6.QtTest import QTest
 
 from examples.demonstration import scene_composition
 from qpane import (
@@ -37,7 +38,8 @@ from qpane import (
     QPaneSceneTemplateBindings,
     QPaneTemplateLayer,
 )
-from qpane.scene.identity import default_catalog_asset_key
+from qpane.scene.affine import LayerTransform
+from qpane.scene.identity import catalog_source_asset_key
 from qpane.scene.model import LayerPlacement
 from qpane.scene.render_plan import RasterLayerRenderItem, RenderStrategy
 from tests.helpers.render_compare import rendered_overscanned_widget_frame
@@ -174,6 +176,36 @@ def test_scene_rect_helpers_reject_invalid_dimensions() -> None:
         QPane.fillSceneRect(QSize(10, 10), QRectF(0.0, 0.0, -1.0, 10.0))
 
 
+def test_layer_index_reorders_one_stack_and_replays_exactly(qapp) -> None:
+    """Public z-order edits should use the composition's atomic stack history."""
+    qpane = QPane(features=())
+    try:
+        first_id, second_id = _load_images(qpane)
+        request = _scene_request(first_id, second_id)
+        qpane.composeScene(request, activate=True)
+        scene = qpane.currentScene()
+        assert scene is not None
+        bottom_id, top_id = (layer.layer_id for layer in scene.layers)
+
+        assert qpane.setLayerIndex(scene.scene_id, bottom_id, 1)
+        assert tuple(layer.layer_id for layer in qpane.currentScene().layers) == (
+            top_id,
+            bottom_id,
+        )
+        assert qpane.undoSceneEdit()
+        assert tuple(layer.layer_id for layer in qpane.currentScene().layers) == (
+            bottom_id,
+            top_id,
+        )
+        assert qpane.redoSceneEdit()
+        assert tuple(layer.layer_id for layer in qpane.currentScene().layers) == (
+            top_id,
+            bottom_id,
+        )
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
 def test_contact_sheet_demo_packs_fitted_thumbnail_placements() -> None:
     """The demo contact sheet should gap actual thumbnails, not wide slots."""
     first_id, second_id, third_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -229,8 +261,8 @@ def test_compose_scene_renders_catalog_layers_and_reuses_pyramids(qapp) -> None:
             second_id,
         ]
         assert [item.pyramid_asset_key for item in raster_items] == [
-            default_catalog_asset_key(first_id, revision=1, source_path=None),
-            default_catalog_asset_key(second_id, revision=1, source_path=None),
+            catalog_source_asset_key(first_id, revision=1, source_path=None),
+            catalog_source_asset_key(second_id, revision=1, source_path=None),
         ]
 
         qpane.view().allocate_buffers()
@@ -246,6 +278,156 @@ def test_compose_scene_renders_catalog_layers_and_reuses_pyramids(qapp) -> None:
         )
         assert buffer.pixelColor(50, 50) == QColor(Qt.red)
         assert buffer.pixelColor(150, 50) == QColor(Qt.blue)
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_catalog_source_products_are_shared_across_compositions(qapp) -> None:
+    """Independent instances of one catalog source must reuse render identity."""
+    qpane = QPane(features=())
+    qpane.resize(160, 120)
+    try:
+        image_id, _other_id = _load_images(qpane)
+        first_layer_id = uuid.uuid4()
+        first_composition = qpane.composeScene(
+            QPaneSceneRequest(
+                composition_id=None,
+                title="First use",
+                bounds=QRectF(0.0, 0.0, 100.0, 100.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=first_layer_id,
+                        image_id=image_id,
+                        placement=QRectF(0.0, 0.0, 100.0, 100.0),
+                    ),
+                ),
+            )
+        )
+        first_plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert first_plan is not None
+        first_item = first_plan.render_items[0]
+
+        second_layer_id = uuid.uuid4()
+        second_composition = qpane.composeScene(
+            QPaneSceneRequest(
+                composition_id=None,
+                title="Second use",
+                bounds=QRectF(0.0, 0.0, 100.0, 100.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=second_layer_id,
+                        image_id=image_id,
+                        placement=QRectF(20.0, 10.0, 70.0, 80.0),
+                    ),
+                ),
+            )
+        )
+        second_plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert second_plan is not None
+        second_item = second_plan.render_items[0]
+
+        assert first_composition != second_composition
+        assert first_item.asset_key != second_item.asset_key
+        assert first_item.pyramid_asset_key == second_item.pyramid_asset_key
+        assert first_item.source_image.cacheKey() == second_item.source_image.cacheKey()
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_default_and_host_scenes_share_the_composition_instance_store(qapp) -> None:
+    """Both compatibility paths must publish from one authoritative layer store."""
+    qpane = QPane(features=())
+    qpane.resize(200, 100)
+    try:
+        first_id, _second_id = _load_images(qpane)
+        compositions = qpane.compositionService()
+        default_id = compositions.default_composition_for_image(first_id)
+        assert default_id is not None
+        assert len(compositions.layers.layers_for_composition(default_id)) == 1
+
+        first_layer_id = uuid.uuid4()
+        second_layer_id = uuid.uuid4()
+        request = QPaneSceneRequest(
+            composition_id=None,
+            title="Shared source",
+            bounds=QRectF(0.0, 0.0, 200.0, 100.0),
+            layers=(
+                QPaneCatalogImageLayerRequest(
+                    layer_id=first_layer_id,
+                    image_id=first_id,
+                    placement=QRectF(0.0, 0.0, 100.0, 100.0),
+                ),
+                QPaneCatalogImageLayerRequest(
+                    layer_id=second_layer_id,
+                    image_id=first_id,
+                    placement=QRectF(100.0, 0.0, 100.0, 100.0),
+                ),
+            ),
+        )
+        composition_id = qpane.composeScene(request)
+        instances = compositions.layers.layers_for_composition(composition_id)
+
+        assert [instance.layer_id for instance in instances] == [
+            first_layer_id,
+            second_layer_id,
+        ]
+        assert instances[0].source == instances[1].source
+        assert instances[0].transform != instances[1].transform
+        assert [layer.layer_id for layer in qpane.currentScene().layers] == [
+            first_layer_id,
+            second_layer_id,
+        ]
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_compose_scene_applies_catalog_layer_opacity(qapp) -> None:
+    """Public catalog layers should composite using their requested opacity."""
+    qpane = QPane(features=())
+    qpane.resize(100, 100)
+    try:
+        first_id, second_id = _load_images(qpane)
+        qpane.composeScene(
+            QPaneSceneRequest(
+                composition_id=None,
+                title="Opacity",
+                bounds=QRectF(0.0, 0.0, 100.0, 100.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=uuid.uuid4(),
+                        image_id=first_id,
+                        placement=QRectF(0.0, 0.0, 100.0, 100.0),
+                    ),
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=uuid.uuid4(),
+                        image_id=second_id,
+                        placement=QRectF(0.0, 0.0, 100.0, 100.0),
+                        opacity=0.5,
+                    ),
+                ),
+            )
+        )
+        plan = qpane.view().calculateRenderPlan(is_blank=False)
+
+        assert plan is not None
+        assert [item.descriptor.opacity for item in plan.render_items] == [1.0, 0.5]
+
+        qpane.view().allocate_buffers()
+        renderer = qpane.view().renderer
+        renderer.paint(plan)
+        buffer = renderer.get_base_buffer()
+        assert buffer is not None
+        frame = rendered_overscanned_widget_frame(
+            buffer.copy(),
+            renderer.get_subpixel_pan_offset(),
+            renderer._viewport_physical_size,
+            renderer._BUFFER_OVERSCAN_PHYSICAL_PX,
+        )
+        center = frame.pixelColor(50, 50)
+        assert center.alpha() == 255
+        assert center.red() == pytest.approx(127, abs=1)
+        assert center.green() == 0
+        assert center.blue() == pytest.approx(128, abs=1)
     finally:
         _cleanup_qpane(qpane, qapp)
 
@@ -355,7 +537,7 @@ def test_scene_raster_smoothing_is_decided_per_layer(qapp) -> None:
         assert raster_items[minified_layer_id].render_hint_enabled is True
         assert raster_items[magnified_layer_id].render_hint_enabled is False
         assert raster_items[minified_layer_id].pyramid_asset_key == (
-            default_catalog_asset_key(minified_id, revision=1, source_path=None)
+            catalog_source_asset_key(minified_id, revision=1, source_path=None)
         )
     finally:
         _cleanup_qpane(qpane, qapp)
@@ -745,7 +927,9 @@ def test_move_interaction_previews_then_commits_generic_layer_placement(qapp) ->
         target = initial_item.transform.map(QPointF(70.0, 60.0))
 
         movement = qpane.sceneLayerMovementInteraction()
-        assert movement.begin(origin)
+        candidate = movement.candidate_at(origin)
+        assert candidate is not None
+        assert movement.begin(candidate)
         assert movement.update(target)
         preview_plan = qpane.view().calculateRenderPlan(is_blank=False)
 
@@ -765,6 +949,234 @@ def test_move_interaction_previews_then_commits_generic_layer_placement(qapp) ->
         assert qpane.sceneEditUndoAvailable()
         assert qpane.undoSceneEdit()
         assert qpane.currentScene().layers[0].placement == first.placement
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_public_affine_transform_round_trips_renders_hits_and_undoes(qapp) -> None:
+    """Exact affine geometry must remain one public, rendered, undoable value."""
+    qpane = QPane(features=())
+    qpane.resize(200, 120)
+    try:
+        image_id, _second_id = _load_images(qpane)
+        layer_id = uuid.uuid4()
+        composition_id = qpane.composeScene(
+            QPaneSceneRequest(
+                composition_id=None,
+                title="Affine layer",
+                bounds=QRectF(0.0, 0.0, 200.0, 120.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=layer_id,
+                        image_id=image_id,
+                        placement=QRectF(10.0, 10.0, 100.0, 100.0),
+                        interaction=QPaneLayerInteractionPolicy(
+                            selectable=True,
+                            movable=True,
+                        ),
+                    ),
+                ),
+            )
+        )
+        qpane.show()
+        qapp.processEvents()
+        before = qpane.layerTransform(composition_id, layer_id)
+        assert before is not None
+        local_bounds = qpane.layerLocalBounds(composition_id, layer_id)
+        assert local_bounds == QRectF(0.0, 0.0, 100.0, 100.0)
+        local_bounds.translate(500.0, 500.0)
+        assert qpane.layerLocalBounds(composition_id, layer_id) == QRectF(
+            0.0,
+            0.0,
+            100.0,
+            100.0,
+        )
+        transform = QTransform(0.0, 1.0, -1.0, 0.0, 150.0, 5.0)
+
+        assert qpane.setLayerTransform(composition_id, layer_id, transform)
+
+        current = qpane.layerTransform(composition_id, layer_id)
+        scene = qpane.currentScene()
+        assert current is not None
+        assert scene is not None
+        assert current == transform
+        assert scene.layers[0].transform == transform
+        assert scene.layers[0].placement == QRectF(50.0, 5.0, 100.0, 100.0)
+        current.translate(300.0, 300.0)
+        assert qpane.layerTransform(composition_id, layer_id) == transform
+
+        plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        item = plan.render_items[0]
+        panel_point = item.transform.map(QPointF(25.0, 70.0)).toPoint()
+        hit = qpane.sceneHitTest(panel_point)
+        assert hit is not None
+        assert hit.layer_id == layer_id
+        assert hit.source_point.x() == pytest.approx(25.0, abs=1.0)
+        assert hit.source_point.y() == pytest.approx(70.0, abs=1.0)
+        expected_scene = transform.map(QPointF(25.0, 70.0))
+        assert hit.scene_point.x() == pytest.approx(expected_scene.x(), abs=1.0)
+        assert hit.scene_point.y() == pytest.approx(expected_scene.y(), abs=1.0)
+
+        assert qpane.undoSceneEdit()
+        assert qpane.layerTransform(composition_id, layer_id) == before
+        assert qpane.redoSceneEdit()
+        assert qpane.layerTransform(composition_id, layer_id) == transform
+        with pytest.raises(ValueError, match="invertible"):
+            qpane.setLayerTransform(
+                composition_id,
+                layer_id,
+                QTransform(0.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+            )
+        with pytest.raises(TypeError, match="scene_id"):
+            qpane.layerLocalBounds("invalid", layer_id)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="layer_id"):
+            qpane.layerLocalBounds(composition_id, "invalid")  # type: ignore[arg-type]
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_move_preview_preserves_rotated_linear_geometry(qapp) -> None:
+    """Move gestures translate exact geometry without flattening its rotation."""
+    qpane = QPane(features=())
+    qpane.resize(160, 120)
+    try:
+        image_id, _second_id = _load_images(qpane)
+        layer_id = uuid.uuid4()
+        composition_id = qpane.composeScene(
+            QPaneSceneRequest(
+                composition_id=None,
+                title="Move rotated layer",
+                bounds=QRectF(0.0, 0.0, 160.0, 120.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=layer_id,
+                        image_id=image_id,
+                        placement=QRectF(0.0, 0.0, 100.0, 100.0),
+                        interaction=QPaneLayerInteractionPolicy(
+                            selectable=True,
+                            movable=True,
+                        ),
+                    ),
+                ),
+            )
+        )
+        rotated = QTransform(0.0, 1.0, -1.0, 0.0, 110.0, 0.0)
+        assert qpane.setLayerTransform(composition_id, layer_id, rotated)
+        qpane.show()
+        qapp.processEvents()
+        plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        origin = plan.render_items[0].transform.map(QPointF(50.0, 50.0))
+        movement = qpane.sceneLayerMovementInteraction()
+
+        candidate = movement.candidate_at(origin)
+        assert candidate is not None
+        assert movement.begin(candidate)
+        assert movement.update(origin + QPointF(18.0, 9.0))
+        preview = qpane.view().calculateRenderPlan(is_blank=False)
+        assert preview is not None
+        preview_transform = preview.render_items[0].descriptor.transform
+        assert preview_transform is not None
+        assert (
+            preview_transform.m11,
+            preview_transform.m12,
+            preview_transform.m21,
+            preview_transform.m22,
+        ) == (0.0, 1.0, -1.0, 0.0)
+        assert movement.finish(origin + QPointF(18.0, 9.0))
+        committed = qpane.layerTransform(composition_id, layer_id)
+        assert committed is not None
+        assert (committed.m11(), committed.m12(), committed.m21(), committed.m22()) == (
+            0.0,
+            1.0,
+            -1.0,
+            0.0,
+        )
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_space_pan_suspends_without_discarding_layer_transform_preview(qapp) -> None:
+    """Temporary navigation must not cancel or commit unresolved layer geometry."""
+    qpane = QPane(features=())
+    qpane.resize(160, 120)
+    try:
+        image_id, _second_id = _load_images(qpane)
+        layer_id = uuid.uuid4()
+        composition_id = qpane.composeScene(
+            QPaneSceneRequest(
+                composition_id=None,
+                title="Suspended transform",
+                bounds=QRectF(0.0, 0.0, 160.0, 120.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=layer_id,
+                        image_id=image_id,
+                        placement=QRectF(0.0, 0.0, 100.0, 100.0),
+                        interaction=QPaneLayerInteractionPolicy(
+                            selectable=True,
+                            movable=True,
+                        ),
+                    ),
+                ),
+            )
+        )
+        rotated = QTransform(0.0, 1.0, -1.0, 0.0, 110.0, 0.0)
+        assert qpane.setLayerTransform(composition_id, layer_id, rotated)
+        qpane.setControlMode(qpane.CONTROL_MODE_MOVE)
+        qpane.show()
+        qapp.processEvents()
+        plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert plan is not None
+        origin = plan.render_items[0].transform.map(QPointF(50.0, 50.0)).toPoint()
+        destination = origin + QPoint(18, 9)
+
+        QTest.mousePress(qpane, Qt.LeftButton, Qt.NoModifier, origin)
+        QTest.mouseMove(qpane, destination, delay=0)
+        qapp.processEvents()
+        preview = qpane.view().current_scene_descriptor()
+        assert preview is not None
+        preview_transform = preview.layers[0].transform
+        assert preview_transform is not None
+        assert preview_transform != LayerTransform.from_qtransform(rotated)
+
+        QTest.keyPress(qpane, Qt.Key_Space)
+        qapp.processEvents()
+        suspended = qpane.view().current_scene_descriptor()
+
+        assert suspended is not None
+        assert suspended.layers[0].transform == preview_transform
+        assert qpane.layerTransform(composition_id, layer_id) == rotated
+        QTest.keyRelease(qpane, Qt.Key_Space)
+        assert qpane.getControlMode() == qpane.CONTROL_MODE_MOVE
+        QTest.mouseRelease(qpane, Qt.LeftButton, Qt.NoModifier, destination)
+        resumed_plan = qpane.view().calculateRenderPlan(is_blank=False)
+        assert resumed_plan is not None
+        resumed_origin = (
+            resumed_plan.render_items[0].transform.map(QPointF(50.0, 50.0)).toPoint()
+        )
+        resumed_destination = resumed_origin + QPoint(8, 4)
+        QTest.mousePress(qpane, Qt.LeftButton, Qt.NoModifier, resumed_origin)
+        QTest.mouseMove(qpane, resumed_destination, delay=0)
+        QTest.mouseRelease(
+            qpane,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            resumed_destination,
+        )
+        qapp.processEvents()
+        committed = qpane.layerTransform(composition_id, layer_id)
+        assert committed is not None
+        assert committed != rotated
+        assert (committed.m11(), committed.m12(), committed.m21(), committed.m22()) == (
+            rotated.m11(),
+            rotated.m12(),
+            rotated.m21(),
+            rotated.m22(),
+        )
+        assert qpane.undoSceneEdit()
+        assert qpane.layerTransform(composition_id, layer_id) == rotated
     finally:
         _cleanup_qpane(qpane, qapp)
 
@@ -816,7 +1228,9 @@ def test_move_interaction_paints_transient_placement_before_commit(qapp) -> None
         assert initial_frame.pixelColor(new_only).red() < 200
 
         movement = qpane.sceneLayerMovementInteraction()
-        assert movement.begin(origin)
+        candidate = movement.candidate_at(origin)
+        assert candidate is not None
+        assert movement.begin(candidate)
         assert movement.update(origin + panel_delta)
         qapp.processEvents()
         preview_frame = qpane.grab().toImage()
@@ -1053,8 +1467,10 @@ def test_layered_scene_rejects_image_scoped_comparison_mutations(qapp) -> None:
         _cleanup_qpane(qpane, qapp)
 
 
-def test_layered_scene_guards_active_image_mask_facade(qapp, monkeypatch) -> None:
-    """Layered scenes should expose only explicit-image mask operations."""
+def test_composition_masks_delegate_without_catalog_image_anchor(
+    qapp, monkeypatch
+) -> None:
+    """Generic mask identity and editing must not depend on catalog navigation."""
     qpane = QPane(features=())
     try:
         first_id, second_id = _load_images(qpane)
@@ -1087,44 +1503,62 @@ def test_layered_scene_guards_active_image_mask_facade(qapp, monkeypatch) -> Non
             lambda queried_id: delegated_calls.append(("undoState", queried_id)),
         )
 
-        assert qpane.activeMaskID() is None
-        assert qpane.maskIDsForImage() == []
-        assert qpane.listMasksForImage() == ()
-        assert qpane.getActiveMaskImage() is None
+        assert qpane.activeMaskID() == mask_id
+        assert qpane.maskIDsForImage() == [mask_id]
+        assert qpane.listMasksForImage() == ("mask-info",)
+        assert not qpane.getActiveMaskImage().isNull()
         assert qpane.maskIDsForImage(first_id) == [mask_id]
         assert qpane.listMasksForImage(first_id) == ("mask-info",)
         assert qpane.getMaskUndoState(mask_id) is None
         assert delegated_calls == [
+            ("maskIDs", None),
+            ("listMasks", None),
             ("maskIDs", first_id),
             ("listMasks", first_id),
             ("undoState", mask_id),
         ]
 
-        def fail_if_delegated(*_args, **_kwargs):
-            raise AssertionError("active-image mask operation delegated")
+        monkeypatch.setattr(
+            controller,
+            "set_active_mask_id",
+            lambda selected_id: delegated_calls.append(("activate", selected_id))
+            or True,
+        )
+        monkeypatch.setattr(
+            controller,
+            "cycle_masks_forward",
+            lambda: delegated_calls.append(("cycle", "forward")) or True,
+        )
+        monkeypatch.setattr(
+            controller,
+            "cycle_masks_backward",
+            lambda: delegated_calls.append(("cycle", "backward")) or True,
+        )
+        monkeypatch.setattr(
+            controller,
+            "undo_mask_edit",
+            lambda: delegated_calls.append(("history", "undo")) or True,
+        )
+        monkeypatch.setattr(
+            controller,
+            "redo_mask_edit",
+            lambda: delegated_calls.append(("history", "redo")) or True,
+        )
 
-        monkeypatch.setattr(controller, "create_blank_mask", fail_if_delegated)
-        monkeypatch.setattr(controller, "load_mask_from_file", fail_if_delegated)
-        monkeypatch.setattr(controller, "set_active_mask_id", fail_if_delegated)
-        monkeypatch.setattr(controller, "cycle_masks_forward", fail_if_delegated)
-        monkeypatch.setattr(controller, "cycle_masks_backward", fail_if_delegated)
-        monkeypatch.setattr(controller, "undo_mask_edit", fail_if_delegated)
-        monkeypatch.setattr(controller, "redo_mask_edit", fail_if_delegated)
-
-        with pytest.raises(RuntimeError):
-            qpane.createBlankMask(QSize(1, 1))
-        with pytest.raises(RuntimeError):
-            qpane.loadMaskFromFile("mask.png")
-        with pytest.raises(RuntimeError):
-            qpane.setActiveMaskID(mask_id)
-        with pytest.raises(RuntimeError):
-            qpane.cycleMasksForward()
-        with pytest.raises(RuntimeError):
-            qpane.cycleMasksBackward()
-        with pytest.raises(RuntimeError):
-            qpane.undoMaskEdit()
-        with pytest.raises(RuntimeError):
-            qpane.redoMaskEdit()
+        assert qpane.createBlankMask(QSize(1, 1)) is None
+        assert qpane.loadMaskFromFile("mask.png") is None
+        assert qpane.setActiveMaskID(mask_id)
+        assert qpane.cycleMasksForward()
+        assert qpane.cycleMasksBackward()
+        assert qpane.undoMaskEdit()
+        assert qpane.redoMaskEdit()
+        assert delegated_calls[-5:] == [
+            ("activate", mask_id),
+            ("cycle", "forward"),
+            ("cycle", "backward"),
+            ("history", "undo"),
+            ("history", "redo"),
+        ]
 
         delegated_calls.clear()
         monkeypatch.setattr(
@@ -1155,11 +1589,12 @@ def test_layered_scene_guards_active_image_mask_facade(qapp, monkeypatch) -> Non
         assert not qpane.removeMaskFromImage(first_id, mask_id)
         assert not qpane.setMaskProperties(mask_id, opacity=0.5)
         assert qpane.prefetchMaskOverlays(first_id, reason="test")
-        assert not qpane.prefetchMaskOverlays(None, reason="test")
+        assert qpane.prefetchMaskOverlays(None, reason="test")
         assert delegated_calls == [
             ("remove", first_id, mask_id),
             ("properties", mask_id, None, 0.5),
             ("prefetch", first_id, "test"),
+            ("prefetch", None, "test"),
         ]
     finally:
         _cleanup_qpane(qpane, qapp)

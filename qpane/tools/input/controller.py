@@ -343,6 +343,11 @@ class PointerInputController(QObject):
             buttons=event.buttons(),
             modifiers=event.modifiers(),
             timestamp_ms=int(event.timestamp()),
+            tilt_x=float(event.xTilt()),
+            tilt_y=float(event.yTilt()),
+            rotation=float(event.rotation()),
+            tangential_pressure=float(event.tangentialPressure()),
+            device_id=_tablet_device_id(event),
         )
 
     def _touch_navigation_allowed(self) -> bool:
@@ -629,3 +634,12 @@ def _tablet_device_kind(
     if device_type == QInputDevice.DeviceType.Stylus:
         return PointerDeviceKind.PEN
     return PointerDeviceKind.UNKNOWN
+
+
+def _tablet_device_id(event: QTabletEvent) -> str:
+    """Return a stable detached tablet identifier when Qt supplies one."""
+    device = event.pointingDevice()
+    if device is None:
+        return ""
+    unique_id = device.uniqueId()
+    return str(unique_id.numericId())

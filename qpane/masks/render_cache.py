@@ -33,7 +33,10 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 
 from ..core import CacheSettings, Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
-from ..raster.image_conversion import numpy_to_qimage_grayscale8
+from ..raster.image_conversion import (
+    numpy_to_qimage_grayscale8,
+    numpy_to_qimage_grayscale8_at_size,
+)
 from ..scene.raster import RasterBounds
 from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
@@ -76,6 +79,7 @@ class MaskRenderCacheKey:
     mask_id: uuid.UUID
     render_revision: int
     scale_key: float | None
+    patch_bounds: RasterBounds | None = None
 
     def __post_init__(self) -> None:
         """Validate cache-key revision metadata."""
@@ -124,6 +128,7 @@ class MaskRenderCache:
         self._async_handler: Callable[[uuid.UUID, MaskLayer], bool] | None = None
         self._async_pending: dict[uuid.UUID, int] = {}
         self._async_threshold_px = 512 * 512
+        self._reframe_threshold_px = 256 * 256
         self._usage_callback: Callable[[], None] | None = None
         self._usage_batch_depth = 0
         self._usage_notification_pending = False
@@ -188,6 +193,10 @@ class MaskRenderCache:
             self._requested_scales.get(mask_id, 1.0),
         )
         return 1 if required_scale >= 1.0 else max(1, math.floor(1 / required_scale))
+
+    def is_live_preview(self, mask_id: uuid.UUID) -> bool:
+        """Return whether cached pixels include an in-flight provisional preview."""
+        return mask_id in self._live_preview_masks
 
     def discard_source(self, mask_id: uuid.UUID) -> None:
         """Forget render state associated with a deleted source."""
@@ -295,6 +304,27 @@ class MaskRenderCache:
             source=source,
         )
 
+    def prepare_image_detached(
+        self,
+        layer: MaskLayer,
+        *,
+        mask_id: uuid.UUID | None = None,
+    ) -> QImage | None:
+        """Build a worker-safe product without mutating UI-owned cache state."""
+        image = layer.surface.snapshot_qimage()
+        if image.isNull():
+            return None
+        resolved_id = layer.mask_id if mask_id is None else mask_id
+        return self.rasterize_detached(image, self._color_for_mask(resolved_id))
+
+    def rasterize_detached(self, mask_image: QImage, color: QColor) -> QImage:
+        """Colorize detached pixels without cache accounting or UI publication."""
+        return self._rasterizer.rasterize(
+            mask_image,
+            color,
+            draw_border=self._mask_config.mask_border_enabled,
+        )
+
     def commit_prefetched(
         self,
         mask_id: uuid.UUID,
@@ -321,6 +351,21 @@ class MaskRenderCache:
                 self._insert(
                     scaled_key, QPixmap.fromImage(scaled_image), mask_id=mask_id
                 )
+        self._render_changed(mask_id, QRect())
+
+    def commit_native(
+        self,
+        mask_id: uuid.UUID,
+        layer: MaskLayer,
+        image: QImage,
+    ) -> None:
+        """Admit one completed native presentation and publish its availability."""
+        if layer is None or image.isNull() or image.size() != layer.mask_image.size():
+            return
+        key = self._key(mask_id, None)
+        if key not in self._cache:
+            self._misses += 1
+            self._insert(key, QPixmap.fromImage(image), mask_id=mask_id)
         self._render_changed(mask_id, QRect())
 
     def notify_color_changed(self, mask_id: uuid.UUID) -> None:
@@ -370,6 +415,13 @@ class MaskRenderCache:
                 QSize(after.width, after.height),
                 scale,
             )
+            large_source = before.width * before.height > self._async_threshold_px
+            if (
+                large_source
+                and target_size.width() * target_size.height()
+                > self._reframe_threshold_px
+            ):
+                continue
             target = QPixmap(target_size)
             target.fill(QColor(0, 0, 0, 0))
             painter = QPainter(target)
@@ -412,8 +464,65 @@ class MaskRenderCache:
         if layer is None:
             return None
         scale_key = self.normalize_scale(scale)
-        self._requested_scales[mask_id] = 1.0 if scale_key is None else scale_key
+        if scale_key is not None:
+            self._requested_scales[mask_id] = scale_key
         return self._get(layer, scale=scale)
+
+    def peek_by_id(
+        self, mask_id: uuid.UUID, *, scale: float | None = None
+    ) -> QPixmap | None:
+        """Return an existing render product without deriving or scheduling one."""
+        if self._assets.get_layer(mask_id) is None:
+            return None
+        scale_key = self.normalize_scale(scale)
+        key = self._key(mask_id, scale_key)
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            self._hits += 1
+            return cached
+        live_preview = self._live_preview_pixmap(mask_id, scale_key)
+        if live_preview is not None:
+            self._hits += 1
+        return live_preview
+
+    def get_best_by_id(self, mask_id: uuid.UUID, *, scale: float) -> QPixmap | None:
+        """Reuse a current nearby LOD before deriving another sampled raster."""
+        layer = self._assets.get_layer(mask_id)
+        if layer is None:
+            return None
+        requested = self.normalize_scale(scale)
+        requested_density = 1.0 if requested is None else requested
+        self._requested_scales[mask_id] = requested_density
+        exact = self.peek_by_id(mask_id, scale=requested)
+        if exact is not None:
+            return exact
+        revision = self.render_revision(mask_id)
+        candidates = tuple(
+            (1.0 if scale_key is None else scale_key, key, pixmap)
+            for scale_key, (key, pixmap, _size) in self._latest_entries(mask_id).items()
+            if key.render_revision == revision
+        )
+        if candidates:
+            density, key, pixmap = min(
+                candidates,
+                key=lambda candidate: abs(math.log2(candidate[0] / requested_density)),
+            )
+            ratio = density / requested_density
+            if 0.5 <= ratio <= 2.0:
+                self._cache.move_to_end(key)
+                self._hits += 1
+                return pixmap
+        derived = self._get(layer, scale=scale)
+        if derived is not None or not candidates:
+            return derived
+        _density, key, fallback = min(
+            candidates,
+            key=lambda candidate: abs(math.log2(candidate[0] / requested_density)),
+        )
+        self._cache.move_to_end(key)
+        self._hits += 1
+        return fallback
 
     def update_region(
         self,
@@ -638,18 +747,70 @@ class MaskRenderCache:
             self._store_prefetched(mask_id, result)
         return result
 
-    def present_pixels(self, mask_id: uuid.UUID, pixels: np.ndarray) -> QImage:
+    def record_background_colorize(self, duration_ms: float, *, source: str) -> None:
+        """Publish worker rasterization metrics on the UI-owned cache boundary."""
+        self._record_colorize(max(0.0, float(duration_ms)), source=source)
+
+    def present_pixels(
+        self,
+        mask_id: uuid.UUID,
+        pixels: np.ndarray,
+        target_size: QSize | None = None,
+    ) -> QImage:
         """Colorize detached canonical pixels without admitting them to the cache."""
+        image = (
+            numpy_to_qimage_grayscale8(pixels)
+            if target_size is None
+            else numpy_to_qimage_grayscale8_at_size(pixels, target_size)
+        )
         return self.colorize_image(
-            numpy_to_qimage_grayscale8(pixels),
+            image,
             self._color_for_mask(mask_id),
             mask_id=None,
             source="floating_edit",
         )
 
-    def _key(self, mask_id: uuid.UUID, scale_key: float | None) -> MaskRenderCacheKey:
+    def present_patch(
+        self,
+        mask_id: uuid.UUID,
+        bounds: RasterBounds,
+        pixels_with_bleed: np.ndarray,
+    ) -> QImage:
+        """Return one revision-keyed colorized tile including its one-pixel bleed."""
+        key = self._key(mask_id, None, patch_bounds=bounds)
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            self._hits += 1
+            return cached.toImage()
+        expected = (bounds.height + 2, bounds.width + 2)
+        if pixels_with_bleed.shape != expected:
+            raise ValueError(f"mask patch bleed pixels must match {expected}")
+        image = numpy_to_qimage_grayscale8(pixels_with_bleed)
+        colorized = self.colorize_image(
+            image,
+            self._color_for_mask(mask_id),
+            mask_id=None,
+            source="sparse_patch",
+        )
+        self._misses += 1
+        self._insert(key, QPixmap.fromImage(colorized), mask_id=mask_id)
+        return colorized
+
+    def _key(
+        self,
+        mask_id: uuid.UUID,
+        scale_key: float | None,
+        *,
+        patch_bounds: RasterBounds | None = None,
+    ) -> MaskRenderCacheKey:
         """Build one stable cache key."""
-        return MaskRenderCacheKey(mask_id, self.render_revision(mask_id), scale_key)
+        return MaskRenderCacheKey(
+            mask_id,
+            self.render_revision(mask_id),
+            scale_key,
+            patch_bounds,
+        )
 
     def _get(self, layer: MaskLayer, *, scale: float | None = None) -> QPixmap | None:
         """Resolve, derive, and cache one requested raster."""
@@ -690,11 +851,11 @@ class MaskRenderCache:
                 result = QPixmap.fromImage(stored)
                 self._insert(key, result, mask_id=mask_id)
                 return result
-            elif (
-                self._async_handler is not None
-                and image.width() * image.height() > self._async_threshold_px
-                and self._async_pending.get(mask_id) != key.render_revision
+            elif self._async_handler is not None and (
+                image.width() * image.height() > self._async_threshold_px
             ):
+                if self._async_pending.get(mask_id) == key.render_revision:
+                    return None
                 self._async_pending[mask_id] = key.render_revision
                 try:
                     if self._async_handler(mask_id, layer):
@@ -807,6 +968,8 @@ class MaskRenderCache:
         """Return the newest usable entry at each scale."""
         latest: dict[float | None, tuple[MaskRenderCacheKey, QPixmap, int]] = {}
         for key in tuple(self._mask_index.get(mask_id, set())):
+            if key.patch_bounds is not None:
+                continue
             pixmap = self._cache.get(key)
             current = latest.get(key.scale_key)
             if (

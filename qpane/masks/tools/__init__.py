@@ -14,9 +14,8 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Mask-aware tool registrations and shared helpers."""
+"""Mask-specific smart-selection tool registrations and helpers."""
 
-from .brush import BrushTool, connect_brush_signals, disconnect_brush_signals
 from .smart_select import (
     SmartSelectTool,
     connect_smart_select_signals,
@@ -25,11 +24,8 @@ from .smart_select import (
 )
 
 __all__ = (
-    "BrushTool",
     "SmartSelectTool",
-    "connect_brush_signals",
     "connect_smart_select_signals",
-    "disconnect_brush_signals",
     "disconnect_smart_select_signals",
     "smart_select_cursor_provider",
 )

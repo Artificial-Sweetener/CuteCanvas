@@ -30,7 +30,7 @@ from PySide6.QtGui import QGuiApplication, QImage, QPixmap
 
 from ..core.config import PlaceholderSettings
 from ..rendering import CoordinateContext, NormalizedViewState, ViewportZoomMode
-from ..scene.identity import SceneLayerAssetKey
+from ..scene.identity import SourceRenderAssetKey
 from ..tools import Tools
 from ..types import LinkedGroup
 from ..ui import copyToClipboard, drag_out_image
@@ -798,7 +798,7 @@ class CatalogController:
         self._viewport.zoom_mode = ViewportZoomMode.CUSTOM
         self._viewport.setZoomAndPan(zoom, QPointF(pan_x, pan_y))
 
-    def _evict_catalog_assets(self, asset_keys: Iterable[SceneLayerAssetKey]) -> None:
+    def _evict_catalog_assets(self, asset_keys: Iterable[SourceRenderAssetKey]) -> None:
         """Purge tile caches for the provided catalog source asset keys.
 
         Args:
@@ -815,7 +815,7 @@ class CatalogController:
         for image_id in image_ids:
             sam_manager.removeFromCache(image_id)
 
-    def _asset_key_for_image(self, image_id: uuid.UUID) -> SceneLayerAssetKey | None:
+    def _asset_key_for_image(self, image_id: uuid.UUID) -> SourceRenderAssetKey | None:
         """Return the current default-scene asset key for ``image_id``."""
         getter = getattr(self.catalog, "defaultAssetKeyForImage", None)
         if not callable(getter):
@@ -829,7 +829,7 @@ class CatalogController:
         ordered_ids = tuple(dict.fromkeys(image_ids))
         removed: list[uuid.UUID] = []
         ids_to_evict: set[uuid.UUID] = set()
-        asset_keys_to_evict: list[SceneLayerAssetKey] = []
+        asset_keys_to_evict: list[SourceRenderAssetKey] = []
         mask_service = self._mask_service
         for image_id in ordered_ids:
             if not self.catalog.containsImage(image_id):

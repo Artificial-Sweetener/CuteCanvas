@@ -29,6 +29,7 @@ from PySide6.QtCore import QRect
 
 from ..concurrency import TaskExecutorProtocol, TaskHandle
 from ..coverage import CoverageSnapshot
+from ..painting import BrushCompositor, BrushStrokeSegment
 from ..scene.raster import RasterBounds
 from .mask import MaskAssetStore
 from .mask_controller import MaskController
@@ -36,7 +37,6 @@ from .mask_diagnostics import MaskStrokeDiagnostics
 from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
-    MaskStrokeSegmentPayload,
 )
 from .stroke_preview import DecimatedStrokePreview
 from .stroke_regions import MaskStrokeRegionPlanner
@@ -72,6 +72,7 @@ class MaskStrokePipeline:
         update_region: Callable[..., None],
         diagnostics: MaskStrokeDiagnostics | None = None,
         selection_constraint: Callable[[UUID], CoverageSnapshot | None] | None = None,
+        compositor: BrushCompositor | None = None,
     ) -> None:
         """Initialize stroke pipeline state, tokens, and optional diagnostics."""
         self._assets = assets
@@ -95,6 +96,7 @@ class MaskStrokePipeline:
         self._diagnostics = diagnostics
         self._selection_constraint = selection_constraint or (lambda _mask_id: None)
         self._idle_callback: Callable[[UUID], None] | None = None
+        self._compositor = BrushCompositor() if compositor is None else compositor
 
     @property
     def diagnostics(self) -> MaskStrokeDiagnostics | None:
@@ -314,7 +316,11 @@ class MaskStrokePipeline:
             job_token,
             source,
         )
-        worker = MaskStrokeWorker(spec=spec, finalize=finalize)
+        worker = MaskStrokeWorker(
+            spec=spec,
+            finalize=finalize,
+            compositor=self._compositor,
+        )
         if executor is None:
             worker.run()
             return True
@@ -564,19 +570,21 @@ class MaskStrokePipeline:
 
     def apply_stroke_segment(
         self,
-        segment: MaskStrokeSegmentPayload,
+        segment: BrushStrokeSegment,
     ) -> None:
         """Render a preview segment and enqueue work for the active mask."""
         if not self._mask_feature_available():
             return
-        current_image_id = self._current_image_id()
-        if not self._ensure_active(current_image_id):
-            logger.info(
-                "Brush stroke skipped: no mask is ready for image %s.",
-                current_image_id,
-            )
-            return
         active_mask_id = self._controller.get_active_mask_id()
+        current_image_id = self._current_image_id()
+        if active_mask_id is None:
+            if not self._ensure_active(current_image_id):
+                logger.info(
+                    "Brush stroke skipped: no mask is ready for image %s.",
+                    current_image_id,
+                )
+                return
+            active_mask_id = self._controller.get_active_mask_id()
         if active_mask_id is None:
             logger.warning("Brush stroke skipped: no active mask selected.")
             return
@@ -660,6 +668,7 @@ class MaskStrokePipeline:
             state = DecimatedStrokePreview(
                 mask_id=active_mask_id,
                 stride=stride,
+                compositor=self._compositor,
                 constraint=constraint,
                 constraint_region=(
                     None

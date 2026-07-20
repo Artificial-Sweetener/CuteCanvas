@@ -60,7 +60,7 @@ class MaskComponentAdjustmentTool:
                 mask_id,
             )
             return None
-        if grow and snapshot.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE:
+        if grow and snapshot.extent_policy is not RasterExtentPolicy.FIXED:
             extent = connected_component_extent(snapshot.pixels, x=x, y=y)
             if extent is not None:
                 snapshot = self._expand_touched_edges(snapshot, extent)

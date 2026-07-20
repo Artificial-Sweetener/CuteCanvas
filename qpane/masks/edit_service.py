@@ -151,7 +151,7 @@ class MaskEditService:
         surface = layer.surface
         current = surface.bounds
         will_expand = bool(
-            surface.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
+            surface.extent_policy is not RasterExtentPolicy.FIXED
             and (current is None or not current.contains(requested))
         )
         storage_request = (
@@ -334,17 +334,15 @@ class MaskEditService:
         if np.array_equal(job.before, job.after):
             self._record_stroke_event("no_op")
             return True
-        top = rect.top()
-        left = rect.left()
-        bottom = top + height
-        right = left + width
 
         def _apply(dest_view: np.ndarray, _: QImage) -> None:
-            """Copy the stroke result into the destination mask slice."""
-            region = dest_view[top:bottom, left:right]
-            np.copyto(region, job.after)
+            """Copy the stroke result into its isolated destination patch."""
+            np.copyto(dest_view, job.after)
 
-        layer.surface.mutate(_apply)
+        layer.surface.mutate_storage_region(
+            RasterBounds(rect.left(), rect.top(), width, height),
+            _apply,
+        )
         self.record_stroke_patch_from_arrays(
             mask_id,
             rect,
@@ -585,7 +583,7 @@ class MaskEditService:
             changed = self._assets.record_applied_surface(
                 mask_id,
                 payload.structural_before,
-                layer.surface.snapshot(),
+                layer.surface.state_snapshot(),
             )
             if changed:
                 self._undo_changed(mask_id)

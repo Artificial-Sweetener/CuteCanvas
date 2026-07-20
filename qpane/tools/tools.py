@@ -25,13 +25,14 @@ from PySide6.QtCore import QObject, QPoint, QPointF, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 
 from .base import BaseTool, CursorTool, ExtensionTool, PanZoomTool
-from .dependencies import ToolDependencies
 from .move import MoveTool
+from .ports import ToolActivationPorts
 from .selection_shapes import (
     EllipseSelectionTool,
     LassoSelectionTool,
     RectangleSelectionTool,
 )
+from .transform import TransformTool
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ class Tools(QObject):
     CONTROL_MODE_PANZOOM = "panzoom"
     CONTROL_MODE_CURSOR = "cursor"
     CONTROL_MODE_MOVE = "move"
+    CONTROL_MODE_TRANSFORM = "transform"
     CONTROL_MODE_DRAW_BRUSH = "draw-brush"
     CONTROL_MODE_SMART_SELECT = "smart-select"
     CONTROL_MODE_SELECT_RECTANGLE = "select-rectangle"
@@ -87,6 +89,12 @@ class Tools(QObject):
     def __init__(self, parent=None):
         """Seed the manager with the default pan/zoom tool registration."""
         super().__init__(parent)
+        from ..painting.tools import (
+            BrushTool,
+            connect_brush_signals,
+            disconnect_brush_signals,
+        )
+
         self.signals = ToolManagerSignals()
         self._registrations: dict[str, ToolRegistration] = {}
         self._tools: dict[str, ExtensionTool] = {}
@@ -108,9 +116,16 @@ class Tools(QObject):
             on_disconnect=self._disconnect_cursor_signals,
         )
         self.registerTool(self.CONTROL_MODE_MOVE, MoveTool)
+        self.registerTool(self.CONTROL_MODE_TRANSFORM, TransformTool)
         self.registerTool(self.CONTROL_MODE_SELECT_RECTANGLE, RectangleSelectionTool)
         self.registerTool(self.CONTROL_MODE_SELECT_ELLIPSE, EllipseSelectionTool)
         self.registerTool(self.CONTROL_MODE_SELECT_LASSO, LassoSelectionTool)
+        self.registerTool(
+            self.CONTROL_MODE_DRAW_BRUSH,
+            BrushTool,
+            on_connect=connect_brush_signals,
+            on_disconnect=disconnect_brush_signals,
+        )
 
     def _ensure_tool(self, mode: str) -> ExtensionTool:
         """Instantiate and cache the tool for the requested mode."""
@@ -175,12 +190,12 @@ class Tools(QObject):
         """Return registered control mode identifiers in registration order."""
         return tuple(self._registrations.keys())
 
-    def set_mode(self, mode: str, dependencies: ToolDependencies | None = None) -> None:
+    def set_mode(self, mode: str, ports: ToolActivationPorts | None = None) -> None:
         """Activate a tool mode and wire its dependencies.
 
         Args:
             mode: Control mode to activate.
-            dependencies: Optional ToolDependencies bundle passed to tool.activate.
+            ports: Focused activation ports for built-ins and custom tools.
 
         Raises:
             ValueError: If mode has not been registered.
@@ -195,8 +210,8 @@ class Tools(QObject):
             self._active_tool.deactivate()
         self._control_mode = mode
         self._active_tool = tool
-        dependencies = ToolDependencies() if dependencies is None else dependencies
-        tool.activate(dependencies)
+        activation_ports = ToolActivationPorts() if ports is None else ports
+        tool.activate(activation_ports.for_mode(mode))
         self._connect_tool_signals(mode, tool)
         self.signals.cursor_update_requested.emit()
 

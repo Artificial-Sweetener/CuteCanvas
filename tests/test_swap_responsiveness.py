@@ -200,20 +200,19 @@ def test_swap_responsiveness_under_contention(
         original_tile_run(self)
 
     monkeypatch.setattr(TileGeneratorWorker, "run", _delayed_tile_run)
-    original_prepare = mask_controller.renders.prepare_image
+    original_prepare = mask_controller.renders.prepare_image_detached
 
     def _delayed_prepare(
         self: object,
         mask_layer: object,
         *,
         mask_id: uuid.UUID | None = None,
-        source: str = "prefetch",
     ) -> QImage | None:
         """Pause slightly to simulate heavy mask colorisation."""
         time.sleep(_WORKER_DELAY_SECONDS)
-        return original_prepare(mask_layer, mask_id=mask_id, source=source)
+        return original_prepare(mask_layer, mask_id=mask_id)
 
-    mask_controller.renders.prepare_image = MethodType(
+    mask_controller.renders.prepare_image_detached = MethodType(
         _delayed_prepare,
         mask_controller.renders,
     )

@@ -27,55 +27,14 @@ import numpy as np
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
 
-
-@dataclass(frozen=True, slots=True)
-class MaskStrokeSegmentPayload:
-    """Describe one fixed- or variable-width mask stroke segment."""
-
-    start: tuple[float, float]
-    end: tuple[float, float]
-    start_diameter: float
-    end_diameter: float
-    erase: bool
-
-    @classmethod
-    def fixed(
-        cls,
-        start: tuple[float, float],
-        end: tuple[float, float],
-        diameter: float,
-        erase: bool,
-    ) -> MaskStrokeSegmentPayload:
-        """Create a constant-width segment."""
-        return cls(
-            start=start,
-            end=end,
-            start_diameter=diameter,
-            end_diameter=diameter,
-            erase=erase,
-        )
-
-    @property
-    def maximum_diameter(self) -> float:
-        """Return the widest endpoint diameter."""
-        return max(1.0, float(self.start_diameter), float(self.end_diameter))
-
-    def translated(self, delta_x: float, delta_y: float) -> MaskStrokeSegmentPayload:
-        """Return this segment translated into another coordinate frame."""
-        return MaskStrokeSegmentPayload(
-            start=(self.start[0] + delta_x, self.start[1] + delta_y),
-            end=(self.end[0] + delta_x, self.end[1] + delta_y),
-            start_diameter=self.start_diameter,
-            end_diameter=self.end_diameter,
-            erase=self.erase,
-        )
+from ..painting import BrushStrokeSegment
 
 
 @dataclass(frozen=True, slots=True)
 class MaskStrokePayload:
     """Bundle stroke segments and stride metadata for worker replays."""
 
-    segments: tuple[MaskStrokeSegmentPayload, ...]
+    segments: tuple[BrushStrokeSegment, ...]
     stride: int = 1
     metadata: Mapping[str, Any] = field(default_factory=dict)
 

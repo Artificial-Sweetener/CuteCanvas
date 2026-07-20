@@ -14,6 +14,9 @@ import uuid
 from collections.abc import Callable
 from typing import Protocol
 
+from ..scene.source_references import LayerSourceReference
+from .resource_lifetime import CompositionResourceLifetime, ResourceLeaseKind
+
 
 class CompositionEditCommand(Protocol):
     """Values retained by the authoritative composition edit history."""
@@ -37,6 +40,8 @@ class CompositionEditHistory:
         *,
         command_limit: int = 100,
         byte_limit: int = 256 * 1024 * 1024,
+        resource_lifetime: CompositionResourceLifetime | None = None,
+        released: Callable[[CompositionEditCommand], None] | None = None,
     ) -> None:
         """Initialize bounded scope histories."""
         if command_limit <= 0:
@@ -45,15 +50,18 @@ class CompositionEditHistory:
             raise ValueError("edit history byte limit must be non-negative")
         self._command_limit = int(command_limit)
         self._byte_limit = int(byte_limit)
+        self._resource_lifetime = resource_lifetime or CompositionResourceLifetime()
+        self._released = released
         self._undo_by_scope: dict[uuid.UUID, list[CompositionEditCommand]] = {}
         self._redo_by_scope: dict[uuid.UUID, list[CompositionEditCommand]] = {}
 
     def record_applied(self, command: CompositionEditCommand) -> None:
         """Record one applied command and discard its scope's redo branch."""
         self._command_bytes(command)
+        self._acquire_command(command)
         undo = self._undo_by_scope.setdefault(command.scope_id, [])
         undo.append(command)
-        self._redo_by_scope.pop(command.scope_id, None)
+        self._release_commands(self._redo_by_scope.pop(command.scope_id, ()))
         self._enforce_limits(command.scope_id)
 
     def undo_candidate(self, scope_id: uuid.UUID) -> CompositionEditCommand | None:
@@ -158,11 +166,15 @@ class CompositionEditHistory:
 
     def clear_scope(self, scope_id: uuid.UUID) -> None:
         """Discard all edit history owned by one removed scope."""
-        self._undo_by_scope.pop(scope_id, None)
-        self._redo_by_scope.pop(scope_id, None)
+        self._release_commands(self._undo_by_scope.pop(scope_id, ()))
+        self._release_commands(self._redo_by_scope.pop(scope_id, ()))
 
     def clear(self) -> None:
         """Discard every edit history branch."""
+        for commands in self._undo_by_scope.values():
+            self._release_commands(commands)
+        for commands in self._redo_by_scope.values():
+            self._release_commands(commands)
         self._undo_by_scope.clear()
         self._redo_by_scope.clear()
 
@@ -181,7 +193,11 @@ class CompositionEditHistory:
         """Discard commands matching a source-lifecycle predicate."""
         for branches in (self._undo_by_scope, self._redo_by_scope):
             for scope_id, commands in tuple(branches.items()):
-                retained = [command for command in commands if not predicate(command)]
+                retained = []
+                discarded = []
+                for command in commands:
+                    (discarded if predicate(command) else retained).append(command)
+                self._release_commands(discarded)
                 if retained:
                     branches[scope_id] = retained
                 else:
@@ -201,9 +217,39 @@ class CompositionEditHistory:
         """Evict oldest applied commands until count and byte budgets hold."""
         undo = self._undo_by_scope.get(scope_id, [])
         while len(undo) > self._command_limit:
-            undo.pop(0)
+            self._release_command(undo.pop(0))
         while undo and self.retained_bytes(scope_id) > self._byte_limit:
-            undo.pop(0)
+            self._release_command(undo.pop(0))
+
+    def _acquire_command(self, command: CompositionEditCommand) -> None:
+        """Acquire history leases retained by one command."""
+        for source in self._command_resources(command):
+            self._resource_lifetime.acquire(source, ResourceLeaseKind.HISTORY)
+
+    def _release_commands(
+        self,
+        commands: tuple[CompositionEditCommand, ...] | list[CompositionEditCommand],
+    ) -> None:
+        """Release a sequence of commands removed from chronology."""
+        for command in commands:
+            self._release_command(command)
+
+    def _release_command(self, command: CompositionEditCommand) -> None:
+        """Release one evicted command's resources and publish its callback."""
+        for source in self._command_resources(command):
+            self._resource_lifetime.release(source, ResourceLeaseKind.HISTORY)
+        if self._released is not None:
+            self._released(command)
+
+    @staticmethod
+    def _command_resources(
+        command: CompositionEditCommand,
+    ) -> tuple[LayerSourceReference, ...]:
+        """Return validated source references retained by one command."""
+        resources = tuple(getattr(command, "retained_resources", ()))
+        if not all(isinstance(source, LayerSourceReference) for source in resources):
+            raise TypeError("history retained_resources must contain source references")
+        return resources
 
     @staticmethod
     def _command_bytes(command: CompositionEditCommand) -> int:

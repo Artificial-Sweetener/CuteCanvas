@@ -35,7 +35,8 @@ from qpane.rendering import ViewportZoomMode
 from qpane.scene.identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
-    default_catalog_asset_key,
+    SourceRenderAssetKey,
+    catalog_source_asset_key,
 )
 from qpane.swap.coordinator import SwapCoordinator
 
@@ -358,7 +359,7 @@ class StubCatalog:
         return None if entry is None else entry.revision
 
     def getBestFitImageForAsset(
-        self, asset_key: SceneLayerAssetKey | None, target_width: int
+        self, asset_key: SourceRenderAssetKey | None, target_width: int
     ) -> QImage | None:
         if asset_key is None:
             return None
@@ -367,13 +368,13 @@ class StubCatalog:
 
     def _asset_key_for_image(
         self, image_id: uuid.UUID | None
-    ) -> SceneLayerAssetKey | None:
+    ) -> SourceRenderAssetKey | None:
         if image_id is None:
             return None
         entry = self._entries.get(image_id)
         if entry is None:
             return None
-        return default_catalog_asset_key(
+        return catalog_source_asset_key(
             image_id,
             revision=entry.revision,
             source_path=entry.path,
@@ -462,6 +463,7 @@ class SwapCoordinatorHarness:
             catalog=self.catalog,
             viewport=self.viewport,
             tile_manager=self.tile_manager,
+            pyramid_manager=self.catalog.pyramid_manager,
         )
         self.qpane.view().swap_delegate.coordinator = self.coordinator
 

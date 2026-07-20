@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from qpane import QPaneLayerInteractionPolicy
+from qpane import QPaneLayerInteractionPolicy, RasterExtentPolicy
 from qpane.raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_argb32,
@@ -32,6 +32,115 @@ from .harness.timing import (
 _INTERACTION_BUDGET_MS = 100.0
 _DEMO_SCALE_PREVIEW_BUDGET_MS = 75.0
 _INTERACTION_OUTLIER_BUDGET_MS = 125.0
+
+
+@pytest.mark.parametrize(
+    ("extent_policy", "outside_visible"),
+    (
+        (RasterExtentPolicy.FIXED, False),
+        (RasterExtentPolicy.EXPAND_ON_WRITE, True),
+    ),
+    ids=("fixed", "expanding"),
+)
+def test_rgba_drag_preview_obeys_layer_extent_policy(
+    qapp: QApplication,
+    extent_policy: RasterExtentPolicy,
+    outside_visible: bool,
+) -> None:
+    """Every transient frame must match fixed or expanding write semantics."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(640, 480),
+        widget_size=QSize(640, 480),
+        mask_count=1,
+    )
+    viewer = harness.viewer
+    try:
+        scene = viewer.currentScene()
+        assert scene is not None
+        image = QImage(160, 120, QImage.Format_ARGB32_Premultiplied)
+        image.fill(QColor(210, 45, 75, 255))
+        layer_id = viewer.addEditableRasterLayer(
+            image,
+            placement=QRectF(160.0, 120.0, 160.0, 120.0),
+            extent_policy=extent_policy,
+        )
+        assert layer_id is not None
+        assert viewer.setSelectedLayer(scene.scene_id, layer_id)
+        selection = QImage(80, 120, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert viewer.setPixelSelection(selection, QRect(240, 120, 80, 120))
+        resolved_scene_id = viewer._resolve_public_scene_id(scene.scene_id)
+        source = viewer.view().layer_source_to_panel_point(
+            resolved_scene_id,
+            layer_id,
+            QPointF(120.0, 60.0),
+        )
+        destination = viewer.view().layer_source_to_panel_point(
+            resolved_scene_id,
+            layer_id,
+            QPointF(220.0, 60.0),
+        )
+        outside = viewer.view().layer_source_to_panel_point(
+            resolved_scene_id,
+            layer_id,
+            QPointF(205.0, 60.0),
+        )
+        assert source is not None
+        assert destination is not None
+        assert outside is not None
+        outside_pixel = outside.toPoint()
+        assert harness.is_background(harness.color_at(outside_pixel))
+
+        viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
+        with harness.observe_presented_frames() as probe:
+            QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, source.toPoint())
+            for local_x in (180.0, 220.0, 190.0, 240.0, 220.0):
+                target = viewer.view().layer_source_to_panel_point(
+                    resolved_scene_id,
+                    layer_id,
+                    QPointF(local_x, 60.0),
+                )
+                assert target is not None
+                QTest.mouseMove(viewer, target.toPoint(), delay=0)
+                harness.drain_events()
+        assert len(probe.frames) >= 5
+        if outside_visible:
+            assert not harness.is_background(probe.frames[-1].color_at(outside_pixel))
+        else:
+            assert all(
+                harness.is_background(frame.color_at(outside_pixel))
+                for frame in probe.frames
+            )
+
+        renderer = viewer.view().presenter.renderer
+        incremental = renderer.get_base_buffer()
+        assert incremental is not None
+        incremental_pixels = qimage_to_numpy_argb32(incremental.copy())
+        viewer.markDirty()
+        viewer.update()
+        harness.drain_events()
+        repaired = renderer.get_base_buffer()
+        assert repaired is not None
+        np.testing.assert_array_equal(
+            incremental_pixels,
+            qimage_to_numpy_argb32(repaired.copy()),
+        )
+
+        QTest.mouseRelease(
+            viewer,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            destination.toPoint(),
+        )
+        harness.drain_events()
+        assert (
+            not harness.is_background(harness.color_at(outside_pixel))
+            if outside_visible
+            else harness.is_background(harness.color_at(outside_pixel))
+        )
+    finally:
+        harness.close()
 
 
 @pytest.mark.parametrize("canvas_size", (4096, 8192))
@@ -101,17 +210,26 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
         destination_point = destination_panel.toPoint()
         viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
 
-        latencies_ms: list[float] = []
+        interaction_latencies_ms: list[float] = []
+        presentation_latencies_ms: list[float] = []
+        measure_presentation = absolute_latency_assertions_are_isolated()
         for _cycle in range(4):
+            started = interaction_clock()
             QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, source_point)
+            interaction_latencies_ms.append((interaction_clock() - started) * 1000.0)
             assert viewer._selected_pixel_movement.active
             started = interaction_clock()
-            QTest.mouseMove(viewer, destination_point, delay=1)
+            QTest.mouseMove(viewer, destination_point, delay=0)
+            interaction_latencies_ms.append((interaction_clock() - started) * 1000.0)
+            presentation_started = interaction_clock()
             harness.drain_events()
-            latencies_ms.append((interaction_clock() - started) * 1000.0)
+            if measure_presentation:
+                presentation_latencies_ms.append(
+                    (interaction_clock() - presentation_started) * 1000.0
+                )
             preview = viewer._selected_pixel_movement.raster_preview
             assert preview is not None
-            assert preview.delta_x == displacement
+            assert preview.fragment_transform.dx == displacement
             started = interaction_clock()
             QTest.mouseRelease(
                 viewer,
@@ -119,11 +237,11 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
                 Qt.NoModifier,
                 destination_point,
             )
-            latencies_ms.append((interaction_clock() - started) * 1000.0)
+            interaction_latencies_ms.append((interaction_clock() - started) * 1000.0)
             assert viewer.floatingPixelEditState() is not None
             started = interaction_clock()
             assert viewer.anchorFloatingPixels()
-            latencies_ms.append((interaction_clock() - started) * 1000.0)
+            interaction_latencies_ms.append((interaction_clock() - started) * 1000.0)
             assert (
                 layer.surface.storage_value(
                     selection_origin,
@@ -140,7 +258,7 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
             )
             started = interaction_clock()
             assert viewer.undoSceneEdit()
-            latencies_ms.append((interaction_clock() - started) * 1000.0)
+            interaction_latencies_ms.append((interaction_clock() - started) * 1000.0)
             assert (
                 layer.surface.storage_value(
                     selection_origin,
@@ -149,7 +267,9 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
                 == 255
             )
 
-        assert max(latencies_ms) < _INTERACTION_BUDGET_MS
+        assert max(interaction_latencies_ms) < _INTERACTION_BUDGET_MS
+        if measure_presentation:
+            assert max(presentation_latencies_ms) < _INTERACTION_BUDGET_MS
     finally:
         harness.close()
 
@@ -228,7 +348,7 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
             update_ms.append((interaction_clock() - started) * 1000.0)
         preview = viewer._selected_pixel_movement.raster_preview
         assert preview is not None
-        assert preview.delta_x == 400
+        assert preview.fragment_transform.dx == 400
 
         started = interaction_clock()
         QTest.mouseRelease(viewer, Qt.LeftButton, Qt.NoModifier, destination)
@@ -553,8 +673,8 @@ def test_rgba_preview_is_pixel_identical_to_commit(qapp: QApplication) -> None:
     """Premultiplied RGBA floating content must use the same rendered transition."""
     harness = MountedQPaneHarness(
         qapp,
-        image_size=QSize(640, 480),
-        widget_size=QSize(800, 600),
+        image_size=QSize(6000, 4000),
+        widget_size=QSize(1200, 800),
         mask_count=1,
     )
     viewer = harness.viewer
@@ -612,6 +732,308 @@ def test_rgba_preview_is_pixel_identical_to_commit(qapp: QApplication) -> None:
             floating_pixels,
             qimage_to_numpy_argb32(committed.copy()),
         )
+    finally:
+        harness.close()
+
+
+def test_rgba_ctrl_d_publishes_committed_frame_and_immediate_history(
+    qapp: QApplication,
+) -> None:
+    """Deselect must anchor pixels, repaint, and publish undo without another event."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(6000, 4000),
+        widget_size=QSize(1200, 800),
+        mask_count=1,
+    )
+    viewer = harness.viewer
+    try:
+        scene = viewer.currentScene()
+        assert scene is not None
+        image = QImage(1920, 3408, QImage.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.fillRect(QRect(0, 0, 1920, 1704), QColor(210, 55, 95, 255))
+        painter.end()
+        layer_id = viewer.addEditableRasterLayer(image)
+        assert layer_id is not None
+        assert viewer.setSelectedLayer(scene.scene_id, layer_id)
+        selection = QImage(1920, 1704, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert viewer.setPixelSelection(selection, QRect(0, 0, 1920, 1704))
+        viewer.markDirty()
+        viewer.update()
+        harness.drain_events()
+        renderer = viewer.view().presenter.renderer
+        initial = renderer.get_base_buffer()
+        assert initial is not None
+        initial_pixels = qimage_to_numpy_argb32(initial.copy())
+        resolved_scene_id = viewer._resolve_public_scene_id(scene.scene_id)
+        source = viewer.view().layer_source_to_panel_point(
+            resolved_scene_id,
+            layer_id,
+            QPointF(960.0, 852.0),
+        )
+        destination = viewer.view().layer_source_to_panel_point(
+            resolved_scene_id,
+            layer_id,
+            QPointF(960.0, 2556.0),
+        )
+        assert source is not None
+        assert destination is not None
+        history_states: list[tuple[bool, bool]] = []
+        viewer.sceneEditHistoryChanged.connect(
+            lambda undo, redo: history_states.append((undo, redo))
+        )
+        viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
+
+        started = interaction_clock()
+        QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, source.toPoint())
+        begin_ms = (interaction_clock() - started) * 1000.0
+        assert history_states and history_states[-1] == (True, False)
+        assert viewer.sceneEditUndoAvailable()
+        started = interaction_clock()
+        QTest.mouseMove(viewer, destination.toPoint(), delay=0)
+        harness.drain_events()
+        first_update_ms = (interaction_clock() - started) * 1000.0
+        QTest.mouseRelease(
+            viewer,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            destination.toPoint(),
+        )
+        harness.drain_events()
+        floating_state = viewer.floatingPixelEditState()
+        assert floating_state is not None
+        assert floating_state.offset.y() > 1600
+        floating = renderer.get_base_buffer()
+        assert floating is not None
+        floating_pixels = qimage_to_numpy_argb32(floating.copy())
+
+        assert viewer.clearPixelSelection()
+        harness.drain_events()
+
+        assert viewer.floatingPixelEditState() is None
+        assert not viewer.pixelSelectionState().has_selection
+        assert viewer.sceneEditUndoAvailable()
+        assert history_states and history_states[-1] == (True, False)
+        asset_ids = viewer._editable_raster_assets.ids()
+        assert len(asset_ids) == 1
+        asset = viewer._editable_raster_assets.get(asset_ids[0])
+        assert asset is not None
+        durable_pixels = asset.surface.presentation_qimage()
+        assert durable_pixels.pixelColor(960, 852).alpha() == 0
+        assert durable_pixels.pixelColor(960, 2556) == QColor(210, 55, 95, 255)
+        committed = renderer.get_base_buffer()
+        assert committed is not None
+        viewer.markDirty()
+        viewer.update()
+        harness.drain_events()
+        repaired = renderer.get_base_buffer()
+        assert repaired is not None
+        np.testing.assert_array_equal(
+            qimage_to_numpy_argb32(committed.copy()),
+            qimage_to_numpy_argb32(repaired.copy()),
+        )
+        np.testing.assert_array_equal(
+            floating_pixels,
+            qimage_to_numpy_argb32(committed.copy()),
+        )
+        np.testing.assert_array_equal(
+            floating_pixels,
+            qimage_to_numpy_argb32(repaired.copy()),
+        )
+
+        assert viewer.undoSceneEdit()
+        harness.drain_events()
+        assert viewer.pixelSelectionState().has_selection
+        assert viewer.sceneEditUndoAvailable()
+        assert viewer.sceneEditRedoAvailable()
+        selection_undo = renderer.get_base_buffer()
+        assert selection_undo is not None
+        np.testing.assert_array_equal(
+            floating_pixels,
+            qimage_to_numpy_argb32(selection_undo.copy()),
+        )
+        assert viewer.undoSceneEdit()
+        harness.drain_events()
+        assert viewer.sceneEditRedoAvailable()
+        movement_undo = renderer.get_base_buffer()
+        assert movement_undo is not None
+        movement_undo_pixels = qimage_to_numpy_argb32(movement_undo.copy())
+        mismatch = np.any(initial_pixels != movement_undo_pixels, axis=2)
+        occupied_y, occupied_x = np.nonzero(mismatch)
+        assert not occupied_x.size, (
+            int(occupied_x.size),
+            int(occupied_x.min()),
+            int(occupied_y.min()),
+            int(occupied_x.max()),
+            int(occupied_y.max()),
+        )
+        assert viewer.redoSceneEdit()
+        harness.drain_events()
+        movement_redo = renderer.get_base_buffer()
+        assert movement_redo is not None
+        redone_pixels = asset.surface.presentation_qimage()
+        assert redone_pixels.pixelColor(960, 852).alpha() == 0
+        assert redone_pixels.pixelColor(960, 2556) == QColor(210, 55, 95, 255)
+        movement_redo_pixels = qimage_to_numpy_argb32(movement_redo.copy())
+        assert not np.array_equal(movement_redo_pixels, initial_pixels)
+        committed_source_color = committed.pixelColor(source.toPoint())
+        committed_destination_color = committed.pixelColor(destination.toPoint())
+        assert movement_redo.pixelColor(source.toPoint()) == committed_source_color
+        assert (
+            movement_redo.pixelColor(destination.toPoint())
+            == committed_destination_color
+        )
+        viewer.markDirty()
+        viewer.update()
+        harness.drain_events()
+        movement_redo_repaired = renderer.get_base_buffer()
+        assert movement_redo_repaired is not None
+        assert (
+            movement_redo_repaired.pixelColor(source.toPoint())
+            == committed_source_color
+        )
+        assert (
+            movement_redo_repaired.pixelColor(destination.toPoint())
+            == committed_destination_color
+        )
+        assert viewer.redoSceneEdit()
+        harness.drain_events()
+        assert not viewer.pixelSelectionState().has_selection
+        if absolute_latency_assertions_are_isolated():
+            assert begin_ms < _DEMO_SCALE_PREVIEW_BUDGET_MS
+            assert first_update_ms < 32.0
+    finally:
+        harness.close()
+
+
+def test_rgba_floating_move_survives_rapid_tool_history_and_repaint_cycles(
+    qapp: QApplication,
+) -> None:
+    """Repeated suspension, deselection, and replay must never expose stale pixels."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(800, 600),
+        widget_size=QSize(800, 600),
+        mask_count=1,
+    )
+    viewer = harness.viewer
+    try:
+        scene = viewer.currentScene()
+        assert scene is not None
+        image = QImage(320, 200, QImage.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.fillRect(QRect(40, 60, 48, 48), QColor(235, 70, 40, 255))
+        painter.end()
+        layer_id = viewer.addEditableRasterLayer(
+            image,
+            placement=QRectF(240.0, 200.0, 320.0, 200.0),
+        )
+        assert layer_id is not None
+        assert viewer.setSelectedLayer(scene.scene_id, layer_id)
+        selection = QImage(48, 48, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert viewer.setPixelSelection(selection, QRect(280, 260, 48, 48))
+        resolved_scene_id = viewer._resolve_public_scene_id(scene.scene_id)
+        viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
+        current_x = 40
+        update_latencies_ms: list[float] = []
+
+        for displacement in (36, -22, 41, -17, 29, -31):
+            source = viewer.view().layer_source_to_panel_point(
+                resolved_scene_id,
+                layer_id,
+                QPointF(current_x + 24.0, 84.0),
+            )
+            destination = viewer.view().layer_source_to_panel_point(
+                resolved_scene_id,
+                layer_id,
+                QPointF(current_x + displacement + 24.0, 84.0),
+            )
+            assert source is not None
+            assert destination is not None
+            QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, source.toPoint())
+            started = interaction_clock()
+            QTest.mouseMove(viewer, destination.toPoint(), delay=0)
+            harness.drain_events()
+            update_latencies_ms.append((interaction_clock() - started) * 1000.0)
+            QTest.mouseRelease(
+                viewer,
+                Qt.LeftButton,
+                Qt.NoModifier,
+                destination.toPoint(),
+            )
+            harness.drain_events()
+            floating_state = viewer.floatingPixelEditState()
+            assert floating_state is not None
+            assert floating_state.offset.x() == displacement
+            renderer = viewer.view().presenter.renderer
+            floating = renderer.get_base_buffer()
+            assert floating is not None
+            floating_pixels = qimage_to_numpy_argb32(floating.copy())
+
+            viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
+            harness.drain_events()
+            suspended = viewer.floatingPixelEditState()
+            assert suspended is not None
+            assert suspended.offset.x() == displacement
+            viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
+
+            assert viewer.clearPixelSelection()
+            harness.drain_events()
+            assert viewer.floatingPixelEditState() is None
+            assert not viewer.pixelSelectionState().has_selection
+            assert viewer.sceneEditUndoAvailable()
+            committed = renderer.get_base_buffer()
+            assert committed is not None
+            np.testing.assert_array_equal(
+                floating_pixels,
+                qimage_to_numpy_argb32(committed.copy()),
+            )
+            viewer.markDirty()
+            viewer.update()
+            harness.drain_events()
+            repaired = renderer.get_base_buffer()
+            assert repaired is not None
+            np.testing.assert_array_equal(
+                qimage_to_numpy_argb32(committed.copy()),
+                qimage_to_numpy_argb32(repaired.copy()),
+            )
+
+            assert viewer.undoSceneEdit()
+            harness.drain_events()
+            assert viewer.pixelSelectionState().has_selection
+            assert viewer.sceneEditRedoAvailable()
+            assert viewer.redoSceneEdit()
+            harness.drain_events()
+            assert not viewer.pixelSelectionState().has_selection
+            assert viewer.undoSceneEdit()
+            harness.drain_events()
+            assert viewer.pixelSelectionState().has_selection
+            current_x += displacement
+
+        asset = viewer._editable_raster_assets.get(
+            viewer._editable_raster_assets.ids()[0]
+        )
+        assert asset is not None
+        final_pixels = asset.surface.presentation_qimage()
+        assert final_pixels.pixelColor(current_x + 24, 84) == QColor(235, 70, 40, 255)
+        assert viewer.undoSceneEdit()
+        harness.drain_events()
+        previous_x = current_x - (-31)
+        undone_pixels = asset.surface.presentation_qimage()
+        assert undone_pixels.pixelColor(previous_x + 24, 84) == QColor(235, 70, 40, 255)
+        assert viewer.redoSceneEdit()
+        harness.drain_events()
+        assert asset.surface.presentation_qimage().pixelColor(
+            current_x + 24,
+            84,
+        ) == QColor(235, 70, 40, 255)
+        if absolute_latency_assertions_are_isolated():
+            assert max(update_latencies_ms) < 32.0
     finally:
         harness.close()
 

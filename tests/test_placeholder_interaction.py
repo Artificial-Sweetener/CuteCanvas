@@ -24,7 +24,7 @@ from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, Qt
 
 from qpane import Config, QPane
-from qpane.scene import PlaceholderImageSource
+from qpane.scene import PlaceholderImageReference
 
 
 def _placeholder_path(tmp_path: Path) -> Path:
@@ -102,7 +102,7 @@ def test_placeholder_resolves_to_scene_render_plan(qapp, tmp_path: Path) -> None
         assert len(plan.hit_test_items) == 1
         item = plan.base_raster_item
         assert item is not None
-        assert isinstance(item.descriptor.source, PlaceholderImageSource)
+        assert isinstance(item.descriptor.source, PlaceholderImageReference)
         assert item.asset_key.source_id == item.descriptor.source.source_id
         assert item.asset_key.source_kind == "placeholder-image"
         assert item.asset_key.source_path == path
@@ -113,7 +113,7 @@ def test_placeholder_resolves_to_scene_render_plan(qapp, tmp_path: Path) -> None
         assert item.descriptor.opacity == 1.0
         assert item.descriptor.placement.width == 8.0
         assert item.descriptor.placement.height == 8.0
-        assert item.descriptor.source.revision == 0
+        assert item.descriptor.source_revision == 0
         assert item.descriptor.source_revision == 0
         assert item.strategy.value in {"direct", "tile"}
     finally:

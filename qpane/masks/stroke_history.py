@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from ..coverage import CoverageSnapshot
+from ..coverage import CoverageStateSnapshot
 from .mask_undo import MaskPatch
 
 
@@ -23,7 +23,7 @@ class MaskStrokeHistoryPayload:
 
     patches: tuple[MaskPatch, ...]
     already_applied: bool
-    structural_before: CoverageSnapshot | None
+    structural_before: CoverageStateSnapshot | None
 
 
 @dataclass(slots=True)
@@ -32,7 +32,7 @@ class _MaskStrokeHistoryState:
 
     patches: list[MaskPatch] = field(default_factory=list)
     already_applied: bool | None = None
-    structural_before: CoverageSnapshot | None = None
+    structural_before: CoverageStateSnapshot | None = None
 
     def reset(self) -> None:
         """Clear all history captured for the next stroke."""
@@ -72,7 +72,7 @@ class MaskStrokeHistorySession:
     def capture_structure(
         self,
         mask_id: uuid.UUID,
-        before: CoverageSnapshot,
+        before: CoverageStateSnapshot,
     ) -> None:
         """Retain only the first pre-growth surface snapshot for a stroke."""
         state = self._states.setdefault(mask_id, _MaskStrokeHistoryState())

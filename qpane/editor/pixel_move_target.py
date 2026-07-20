@@ -180,8 +180,7 @@ class SelectedPixelMoveTargetResolver:
             and layer.capabilities.raster_editable
             and transform is not None
             and layer.raster_bounds is not None
-            and transform.scale_x > 0.0
-            and transform.scale_y > 0.0
+            and transform.is_invertible
         )
 
 

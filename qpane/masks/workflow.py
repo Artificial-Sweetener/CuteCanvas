@@ -32,13 +32,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtCore import QRect, QSize
-from PySide6.QtGui import QColor, QCursor, QImage, Qt
+from PySide6.QtGui import QColor, QImage
 
 from ..core import Config
 from ..masks import MaskDelegate
-from ..rendering import CoordinateContext
 from ..sam import SamDelegate
-from ..scene.identity import default_scene_id
 from ..types import DiagnosticRecord, QPaneLayerInteractionPolicy
 from .mask_diagnostics import (
     mask_brush_detail_provider,
@@ -133,72 +131,6 @@ class _MaskUndoAPI:
         """Invalidate the active mask cache via the delegate."""
         delegate = self._owner._ensure_mask_delegate()
         return False if delegate is None else delegate.invalidate_active_mask_cache()
-
-
-class _BrushCursorAdapter:
-    """Keep brush cursor rendering isolated from the Masks facade."""
-
-    def __init__(self, owner: Masks) -> None:
-        """Capture the owning Masks controller."""
-        self._owner = owner
-
-    def update_cursor(self, erase_indicator: bool = False) -> None:
-        """Apply the appropriate brush cursor to the QPane."""
-        qpane = self._owner._qpane
-        if not self._owner.mask_feature_available():
-            qpane.interaction.custom_cursor = None
-            qpane.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-            return
-        cursor = self.compute_cursor(erase_indicator=erase_indicator)
-        if cursor is None:
-            qpane.interaction.custom_cursor = None
-            qpane.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-            return
-        qpane.interaction.custom_cursor = cursor
-        qpane.setCursor(cursor)
-
-    def cursor_provider(self, _qpane_instance: QPane) -> QCursor | None:
-        """Return the cursor used for the active brush state."""
-        qpane = self._owner._qpane
-        if not self._owner.mask_feature_available():
-            qpane.interaction.custom_cursor = None
-            return QCursor(Qt.CursorShape.ArrowCursor)
-        cursor = self.compute_cursor(
-            erase_indicator=getattr(qpane.interaction, "alt_key_held", False)
-        )
-        if cursor is None:
-            qpane.interaction.custom_cursor = None
-            return QCursor(Qt.CursorShape.ArrowCursor)
-        qpane.interaction.custom_cursor = cursor
-        return cursor
-
-    def compute_cursor(self, *, erase_indicator: bool) -> QCursor | None:
-        """Construct a cursor image sized to the logical brush diameter."""
-        qpane = self._owner._qpane
-        service = self._owner._ensure_mask_service()
-        if service is None:
-            return None
-        color = service.getActiveMaskColor() or QColor(128, 128, 128)
-        try:
-            view = qpane.view()
-        except AttributeError:
-            logger.debug("Brush cursor requested before view initialization")
-            return None
-        viewport = getattr(view, "viewport", None)
-        zoom = getattr(viewport, "zoom", 1.0) or 1.0
-        brush_size = max(1, int(getattr(qpane.interaction, "brush_size", 1)))
-        physical_size = brush_size * zoom
-        context = CoordinateContext(qpane)
-        logical_size = context.physical_to_logical(physical_size)
-        viewport_size = qpane.size()
-        if logical_size > min(viewport_size.width(), viewport_size.height()):
-            return None
-        cursor_size = max(2, int(logical_size))
-        paint_cursor, erase_cursor = qpane.cursor_builder.get_brush_cursor_pair(
-            cursor_size,
-            color,
-        )
-        return erase_cursor if erase_indicator else paint_cursor
 
 
 class _SamWorkflow:
@@ -364,7 +296,6 @@ class Masks:
         self._cached_mask_service_records: tuple[DiagnosticRecord, ...] = ()
         self._diagnostics_registered = False
         self._undo_api = _MaskUndoAPI(self)
-        self._brush_cursor_adapter = _BrushCursorAdapter(self)
         self._sam_workflow = _SamWorkflow(self)
         # Subscribe to navigation so we can own overlay suspension ordering and activation sequencing.
         self._catalog.onNavigationStarted(self.on_navigation_started)
@@ -380,11 +311,6 @@ class Masks:
         qpane = self._qpane
         interaction = qpane.interaction
         interaction.unregisterOverlay("mask")
-        interaction.unregisterCursorProvider(qpane.CONTROL_MODE_DRAW_BRUSH)
-        interaction.registerCursorProvider(
-            qpane.CONTROL_MODE_DRAW_BRUSH,
-            self._brush_cursor_adapter.cursor_provider,
-        )
 
     def on_navigation_started(self, event: NavigationEvent) -> None:
         """Record navigation metadata and suspend overlays when needed."""
@@ -649,19 +575,16 @@ class Masks:
             opacity = float(opacity) if opacity is not None else None
         except (TypeError, ValueError):
             opacity = None
-        current_image_id = self._catalog.currentImageID()
-        scene_image_id = (
-            current_image_id
-            if current_image_id in image_ids
-            else next(iter(image_ids), None)
+        composition_ids = service.composition_ids_for_mask(mask_id)
+        current_composition_id = self._qpane.currentCompositionID()
+        scene_id = (
+            current_composition_id
+            if current_composition_id in composition_ids
+            else next(iter(composition_ids), None)
         )
         return MaskInfo(
             mask_id=mask_id,
-            scene_id=(
-                default_scene_id(scene_image_id)
-                if instance is not None and scene_image_id is not None
-                else None
-            ),
+            scene_id=scene_id if instance is not None else None,
             layer_id=None if instance is None else instance.layer_id,
             color=None if instance is None else instance.tint,
             label=label,
@@ -674,6 +597,8 @@ class Masks:
                     selectable=instance.interaction.selectable,
                     movable=instance.interaction.movable,
                     pixel_editable=instance.interaction.pixel_editable,
+                    reorderable=instance.interaction.reorderable,
+                    removable=instance.interaction.removable,
                 )
             ),
             is_active=mask_id == self.active_mask_id(),
@@ -920,8 +845,8 @@ class Masks:
         return 0 if delegate is None else delegate.get_brush_size()
 
     def update_brush_cursor(self, erase_indicator: bool = False) -> None:
-        """Refresh the brush cursor appearance based on erase mode."""
-        self._brush_cursor_adapter.update_cursor(erase_indicator=erase_indicator)
+        """Refresh source-neutral brush feedback through tool cursor arbitration."""
+        self._qpane.interaction.update_brush_cursor(erase_indicator=erase_indicator)
 
     # SAM ------------------------------------------------------------------
 

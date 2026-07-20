@@ -27,7 +27,7 @@ from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
 
 from qpane.scene.default_scene import build_default_catalog_scene
-from qpane.scene.identity import SceneLayerAssetKey
+from qpane.scene.identity import SceneLayerAssetKey, SourceRenderAssetKey
 from qpane.scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
@@ -36,6 +36,16 @@ from qpane.scene.render_plan import (
     SceneRenderPlan,
     TileRenderData,
 )
+
+
+def _source_key(asset_key: SceneLayerAssetKey) -> SourceRenderAssetKey:
+    """Project instance identity into reusable source-product identity."""
+    return SourceRenderAssetKey(
+        source_id=asset_key.source_id,
+        source_kind=asset_key.source_kind,
+        source_revision=asset_key.source_revision,
+        source_path=asset_key.source_path,
+    )
 
 
 def test_scene_render_plan_keeps_ordered_items_and_base_item() -> None:
@@ -62,7 +72,7 @@ def test_scene_render_plan_keeps_ordered_items_and_base_item() -> None:
         descriptor=layer,
         source_image=source_image,
         asset_key=asset_key,
-        pyramid_asset_key=asset_key,
+        pyramid_asset_key=_source_key(asset_key),
         pyramid_scale=0.5,
         transform=QTransform(),
         placement=layer.placement,
@@ -76,6 +86,7 @@ def test_scene_render_plan_keeps_ordered_items_and_base_item() -> None:
         max_tile_cols=0,
         max_tile_rows=0,
         visible_tile_range=None,
+        is_base_raster=True,
     )
     hit_item = SceneHitTestItem(
         scene_id=scene.scene_id,
@@ -135,7 +146,7 @@ def test_raster_layer_render_item_validates_scale_and_tile_metadata() -> None:
             descriptor=layer,
             source_image=QImage(16, 12, QImage.Format_ARGB32_Premultiplied),
             asset_key=asset_key,
-            pyramid_asset_key=asset_key,
+            pyramid_asset_key=_source_key(asset_key),
             pyramid_scale=0.0,
             transform=QTransform(),
             placement=layer.placement,
@@ -190,7 +201,7 @@ def test_render_plan_detaches_mutable_geometry_without_copying_images(
         descriptor=layer,
         source_image=source_image,
         asset_key=asset_key,
-        pyramid_asset_key=asset_key,
+        pyramid_asset_key=_source_key(asset_key),
         pyramid_scale=0.5,
         transform=transform,
         placement=layer.placement,

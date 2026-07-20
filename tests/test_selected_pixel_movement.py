@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 import numpy as np
 from PySide6.QtCore import QPointF
@@ -20,11 +21,19 @@ from qpane.composition.edit_controller import CompositionEditController
 from qpane.composition.edit_history import CompositionEditHistory
 from qpane.coverage import CoverageSnapshot
 from qpane.editor.movement import EditorMovementInteraction
+from qpane.editor.operation_resolution import (
+    EditorOperation,
+    EditorOperationDenial,
+    EditorOperationResolution,
+    EditorOperationTarget,
+)
 from qpane.editor.pixel_movement import SelectedPixelMovementController
 from qpane.editor.selection_projection import LayerSelectionProjectionCache
 from qpane.raster.assets import EditableRasterAssetStore
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.raster.pixel_edits import EditableRasterPixelMutationOwner
+from qpane.raster.source_reference import EditableRasterReference
+from qpane.scene.affine import LayerTransform
 from qpane.scene.layer_selection import SceneLayerSelectionController
 from qpane.scene.model import (
     LayerContentCapabilities,
@@ -37,12 +46,13 @@ from qpane.scene.model import (
 )
 from qpane.scene.mutations import SceneMutationCoordinator
 from qpane.scene.pixel_owners import LayerPixelOwnerRegistry
-from qpane.scene.raster import (
-    LayerTransform,
-    RasterBounds,
-    RasterExtentPolicy,
+from qpane.scene.raster import RasterBounds, RasterExtentPolicy
+from qpane.scene.transform_geometry import (
+    TransformHandle,
+    TransformModifiers,
+    TransformOperation,
+    TransformOperationKind,
 )
-from qpane.scene.sources import EditableRasterSource
 from qpane.selection import PixelSelectionService
 
 
@@ -50,6 +60,7 @@ def _movement_fixture(
     *,
     placement: LayerPlacement | None = None,
     transform: LayerTransform | None = None,
+    extent_policy: RasterExtentPolicy = RasterExtentPolicy.EXPAND_ON_WRITE,
 ):
     """Build one real RGBA domain behind the generic movement boundary."""
     scene_id = uuid.uuid4()
@@ -60,12 +71,12 @@ def _movement_fixture(
     image.setPixelColor(1, 0, QColor(255, 0, 0, 255))
     image.setPixelColor(2, 0, QColor(0, 255, 0, 255))
     assets = EditableRasterAssetStore()
-    asset = assets.create(image, extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE)
+    asset = assets.create(image, extent_policy=extent_policy)
     layer = LayerDescriptor(
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.RASTER,
-        source=EditableRasterSource(asset.raster_id, 0),
+        source=EditableRasterReference(asset.raster_id),
         placement=placement,
         interaction=LayerInteractionPolicy(selectable=True, pixel_editable=True),
         capabilities=LayerContentCapabilities(raster_editable=True),
@@ -88,7 +99,7 @@ def _movement_fixture(
         scene_id,
         CoverageSnapshot(
             RasterBounds(1, 0, 2, 1),
-            RasterExtentPolicy.EXPAND_ON_WRITE,
+            extent_policy,
             np.full((1, 2), 255, dtype=np.uint8),
         ),
     )
@@ -134,7 +145,7 @@ def _cross_layer_fixture():
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.RASTER,
-        source=EditableRasterSource(source_asset.raster_id, 0),
+        source=EditableRasterReference(source_asset.raster_id),
         placement=LayerPlacement(0.0, 0.0, 6.0, 2.0),
         interaction=policy,
         capabilities=capabilities,
@@ -145,7 +156,7 @@ def _cross_layer_fixture():
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.RASTER,
-        source=EditableRasterSource(target_asset.raster_id, 0),
+        source=EditableRasterReference(target_asset.raster_id),
         placement=LayerPlacement(0.0, 0.0, 6.0, 2.0),
         interaction=policy,
         capabilities=capabilities,
@@ -197,6 +208,39 @@ def _cross_layer_fixture():
     )
 
 
+def test_affine_selected_pixels_resample_once_and_replay_atomically() -> None:
+    """Free-transform resolution should preserve exact undo/redo chronology."""
+    movement, edits, _assets, asset, _selection, scene, _layer, _previews = (
+        _movement_fixture()
+    )
+    before = asset.surface.snapshot_qimage()
+    operation = TransformOperation(
+        TransformOperationKind.SCALE,
+        TransformHandle.RIGHT,
+    )
+
+    assert movement.begin_transform(operation, QPointF(3.0, 0.5))
+    assert movement.update_transform(
+        QPointF(5.0, 0.5),
+        TransformModifiers(proportional=False),
+    )
+    assert movement.finish_transform(
+        QPointF(5.0, 0.5),
+        TransformModifiers(proportional=False),
+    )
+    assert movement.raster_preview is not None
+    assert movement.raster_preview.fragment_transform.m11 == 2.0
+    assert movement.commit_transform()
+
+    after = asset.surface.snapshot_qimage()
+    assert after != before
+    assert asset.surface.bounds.right >= 5
+    assert edits.undo(scene.scene_id)
+    assert asset.surface.snapshot_qimage() == before
+    assert edits.redo(scene.scene_id)
+    assert asset.surface.snapshot_qimage() == after
+
+
 def test_selected_pixels_remain_floating_after_release_then_anchor_atomically() -> None:
     """Pointer release must retain a non-destructive edit until explicit anchoring."""
     movement, edits, _assets, asset, selection, scene, _layer, previews = (
@@ -208,7 +252,8 @@ def test_selected_pixels_remain_floating_after_release_then_anchor_atomically() 
     assert movement.update(QPointF(3.5, 0.5))
     assert asset.surface.snapshot_qimage() == before
     assert movement.raster_preview is not None
-    assert movement.raster_preview.delta_x == 2
+    assert movement.raster_preview.fragment_transform.dx == 2
+    assert movement.raster_preview.extent_clip_bounds is None
     assert movement.preview_state is not None
     assert movement.preview_state.coverage is not None
     assert movement.preview_state.coverage.bounds == RasterBounds(3, 0, 2, 1)
@@ -239,6 +284,19 @@ def test_selected_pixels_remain_floating_after_release_then_anchor_atomically() 
     )
 
 
+def test_fixed_pixel_session_carries_authoritative_preview_clip() -> None:
+    """Fixed policy must cross into rendering as the source-local extent."""
+    movement, _edits, _assets, _asset, _selection, _scene, layer, _previews = (
+        _movement_fixture(extent_policy=RasterExtentPolicy.FIXED)
+    )
+
+    assert movement.begin(QPointF(1.5, 0.5))
+    assert movement.update(QPointF(4.5, 0.5))
+    preview = movement.raster_preview
+    assert preview is not None
+    assert preview.extent_clip_bounds == layer.raster_bounds
+
+
 def test_floating_pixels_support_repeated_drags_and_lossless_cancel() -> None:
     """A released payload should remain movable while cancel preserves its source."""
     movement, edits, _assets, asset, selection, scene, _layer, _previews = (
@@ -252,7 +310,7 @@ def test_floating_pixels_support_repeated_drags_and_lossless_cancel() -> None:
     assert movement.begin(QPointF(3.5, 0.5))
     assert movement.finish(QPointF(4.5, 0.5))
     assert movement.raster_preview is not None
-    assert movement.raster_preview.delta_x == 3
+    assert movement.raster_preview.fragment_transform.dx == 3
     assert asset.surface.snapshot_qimage() == before
 
     assert movement.cancel()
@@ -281,8 +339,8 @@ def test_suspending_active_drag_preserves_exact_floating_displacement() -> None:
     assert asset.surface.snapshot_qimage() == before
 
 
-def test_anchor_applies_the_exact_transition_exposed_to_rendering() -> None:
-    """Durable source pixels must equal the immutable transition shown in preview."""
+def test_release_settles_one_exact_transition_reused_by_anchor() -> None:
+    """Pointer motion stays transform-only while release settles the exact commit."""
     movement, _edits, _assets, asset, _selection, _scene, _layer, _previews = (
         _movement_fixture()
     )
@@ -291,10 +349,14 @@ def test_anchor_applies_the_exact_transition_exposed_to_rendering() -> None:
     assert movement.update(QPointF(3.5, 0.5))
     preview = movement.raster_preview
     assert preview is not None
-    expected = np.array(preview.transition.after_pixels, copy=True)
-    expected_bounds = preview.transition.patch_bounds
+    assert preview.settled_transition is None
 
     assert movement.finish(QPointF(3.5, 0.5))
+    settled = movement.raster_preview
+    assert settled is not None
+    assert settled.settled_transition is not None
+    expected = np.array(settled.settled_transition.after_pixels, copy=True)
+    expected_bounds = settled.settled_transition.patch_bounds
     assert movement.anchor_to_source()
     np.testing.assert_array_equal(
         asset.surface.capture_region(expected_bounds),
@@ -376,6 +438,10 @@ class _PixelsRejectingStart:
         """Report an active selection."""
         return True
 
+    def has_movable_pixels(self) -> bool:
+        """Report selected layer pixels away from the tested point."""
+        return True
+
     def can_begin(self, _point: QPointF) -> bool:
         """Reject the tested point."""
         return False
@@ -396,6 +462,18 @@ class _PixelsWithoutSelection(_PixelsRejectingStart):
         """Report no active selection."""
         return False
 
+    def has_movable_pixels(self) -> bool:
+        """Report no movable selected pixels."""
+        return False
+
+
+class _PixelsWithoutMovableContent(_PixelsRejectingStart):
+    """Pixel branch double whose selection intersects only transparency."""
+
+    def has_movable_pixels(self) -> bool:
+        """Report that the active selection contains no layer pixels."""
+        return False
+
 
 class _LayerMovementSpy:
     """Layer branch double recording accidental fallthrough."""
@@ -410,7 +488,15 @@ class _LayerMovementSpy:
         """Report no hover."""
         return False
 
-    def begin(self, _point: QPointF) -> bool:
+    def candidate_at(self, _point: QPointF):
+        """Return one stable hit-test candidate."""
+        return SimpleNamespace(hit=SimpleNamespace(layer_id=uuid.uuid4()))
+
+    def set_hover(self, _candidate) -> bool:
+        """Report unchanged hover state."""
+        return False
+
+    def begin(self, _candidate) -> bool:
         """Record an invalid layer fallback."""
         self.begin_calls += 1
         return True
@@ -420,6 +506,30 @@ class _LayerMovementSpy:
         return False
 
 
+class _MovementOperationResolver:
+    """Resolve the exact branch expected by an interaction characterization."""
+
+    def __init__(self, target: EditorOperationTarget | None) -> None:
+        """Capture one allowed target or a pointer denial."""
+        self._target = target
+
+    def resolve(
+        self, _operation: EditorOperation, **_kwargs
+    ) -> EditorOperationResolution:
+        """Return the configured deterministic movement decision."""
+        if self._target is None:
+            return EditorOperationResolution(
+                EditorOperation.MOVE,
+                False,
+                denial=EditorOperationDenial.POINTER_OUTSIDE_SELECTION,
+            )
+        return EditorOperationResolution(
+            EditorOperation.MOVE,
+            True,
+            target=self._target,
+        )
+
+
 def test_active_selection_rejection_never_falls_through_to_layer_movement() -> None:
     """A click outside selected pixels must not move an underlying layer."""
     pixels = _PixelsRejectingStart()
@@ -427,6 +537,7 @@ def test_active_selection_rejection_never_falls_through_to_layer_movement() -> N
     interaction = EditorMovementInteraction(
         pixels=pixels,
         layers=layers,
+        operations=_MovementOperationResolver(None),
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
     )
@@ -441,6 +552,22 @@ def test_no_selection_preserves_whole_layer_movement_branch() -> None:
     interaction = EditorMovementInteraction(
         pixels=_PixelsWithoutSelection(),
         layers=layers,
+        operations=_MovementOperationResolver(EditorOperationTarget.LAYER),
+        panel_to_scene=lambda point: point,
+        refresh_preview=lambda: None,
+    )
+
+    assert interaction.begin(QPointF(5.0, 5.0))
+    assert layers.begin_calls == 1
+
+
+def test_selection_without_layer_content_falls_through_to_layer_movement() -> None:
+    """A selection containing no active-layer pixels should move the layer."""
+    layers = _LayerMovementSpy()
+    interaction = EditorMovementInteraction(
+        pixels=_PixelsWithoutMovableContent(),
+        layers=layers,
+        operations=_MovementOperationResolver(EditorOperationTarget.LAYER),
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
     )
@@ -571,7 +698,7 @@ def test_content_filtered_move_maps_transformed_layer_coverage_exactly() -> None
     movement, _edits, _assets, _asset, selection, scene, _layer, _previews = (
         _movement_fixture(
             placement=LayerPlacement(10.0, 20.0, 12.0, 4.0),
-            transform=LayerTransform(2.0, 2.0, 10.0, 20.0),
+            transform=LayerTransform(m11=2.0, m22=2.0, dx=10.0, dy=20.0),
         )
     )
     assert selection.restore(
@@ -591,7 +718,7 @@ def test_content_filtered_move_maps_transformed_layer_coverage_exactly() -> None
     assert preview.coverage.bounds == RasterBounds(16, 20, 4, 2)
     raster_preview = movement.raster_preview
     assert raster_preview is not None
-    assert raster_preview.delta_x == 2
+    assert raster_preview.fragment_transform.dx == 2
 
     assert movement.finish(QPointF(17.0, 21.0))
     assert movement.anchor_to_source()

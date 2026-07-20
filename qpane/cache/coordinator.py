@@ -40,7 +40,10 @@ class CachePriority(IntEnum):
     """Eviction ordering where lower values trim before higher ones."""
 
     PREDICTORS = 10
+    BRUSH_TIPS = 15
+    VECTOR_PRODUCTS = 18
     MASK_OVERLAYS = 20
+    RASTER_PREVIEWS = 25
     TILES = 30
     PYRAMIDS = 40
 

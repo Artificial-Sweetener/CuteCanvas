@@ -18,16 +18,16 @@ from dataclasses import dataclass
 from PySide6.QtCore import QPoint, QRect
 
 from ..coverage import CoverageSnapshot, WritableCoverageRegion
+from ..painting import BrushStrokeSegment
 from ..scene.raster import RasterBounds
 from .mask import MaskLayer
-from .stroke_models import MaskStrokeSegmentPayload
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedMaskStrokeRegion:
     """Describe a clipped storage-space segment ready for preview rendering."""
 
-    segment: MaskStrokeSegmentPayload
+    segment: BrushStrokeSegment
     dirty_rect: QRect
     rebase_x: int = 0
     rebase_y: int = 0
@@ -49,7 +49,7 @@ class MaskStrokeRegionPlanner:
         self,
         mask_id: uuid.UUID,
         layer: MaskLayer,
-        segment: MaskStrokeSegmentPayload,
+        segment: BrushStrokeSegment,
         constraint: CoverageSnapshot | None = None,
     ) -> PreparedMaskStrokeRegion | None:
         """Return storage-space geometry accepted for one semantic segment."""
@@ -83,7 +83,7 @@ class MaskStrokeRegionPlanner:
         )
 
     @staticmethod
-    def _requested_bounds(segment: MaskStrokeSegmentPayload) -> RasterBounds:
+    def _requested_bounds(segment: BrushStrokeSegment) -> RasterBounds:
         """Return the conservative layer-local footprint of ``segment``."""
         start = QPoint(math.floor(segment.start[0]), math.floor(segment.start[1]))
         end = QPoint(math.ceil(segment.end[0]), math.ceil(segment.end[1]))

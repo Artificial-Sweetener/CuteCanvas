@@ -11,12 +11,28 @@
 from .floating_layers import FloatingLayerPromotionRegistry
 from .interaction import EditorInteractionCoordinator
 from .movement import EditorMovementInteraction
+from .operation_resolution import (
+    EditorOperation,
+    EditorOperationAlternative,
+    EditorOperationDenial,
+    EditorOperationResolution,
+    EditorOperationResolver,
+    EditorOperationTarget,
+)
 from .pixel_movement import SelectedPixelMovementController
+from .policy import EditorPolicyController
 from .selection_projection import LayerSelectionProjectionCache
 
 __all__ = [
     "EditorInteractionCoordinator",
     "EditorMovementInteraction",
+    "EditorOperation",
+    "EditorOperationAlternative",
+    "EditorOperationDenial",
+    "EditorOperationResolution",
+    "EditorOperationResolver",
+    "EditorOperationTarget",
+    "EditorPolicyController",
     "FloatingLayerPromotionRegistry",
     "LayerSelectionProjectionCache",
     "SelectedPixelMovementController",

@@ -32,6 +32,8 @@ from ..concurrency.executor import (
     LiveTunableExecutorProtocol,
     QThreadPoolExecutor,
     TaskExecutorProtocol,
+    TaskHandle,
+    TaskRejected,
 )
 from ..concurrency.metrics import retry_diagnostics_provider, retry_summary_provider
 from ..concurrency.thread_policy import ThreadPolicy, build_thread_policy
@@ -46,6 +48,7 @@ from .diagnostics import (
 from .diagnostics_broker import Diagnostics
 from .fallbacks import FeatureFailure, FeatureFallbacks
 from .feature_coordinator import FeatureCoordinator, default_feature_selection
+from .headroom import SystemHeadroomWorker
 
 if TYPE_CHECKING:  # pragma: no cover
 
@@ -143,6 +146,7 @@ class QPaneState:
         self._headroom_psutil_module = None
         self._headroom_psutil_missing = False
         self._last_headroom_snapshot: dict[str, object] = {}
+        self._pending_headroom: tuple[SystemHeadroomWorker, TaskHandle] | None = None
 
     @property
     def executor(self) -> TaskExecutorProtocol:
@@ -422,7 +426,6 @@ class QPaneState:
             return
         self._headroom_psutil_missing = False
         self._start_headroom_monitor()
-        self._headroom_tick()
 
     def _start_headroom_monitor(self) -> None:
         """Ensure the headroom monitor timer is running."""
@@ -440,9 +443,15 @@ class QPaneState:
         timer = self._headroom_timer
         if timer is not None:
             timer.stop()
+        pending = self._pending_headroom
+        self._pending_headroom = None
+        if pending is not None:
+            worker, handle = pending
+            worker.cancel()
+            self._executor.cancel(handle)
 
     def _headroom_tick(self) -> None:
-        """Adjust the active cache budget based on system headroom."""
+        """Submit one system-headroom observation without blocking Qt."""
         coordinator = self._cache_coordinator
         if coordinator is None:
             self._stop_headroom_monitor()
@@ -451,53 +460,50 @@ class QPaneState:
         if cache_settings.mode.lower() != "auto":
             self._stop_headroom_monitor()
             return
-        fallback_to_hard_cap = False
-        psutil_module = self._headroom_psutil_module
-        if psutil_module is None and not self._headroom_psutil_missing:
-            try:
-                import psutil  # type: ignore
-            except ImportError:
-                self._headroom_psutil_missing = True
-                fallback_to_hard_cap = True
-            else:
-                psutil_module = psutil
-                self._headroom_psutil_module = psutil
-        snapshot: dict[str, object] = {}
+        if self._pending_headroom is not None:
+            return
         if self._headroom_psutil_missing:
-            budget_bytes = 1024 * MB
-            self._stop_headroom_monitor()
-            fallback_to_hard_cap = True
-        else:
-            try:
-                mem = psutil_module.virtual_memory()  # type: ignore[attr-defined]
-                available = int(mem.available)
-                total = int(mem.total)
-            except Exception:  # noqa: BLE001 - psutil is an optional system boundary
-                self._headroom_psutil_missing = True
-                budget_bytes = 1024 * MB
-                self._stop_headroom_monitor()
-                fallback_to_hard_cap = True
-                snapshot = {}
-            else:
-                headroom_bytes = min(
-                    int(total * max(0.0, float(cache_settings.headroom_percent))),
-                    max(0, int(cache_settings.headroom_cap_mb)) * MB,
-                )
-                usage_bytes = coordinator.total_usage_bytes
-                raw_budget = available + usage_bytes - headroom_bytes
-                capacity_bytes = max(0, total - headroom_bytes)
-                budget_bytes = min(max(0, raw_budget), capacity_bytes)
-                # Ensure the budget never drops below current usage while still honoring capacity.
-                budget_bytes = min(max(budget_bytes, usage_bytes), capacity_bytes)
-                snapshot = self._build_headroom_snapshot(psutil_module)
-                if not snapshot:
-                    self._headroom_psutil_missing = True
-                    budget_bytes = 1024 * MB
-                    self._stop_headroom_monitor()
-                    fallback_to_hard_cap = True
-        if fallback_to_hard_cap:
-            coordinator.set_hard_cap(True)
-            snapshot = {}
+            self._apply_headroom_fallback()
+            return
+        worker = SystemHeadroomWorker(self._headroom_psutil_module)
+        worker.connect_queued(worker.finished, self._finish_headroom_sample)
+        worker.connect_queued(worker.error, self._finish_headroom_sample)
+        try:
+            handle = self._executor.submit(worker, category="cache_headroom")
+        except TaskRejected:
+            worker.deleteLater()
+            return
+        self._pending_headroom = (worker, handle)
+
+    def _finish_headroom_sample(self, worker: SystemHeadroomWorker) -> None:
+        """Apply one current worker observation on the GUI thread."""
+        pending = self._pending_headroom
+        if pending is None or pending[0] is not worker:
+            return
+        self._pending_headroom = None
+        coordinator = self._cache_coordinator
+        if coordinator is None or self._cache_settings().mode.lower() != "auto":
+            return
+        sample = worker.sample
+        if sample is None:
+            self._headroom_psutil_missing = True
+            self._apply_headroom_fallback()
+            return
+        self._headroom_psutil_module = worker.psutil_module
+        cache_settings = self._cache_settings()
+        available = max(0, sample.available_bytes)
+        total = max(0, sample.total_bytes)
+        headroom_bytes = min(
+            int(total * max(0.0, float(cache_settings.headroom_percent))),
+            max(0, int(cache_settings.headroom_cap_mb)) * MB,
+        )
+        usage_bytes = coordinator.total_usage_bytes
+        capacity_bytes = max(0, total - headroom_bytes)
+        budget_bytes = min(
+            max(available + usage_bytes - headroom_bytes, usage_bytes),
+            capacity_bytes,
+        )
+        snapshot = sample.diagnostic_snapshot()
         if (
             budget_bytes != coordinator.active_budget_bytes
             or snapshot != self._last_headroom_snapshot
@@ -506,29 +512,21 @@ class QPaneState:
             coordinator.set_headroom_snapshot(snapshot)
             self._last_headroom_snapshot = snapshot
 
-    def _build_headroom_snapshot(
-        self, psutil_module: object | None
-    ) -> dict[str, object]:
-        """Return a headroom snapshot derived from the supplied psutil module."""
-        if psutil_module is None:
-            return {}
-        try:
-            mem = psutil_module.virtual_memory()  # type: ignore[attr-defined]
-            available = int(mem.available)
-            total = int(mem.total)
-        except Exception:  # noqa: BLE001 - psutil is an optional system boundary
-            return {}
-        snapshot: dict[str, object] = {
-            "available_bytes": max(0, available),
-            "total_bytes": max(0, total),
-        }
-        try:
-            swap = psutil_module.swap_memory()  # type: ignore[attr-defined]
-            snapshot["swap_total_bytes"] = int(swap.total)
-            snapshot["swap_free_bytes"] = int(swap.free)
-        except Exception:  # noqa: BLE001 - psutil is an optional system boundary
-            return snapshot
-        return snapshot
+    def _apply_headroom_fallback(self) -> None:
+        """Install the conservative hard cap after observation failure."""
+        coordinator = self._cache_coordinator
+        if coordinator is None:
+            return
+        self._stop_headroom_monitor()
+        coordinator.set_hard_cap(True)
+        budget_bytes = 1024 * MB
+        if (
+            budget_bytes != coordinator.active_budget_bytes
+            or self._last_headroom_snapshot
+        ):
+            coordinator.set_active_budget(budget_bytes)
+            coordinator.set_headroom_snapshot({})
+            self._last_headroom_snapshot = {}
 
     def build_cache_coordinator(self) -> CacheCoordinator:
         """Build a cache coordinator configured with the resolved budgets.

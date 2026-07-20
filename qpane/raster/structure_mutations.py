@@ -23,13 +23,10 @@ from ..concurrency import BaseWorker, TaskExecutorProtocol, TaskHandle, TaskReje
 from ..scene.model import LayerDescriptor, SceneDescriptor
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from ..scene.raster_mutations import RasterBoundsCompletion, RasterLayerState
-from ..scene.sources import EditableRasterSource
 from .assets import EditableRasterAssetStore
-from .color_surface import (
-    ColorRasterSnapshot,
-    ColorRasterSurface,
-    reframe_color_raster_snapshot,
-)
+from .color_surface import ColorRasterSurface
+from .source_reference import EditableRasterReference
+from .sparse_grid import SparseRasterSnapshot, reframe_sparse_raster_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +38,8 @@ class ColorRasterStructureEdit:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     raster_id: uuid.UUID
-    before: ColorRasterSnapshot
-    after: ColorRasterSnapshot
+    before: SparseRasterSnapshot
+    after: SparseRasterSnapshot
 
     @property
     def scope_id(self) -> uuid.UUID:
@@ -52,7 +49,7 @@ class ColorRasterStructureEdit:
     @property
     def retained_bytes(self) -> int:
         """Return detached pixel bytes retained by both states."""
-        return int(self.before.pixels.nbytes + self.after.pixels.nbytes)
+        return self.before.retained_bytes + self.after.retained_bytes
 
 
 @dataclass(slots=True)
@@ -96,7 +93,7 @@ class EditableRasterStructureMutationOwner:
 
     def supports_layer(self, layer: LayerDescriptor) -> bool:
         """Return whether ``layer`` references an editable raster."""
-        return isinstance(layer.source, EditableRasterSource)
+        return isinstance(layer.source, EditableRasterReference)
 
     def state(
         self,
@@ -140,7 +137,7 @@ class EditableRasterStructureMutationOwner:
     ) -> uuid.UUID | None:
         """Replace prior layer work and prepare reframed pixels off-thread."""
         source = layer.source
-        if self._closed or not isinstance(source, EditableRasterSource):
+        if self._closed or not isinstance(source, EditableRasterReference):
             return None
         asset = self._assets.get(source.raster_id)
         if asset is None:
@@ -244,7 +241,7 @@ class EditableRasterStructureMutationOwner:
                 "source snapshot unavailable",
             )
             return
-        asset.surface.replace_with_snapshot(worker.result)
+        asset.surface.replace_with_sparse_snapshot(worker.result)
         self._edits.record_applied(
             ColorRasterStructureEdit(
                 pending.scene_id,
@@ -297,7 +294,7 @@ class EditableRasterStructureMutationOwner:
         source = layer.source
         return (
             None
-            if not isinstance(source, EditableRasterSource)
+            if not isinstance(source, EditableRasterReference)
             else self._assets.get(source.raster_id)
         )
 
@@ -321,7 +318,7 @@ class EditableRasterStructureMutationOwner:
         asset = self._assets.get(command.raster_id)
         if asset is None:
             return False
-        asset.surface.replace_with_snapshot(
+        asset.surface.replace_with_sparse_snapshot(
             command.after if use_after else command.before
         )
         self._changed()
@@ -347,8 +344,8 @@ class _ColorRasterReframeWorker(QObject, QRunnable, BaseWorker):
         self._surface = surface
         self._bounds = bounds
         self.source_revisions: tuple[int, int] | None = None
-        self.source_snapshot: ColorRasterSnapshot | None = None
-        self.result: ColorRasterSnapshot | None = None
+        self.source_snapshot: SparseRasterSnapshot | None = None
+        self.result: SparseRasterSnapshot | None = None
         self.error: BaseException | None = None
 
     def run(self) -> None:
@@ -357,13 +354,13 @@ class _ColorRasterReframeWorker(QObject, QRunnable, BaseWorker):
             if self.is_cancelled:
                 self.emit_finished(False, payload=self)
                 return
-            content, structure, snapshot = self._surface.versioned_snapshot()
+            content, structure, snapshot = self._surface.versioned_sparse_snapshot()
             self.source_revisions = (content, structure)
             self.source_snapshot = snapshot
             if self.is_cancelled:
                 self.emit_finished(False, payload=self)
                 return
-            self.result = reframe_color_raster_snapshot(snapshot, self._bounds)
+            self.result = reframe_sparse_raster_snapshot(snapshot, self._bounds)
         except BaseException as exc:  # pragma: no cover - defensive worker boundary
             self.error = exc
             logger.exception("Color raster reframe failed")

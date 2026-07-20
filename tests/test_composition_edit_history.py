@@ -15,10 +15,15 @@ from dataclasses import dataclass
 
 from qpane.composition.edit_controller import CompositionEditController
 from qpane.composition.edit_history import CompositionEditHistory
-from qpane.scene.model import LayerPlacement
-from qpane.scene.placement_edit import LayerPlacementEdit
+from qpane.composition.resource_lifetime import (
+    CompositionResourceLifetime,
+    ResourceLeaseKind,
+)
+from qpane.masks.source_reference import MaskAssetReference
+from qpane.scene.affine import LayerTransform
+from qpane.scene.transform_edit import LayerTransformEdit
 
-_PLACEMENT = LayerPlacement(0.0, 0.0, 100.0, 80.0)
+_TRANSFORM = LayerTransform()
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,13 +35,22 @@ class _TestCommand:
     retained_bytes: int
 
 
-def _placement_edit(scope_id: uuid.UUID, x: float) -> LayerPlacementEdit:
-    """Return a representative placement edit in ``scope_id``."""
-    return LayerPlacementEdit(
+@dataclass(frozen=True, slots=True)
+class _ResourceCommand:
+    """History command retaining one reusable source payload."""
+
+    scope_id: uuid.UUID
+    retained_bytes: int
+    retained_resources: tuple[MaskAssetReference, ...]
+
+
+def _placement_edit(scope_id: uuid.UUID, x: float) -> LayerTransformEdit:
+    """Return a representative transform edit in ``scope_id``."""
+    return LayerTransformEdit(
         scene_id=scope_id,
         layer_id=uuid.uuid4(),
-        before=_PLACEMENT,
-        after=LayerPlacement(x, 0.0, 100.0, 80.0),
+        before=_TRANSFORM,
+        after=LayerTransform(dx=x),
     )
 
 
@@ -61,7 +75,7 @@ def test_edit_history_advances_each_scope_independently() -> None:
 def test_edit_history_evicts_oldest_commands_by_byte_budget() -> None:
     """Large raster patches must displace old history without parallel limits."""
     scope_id = uuid.uuid4()
-    history = CompositionEditHistory(command_limit=10, byte_limit=64)
+    history = CompositionEditHistory(command_limit=10, byte_limit=96)
     first = _placement_edit(scope_id, 10.0)
     second = _placement_edit(scope_id, 20.0)
 
@@ -69,7 +83,7 @@ def test_edit_history_evicts_oldest_commands_by_byte_budget() -> None:
     history.record_applied(second)
 
     assert history.undo_candidate(scope_id) is second
-    assert history.retained_bytes(scope_id) == 64
+    assert history.retained_bytes(scope_id) == 96
     assert not history.commit_undo(first)
 
 
@@ -137,3 +151,30 @@ def test_controller_notifies_scope_after_record_undo_and_redo() -> None:
     assert controller.redo(scope_id).changed
 
     assert observed == [scope_id, scope_id, scope_id]
+
+
+def test_history_releases_resource_leases_on_branch_discard_and_eviction() -> None:
+    """Chronology must expose source reachability until a command is discarded."""
+    lifetime = CompositionResourceLifetime()
+    released: list[_ResourceCommand] = []
+    history = CompositionEditHistory(
+        command_limit=1,
+        resource_lifetime=lifetime,
+        released=released.append,
+    )
+    scope_id = uuid.uuid4()
+    first_source = MaskAssetReference(uuid.uuid4())
+    second_source = MaskAssetReference(uuid.uuid4())
+    first = _ResourceCommand(scope_id, 1, (first_source,))
+    second = _ResourceCommand(scope_id, 1, (second_source,))
+
+    history.record_applied(first)
+    assert lifetime.lease_count(first_source, ResourceLeaseKind.HISTORY) == 1
+    history.record_applied(second)
+
+    assert lifetime.total_leases(first_source) == 0
+    assert lifetime.lease_count(second_source, ResourceLeaseKind.HISTORY) == 1
+    assert released == [first]
+    history.clear_scope(scope_id)
+    assert lifetime.total_leases(second_source) == 0
+    assert released == [first, second]

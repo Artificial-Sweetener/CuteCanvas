@@ -26,10 +26,10 @@ import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QWheelEvent
 
-from qpane.tools import ToolDependencies
 from qpane.tools.base import BaseTool
 from qpane.tools.input.model import PointerPhase, PointerSample
 from qpane.tools.input.profile import ToolInputProfile
+from qpane.tools.ports import SmartSelectionInteractionPort
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class SmartSelectTool(BaseTool):
         )
         self._get_active_mask_color: Callable[[], QColor | None] = lambda: None
 
-    def activate(self, dependencies: ToolDependencies) -> None:
+    def activate(self, dependencies: SmartSelectionInteractionPort) -> None:
         """Capture QPane-provided helpers when the tool becomes active.
 
         Expected callables:
@@ -100,26 +100,14 @@ class SmartSelectTool(BaseTool):
         All inputs are optional; defaults keep the tool passive when dependencies
         are missing.
         """
-        self._is_alt_held = dependencies.get("is_alt_held", lambda: False)
-        self._get_dpr = dependencies.get("get_dpr", lambda: 1.0)
-        self._panel_to_content_point = dependencies.get(
-            "panel_to_content_point", lambda point: None
-        )
-        self._image_to_panel_point = dependencies.get(
-            "image_to_panel_point", lambda point: None
-        )
-        self._panel_to_active_mask_point = dependencies.get(
-            "panel_to_active_mask_point"
-        )
-        self._active_mask_to_panel_point = dependencies.get(
-            "active_mask_to_panel_point"
-        )
-        self._get_min_selection_size = dependencies.get(
-            "get_min_selection_size", lambda: DEFAULT_MIN_SELECTION_SIZE
-        )
-        self._get_active_mask_color = dependencies.get(
-            "get_active_mask_color", lambda: None
-        )
+        self._is_alt_held = dependencies.is_alt_held
+        self._get_dpr = dependencies.get_dpr
+        self._panel_to_content_point = dependencies.panel_to_content_point
+        self._image_to_panel_point = dependencies.image_to_panel_point
+        self._panel_to_active_mask_point = dependencies.panel_to_active_mask_point
+        self._active_mask_to_panel_point = dependencies.active_mask_to_panel_point
+        self._get_min_selection_size = dependencies.get_min_selection_size
+        self._get_active_mask_color = dependencies.get_active_mask_color
 
     def deactivate(self):
         """Clear selection state and restore default dependency callbacks."""

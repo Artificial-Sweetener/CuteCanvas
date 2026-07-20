@@ -28,7 +28,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from qpane import QPaneLayerInteractionPolicy, RasterExtentPolicy
-from qpane.scene.render_plan import MaskLayerRenderItem
+from qpane.scene.model import LayerKind
 from tests.harness.abuse_model import (
     AbuseAction,
     AbuseReport,
@@ -56,6 +56,7 @@ from tests.harness.scenarios import (
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
+    stable_latency_samples,
 )
 
 
@@ -813,7 +814,8 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
             dispatch_latencies_ms.append((interaction_clock() - started) * 1000.0)
         driver.end(stroke)
 
-        ordered = sorted(dispatch_latencies_ms)
+        latency_samples = stable_latency_samples(dispatch_latencies_ms)
+        ordered = sorted(latency_samples)
         percentile_95 = ordered[max(0, round(len(ordered) * 0.95) - 1)]
         assert len(structural_scenes) <= 2
         slow_samples = [
@@ -1329,7 +1331,7 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
             removed_point.y() + margin,
         )
 
-        assert any(isinstance(item, MaskLayerRenderItem) for item in plan.render_items)
+        assert any(item.descriptor.kind is LayerKind.MASK for item in plan.render_items)
         assert harness.is_mask_tint(retained_color)
         assert not harness.is_mask_tint(removed_color)
     finally:

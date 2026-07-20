@@ -21,8 +21,10 @@ from PySide6.QtGui import QImage
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.edit_history import CompositionEditCommand
-from ..coverage import CoverageSnapshot
+from ..coverage import CoverageSnapshot, CoverageStateSnapshot
 from ..raster.image_conversion import qimage_to_numpy_view_grayscale8
+from ..raster.sparse_grid import SparseRasterSnapshot
+from ..scene.raster import RasterBounds
 from .mask_undo import (
     MaskHistoryChange,
     MaskImageCommand,
@@ -39,8 +41,8 @@ logger = logging.getLogger(__name__)
 class CoverageSurfaceLike(Protocol):
     """Surface operations required to construct and replay mask commands."""
 
-    def snapshot(self) -> CoverageSnapshot:
-        """Return detached surface structure and pixels."""
+    def state_snapshot(self) -> SparseRasterSnapshot:
+        """Return detached sparse surface structure and pixels."""
         ...
 
     def snapshot_qimage(self) -> QImage:
@@ -51,11 +53,15 @@ class CoverageSurfaceLike(Protocol):
         """Return whether the surface has no pixels."""
         ...
 
-    def mutate(self, mutator: Callable[[np.ndarray, QImage], None]) -> None:
-        """Apply an in-place pixel mutation."""
+    def mutate_storage_region(
+        self,
+        region: RasterBounds,
+        mutator: Callable[[np.ndarray, QImage], None],
+    ) -> None:
+        """Apply an in-place pixel mutation to one storage patch."""
         ...
 
-    def replace_with_snapshot(self, snapshot: CoverageSnapshot) -> None:
+    def replace_with_state_snapshot(self, snapshot: CoverageStateSnapshot) -> None:
         """Restore complete surface state."""
         ...
 
@@ -194,8 +200,8 @@ class MaskHistory:
     def record_applied_surface(
         self,
         mask_id: uuid.UUID,
-        before: CoverageSnapshot,
-        after: CoverageSnapshot,
+        before: CoverageStateSnapshot,
+        after: CoverageStateSnapshot,
         *,
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
@@ -218,7 +224,7 @@ class MaskHistory:
         layer = self._assets.get_layer(mask_id)
         if layer is None:
             return False
-        before = layer.surface.snapshot()
+        before = layer.surface.state_snapshot()
         if _surface_equal(before, after):
             return False
         command = MaskSurfaceCommand(
@@ -327,28 +333,43 @@ class MaskHistory:
             return
         sequence = tuple(patches) if use_after else tuple(reversed(patches))
 
-        def mutate(destination: np.ndarray, _image: QImage) -> None:
-            """Copy selected patch direction into canonical storage."""
-            for patch in sequence:
-                destination_slice = destination[
-                    patch.rect.top() : patch.rect.top() + patch.rect.height(),
-                    patch.rect.left() : patch.rect.left() + patch.rect.width(),
-                ]
-                source = patch.after if use_after else patch.before
-                source_view, _ = qimage_to_numpy_view_grayscale8(source)
-                np.copyto(destination_slice, source_view, where=patch.mask)
+        for patch in sequence:
+            source = patch.after if use_after else patch.before
+            source_view, _ = qimage_to_numpy_view_grayscale8(source)
 
-        layer.surface.mutate(mutate)
+            def mutate(
+                destination: np.ndarray,
+                _image: QImage,
+                *,
+                retained: np.ndarray = source_view,
+                selected: np.ndarray = patch.mask,
+            ) -> None:
+                """Copy one selected patch into isolated canonical storage."""
+                np.copyto(destination, retained, where=selected)
+
+            layer.surface.mutate_storage_region(
+                RasterBounds(
+                    patch.rect.left(),
+                    patch.rect.top(),
+                    patch.rect.width(),
+                    patch.rect.height(),
+                ),
+                mutate,
+            )
 
     def _apply_image(self, mask_id: uuid.UUID, image: QImage) -> None:
         """Replay a complete image state."""
         self._assets.set_mask_image(mask_id, image)
 
-    def _apply_surface(self, mask_id: uuid.UUID, snapshot: CoverageSnapshot) -> None:
+    def _apply_surface(
+        self,
+        mask_id: uuid.UUID,
+        snapshot: CoverageStateSnapshot,
+    ) -> None:
         """Replay complete mask structure and pixels."""
         layer = self._assets.get_layer(mask_id)
         if layer is not None:
-            layer.surface.replace_with_snapshot(snapshot)
+            layer.surface.replace_with_state_snapshot(snapshot)
 
     @staticmethod
     def _undo_command(command: CompositionEditCommand) -> bool:
@@ -367,8 +388,30 @@ class MaskHistory:
         return True
 
 
-def _surface_equal(left: CoverageSnapshot, right: CoverageSnapshot) -> bool:
+def _surface_equal(
+    left: CoverageStateSnapshot,
+    right: CoverageStateSnapshot,
+) -> bool:
     """Return whether complete coverage surface states match."""
+    if isinstance(left, SparseRasterSnapshot) or isinstance(
+        right, SparseRasterSnapshot
+    ):
+        if not isinstance(left, SparseRasterSnapshot) or not isinstance(
+            right, SparseRasterSnapshot
+        ):
+            return False
+        return (
+            left.bounds == right.bounds
+            and left.extent_policy is right.extent_policy
+            and left.channels == right.channels
+            and left.tile_size == right.tile_size
+            and len(left.tiles) == len(right.tiles)
+            and all(
+                left_tile.bounds == right_tile.bounds
+                and np.array_equal(left_tile.pixels, right_tile.pixels)
+                for left_tile, right_tile in zip(left.tiles, right.tiles, strict=True)
+            )
+        )
     return (
         left.bounds == right.bounds
         and left.extent_policy is right.extent_policy
@@ -386,8 +429,15 @@ def _command_bytes(command: MaskUndoCommand) -> int:
     if isinstance(command, MaskImageCommand):
         return command.before.sizeInBytes() + command.after.sizeInBytes()
     if isinstance(command, MaskSurfaceCommand):
-        return command.before.pixels.nbytes + command.after.pixels.nbytes
+        return _state_bytes(command.before) + _state_bytes(command.after)
     return 0
+
+
+def _state_bytes(snapshot: CoverageStateSnapshot) -> int:
+    """Return detached bytes retained by one dense or sparse state."""
+    if isinstance(snapshot, SparseRasterSnapshot):
+        return snapshot.retained_bytes
+    return snapshot.pixels.nbytes
 
 
 def _history_change(

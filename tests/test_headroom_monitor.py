@@ -18,7 +18,11 @@
 
 from __future__ import annotations
 
+import time
+from threading import Event
+
 from qpane import QPane
+from tests.harness.timing import interaction_clock
 
 MB = 1024 * 1024
 
@@ -47,6 +51,18 @@ class _FailingPsutil:
         raise RuntimeError("psutil missing")
 
 
+def _wait_until(qapp, predicate, *, timeout_seconds: float = 2.0) -> None:
+    """Process queued Qt work until one asynchronous assertion is ready."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return
+        time.sleep(0.001)
+    qapp.processEvents()
+    assert predicate(), "asynchronous headroom work did not settle"
+
+
 def test_headroom_monitor_updates_budget_and_snapshot(qapp) -> None:
     qpane_widget = QPane(features=())
     try:
@@ -56,6 +72,11 @@ def test_headroom_monitor_updates_budget_and_snapshot(qapp) -> None:
         state._restart_headroom_monitor()
         state._headroom_tick()
         expected_budget = 7 * MB
+        _wait_until(
+            qapp,
+            lambda: qpane_widget.cacheCoordinator.active_budget_bytes
+            == expected_budget,
+        )
         assert qpane_widget.cacheCoordinator.active_budget_bytes == expected_budget
         snapshot = qpane_widget.cacheCoordinator.snapshot().get("headroom") or {}
         assert snapshot.get("available_bytes") == 8 * MB
@@ -90,6 +111,7 @@ def test_headroom_monitor_falls_back_when_psutil_missing(qapp) -> None:
         state._headroom_tick()
         coordinator = qpane_widget.cacheCoordinator
         assert coordinator is not None
+        _wait_until(qapp, lambda: coordinator.snapshot().get("hard_cap") is True)
         assert coordinator.active_budget_bytes == 1024 * MB
         assert coordinator.snapshot().get("hard_cap") is True
         assert coordinator.should_admit(2048 * MB) is False
@@ -154,17 +176,71 @@ def test_headroom_monitor_trims_when_headroom_shrinks(qapp) -> None:
         # Re-assert the test psutil module after restart to avoid any resets.
         state._headroom_psutil_module = _LowHeadroomPsutil
         state._headroom_tick()
+        _wait_until(
+            qapp,
+            lambda: (coordinator.snapshot().get("headroom") or {}).get(
+                "available_bytes"
+            )
+            == 4 * MB,
+        )
         snapshot_after = coordinator.snapshot()
         headroom = snapshot_after.get("headroom", {})
         assert headroom.get("available_bytes") == 4 * MB
         assert headroom.get("total_bytes") == 10 * MB
-        # Budget should track available-minus-headroom and trims should fire.
-        assert coordinator.active_budget_bytes == 3 * MB
+        # The cache can reclaim no more than physical capacity after headroom.
+        assert coordinator.active_budget_bytes == 9 * MB
         tiles_after = snapshot_after["consumers"]["tiles"]
         assert tiles_after["usage_bytes"] <= coordinator.active_budget_bytes
         assert trim_calls, "Expected a trim when usage exceeds recomputed capacity"
         assert any(reason == "global" for _, _, reason in trim_calls)
     finally:
         coordinator._trim_consumer_to = original_trim  # type: ignore[assignment]
+        qpane_widget.deleteLater()
+        qapp.processEvents()
+
+
+def test_headroom_monitor_never_waits_for_system_observation(qapp) -> None:
+    """A stalled OS-memory query must not consume the GUI interaction budget."""
+
+    class _SlowPsutil:
+        started = Event()
+        release = Event()
+
+        class _VM:
+            total = 10 * MB
+            available = 8 * MB
+
+        class _Swap:
+            total = 0
+            free = 0
+
+        @classmethod
+        def virtual_memory(cls):
+            cls.started.set()
+            cls.release.wait(timeout=2.0)
+            return cls._VM()
+
+        @classmethod
+        def swap_memory(cls):
+            return cls._Swap()
+
+    qpane_widget = QPane(features=())
+    try:
+        state = qpane_widget._state
+        state._headroom_psutil_module = _SlowPsutil
+        state._headroom_psutil_missing = False
+        state._restart_headroom_monitor()
+        started = interaction_clock()
+        state._headroom_tick()
+        submission_ms = (interaction_clock() - started) * 1000.0
+        assert submission_ms < 16.0
+        assert _SlowPsutil.started.wait(timeout=1.0)
+        assert state._pending_headroom is not None
+        assert state._pending_headroom[0].sample is None
+        _SlowPsutil.release.set()
+        _wait_until(qapp, lambda: state._pending_headroom is None)
+        assert qpane_widget.cacheCoordinator.active_budget_bytes == 7 * MB
+    finally:
+        _SlowPsutil.release.set()
         qpane_widget.deleteLater()
         qapp.processEvents()

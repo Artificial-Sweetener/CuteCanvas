@@ -25,9 +25,9 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
 
 from .base import BaseTool
-from .dependencies import ToolDependencies
 from .input.model import PointerPhase, PointerSample
 from .input.profile import ToolInputProfile
+from .ports import MoveInteractionPort
 
 
 class MoveTool(BaseTool):
@@ -40,20 +40,18 @@ class MoveTool(BaseTool):
         super().__init__()
         self._reset_state()
 
-    def activate(self, dependencies: ToolDependencies) -> None:
+    def activate(self, dependencies: MoveInteractionPort) -> None:
         """Capture movement operations supplied by the QPane facade."""
-        self._begin_move = dependencies.get("begin_move", lambda _point, _copy: False)
-        self._update_move = dependencies.get("update_move", lambda _point: False)
-        self._finish_move = dependencies.get("finish_move", lambda _point: False)
-        self._suspend_move = dependencies.get("suspend_move", lambda: False)
-        self._cancel_move = dependencies.get("cancel_move", lambda: False)
-        self._anchor_move = dependencies.get("anchor_move", lambda: False)
-        self._update_hover = dependencies.get("update_move_hover", lambda _point: False)
-        self._clear_hover = dependencies.get("clear_move_hover", lambda: False)
-        self._target_available = dependencies.get(
-            "move_target_available", lambda: False
-        )
-        self._nudge_move = dependencies.get("nudge_move", lambda _x, _y: False)
+        self._begin_move = dependencies.begin_move
+        self._update_move = dependencies.update_move
+        self._finish_move = dependencies.finish_move
+        self._suspend_move = dependencies.suspend_move
+        self._cancel_move = dependencies.cancel_move
+        self._anchor_move = dependencies.anchor_move
+        self._update_hover = dependencies.update_move_hover
+        self._clear_hover = dependencies.clear_move_hover
+        self._target_available = dependencies.move_target_available
+        self._nudge_move = dependencies.nudge_move
 
     def deactivate(self) -> None:
         """Release pointer ownership without resolving editor-owned state."""

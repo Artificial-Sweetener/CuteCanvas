@@ -134,6 +134,20 @@ def test_storage_region_queries_copy_only_requested_pixels() -> None:
     assert surface.storage_value(6, 3) == 0
 
 
+def test_content_bounds_exclude_empty_storage_and_follow_edits() -> None:
+    """Transform geometry should track meaningful coverage, not raster storage."""
+    surface = CoverageSurface(
+        np.zeros((12, 16), dtype=np.uint8),
+        bounds=RasterBounds(-4, 7, 16, 12),
+    )
+    assert surface.content_bounds() is None
+
+    surface.mutate(lambda pixels, _image: pixels[2:6, 3:8].fill(255))
+
+    assert surface.content_bounds() == RasterBounds(-1, 9, 5, 4)
+    assert surface.content_bounds() == RasterBounds(-1, 9, 5, 4)
+
+
 @pytest.mark.performance
 def test_4k_surface_reframe_stays_within_interactive_growth_budget() -> None:
     """Padding a 4K surface should remain fast enough for first-edge brush input."""

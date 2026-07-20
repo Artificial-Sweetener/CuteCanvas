@@ -20,8 +20,8 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor
 
 from qpane.masks.tools.smart_select import SmartSelectTool
-from qpane.tools import ToolDependencies
 from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
+from qpane.tools.ports import SmartSelectionInteractionPort
 
 
 class _PointWrapper:
@@ -100,7 +100,7 @@ def _drag_selection(tool: SmartSelectTool, start: QPoint, end: QPoint):
 def smart_select_tool(qapp):
     tool = SmartSelectTool()
     tool.activate(
-        ToolDependencies(
+        SmartSelectionInteractionPort(
             is_alt_held=lambda: False,
             get_min_selection_size=lambda: 4,
             panel_to_content_point=lambda point: point,
@@ -219,7 +219,7 @@ def test_draw_overlay_matches_mask_colour(smart_select_tool):
 
 def test_draw_overlay_uses_mask_colour_when_alt(smart_select_tool):
     smart_select_tool.activate(
-        ToolDependencies(
+        SmartSelectionInteractionPort(
             is_alt_held=lambda: True,
             get_min_selection_size=lambda: 4,
             panel_to_content_point=lambda point: point,

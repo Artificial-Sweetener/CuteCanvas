@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QRect, QRectF
 
 from ..core import Config, PrefetchSettings
-from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey
+from ..scene.identity import SceneLayerTileKey, SourceRenderAssetKey
 from .coordinator import SwapCoordinator, SwapCoordinatorMetrics
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -35,6 +35,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..catalog.image_catalog import ImageCatalog
     from ..qpane import QPane
     from ..rendering import RenderingPresenter, TileManager, Viewport
+    from .contracts import PyramidPrefetchManager
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +49,7 @@ class SwapDelegate:
         catalog: ImageCatalog,
         viewport: Viewport,
         tile_manager: TileManager,
+        pyramid_manager: PyramidPrefetchManager,
         rendering: RenderingPresenter,
         prefetch_settings: PrefetchSettings | None,
         mark_dirty: Callable[[QRect | QRectF | None], None],
@@ -59,6 +61,7 @@ class SwapDelegate:
             catalog: Catalog providing images for swaps.
             viewport: Viewport used to size and fit images.
             tile_manager: Tile manager handling prefetch hints and tile sizes.
+            pyramid_manager: Rendering-owned pyramid service.
             rendering: Rendering presenter used to calculate draw regions.
             prefetch_settings: Initial prefetch configuration, when provided.
             mark_dirty: Callback that invalidates a region when tiles arrive.
@@ -73,6 +76,7 @@ class SwapDelegate:
             catalog=catalog,
             viewport=viewport,
             tile_manager=tile_manager,
+            pyramid_manager=pyramid_manager,
             prefetch_settings=prefetch_settings,
         )
 
@@ -170,7 +174,7 @@ class SwapDelegate:
             return
         self._mark_dirty(dirty_rect)
 
-    def handle_pyramid_ready(self, asset_key: SceneLayerAssetKey | None) -> None:
+    def handle_pyramid_ready(self, asset_key: SourceRenderAssetKey | None) -> None:
         """Trigger a repaint when the active image's pyramid finishes."""
         qpane = self._qpane
         if asset_key is None:

@@ -20,7 +20,8 @@ from qpane.editor.selection_projection import (
     LayerSelectionProjectionCache,
     translated_coverage_within,
 )
-from qpane.scene.raster import LayerTransform, RasterBounds, RasterExtentPolicy
+from qpane.scene.affine import LayerTransform
+from qpane.scene.raster import RasterBounds, RasterExtentPolicy
 from qpane.selection import LayerCoverageProjector
 
 
@@ -59,13 +60,13 @@ def test_project_to_layer_matches_aligned_rectangle_oracle_across_affines() -> N
         local_height = max(2, local_height)
         layer_bounds = RasterBounds(layer_x, layer_y, layer_width, layer_height)
         transform = LayerTransform(
-            scale_x=scale_x,
-            scale_y=scale_y,
-            translate_x=float(randomizer.randint(-100, 100)),
-            translate_y=float(randomizer.randint(-100, 100)),
+            m11=scale_x,
+            m22=scale_y,
+            dx=float(randomizer.randint(-100, 100)),
+            dy=float(randomizer.randint(-100, 100)),
         )
-        scene_x = round(local_x * scale_x + transform.translate_x)
-        scene_y = round(local_y * scale_y + transform.translate_y)
+        scene_x = round(local_x * scale_x + transform.dx)
+        scene_y = round(local_y * scale_y + transform.dy)
         scene_width = round(local_width * scale_x)
         scene_height = round(local_height * scale_y)
         scene = _coverage(
@@ -106,8 +107,8 @@ def test_integer_translation_round_trip_preserves_random_soft_coverage() -> None
         )
         source = _coverage(bounds, pixels)
         transform = LayerTransform(
-            translate_x=float(index - 32),
-            translate_y=float(40 - index),
+            dx=float(index - 32),
+            dy=float(40 - index),
         )
 
         scene = projector.project(source, transform)
@@ -121,12 +122,39 @@ def test_integer_translation_round_trip_preserves_random_soft_coverage() -> None
         assert restored.pixels is source.pixels
 
 
+def test_quarter_turn_projection_preserves_exact_coverage_and_local_bounds() -> None:
+    """Affine projection rotates coverage without treating its AABB as content."""
+    projector = LayerCoverageProjector()
+    source = _coverage(
+        RasterBounds(0, 0, 2, 1),
+        np.array([[80, 240]], dtype=np.uint8),
+    )
+    transform = LayerTransform(
+        m11=0.0,
+        m12=1.0,
+        m21=-1.0,
+        m22=0.0,
+        dx=5.0,
+        dy=7.0,
+    )
+
+    scene = projector.project(source, transform)
+
+    assert scene is not None
+    assert scene.bounds == RasterBounds(4, 7, 1, 2)
+    np.testing.assert_array_equal(scene.pixels, np.array([[80], [240]], dtype=np.uint8))
+    restored = projector.project_to_layer(scene, transform, source.bounds)
+    assert restored is not None
+    assert restored.bounds == source.bounds
+    np.testing.assert_array_equal(restored.pixels, source.pixels)
+
+
 def test_exact_layer_projection_cache_is_revision_and_transform_scoped() -> None:
     """Derived local coverage must never survive authoritative identity changes."""
     cache = LayerSelectionProjectionCache()
     scene_id = uuid.uuid4()
     layer_id = uuid.uuid4()
-    transform = LayerTransform(scale_x=2.0, scale_y=3.0)
+    transform = LayerTransform(m11=2.0, m22=3.0)
     coverage = _coverage(RasterBounds(4, 5, 2, 1), np.array([[64, 255]]))
     cache.remember(
         scene_id=scene_id,
@@ -159,7 +187,7 @@ def test_exact_layer_projection_cache_is_revision_and_transform_scoped() -> None
             scene_id=scene_id,
             layer_id=layer_id,
             selection_revision=7,
-            transform=LayerTransform(scale_x=2.0, scale_y=2.0),
+            transform=LayerTransform(m11=2.0, m22=2.0),
         )
         is None
     )

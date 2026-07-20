@@ -24,6 +24,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize
 
+from ..catalog.source_reference import CatalogImageReference
+from .affine import LayerTransform
 from .identity import base_image_layer_id, default_scene_id
 from .model import (
     BlendMode,
@@ -35,8 +37,7 @@ from .model import (
     SceneKind,
 )
 from .providers import SceneContribution
-from .raster import LayerTransform, RasterBounds
-from .sources import CatalogImageSource
+from .raster import RasterBounds
 
 
 def build_default_catalog_scene(
@@ -57,11 +58,7 @@ def build_default_catalog_scene(
         height=float(image_size.height()),
     )
     raster_bounds = RasterBounds.from_size(image_size)
-    source = CatalogImageSource(
-        image_id=image_id,
-        source_path=source_path,
-        revision=revision,
-    )
+    source = CatalogImageReference(image_id=image_id)
     layer = LayerDescriptor(
         scene_id=scene_id,
         layer_id=base_image_layer_id(image_id),

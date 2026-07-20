@@ -26,13 +26,14 @@ from typing import Protocol
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.edit_history import CompositionEditCommand
+from .affine import LayerTransform
 from .model import (
     LayerDescriptor,
     LayerInteractionPolicy,
     LayerPlacement,
     SceneDescriptor,
 )
-from .placement_edit import LayerPlacementEdit
+from .transform_edit import LayerTransformEdit
 
 
 class SceneMutationStatus(str, Enum):
@@ -117,6 +118,15 @@ class SceneMutationOwner(Protocol):
         """Update scene-space placement through the authoritative owner."""
         ...
 
+    def set_transform(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        transform: LayerTransform,
+    ) -> SceneMutationResult:
+        """Update exact local-to-scene geometry through the authoritative owner."""
+        ...
+
     def request_source_revision(
         self, scene: SceneDescriptor, layer: LayerDescriptor, reason: str
     ) -> SceneMutationResult:
@@ -175,6 +185,15 @@ class BaseSceneMutationOwner:
         """Reject placement updates for unsupported owners."""
         return self._unsupported(scene, layer, "set placement")
 
+    def set_transform(
+        self,
+        scene: SceneDescriptor,
+        layer: LayerDescriptor,
+        transform: LayerTransform,
+    ) -> SceneMutationResult:
+        """Reject affine transform updates for unsupported owners."""
+        return self._unsupported(scene, layer, "set transform")
+
     def _unsupported(
         self, scene: SceneDescriptor, layer: LayerDescriptor, operation: str
     ) -> SceneMutationResult:
@@ -203,9 +222,9 @@ class SceneMutationCoordinator:
         self._edit_controller = edit_controller
         if edit_controller is not None:
             edit_controller.register_handler(
-                LayerPlacementEdit,
-                undo=self._undo_placement,
-                redo=self._redo_placement,
+                LayerTransformEdit,
+                undo=self._undo_transform,
+                redo=self._redo_transform,
             )
 
     def register_owner(self, owner: SceneMutationOwner) -> SceneMutationOwner:
@@ -327,13 +346,72 @@ class SceneMutationCoordinator:
                 message="layer interaction policy does not permit movement",
             )
         result = owner.set_placement(scene, layer, placement)
-        if result.changed and self._edit_controller is not None:
+        after = (
+            None
+            if layer.raster_bounds is None
+            else LayerTransform.from_placement(layer.raster_bounds, placement)
+        )
+        if (
+            result.changed
+            and self._edit_controller is not None
+            and layer.transform is not None
+            and after is not None
+        ):
             self._edit_controller.record_applied(
-                LayerPlacementEdit(
+                LayerTransformEdit(
                     scene_id=scene.scene_id,
                     layer_id=layer.layer_id,
-                    before=layer.placement,
-                    after=placement,
+                    before=layer.transform,
+                    after=after,
+                )
+            )
+        return result
+
+    def set_transform(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        transform: LayerTransform,
+    ) -> SceneMutationResult:
+        """Route one policy-authorized invertible affine transform update."""
+        if not isinstance(transform, LayerTransform):
+            return self._invalid_request(
+                scene_id,
+                layer_id,
+                "transform must be LayerTransform",
+            )
+        if not transform.is_invertible:
+            return self._invalid_request(
+                scene_id,
+                layer_id,
+                "transform must be numerically invertible",
+            )
+        resolved = self._layer_for_ids(scene_id, layer_id)
+        if isinstance(resolved, SceneMutationResult):
+            return resolved
+        scene, layer, owner = resolved
+        if not layer.interaction.movable:
+            return SceneMutationResult(
+                status=SceneMutationStatus.POLICY_DENIED,
+                scene_id=scene_id,
+                layer_id=layer_id,
+                owner=owner.name,
+                message="layer interaction policy does not permit transforms",
+            )
+        if layer.transform is None:
+            return self._invalid_request(
+                scene_id,
+                layer_id,
+                "layer does not expose transformable geometry",
+            )
+        result = owner.set_transform(scene, layer, transform)
+        if result.changed and self._edit_controller is not None:
+            self._edit_controller.record_applied(
+                LayerTransformEdit(
+                    scene_id=scene.scene_id,
+                    layer_id=layer.layer_id,
+                    before=layer.transform,
+                    after=transform,
                 )
             )
         return result
@@ -404,29 +482,29 @@ class SceneMutationCoordinator:
                 return owner
         return None
 
-    def _restore_placement(
+    def _restore_transform(
         self,
-        command: LayerPlacementEdit,
-        placement: LayerPlacement,
+        command: LayerTransformEdit,
+        transform: LayerTransform,
     ) -> SceneMutationResult:
-        """Apply a history placement without recording another command."""
+        """Apply a history transform without recording another command."""
         resolved = self._layer_for_ids(command.scene_id, command.layer_id)
         if isinstance(resolved, SceneMutationResult):
             return resolved
         scene, layer, owner = resolved
-        return owner.set_placement(scene, layer, placement)
+        return owner.set_transform(scene, layer, transform)
 
-    def _undo_placement(self, command: CompositionEditCommand) -> bool:
-        """Restore a placement command's previous domain-owned value."""
-        if not isinstance(command, LayerPlacementEdit):
+    def _undo_transform(self, command: CompositionEditCommand) -> bool:
+        """Restore a transform command's previous domain-owned value."""
+        if not isinstance(command, LayerTransformEdit):
             return False
-        return self._restore_placement(command, command.before).accepted
+        return self._restore_transform(command, command.before).accepted
 
-    def _redo_placement(self, command: CompositionEditCommand) -> bool:
-        """Restore a placement command's subsequent domain-owned value."""
-        if not isinstance(command, LayerPlacementEdit):
+    def _redo_transform(self, command: CompositionEditCommand) -> bool:
+        """Restore a transform command's subsequent domain-owned value."""
+        if not isinstance(command, LayerTransformEdit):
             return False
-        return self._restore_placement(command, command.after).accepted
+        return self._restore_transform(command, command.after).accepted
 
     @staticmethod
     def _invalid_request(

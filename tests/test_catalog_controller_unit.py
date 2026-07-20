@@ -27,7 +27,11 @@ from PySide6.QtGui import QImage
 
 from qpane.catalog.controller import CatalogController
 from qpane.rendering import NormalizedViewState, ViewportZoomMode
-from qpane.scene.identity import SceneLayerAssetKey, default_catalog_asset_key
+from qpane.scene.identity import (
+    SceneLayerAssetKey,
+    SourceRenderAssetKey,
+    catalog_source_asset_key,
+)
 
 
 class _ViewportStub:
@@ -85,9 +89,11 @@ class _CatalogStub:
     def getPath(self, image_id: uuid.UUID):
         return self._paths.get(image_id)
 
-    def defaultAssetKeyForImage(self, image_id: uuid.UUID) -> SceneLayerAssetKey | None:
+    def defaultAssetKeyForImage(
+        self, image_id: uuid.UUID
+    ) -> SourceRenderAssetKey | None:
         path = self.getPath(image_id)
-        return default_catalog_asset_key(
+        return catalog_source_asset_key(
             image_id,
             revision=0,
             source_path=Path(path) if path is not None else None,
@@ -115,13 +121,13 @@ class _TileManagerStub:
     """Track cache removals triggered by catalog mutations."""
 
     def __init__(self) -> None:
-        self.removed: list[SceneLayerAssetKey] = []
+        self.removed: list[SceneLayerAssetKey | SourceRenderAssetKey] = []
         self.cleared = False
 
     def remove_tiles_for_asset(self, asset_key: SceneLayerAssetKey) -> None:
         self.removed.append(asset_key)
 
-    def remove_tiles_for_source_asset(self, asset_key: SceneLayerAssetKey) -> None:
+    def remove_tiles_for_source_asset(self, asset_key: SourceRenderAssetKey) -> None:
         self.removed.append(asset_key)
 
     def clear_caches(self) -> None:

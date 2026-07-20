@@ -8,7 +8,7 @@
 
 """Private composition archive capture, codec, and restoration services."""
 
-from .capture import capture_image_composition
+from .capture import capture_composition
 from .codec import CompositionArchiveCodec
 from .model import CompositionArchiveSnapshot
 from .restore import CompositionArchiveRestorer
@@ -17,5 +17,5 @@ __all__ = [
     "CompositionArchiveCodec",
     "CompositionArchiveRestorer",
     "CompositionArchiveSnapshot",
-    "capture_image_composition",
+    "capture_composition",
 ]

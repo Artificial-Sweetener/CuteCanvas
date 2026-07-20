@@ -18,9 +18,9 @@ from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent, QPainter, QPen, QPoly
 from ..coverage import CoverageCombineMode, CoverageSnapshot
 from ..selection import SelectionGeometryRasterizer
 from .base import BaseTool
-from .dependencies import ToolDependencies
 from .input.model import PointerPhase, PointerSample
 from .input.profile import ToolInputProfile
+from .ports import PixelSelectionInteractionPort
 
 
 class SelectionShapeTool(BaseTool):
@@ -38,16 +38,13 @@ class SelectionShapeTool(BaseTool):
         self._scene_points: list[QPointF] = []
         self._panel_points: list[QPointF] = []
 
-    def activate(self, dependencies: ToolDependencies) -> None:
+    def activate(self, dependencies: PixelSelectionInteractionPort) -> None:
         """Capture coordinate and selection collaborators."""
-        self._panel_to_scene = dependencies.get(
-            "panel_to_scene_point", lambda _point: None
-        )
-        self._commit = dependencies.get(
-            "commit_pixel_selection", lambda _coverage, _mode: False
-        )
-        self._is_shift_held = dependencies.get("is_shift_held", lambda: False)
-        self._is_alt_held = dependencies.get("is_alt_held", lambda: False)
+        self._panel_to_scene = dependencies.panel_to_scene_point
+        self._can_select = dependencies.can_select
+        self._commit = dependencies.commit_pixel_selection
+        self._is_shift_held = dependencies.is_shift_held
+        self._is_alt_held = dependencies.is_alt_held
 
     def deactivate(self) -> None:
         """Discard transient geometry and release collaborators."""
@@ -109,7 +106,11 @@ class SelectionShapeTool(BaseTool):
 
     def getCursor(self) -> QCursor | None:
         """Return the standard precise-selection crosshair."""
-        return QCursor(Qt.CursorShape.CrossCursor)
+        return QCursor(
+            Qt.CursorShape.CrossCursor
+            if self._can_select()
+            else Qt.CursorShape.ForbiddenCursor
+        )
 
     def draw_overlay(self, painter: QPainter) -> None:
         """Draw transient vector geometry without rasterizing selection coverage."""
@@ -125,6 +126,8 @@ class SelectionShapeTool(BaseTool):
 
     def _begin(self, panel_point: QPointF) -> bool:
         """Start a gesture when panel coordinates map into the active scene."""
+        if not self._can_select():
+            return False
         scene_point = self._panel_to_scene(panel_point)
         if scene_point is None:
             return False
@@ -176,6 +179,7 @@ class SelectionShapeTool(BaseTool):
     def _reset_dependencies(self) -> None:
         """Install inert collaborators for safe deactivation."""
         self._panel_to_scene: Callable[[QPointF], QPointF | None] = lambda _point: None
+        self._can_select: Callable[[], bool] = lambda: False
         self._commit: Callable[[CoverageSnapshot, CoverageCombineMode], bool] = (
             lambda _coverage, _mode: False
         )

@@ -22,6 +22,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize
 
+from .affine import LayerTransform
 from .identity import placeholder_layer_id, placeholder_scene_id, placeholder_source_id
 from .model import (
     BlendMode,
@@ -32,8 +33,8 @@ from .model import (
     SceneDescriptor,
     SceneKind,
 )
-from .raster import LayerTransform, RasterBounds
-from .sources import PlaceholderImageSource
+from .raster import RasterBounds
+from .source_references import PlaceholderImageReference
 
 
 def build_placeholder_scene(
@@ -54,7 +55,7 @@ def build_placeholder_scene(
         height=float(image_size.height()),
     )
     raster_bounds = RasterBounds.from_size(image_size)
-    source = PlaceholderImageSource(source_id=source_id, revision=revision)
+    source = PlaceholderImageReference(source_id=source_id)
     layer = LayerDescriptor(
         scene_id=scene_id,
         layer_id=placeholder_layer_id(source_id),

@@ -22,15 +22,17 @@ from .default_scene import DefaultCatalogSceneProvider, build_default_catalog_sc
 from .identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
+    SourceRenderAssetKey,
     base_image_layer_id,
+    catalog_source_asset_key,
     compare_layer_id,
     default_scene_id,
-    mask_layer_asset_key,
     mask_layer_id,
     placeholder_layer_id,
     placeholder_scene_id,
     placeholder_source_id,
     scene_image_asset_key,
+    source_render_asset_key,
 )
 from .layer_assembly import CompositionLayerSceneAssembler
 from .layer_selection import SceneLayerSelection, SceneLayerSelectionController
@@ -47,7 +49,6 @@ from .model import (
     SceneDescriptor,
     SceneKind,
 )
-from .movement import LayerMoveSession, SceneLayerMovementController
 from .mutations import (
     BaseSceneMutationOwner,
     SceneMutationCoordinator,
@@ -56,20 +57,14 @@ from .mutations import (
     SceneMutationStatus,
 )
 from .placeholder_scene import build_placeholder_scene
-from .placement_edit import LayerPlacementEdit
-from .placement_preview import LayerPlacementPreview, SceneLayerPlacementPreview
 from .providers import SceneContribution, SceneProvider, SceneResolver
 from .registry import (
-    CatalogLayerSourceResolver,
-    LayerSourceResolver,
-    LayerSourceResolverRegistry,
     SceneContributionProvider,
     ScenePostProcessor,
     SceneProviderRegistry,
     SceneReplacementProvider,
 )
 from .render_plan import (
-    MaskLayerRenderItem,
     RasterLayerRenderItem,
     RenderStrategy,
     SceneHitTestItem,
@@ -78,18 +73,28 @@ from .render_plan import (
     SceneRenderPlan,
     TileRenderData,
 )
-from .sources import (
-    CatalogImageSource,
-    LayerSource,
-    MaskLayerSource,
-    PlaceholderImageSource,
+from .source_capabilities import (
+    LayerSourceCapabilities,
+    PixelPresentationRegistry,
+    RasterPresentation,
+    RasterPresentationRegistry,
+    SourceCoverageRegistry,
+    SourceHitTestRegistry,
+    SourceMetadataRegistry,
+)
+from .source_references import LayerSourceReference, PlaceholderImageReference
+from .transform_edit import LayerTransformEdit
+from .transform_preview import LayerTransformPreview, SceneLayerTransformPreview
+from .transform_session import (
+    LayerTransformBoxState,
+    LayerTransformGesture,
+    LayerTransformSession,
+    SceneLayerTransformController,
 )
 
 __all__ = [
     "BaseSceneMutationOwner",
     "BlendMode",
-    "CatalogImageSource",
-    "CatalogLayerSourceResolver",
     "ClipCoordinateSpace",
     "CompositionLayerSceneAssembler",
     "DefaultCatalogSceneProvider",
@@ -99,17 +104,19 @@ __all__ = [
     "LayerHitTest",
     "LayerInteractionPolicy",
     "LayerKind",
-    "LayerMoveSession",
     "LayerPlacement",
-    "LayerPlacementEdit",
-    "LayerPlacementPreview",
-    "LayerSource",
-    "LayerSourceResolver",
-    "LayerSourceResolverRegistry",
-    "MaskLayerRenderItem",
-    "MaskLayerSource",
-    "PlaceholderImageSource",
+    "LayerSourceCapabilities",
+    "LayerSourceReference",
+    "LayerTransformBoxState",
+    "LayerTransformEdit",
+    "LayerTransformGesture",
+    "LayerTransformPreview",
+    "LayerTransformSession",
+    "PixelPresentationRegistry",
+    "PlaceholderImageReference",
     "RasterLayerRenderItem",
+    "RasterPresentation",
+    "RasterPresentationRegistry",
     "RenderStrategy",
     "SceneContribution",
     "SceneContributionProvider",
@@ -118,11 +125,11 @@ __all__ = [
     "SceneKind",
     "SceneLayerAssetKey",
     "SceneLayerHitTestResult",
-    "SceneLayerMovementController",
-    "SceneLayerPlacementPreview",
     "SceneLayerSelection",
     "SceneLayerSelectionController",
     "SceneLayerTileKey",
+    "SceneLayerTransformController",
+    "SceneLayerTransformPreview",
     "SceneMutationCoordinator",
     "SceneMutationOwner",
     "SceneMutationResult",
@@ -134,16 +141,21 @@ __all__ = [
     "SceneRenderPlan",
     "SceneReplacementProvider",
     "SceneResolver",
+    "SourceCoverageRegistry",
+    "SourceHitTestRegistry",
+    "SourceMetadataRegistry",
+    "SourceRenderAssetKey",
     "TileRenderData",
     "base_image_layer_id",
     "build_default_catalog_scene",
     "build_placeholder_scene",
+    "catalog_source_asset_key",
     "compare_layer_id",
     "default_scene_id",
-    "mask_layer_asset_key",
     "mask_layer_id",
     "placeholder_layer_id",
     "placeholder_scene_id",
     "placeholder_source_id",
     "scene_image_asset_key",
+    "source_render_asset_key",
 ]

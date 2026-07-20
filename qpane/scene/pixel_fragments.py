@@ -91,6 +91,8 @@ class RasterPixelFragment:
 
     def materialized_pixels(self) -> np.ndarray:
         """Return selected source contribution over an empty destination."""
+        if bool(np.all(self.coverage.pixels == 255)):
+            return self.pixels
         selection = self.coverage.pixels.astype(np.uint16)
         if self.pixels.ndim == 3:
             selection = selection[:, :, np.newaxis]

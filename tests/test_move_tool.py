@@ -22,9 +22,9 @@ import pytest
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
 
-from qpane.tools import ToolDependencies
 from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
 from qpane.tools.move import MoveTool
+from qpane.tools.ports import MoveInteractionPort
 
 
 def _sample(
@@ -76,7 +76,7 @@ def test_move_tool_routes_normalized_sequence_through_generic_operations(
     calls: list[tuple[str, QPointF | None]] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             begin_move=lambda point, _copy: calls.append(("begin", point)) or True,
             update_move=lambda point: calls.append(("update", point)) or True,
             finish_move=lambda point: calls.append(("finish", point)) or True,
@@ -105,7 +105,7 @@ def test_move_tool_forwards_alt_as_copy_intent() -> None:
     copy_intents: list[bool] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             begin_move=lambda _point, copy: copy_intents.append(copy) or True,
         )
     )
@@ -127,7 +127,7 @@ def test_move_tool_suspends_pointer_sequence_without_cancelling_floating_edit() 
     suspended: list[bool] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             begin_move=lambda _point, _copy: True,
             cancel_move=lambda: cancelled.append(True) or True,
             suspend_move=lambda: suspended.append(True) or True,
@@ -146,7 +146,7 @@ def test_move_tool_routes_mouse_drag_through_same_operations() -> None:
     calls: list[str] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             begin_move=lambda _point, _copy: calls.append("begin") or True,
             update_move=lambda _point: calls.append("update") or True,
             finish_move=lambda _point: calls.append("finish") or True,
@@ -185,7 +185,7 @@ def test_move_tool_uses_four_direction_cursor_during_drag() -> None:
     """Move mode should retain its four-direction cursor while active."""
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             begin_move=lambda _point, _copy: True,
             move_target_available=lambda: True,
         )
@@ -203,7 +203,7 @@ def test_move_tool_updates_hover_without_starting_a_drag() -> None:
     cleared: list[bool] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             update_move_hover=lambda point: hovered.append(point) or True,
             clear_move_hover=lambda: cleared.append(True) or True,
         )
@@ -227,7 +227,7 @@ def test_move_tool_constrains_shift_drag_to_nearest_45_degree_axis() -> None:
     updates: list[QPointF] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             begin_move=lambda _point, _copy: True,
             update_move=lambda point: updates.append(point) or True,
         )
@@ -251,7 +251,7 @@ def test_move_tool_nudges_one_or_ten_pixels_with_arrow_keys() -> None:
     nudges: list[tuple[int, int]] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(nudge_move=lambda x, y: nudges.append((x, y)) or True)
+        MoveInteractionPort(nudge_move=lambda x, y: nudges.append((x, y)) or True)
     )
     right = QKeyEvent(
         QEvent.Type.KeyPress,
@@ -277,7 +277,7 @@ def test_move_tool_resolves_or_cancels_released_floating_pixels() -> None:
     actions: list[str] = []
     tool = MoveTool()
     tool.activate(
-        ToolDependencies(
+        MoveInteractionPort(
             anchor_move=lambda: actions.append("anchor") or True,
             cancel_move=lambda: actions.append("cancel") or True,
         )

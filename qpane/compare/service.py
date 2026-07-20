@@ -27,7 +27,9 @@ from typing import Protocol
 
 from PySide6.QtGui import QImage
 
-from ..scene.identity import base_image_layer_id, compare_layer_id
+from ..catalog.source_reference import CatalogImageReference
+from ..scene.affine import LayerTransform
+from ..scene.identity import compare_layer_id
 from ..scene.model import (
     BlendMode,
     ClipCoordinateSpace,
@@ -39,8 +41,7 @@ from ..scene.model import (
     SceneDescriptor,
 )
 from ..scene.providers import SceneContribution
-from ..scene.raster import LayerTransform, RasterBounds
-from ..scene.sources import CatalogImageSource
+from ..scene.raster import RasterBounds
 from ..types import ComparisonOrientation, ComparisonState
 
 
@@ -116,6 +117,10 @@ class CompositionComparisonLookup(Protocol):
 
     def remove_catalog_images(self, image_ids: set[uuid.UUID]) -> bool:
         """Remove composition references to removed catalog images."""
+        ...
+
+    def is_generated_default(self, composition_id: uuid.UUID) -> bool:
+        """Return whether one document belongs to catalog navigation."""
         ...
 
 
@@ -205,6 +210,18 @@ class CompareService:
             return 0
         return max(0, int(self._catalog.getRevision(state.source_id) or 0))
 
+    def revision(self) -> tuple[object, ...]:
+        """Return dynamic scene-provider state used for render invalidation."""
+        state = self.state()
+        return (
+            state.enabled,
+            state.source_id,
+            state.source_kind,
+            state.split_position,
+            state.orientation,
+            self.source_revision(),
+        )
+
     def adapt_base_scene(
         self,
         base_scene: SceneDescriptor,
@@ -291,10 +308,14 @@ class CompareService:
 
     def _active_layer_source(
         self,
-    ) -> tuple[uuid.UUID, CatalogImageSource, int] | None:
+    ) -> tuple[uuid.UUID, CatalogImageReference, int] | None:
         """Return the active source triple used for a comparison layer."""
         record = self._compositions.active_record()
-        if record is None or record.comparison is None:
+        if (
+            record is None
+            or record.comparison is None
+            or not self._compositions.is_generated_default(record.composition_id)
+        ):
             return None
         comparison = record.comparison
         if comparison.source_kind == "catalog":
@@ -304,11 +325,7 @@ class CompareService:
             revision = max(0, int(self._catalog.getRevision(image_id) or 0))
             return (
                 image_id,
-                CatalogImageSource(
-                    image_id=image_id,
-                    source_path=self._catalog.getPath(image_id),
-                    revision=revision,
-                ),
+                CatalogImageReference(image_id=image_id),
                 revision,
             )
         return None
@@ -360,12 +377,8 @@ class CompareService:
             return layer
         is_base_layer = (
             layer.kind == LayerKind.IMAGE
-            and isinstance(layer.source, CatalogImageSource)
+            and isinstance(layer.source, CatalogImageReference)
             and layer.source.image_id == image_id
-            and (
-                layer.hit_test.role == "base-image"
-                or layer.layer_id == base_image_layer_id(image_id)
-            )
         )
         if not is_base_layer:
             return layer

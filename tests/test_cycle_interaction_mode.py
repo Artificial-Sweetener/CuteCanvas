@@ -54,6 +54,7 @@ def _cycle(qpane: QPane) -> None:
         QPane.CONTROL_MODE_CURSOR,
         QPane.CONTROL_MODE_PANZOOM,
         QPane.CONTROL_MODE_MOVE,
+        QPane.CONTROL_MODE_TRANSFORM,
     ]
     if mask_available:
         preferred_order.append(QPane.CONTROL_MODE_DRAW_BRUSH)
@@ -129,6 +130,8 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
         _cycle(qpane)
         assert qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
         _cycle(qpane)
+        assert qpane.getControlMode() == QPane.CONTROL_MODE_TRANSFORM
+        _cycle(qpane)
         assert qpane.getControlMode() == QPane.CONTROL_MODE_DRAW_BRUSH
         _cycle(qpane)
         if qpane.samFeatureAvailable():
@@ -141,6 +144,10 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
             QPane.CONTROL_MODE_SELECT_RECTANGLE,
             QPane.CONTROL_MODE_SELECT_ELLIPSE,
             QPane.CONTROL_MODE_SELECT_LASSO,
+            QPane.CONTROL_MODE_VECTOR_SHAPE,
+            QPane.CONTROL_MODE_VECTOR_PATH,
+            QPane.CONTROL_MODE_VECTOR_NODE,
+            QPane.CONTROL_MODE_VECTOR_TEXT,
             QPane.CONTROL_MODE_CURSOR,
         ):
             _cycle(qpane)

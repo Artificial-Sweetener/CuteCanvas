@@ -21,11 +21,11 @@ from qpane.coverage import CoverageSnapshot, CoverageSurface
 from qpane.masks.mask import MaskLayer
 from qpane.masks.pixel_edits import MaskLayerPixelMutationOwner
 from qpane.masks.pixel_translation import MaskPixelTranslator
+from qpane.masks.source_reference import MaskAssetReference
 from qpane.raster.color_surface import ColorRasterSurface
 from qpane.raster.pixel_translation import ColorPixelTranslator
 from qpane.scene.model import LayerDescriptor
 from qpane.scene.raster import RasterBounds, RasterExtentPolicy
-from qpane.scene.sources import MaskLayerSource
 
 
 def _coverage(values: list[int], *, x: int = 0) -> CoverageSnapshot:
@@ -161,7 +161,7 @@ def test_mask_owner_exposes_nonzero_content_as_binary_movement_occupancy() -> No
     owner = MaskLayerPixelMutationOwner(Lookup(), lambda _mask_id, _bounds: None)
     descriptor = cast(
         LayerDescriptor,
-        SimpleNamespace(source=MaskLayerSource(mask.mask_id, 0)),
+        SimpleNamespace(source=MaskAssetReference(mask.mask_id)),
     )
 
     coverage = owner.content_coverage(descriptor, RasterBounds(0, 0, 4, 1))

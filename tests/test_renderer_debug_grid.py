@@ -14,22 +14,14 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests for renderer debug grid behaviour."""
+"""Tests for compositor debug grid behaviour."""
 
-from PySide6.QtCore import QPointF, QRect
+from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
 
-from qpane.rendering import Renderer
+from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.scene.render_plan import RenderStrategy
 from tests.helpers.render_plan import make_render_plan
-
-
-class _StubQPane:
-    """Provides just enough surface for Renderer tests."""
-
-    def _get_tile_draw_position(self, identifier):
-        """Return the top-left position for a tile identifier."""
-        return QPointF(identifier.col * 64, identifier.row * 64)
 
 
 class _PainterStub:
@@ -45,6 +37,19 @@ class _PainterStub:
     def setBrush(self, brush):
         """Store the brush (unused)."""
         self.brush = brush
+
+    def save(self):
+        """Accept compositor state isolation."""
+
+    def restore(self):
+        """Accept compositor state restoration."""
+
+    def setClipRect(self, rect, operation):
+        """Store the active clip (unused)."""
+        self.clip = (rect, operation)
+
+    def drawImage(self, *args):
+        """Accept source and tile image draws."""
 
     def drawRect(self, rect):
         """Record the drawn rectangle."""
@@ -68,18 +73,18 @@ def _make_render_plan(draw_grid: bool):
 
 
 def test_debug_grid_skips_when_flag_disabled():
-    """Renderer should skip drawing when the state flag is false."""
-    renderer = Renderer(_StubQPane())
+    """Compositor should skip drawing when the item flag is false."""
+    compositor = SceneItemCompositor()
     painter = _PainterStub()
     plan = _make_render_plan(draw_grid=False)
-    renderer._draw_tile_debug_overlay(painter, plan, plan.base_raster_item)
+    compositor.draw_raster_source(painter, plan, plan.base_raster_item)
     assert painter.rects == []
 
 
 def test_debug_grid_draws_when_flag_enabled():
-    """Renderer should draw tile outlines when the state flag is true."""
-    renderer = Renderer(_StubQPane())
+    """Compositor should draw tile outlines when the item flag is true."""
+    compositor = SceneItemCompositor()
     painter = _PainterStub()
     plan = _make_render_plan(draw_grid=True)
-    renderer._draw_tile_debug_overlay(painter, plan, plan.base_raster_item)
+    compositor.draw_raster_source(painter, plan, plan.base_raster_item)
     assert painter.rects, "Expected at least one debug rectangle to be drawn"

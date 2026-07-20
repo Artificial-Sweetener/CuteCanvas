@@ -24,13 +24,13 @@ from collections.abc import Callable
 from PySide6.QtCore import QCoreApplication, QRunnable, QTimer
 
 from ..concurrency.base_worker import BaseWorker
+from ..painting import BrushCompositor, BrushStrokeSegment
+from ..painting.rendering import render_coverage_stroke
 from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
     MaskStrokePayload,
-    MaskStrokeSegmentPayload,
 )
-from .stroke_render import render_stroke_segments
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ class MaskStrokeWorker(QRunnable, BaseWorker):
         spec: MaskStrokeJobSpec,
         finalize: Callable[[MaskStrokeJobResult], None],
         logger_name: str | None = None,
+        compositor: BrushCompositor | None = None,
     ) -> None:
         """Capture job spec and finalize callback for off-UI stroke replay."""
         QRunnable.__init__(self)
@@ -56,6 +57,7 @@ class MaskStrokeWorker(QRunnable, BaseWorker):
         self._spec = spec
         self._payload = spec.payload
         self._finalize = finalize
+        self._compositor = BrushCompositor() if compositor is None else compositor
 
     def run(self) -> None:
         """Replay the stroke payload and dispatch the finalize callback."""
@@ -80,17 +82,18 @@ class MaskStrokeWorker(QRunnable, BaseWorker):
         """Render the stroke payload into a mask slice and build the result."""
         payload: MaskStrokePayload | None = self._payload
         spec = self._spec
-        segments: tuple[MaskStrokeSegmentPayload, ...]
+        segments: tuple[BrushStrokeSegment, ...]
         if payload is None:
             segments = ()
         else:
             segments = payload.segments
-        after_slice, preview_image = render_stroke_segments(
+        after_slice, preview_image = render_coverage_stroke(
             before=spec.before,
             dirty_rect=spec.dirty_rect,
             segments=segments,
             preview_stride=1 if payload is None else payload.stride,
             constraint=spec.constraint,
+            compositor=self._compositor,
         )
         return MaskStrokeJobResult(
             mask_id=spec.mask_id,

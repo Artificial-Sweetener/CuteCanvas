@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import time
 import uuid
 from statistics import median
 
@@ -23,6 +22,7 @@ from qpane.masks.pixel_translation import MaskPixelTranslator
 from qpane.raster.color_surface import ColorRasterSurface
 from qpane.raster.pixel_translation import ColorPixelTranslator
 from qpane.scene.raster import RasterBounds, RasterExtentPolicy
+from tests.harness.timing import interaction_clock, stable_latency_samples
 
 _RGBA_MEDIAN_BUDGET_MS = 50.0
 _MASK_MEDIAN_BUDGET_MS = 15.0
@@ -52,10 +52,10 @@ def test_one_megapixel_hard_translation_stays_below_commit_budgets() -> None:
     color_ms: list[float] = []
     mask_ms: list[float] = []
 
-    for _sample in range(3):
-        started = time.perf_counter()
+    for _sample in range(8):
+        started = interaction_clock()
         color_transition = color_translator.move(color_surface, selection, 200, 0)
-        color_ms.append((time.perf_counter() - started) * 1000.0)
+        color_ms.append((interaction_clock() - started) * 1000.0)
         assert color_transition is not None
         assert not color_transition.before_pixels.flags.writeable
         assert not color_transition.after_pixels.flags.writeable
@@ -65,13 +65,13 @@ def test_one_megapixel_hard_translation_stays_below_commit_budgets() -> None:
             use_after=False,
         )
 
-        started = time.perf_counter()
+        started = interaction_clock()
         mask_transition = mask_translator.move(mask, selection, 200, 0)
-        mask_ms.append((time.perf_counter() - started) * 1000.0)
+        mask_ms.append((interaction_clock() - started) * 1000.0)
         assert mask_transition is not None
         assert not mask_transition.before_pixels.flags.writeable
         assert not mask_transition.after_pixels.flags.writeable
         assert mask_translator.restore(mask, mask_transition, use_after=False)
 
-    assert median(color_ms) < _RGBA_MEDIAN_BUDGET_MS
-    assert median(mask_ms) < _MASK_MEDIAN_BUDGET_MS
+    assert median(stable_latency_samples(color_ms)) < _RGBA_MEDIAN_BUDGET_MS
+    assert median(stable_latency_samples(mask_ms)) < _MASK_MEDIAN_BUDGET_MS

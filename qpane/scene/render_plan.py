@@ -25,11 +25,13 @@ from pathlib import Path
 from typing import TypeAlias
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
-from PySide6.QtGui import QImage, QPixmap, QTransform
+from PySide6.QtGui import QImage, QPainterPath, QPicture, QTransform
 
-from .identity import SceneLayerAssetKey
+from .affine import LayerTransform
+from .identity import SceneLayerAssetKey, SourceRenderAssetKey
 from .model import LayerClip, LayerDescriptor, LayerPlacement
-from .sources import LayerSource
+from .raster import RasterBounds
+from .source_references import LayerSourceReference
 
 
 class RenderStrategy(str, Enum):
@@ -74,7 +76,7 @@ class RasterLayerRenderItem:
     descriptor: LayerDescriptor
     source_image: QImage
     asset_key: SceneLayerAssetKey
-    pyramid_asset_key: SceneLayerAssetKey
+    pyramid_asset_key: SourceRenderAssetKey
     pyramid_scale: float
     transform: QTransform
     placement: LayerPlacement
@@ -88,11 +90,26 @@ class RasterLayerRenderItem:
     max_tile_cols: int
     max_tile_rows: int
     visible_tile_range: tuple[int, int, int, int] | None
+    is_base_raster: bool = False
+    effect_clip_path: QPainterPath | None = None
+    source_clip_rect: QRectF | None = None
 
     def __post_init__(self) -> None:
         """Validate stable raster planning values."""
         object.__setattr__(self, "transform", QTransform(self.transform))
         object.__setattr__(self, "tiles_to_draw", tuple(self.tiles_to_draw))
+        if self.effect_clip_path is not None:
+            object.__setattr__(
+                self,
+                "effect_clip_path",
+                QPainterPath(self.effect_clip_path),
+            )
+        if self.source_clip_rect is not None:
+            object.__setattr__(
+                self,
+                "source_clip_rect",
+                QRectF(self.source_clip_rect),
+            )
         if self.pyramid_scale <= 0.0:
             raise ValueError("pyramid scale must be positive")
         if self.tile_size < 0 or self.tile_overlap < 0:
@@ -102,43 +119,108 @@ class RasterLayerRenderItem:
 
 
 @dataclass(frozen=True, slots=True)
-class MaskLayerRenderItem:
-    """Render-ready mask layer snapshot consumed by scene painting."""
+class VectorTileRenderData:
+    """Carry one refined vector tile and its source-local draw rectangles."""
 
-    descriptor: LayerDescriptor
-    pixmap: QPixmap
-    asset_key: SceneLayerAssetKey
-    transform: QTransform
-    placement: LayerPlacement
-    clip: LayerClip | None
-    render_hint_enabled: bool
-    scale: float | None
+    image: QImage
+    source_rect: QRectF
+    image_source_rect: QRectF
 
     def __post_init__(self) -> None:
-        """Detach mutable Qt values from caller-owned render inputs."""
-        object.__setattr__(self, "pixmap", QPixmap(self.pixmap))
-        object.__setattr__(self, "transform", QTransform(self.transform))
-
-
-SceneRenderItem: TypeAlias = RasterLayerRenderItem | MaskLayerRenderItem
+        """Detach mutable Qt values from the cache-owned product."""
+        object.__setattr__(self, "image", QImage(self.image))
+        object.__setattr__(self, "source_rect", QRectF(self.source_rect))
+        object.__setattr__(
+            self,
+            "image_source_rect",
+            QRectF(self.image_source_rect),
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class FloatingPixelRenderContribution:
-    """Carry one exact transient raster into scene rendering."""
+class VectorLayerRenderItem:
+    """Render-ready resolution-independent vector layer snapshot."""
+
+    descriptor: LayerDescriptor
+    picture: QPicture
+    transform: QTransform
+    placement: LayerPlacement
+    clip: LayerClip | None
+    source_size: QSize
+    effect_clip_path: QPainterPath | None = None
+    preview_picture: QPicture | None = None
+    trailing_picture: QPicture | None = None
+    refined_tiles: tuple[VectorTileRenderData, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt drawing and geometry values."""
+        object.__setattr__(self, "picture", QPicture(self.picture))
+        object.__setattr__(self, "transform", QTransform(self.transform))
+        object.__setattr__(self, "source_size", QSize(self.source_size))
+        object.__setattr__(self, "refined_tiles", tuple(self.refined_tiles))
+        if self.preview_picture is not None:
+            object.__setattr__(self, "preview_picture", QPicture(self.preview_picture))
+        if self.trailing_picture is not None:
+            object.__setattr__(
+                self,
+                "trailing_picture",
+                QPicture(self.trailing_picture),
+            )
+        if self.effect_clip_path is not None:
+            object.__setattr__(
+                self,
+                "effect_clip_path",
+                QPainterPath(self.effect_clip_path),
+            )
+
+
+SceneRenderItem: TypeAlias = RasterLayerRenderItem | VectorLayerRenderItem
+
+
+@dataclass(frozen=True, slots=True)
+class FloatingPixelTransformContribution:
+    """Carry stable lifted-pixel products plus transient source-local geometry."""
+
+    session_id: uuid.UUID
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    source_asset_key: SceneLayerAssetKey
+    source_patch: QImage | None
+    source_bounds: RasterBounds
+    fragment_image: QImage
+    fragment_bounds: RasterBounds
+    selection_mask: QImage
+    fragment_transform: LayerTransform
+    clear_destination: bool
+    extent_clip_bounds: RasterBounds | None
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt resources from the compiling presenter."""
+        if self.source_patch is not None:
+            object.__setattr__(self, "source_patch", QImage(self.source_patch))
+        object.__setattr__(self, "fragment_image", QImage(self.fragment_image))
+        object.__setattr__(self, "selection_mask", QImage(self.selection_mask))
+
+
+@dataclass(frozen=True, slots=True)
+class FloatingPixelResolvedContribution:
+    """Carry one exact settled raster until durable presentation catches up."""
 
     session_id: uuid.UUID
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     source_asset_key: SceneLayerAssetKey
     source_image: QImage
-    source_pixmap: QPixmap | None = None
+    source_bounds: RasterBounds
 
     def __post_init__(self) -> None:
         """Detach mutable Qt resources from the compiling presenter."""
         object.__setattr__(self, "source_image", QImage(self.source_image))
-        if self.source_pixmap is not None:
-            object.__setattr__(self, "source_pixmap", QPixmap(self.source_pixmap))
+
+
+FloatingPixelRenderContribution: TypeAlias = (
+    FloatingPixelTransformContribution | FloatingPixelResolvedContribution
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +233,7 @@ class SceneHitTestItem:
     enabled: bool
     selectable: bool
     role: str
-    source: LayerSource | None = None
+    source: LayerSourceReference | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,7 +243,7 @@ class SceneLayerHitTestResult:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     role: str
-    source: LayerSource
+    source: LayerSourceReference
     panel_point: QPointF
     scene_point: QPointF
     source_point: QPointF
@@ -198,10 +280,8 @@ class SceneRenderPlan:
 
     @property
     def base_raster_item(self) -> RasterLayerRenderItem | None:
-        """Return the default base-image raster item when one exists."""
+        """Return the renderer-selected base raster item when one exists."""
         for item in self.render_items:
-            if isinstance(
-                item, RasterLayerRenderItem
-            ) and item.descriptor.hit_test.role in {"base-image", "placeholder-image"}:
+            if isinstance(item, RasterLayerRenderItem) and item.is_base_raster:
                 return item
         return None

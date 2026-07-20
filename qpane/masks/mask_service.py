@@ -34,7 +34,7 @@ from ..concurrency import TaskExecutorProtocol
 from ..core import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from ..coverage import CoverageSnapshot
-from ..scene.identity import default_scene_id
+from ..painting import BrushStrokeSegment
 from ..types import DiagnosticRecord, DiagnosticsDomain
 from .activation import MaskActivationController
 from .autosave_coordination import MaskAutosaveCoordinator
@@ -51,7 +51,6 @@ from .render_coordination import (
     SNIPPET_ASYNC_THRESHOLD_PX,
     MaskRenderWorkCoordinator,
 )
-from .stroke_models import MaskStrokeSegmentPayload
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
@@ -105,13 +104,14 @@ class MaskService:
         )
         self._status_messages: deque[tuple[str, str]] = deque(maxlen=8)
         self._layers = MaskLayerCoordinator(
-            layers=qpane.compositionService().image_layers,
+            layers=qpane.compositionService().layers,
+            layer_edits=qpane.compositionService().layer_edits,
             assets=mask_assets,
             controller=mask_controller,
+            composition_for_image=qpane.compositionService().default_composition_for_image,
+            image_for_composition=qpane.compositionService().image_id_for_default_composition,
+            current_composition_id=qpane.compositionService().current_composition_id,
             current_image_id=self._catalog.currentImageID,
-            remove_mask=lambda image_id, mask_id: self.removeMaskFromImage(
-                image_id, mask_id
-            ),
         )
         self._mask_controller.set_color_resolver(self._layers.color)
         self._render_work = MaskRenderWorkCoordinator(
@@ -160,6 +160,7 @@ class MaskService:
             view=qpane.view,
             update_region=self._render_work.update_region,
             diagnostics=stroke_diagnostics,
+            compositor=qpane.paintingCoordinator().compositor,
         )
         self._stroke_pipeline.set_idle_callback(self._render_work.handle_mask_idle)
         self._layer_workflow = MaskLayerWorkflow(
@@ -199,7 +200,7 @@ class MaskService:
 
     def applyStrokeSegment(
         self,
-        segment: MaskStrokeSegmentPayload,
+        segment: BrushStrokeSegment,
     ) -> None:
         """Handle a brush segment emitted by the tool manager."""
         active_mask_id = self._mask_controller.get_active_mask_id()
@@ -303,6 +304,10 @@ class MaskService:
         """Return image scenes containing an instance of one mask asset."""
         return self._layers.image_ids_for_mask(mask_id)
 
+    def composition_ids_for_mask(self, mask_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
+        """Return composition documents containing an instance of one mask."""
+        return self._layers.composition_ids_for_mask(mask_id)
+
     def layer_instances_for_image(
         self, image_id: uuid.UUID
     ) -> tuple[CompositionLayerInstance, ...]:
@@ -369,13 +374,12 @@ class MaskService:
         )
 
     def _scope_for_mask(self, mask_id: uuid.UUID) -> uuid.UUID | None:
-        """Resolve a mask asset to its active or first owning image scene."""
-        image_ids = self._layers.image_ids_for_mask(mask_id)
-        if not image_ids:
+        """Resolve a mask asset to its active or first owning composition."""
+        composition_ids = self._layers.composition_ids_for_mask(mask_id)
+        if not composition_ids:
             return None
-        current_image_id = self._catalog.currentImageID()
-        image_id = current_image_id if current_image_id in image_ids else image_ids[0]
-        return default_scene_id(image_id)
+        current_id = self._qpane.currentCompositionID()
+        return current_id if current_id in composition_ids else composition_ids[0]
 
     def connectUndoStackChanged(self, slot: Callable[[uuid.UUID], None]) -> None:
         """Register slot for undo stack change notifications."""
@@ -734,12 +738,12 @@ class MaskService:
             opacity=opacity,
         )
 
-    def cycleMasks(self, image_id: uuid.UUID, *, forward: bool) -> None:
-        """Cycle mask ordering for image_id and refresh edit state."""
+    def cycleMasks(self, image_id: uuid.UUID | None, *, forward: bool) -> None:
+        """Cycle mask ordering for an image adapter or active composition."""
         self._layer_workflow.cycle(image_id, forward=forward)
 
     def promoteMaskToTop(self, mask_id: uuid.UUID) -> bool:
-        """Bring mask_id to the top of the active image mask stack."""
+        """Bring mask_id to the top of the active composition's mask stack."""
         return self._layer_workflow.promote_to_top(mask_id)
 
     def refreshAutosavePolicy(self) -> None:

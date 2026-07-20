@@ -19,22 +19,10 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
-import numpy as np
-from PySide6.QtCore import QPointF, QSize
-from PySide6.QtGui import QImage
-
-from .identity import SceneLayerAssetKey
 from .model import SceneDescriptor
 from .providers import SceneContribution
-from .sources import LayerSource
-
-if TYPE_CHECKING:
-    from ..coverage import CoverageSnapshot
-    from .pixel_fragments import RasterPixelFormat
 
 
 class SceneContributionProvider(Protocol):
@@ -69,127 +57,12 @@ class SceneGeometryAdapter(Protocol):
         ...
 
 
-class LayerSourceResolver(Protocol):
-    """Resolve pixels and cache metadata for a layer source variant."""
-
-    def supports_source(self, source: LayerSource) -> bool:
-        """Return True when this resolver owns ``source``."""
-        ...
-
-    def source_image(self, source: LayerSource) -> QImage | None:
-        """Return full-resolution pixels for ``source``."""
-        ...
-
-    def source_size(self, source: LayerSource) -> QSize | None:
-        """Return authoritative source dimensions without materializing pixels."""
-        ...
-
-    def source_path(self, source: LayerSource) -> Path | None:
-        """Return a path for ``source`` when one exists."""
-        ...
-
-    def best_fit_image(
-        self,
-        source: LayerSource,
-        *,
-        asset_key: SceneLayerAssetKey,
-        pyramid_asset_key: SceneLayerAssetKey,
-        source_size: QSize,
-        target_width: float,
-    ) -> QImage | None:
-        """Return the best available raster for rendering ``source``."""
-        ...
-
-    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
-        """Return whether source coverage permits selecting ``point``."""
-        ...
-
-    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
-        """Return editable coverage when the source domain supplies it."""
-        ...
-
-    def present_pixels(
-        self,
-        source: LayerSource,
-        pixel_format: RasterPixelFormat,
-        pixels: np.ndarray,
-    ) -> QImage | None:
-        """Present detached canonical pixels using source-domain appearance."""
-        ...
-
-
 class ScenePostProcessor(Protocol):
     """Apply transient descriptor changes after complete scene assembly."""
 
     def process_scene(self, scene: SceneDescriptor) -> SceneDescriptor:
         """Return a processed scene descriptor."""
         ...
-
-
-@dataclass(frozen=True, slots=True)
-class CatalogLayerSourceResolver:
-    """Resolve catalog image sources through the catalog owner."""
-
-    catalog: object
-
-    def supports_source(self, source: LayerSource) -> bool:
-        """Return True for catalog image sources."""
-        from .sources import CatalogImageSource
-
-        return isinstance(source, CatalogImageSource)
-
-    def source_image(self, source: LayerSource) -> QImage | None:
-        """Return catalog pixels for ``source``."""
-        image_getter = getattr(self.catalog, "getImage", None)
-        if not callable(image_getter):
-            return None
-        return image_getter(source.image_id)  # type: ignore[union-attr]
-
-    def source_size(self, source: LayerSource) -> QSize | None:
-        """Return catalog dimensions from its already-owned image reference."""
-        image = self.source_image(source)
-        return None if image is None or image.isNull() else image.size()
-
-    def source_path(self, source: LayerSource) -> Path | None:
-        """Return the catalog path for ``source``."""
-        path_getter = getattr(self.catalog, "getPath", None)
-        if not callable(path_getter):
-            return None
-        return path_getter(source.image_id)  # type: ignore[union-attr]
-
-    def best_fit_image(
-        self,
-        source: LayerSource,
-        *,
-        asset_key: SceneLayerAssetKey,
-        pyramid_asset_key: SceneLayerAssetKey,
-        source_size: QSize,
-        target_width: float,
-    ) -> QImage | None:
-        """Return a catalog pyramid raster when available."""
-        best_fit = getattr(self.catalog, "getBestFitImageForAsset", None)
-        if callable(best_fit):
-            source_image = best_fit(pyramid_asset_key, target_width)
-            if source_image is not None and not source_image.isNull():
-                return source_image
-        return self.source_image(source)
-
-    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
-        """Treat catalog image source bounds as fully selectable coverage."""
-        return True
-
-    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
-        """Return no coverage because catalog images are color rasters."""
-        return None
-
-    def present_pixels(
-        self,
-        source: LayerSource,
-        pixel_format: RasterPixelFormat,
-        pixels: np.ndarray,
-    ) -> QImage | None:
-        """Reject transient editing because catalog sources are not editable."""
-        return None
 
 
 class SceneProviderRegistry:
@@ -347,88 +220,3 @@ class SceneProviderRegistry:
         if callable(revision_getter):
             return revision_getter()
         return id(provider)
-
-
-class LayerSourceResolverRegistry:
-    """Route layer-source lookups to their authoritative domain owner."""
-
-    def __init__(self) -> None:
-        """Initialize an empty resolver registry."""
-        self._resolvers: list[LayerSourceResolver] = []
-
-    def register(self, resolver: LayerSourceResolver) -> LayerSourceResolver:
-        """Register a source resolver if it is not already present."""
-        if resolver not in self._resolvers:
-            self._resolvers.append(resolver)
-        return resolver
-
-    def unregister(self, resolver: LayerSourceResolver) -> None:
-        """Remove a previously registered source resolver."""
-        self._resolvers = [
-            candidate for candidate in self._resolvers if candidate is not resolver
-        ]
-
-    def resolver_for(self, source: LayerSource) -> LayerSourceResolver | None:
-        """Return the resolver that owns ``source``."""
-        for resolver in self._resolvers:
-            if resolver.supports_source(source):
-                return resolver
-        return None
-
-    def source_image(self, source: LayerSource) -> QImage | None:
-        """Return source pixels through the owning resolver."""
-        resolver = self.resolver_for(source)
-        return None if resolver is None else resolver.source_image(source)
-
-    def source_path(self, source: LayerSource) -> Path | None:
-        """Return source path metadata through the owning resolver."""
-        resolver = self.resolver_for(source)
-        return None if resolver is None else resolver.source_path(source)
-
-    def source_size(self, source: LayerSource) -> QSize | None:
-        """Return source dimensions through the owning resolver."""
-        resolver = self.resolver_for(source)
-        return None if resolver is None else resolver.source_size(source)
-
-    def best_fit_image(
-        self,
-        source: LayerSource,
-        *,
-        asset_key: SceneLayerAssetKey,
-        pyramid_asset_key: SceneLayerAssetKey,
-        source_size: QSize,
-        target_width: float,
-    ) -> QImage | None:
-        """Return the best available raster through the owning resolver."""
-        resolver = self.resolver_for(source)
-        if resolver is None:
-            return None
-        return resolver.best_fit_image(
-            source,
-            asset_key=asset_key,
-            pyramid_asset_key=pyramid_asset_key,
-            source_size=source_size,
-            target_width=target_width,
-        )
-
-    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
-        """Return selection coverage through the authoritative source resolver."""
-        resolver = self.resolver_for(source)
-        return bool(resolver is not None and resolver.selection_contains(source, point))
-
-    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
-        """Return editable coverage through the authoritative source resolver."""
-        resolver = self.resolver_for(source)
-        return None if resolver is None else resolver.coverage_snapshot(source)
-
-    def present_pixels(
-        self,
-        source: LayerSource,
-        pixel_format: RasterPixelFormat,
-        pixels: np.ndarray,
-    ) -> QImage | None:
-        """Present canonical pixels through their authoritative source resolver."""
-        resolver = self.resolver_for(source)
-        if resolver is None:
-            return None
-        return resolver.present_pixels(source, pixel_format, pixels)

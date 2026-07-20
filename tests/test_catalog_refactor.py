@@ -24,6 +24,7 @@ from PySide6.QtGui import QImage
 
 from qpane import Config
 from qpane.catalog import ImageCatalog
+from qpane.rendering import PyramidManager
 from qpane.scene.identity import SceneLayerAssetKey
 from qpane.types import CatalogEntry
 from tests.helpers.executor_stubs import StubExecutor
@@ -57,10 +58,14 @@ def _make_image(fmt: QImage.Format, fill: int = 0) -> QImage:
     return image
 
 
+def _catalog() -> ImageCatalog:
+    """Return a catalog with a deterministic derived-product owner."""
+    return ImageCatalog(pyramid_manager=StubPyramidManager())
+
+
 def test_set_images_normalizes_and_uses_consistent_format(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     image_id = uuid.uuid4()
     image_map = {
         image_id: CatalogEntry(
@@ -80,9 +85,8 @@ def test_set_images_normalizes_and_uses_consistent_format(qapp):
 
 
 def test_set_images_reports_only_removed_and_content_changed_ids(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     unchanged_id = uuid.uuid4()
     changed_id = uuid.uuid4()
     removed_id = uuid.uuid4()
@@ -135,9 +139,8 @@ def test_set_images_reports_only_removed_and_content_changed_ids(qapp):
 
 
 def test_add_image_normalizes_before_storage_and_pyramid(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     image_id = uuid.uuid4()
     src_image = _make_image(QImage.Format_RGB32)
     catalog.addImage(image_id, src_image, Path("bar.png"))
@@ -151,9 +154,8 @@ def test_add_image_normalizes_before_storage_and_pyramid(qapp):
 
 
 def test_add_image_replaces_existing_id_without_reordering_unchanged_content(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     first_id = uuid.uuid4()
     second_id = uuid.uuid4()
     first_image = _make_image(QImage.Format_ARGB32_Premultiplied, 48)
@@ -171,9 +173,8 @@ def test_add_image_replaces_existing_id_without_reordering_unchanged_content(qap
 
 
 def test_add_image_removes_pyramid_when_existing_content_changes(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     image_id = uuid.uuid4()
     catalog.addImage(
         image_id,
@@ -190,16 +191,15 @@ def test_add_image_removes_pyramid_when_existing_content_changes(qapp):
 
 
 def test_add_image_raises_on_null(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
+    catalog = _catalog()
     with pytest.raises(ValueError):
         catalog.addImage(uuid.uuid4(), QImage(), None)
     assert catalog.getImageIds() == []
 
 
 def test_update_current_entry_normalizes_and_refreshes_pyramid(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     image_id = uuid.uuid4()
     initial_image = _make_image(QImage.Format_ARGB32_Premultiplied)
     catalog.setImagesByID(
@@ -223,9 +223,8 @@ def test_update_current_entry_normalizes_and_refreshes_pyramid(qapp):
 
 
 def test_update_current_entry_path_change_invalidates_current_pyramid(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     image_id = uuid.uuid4()
     initial_image = _make_image(QImage.Format_ARGB32_Premultiplied, 24)
     catalog.setImagesByID(
@@ -246,9 +245,8 @@ def test_update_current_entry_path_change_invalidates_current_pyramid(qapp):
 
 
 def test_update_current_entry_without_selection_is_noop(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     mutation = catalog.updateCurrentEntry(
         image=_make_image(QImage.Format_RGB32, 44),
         path=Path("ignored.png"),
@@ -261,9 +259,7 @@ def test_update_current_entry_without_selection_is_noop(qapp):
 
 
 def test_catalog_revisions_increment_only_for_content_changes(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
     image_id = uuid.uuid4()
     initial = _make_image(QImage.Format_ARGB32_Premultiplied, 10)
     catalog.setImagesByID(
@@ -290,9 +286,7 @@ def test_catalog_revisions_increment_only_for_content_changes(qapp):
 
 
 def test_update_current_entry_reports_content_and_path_changes_separately(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
     image_id = uuid.uuid4()
     catalog.setImagesByID(
         {
@@ -317,9 +311,8 @@ def test_update_current_entry_reports_content_and_path_changes_separately(qapp):
 
 
 def test_apply_config_regenerates_current_image(qapp):
-    catalog = ImageCatalog(config=Config(), executor=StubExecutor())
-    stub = StubPyramidManager()
-    catalog.pyramid_manager = stub
+    catalog = _catalog()
+    stub = catalog.pyramid_manager
     image_id = uuid.uuid4()
     image = _make_image(QImage.Format_ARGB32_Premultiplied)
     path = Path("regen.png")
@@ -342,8 +335,10 @@ def test_catalog_facade_rejects_null_image(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_catalog_passes_executor_to_pyramid_manager() -> None:
-    """ImageCatalog should supply the shared executor to PyramidManager."""
+def test_catalog_uses_injected_render_product_owner() -> None:
+    """ImageCatalog should collaborate with, not construct, the raster renderer."""
     executor = StubExecutor()
-    catalog = ImageCatalog(config=Config(), executor=executor)
-    assert catalog.pyramid_manager._executor is executor
+    pyramids = PyramidManager(Config(), executor=executor)
+    catalog = ImageCatalog(pyramid_manager=pyramids)
+    assert catalog.pyramid_manager is pyramids
+    assert pyramids._executor is executor

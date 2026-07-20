@@ -13,12 +13,18 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeAlias
 
 import numpy as np
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QImage
 
 from ..raster.image_conversion import qimage_to_numpy_view_grayscale8
+from ..raster.sparse_grid import (
+    SparseRasterGrid,
+    SparseRasterSnapshot,
+    SparseRasterTile,
+)
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 
 
@@ -57,6 +63,24 @@ class CoverageSnapshot:
         """Return immutable pixels with replacement coordinate metadata."""
         policy = self.extent_policy if extent_policy is None else extent_policy
         return CoverageSnapshot._adopt_detached(bounds, policy, self.pixels)
+
+    def clipped_to(self, bounds: RasterBounds) -> CoverageSnapshot | None:
+        """Return the minimal intersection with ``bounds`` in the same coordinates."""
+        current = self.bounds
+        if current is None:
+            return None
+        overlap = current.intersection(bounds)
+        if overlap is None:
+            return None
+        if overlap == current:
+            return self
+        x = overlap.x - current.x
+        y = overlap.y - current.y
+        return CoverageSnapshot(
+            overlap,
+            self.extent_policy,
+            self.pixels[y : y + overlap.height, x : x + overlap.width],
+        )
 
     @classmethod
     def _adopt_detached(
@@ -98,6 +122,9 @@ class WritableCoverageRegion:
     def expanded(self) -> bool:
         """Return whether accepting the write enlarged surface storage."""
         return self.before_bounds != self.after_bounds
+
+
+CoverageStateSnapshot: TypeAlias = CoverageSnapshot | SparseRasterSnapshot
 
 
 def normalize_coverage_array(array: np.ndarray | None) -> np.ndarray:
@@ -167,14 +194,20 @@ class CoverageSurface:
     ) -> None:
         """Initialize normalized pixels and their zero-copy Qt view."""
         self._lock = threading.RLock()
-        self._buffer = normalize_coverage_array(buffer)
-        self._bounds = self._normalized_bounds(bounds, self._buffer)
+        pixels = normalize_coverage_array(buffer)
+        self._bounds = self._normalized_bounds(bounds, pixels)
         self._extent_policy = RasterExtentPolicy(extent_policy)
-        self._image = self._wrap_buffer(self._buffer)
+        self._grid = SparseRasterGrid(channels=1, tile_size=512)
+        if self._bounds is not None:
+            self._grid.replace(self._bounds, pixels)
+        self._buffer: np.ndarray | None = pixels
+        self._image: QImage | None = self._wrap_buffer(pixels)
         self._snapshot_cache: QImage | None = None
         self._snapshot_generation = -1
         self.generation = 0
         self.structure_generation = 0
+        self._content_bounds_generation = -1
+        self._content_bounds_cache: RasterBounds | None = None
 
     @classmethod
     def from_qimage(cls, image: QImage) -> CoverageSurface:
@@ -196,9 +229,19 @@ class CoverageSurface:
             return cls()
         return cls(np.zeros((size.height(), size.width()), dtype=np.uint8))
 
+    @classmethod
+    def from_sparse_snapshot(cls, snapshot: SparseRasterSnapshot) -> CoverageSurface:
+        """Build a surface without materializing a sparse snapshot's envelope."""
+        surface = cls()
+        surface.replace_with_sparse_snapshot(snapshot)
+        surface.generation = 0
+        surface.structure_generation = 0
+        return surface
+
     def is_null(self) -> bool:
         """Return whether the surface has no pixels."""
-        return self._buffer.size == 0
+        with self._lock:
+            return self._bounds is None
 
     @property
     def bounds(self) -> RasterBounds | None:
@@ -211,6 +254,12 @@ class CoverageSurface:
         """Return the policy controlling out-of-bounds writes."""
         with self._lock:
             return self._extent_policy
+
+    @property
+    def allocated_bytes(self) -> int:
+        """Return authoritative sparse bytes excluding derived dense products."""
+        with self._lock:
+            return self._grid.allocated_bytes
 
     def set_extent_policy(self, policy: RasterExtentPolicy) -> bool:
         """Replace write-extent policy without changing pixels or bounds."""
@@ -228,8 +277,46 @@ class CoverageSurface:
             return CoverageSnapshot(
                 bounds=self._bounds,
                 extent_policy=self._extent_policy,
-                pixels=self._buffer,
+                pixels=self._dense_locked(),
             )
+
+    def sparse_snapshot(self) -> SparseRasterSnapshot:
+        """Return detached sparse state without materializing transparent gaps."""
+        with self._lock:
+            return self._grid.snapshot(self._bounds, self._extent_policy)
+
+    def state_snapshot(self) -> SparseRasterSnapshot:
+        """Return the sparse structural state used by history and persistence."""
+        return self.sparse_snapshot()
+
+    def replace_with_sparse_snapshot(self, snapshot: SparseRasterSnapshot) -> None:
+        """Replace complete storage from one single-channel sparse snapshot."""
+        if snapshot.channels != 1:
+            raise ValueError("coverage snapshots require one channel")
+        with self._lock:
+            self._grid.restore(snapshot)
+            self._bounds = snapshot.bounds
+            self._extent_policy = snapshot.extent_policy
+            self._buffer = None
+            self._image = None
+            self._mark_changed(structure=True)
+
+    def replace_with_state_snapshot(self, snapshot: CoverageStateSnapshot) -> None:
+        """Restore either current sparse state or a legacy dense state."""
+        if isinstance(snapshot, SparseRasterSnapshot):
+            self.replace_with_sparse_snapshot(snapshot)
+        else:
+            self.replace_with_snapshot(snapshot)
+
+    def content_bounds(self) -> RasterBounds | None:
+        """Return revision-cached bounds of nonzero coverage."""
+        with self._lock:
+            if self._content_bounds_generation == self.generation:
+                return self._content_bounds_cache
+            bounds = None if self._bounds is None else self._grid.content_bounds()
+            self._content_bounds_cache = bounds
+            self._content_bounds_generation = self.generation
+            return bounds
 
     def versioned_snapshot(self) -> tuple[int, int, CoverageSnapshot]:
         """Return content/structure revisions with one atomic detached snapshot."""
@@ -240,8 +327,19 @@ class CoverageSurface:
                 CoverageSnapshot(
                     bounds=self._bounds,
                     extent_policy=self._extent_policy,
-                    pixels=self._buffer,
+                    pixels=self._dense_locked(),
                 ),
+            )
+
+    def versioned_state_snapshot(
+        self,
+    ) -> tuple[int, int, SparseRasterSnapshot]:
+        """Return revisions with sparse structural state from one instant."""
+        with self._lock:
+            return (
+                self.generation,
+                self.structure_generation,
+                self._grid.snapshot(self._bounds, self._extent_policy),
             )
 
     def revisions(self) -> tuple[int, int]:
@@ -258,14 +356,14 @@ class CoverageSurface:
                 self._snapshot_cache is None
                 or self._snapshot_generation != self.generation
             ):
-                self._snapshot_cache = self._image.copy()
+                self._snapshot_cache = self._image_locked().copy()
                 self._snapshot_generation = self.generation
             return self._snapshot_cache.copy()
 
     def snapshot_array(self) -> np.ndarray:
         """Return a detached NumPy snapshot."""
         with self._lock:
-            return np.array(self._buffer, copy=True)
+            return np.array(self._dense_locked(), copy=True)
 
     def snapshot_storage_region(
         self,
@@ -278,27 +376,66 @@ class CoverageSurface:
             raise TypeError("region must be RasterBounds")
         normalized_stride = max(1, int(stride))
         with self._lock:
-            if self._buffer.size == 0:
+            bounds = self._bounds
+            if bounds is None:
                 raise ValueError("cannot snapshot a null mask surface")
-            storage = RasterBounds(0, 0, self._buffer.shape[1], self._buffer.shape[0])
+            storage = RasterBounds(0, 0, bounds.width, bounds.height)
             if not storage.contains(region):
                 raise ValueError("storage region must lie within the mask surface")
+            local = RasterBounds(
+                bounds.x + region.x,
+                bounds.y + region.y,
+                region.width,
+                region.height,
+            )
             return np.array(
-                self._buffer[
-                    region.y : region.y + region.height : normalized_stride,
-                    region.x : region.x + region.width : normalized_stride,
-                ],
+                self._grid.read_strided(local, normalized_stride),
                 copy=True,
                 order="C",
             )
 
+    def capture_region(self, region: RasterBounds) -> np.ndarray:
+        """Return a zero-padded detached layer-local coverage region."""
+        if not isinstance(region, RasterBounds):
+            raise TypeError("region must be RasterBounds")
+        with self._lock:
+            return self._grid.read(region)
+
+    def sparse_tiles(self, visible: RasterBounds) -> tuple[SparseRasterTile, ...]:
+        """Return allocated coverage tiles intersecting visible logical storage."""
+        if not isinstance(visible, RasterBounds):
+            raise TypeError("visible must be RasterBounds")
+        with self._lock:
+            logical = (
+                None if self._bounds is None else self._bounds.intersection(visible)
+            )
+            return () if logical is None else self._grid.tiles(logical)
+
+    def sparse_tile_count(self, visible: RasterBounds) -> int:
+        """Return visible allocated tile count without detaching tile pixels."""
+        if not isinstance(visible, RasterBounds):
+            raise TypeError("visible must be RasterBounds")
+        with self._lock:
+            logical = (
+                None if self._bounds is None else self._bounds.intersection(visible)
+            )
+            return 0 if logical is None else self._grid.count_tiles(logical)
+
     def storage_value(self, x: int, y: int) -> int:
         """Return one storage-coordinate value, or zero outside the surface."""
         with self._lock:
-            height, width = self._buffer.shape
-            if x < 0 or y < 0 or x >= width or y >= height:
+            bounds = self._bounds
+            if (
+                bounds is None
+                or x < 0
+                or y < 0
+                or x >= bounds.width
+                or y >= bounds.height
+            ):
                 return 0
-            return int(self._buffer[y, x])
+            return int(
+                self._grid.read(RasterBounds(bounds.x + x, bounds.y + y, 1, 1))[0, 0]
+            )
 
     def replace_with_array(self, array: np.ndarray) -> None:
         """Replace authoritative pixels and advance content revision."""
@@ -307,7 +444,6 @@ class CoverageSurface:
             previous_bounds = self._bounds
             origin_x = 0 if self._bounds is None else self._bounds.x
             origin_y = 0 if self._bounds is None else self._bounds.y
-            self._buffer = pixels
             self._bounds = (
                 None
                 if pixels.size == 0
@@ -318,7 +454,11 @@ class CoverageSurface:
                     pixels.shape[0],
                 )
             )
-            self._image = self._wrap_buffer(self._buffer)
+            self._grid.clear()
+            if self._bounds is not None:
+                self._grid.replace(self._bounds, pixels)
+            self._buffer = pixels
+            self._image = self._wrap_buffer(pixels)
             self._mark_changed(structure=self._bounds != previous_bounds)
 
     def replace_with_snapshot(self, snapshot: CoverageSnapshot) -> None:
@@ -327,6 +467,9 @@ class CoverageSurface:
             self._buffer = np.array(snapshot.pixels, copy=True, order="C")
             self._bounds = snapshot.bounds
             self._extent_policy = snapshot.extent_policy
+            self._grid.clear()
+            if self._bounds is not None:
+                self._grid.replace(self._bounds, self._buffer)
             self._image = self._wrap_buffer(self._buffer)
             self._mark_changed(structure=True)
 
@@ -346,7 +489,38 @@ class CoverageSurface:
     def mutate(self, mutator: Callable[[np.ndarray, QImage], None]) -> None:
         """Run one controlled in-place mutation and advance revision."""
         with self._lock:
-            mutator(self._buffer, self._image)
+            buffer = self._dense_locked()
+            image = self._image_locked()
+            mutator(buffer, image)
+            if self._bounds is not None:
+                self._grid.replace(self._bounds, buffer)
+            self._mark_changed()
+
+    def mutate_storage_region(
+        self,
+        region: RasterBounds,
+        mutator: Callable[[np.ndarray, QImage], None],
+    ) -> None:
+        """Mutate one zero-origin storage patch without materializing its envelope."""
+        with self._lock:
+            bounds = self._bounds
+            if bounds is None:
+                raise ValueError("cannot mutate a null coverage surface")
+            storage = RasterBounds(0, 0, bounds.width, bounds.height)
+            if not storage.contains(region):
+                raise ValueError("storage region must lie within the coverage surface")
+            local = RasterBounds(
+                bounds.x + region.x,
+                bounds.y + region.y,
+                region.width,
+                region.height,
+            )
+            pixels = self._grid.read(local)
+            image = self._wrap_buffer(pixels)
+            mutator(pixels, image)
+            self._grid.write(local, pixels)
+            self._buffer = None
+            self._image = None
             self._mark_changed()
 
     def fill(self, value: int) -> None:
@@ -379,7 +553,9 @@ class CoverageSurface:
             if before is None:
                 if self._extent_policy is RasterExtentPolicy.FIXED:
                     return WritableCoverageRegion(requested, None, None, None)
-                self._reframe_locked(requested)
+                self._bounds = requested
+                self._buffer = None
+                self._image = None
                 self._mark_changed(structure=True)
                 return WritableCoverageRegion(requested, requested, None, self._bounds)
             if self._extent_policy is RasterExtentPolicy.FIXED:
@@ -391,31 +567,30 @@ class CoverageSurface:
                 )
             if before.contains(requested):
                 return WritableCoverageRegion(requested, requested, before, before)
-            self._reframe_locked(before.united(requested))
+            self._bounds = before.united(requested)
+            self._buffer = None
+            self._image = None
             self._mark_changed(structure=True)
             return WritableCoverageRegion(requested, requested, before, self._bounds)
 
     def expand_with_snapshot(
         self,
         requested: RasterBounds,
-    ) -> tuple[WritableCoverageRegion, CoverageSnapshot | None]:
-        """Expand storage while adopting the detached prior buffer for history."""
+    ) -> tuple[WritableCoverageRegion, SparseRasterSnapshot | None]:
+        """Expand logical storage while retaining sparse prior state for history."""
         if not isinstance(requested, RasterBounds):
             raise TypeError("requested must be RasterBounds")
         with self._lock:
             before = self._bounds
-            if self._extent_policy is not RasterExtentPolicy.EXPAND_ON_WRITE or (
+            if self._extent_policy is RasterExtentPolicy.FIXED or (
                 before is not None and before.contains(requested)
             ):
                 return self.ensure_writable(requested), None
-            old_buffer = self._buffer
-            snapshot = CoverageSnapshot._adopt_detached(
-                before,
-                self._extent_policy,
-                old_buffer,
-            )
+            snapshot = self._grid.snapshot(before, self._extent_policy)
             target = requested if before is None else before.united(requested)
-            self._reframe_locked(target)
+            self._bounds = target
+            self._buffer = None
+            self._image = None
             self._mark_changed(structure=True)
             return (
                 WritableCoverageRegion(requested, requested, before, self._bounds),
@@ -448,25 +623,32 @@ class CoverageSurface:
 
     def _reframe_locked(self, bounds: RasterBounds) -> None:
         """Replace storage bounds under lock while retaining their intersection."""
-        replacement = np.zeros((bounds.height, bounds.width), dtype=np.uint8)
-        current = self._bounds
-        if current is not None:
-            overlap = current.intersection(bounds)
-            if overlap is not None:
-                source_y = overlap.y - current.y
-                source_x = overlap.x - current.x
-                target_y = overlap.y - bounds.y
-                target_x = overlap.x - bounds.x
-                replacement[
-                    target_y : target_y + overlap.height,
-                    target_x : target_x + overlap.width,
-                ] = self._buffer[
-                    source_y : source_y + overlap.height,
-                    source_x : source_x + overlap.width,
-                ]
-        self._buffer = replacement
+        self._grid.crop(bounds)
         self._bounds = bounds
-        self._image = self._wrap_buffer(self._buffer)
+        self._buffer = None
+        self._image = None
+
+    def _dense_locked(self) -> np.ndarray:
+        """Materialize and retain the current logical envelope on demand."""
+        buffer = self._buffer
+        bounds = self._bounds
+        if buffer is None:
+            buffer = (
+                np.zeros((0, 0), dtype=np.uint8)
+                if bounds is None
+                else self._grid.read(bounds)
+            )
+            self._buffer = buffer
+            self._image = self._wrap_buffer(buffer)
+        return buffer
+
+    def _image_locked(self) -> QImage:
+        """Return the QImage view for the current dense materialization."""
+        image = self._image
+        if image is None:
+            self._dense_locked()
+            image = self._image
+        return QImage() if image is None else image
 
     @staticmethod
     def _normalized_bounds(

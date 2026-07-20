@@ -84,7 +84,7 @@ def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
             layer for layer in scene.layers if layer.source_kind == "catalog-image"
         ]
         assert base_layers
-        assert all(not layer.interaction.selectable for layer in base_layers)
+        assert all(layer.interaction.selectable for layer in base_layers)
         assert all(not layer.interaction.movable for layer in base_layers)
         mask_policies = {
             mask.mask_id: mask.interaction for mask in window.qpane.listMasksForImage()

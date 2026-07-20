@@ -19,12 +19,25 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
 
 from .layer_selection import SceneLayerSelection
-from .movement import SceneLayerMovementController
 from .render_plan import SceneLayerHitTestResult
+from .transform_session import SceneLayerTransformController
+
+
+@dataclass(frozen=True, slots=True)
+class LayerMoveCandidate:
+    """Carry one hit-tested layer and its exact scene-space pointer point."""
+
+    hit: SceneLayerHitTestResult
+    scene_point: QPointF
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt geometry at the adapter boundary."""
+        object.__setattr__(self, "scene_point", QPointF(self.scene_point))
 
 
 class SceneLayerMovementInteraction:
@@ -33,7 +46,7 @@ class SceneLayerMovementInteraction:
     def __init__(
         self,
         *,
-        movement: SceneLayerMovementController,
+        movement: SceneLayerTransformController,
         hit_test: Callable[[QPointF], SceneLayerHitTestResult | None],
         panel_to_scene: Callable[[QPointF], QPointF | None],
         publish_change: Callable[[], None],
@@ -52,14 +65,22 @@ class SceneLayerMovementInteraction:
         """Return the move target currently under the pointer."""
         return self._hovered
 
-    def update_hover(self, panel_point: QPointF) -> bool:
-        """Resolve a movable hover target without changing layer selection."""
+    def candidate_at(self, panel_point: QPointF) -> LayerMoveCandidate | None:
+        """Hit-test one pointer without deciding editor operation policy."""
         hit = self._hit_test(panel_point)
-        hovered = (
-            None
-            if hit is None or not self._movement.can_move(hit)
-            else SceneLayerSelection(hit.scene_id, hit.layer_id)
-        )
+        scene_point = self._panel_to_scene(panel_point)
+        if hit is None or scene_point is None:
+            return None
+        return LayerMoveCandidate(hit, scene_point)
+
+    def set_hover(self, candidate: LayerMoveCandidate | None) -> bool:
+        """Publish the resolver-approved layer hover target."""
+        hovered = None
+        if candidate is not None:
+            hovered = SceneLayerSelection(
+                candidate.hit.scene_id,
+                candidate.hit.layer_id,
+            )
         if hovered == self._hovered:
             return False
         self._hovered = hovered
@@ -74,16 +95,10 @@ class SceneLayerMovementInteraction:
         self._refresh_preview()
         return True
 
-    def begin(self, panel_point: QPointF) -> bool:
-        """Begin movement for the top selectable covered scene layer."""
+    def begin(self, candidate: LayerMoveCandidate) -> bool:
+        """Begin movement for one resolver-approved hit candidate."""
         self.clear_hover()
-        hit = self._hit_test(panel_point)
-        scene_point = self._panel_to_scene(panel_point)
-        if hit is None or scene_point is None:
-            self._movement.clear_selection()
-            self._movement.cancel()
-            return False
-        return self._movement.begin(hit, scene_point)
+        return self._movement.begin_move(candidate.hit, candidate.scene_point)
 
     def update(self, panel_point: QPointF) -> bool:
         """Update transient placement from panel coordinates."""
@@ -98,7 +113,7 @@ class SceneLayerMovementInteraction:
         scene_point = self._panel_to_scene(panel_point)
         if scene_point is None:
             return self.cancel()
-        result = self._movement.finish(scene_point)
+        result = self._movement.finish_move(scene_point)
         if result is not None and result.changed:
             self._publish_change()
             return True
@@ -111,6 +126,10 @@ class SceneLayerMovementInteraction:
         if changed:
             self._refresh_preview()
         return changed
+
+    def suspend(self) -> bool:
+        """Preserve unresolved geometry while a temporary tool owns input."""
+        return self._movement.suspend()
 
     def nudge(self, delta_x: int, delta_y: int) -> bool:
         """Commit one keyboard movement for the selected movable layer."""

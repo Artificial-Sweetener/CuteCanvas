@@ -17,6 +17,25 @@ import numpy as np
 from .raster import RasterBounds
 
 
+def raster_edit_patch_bounds(
+    source_bounds: RasterBounds,
+    destination_bounds: RasterBounds,
+    surface_bounds: RasterBounds,
+    *,
+    sampling_bleed: int = 4,
+) -> RasterBounds | None:
+    """Return one edit patch including the pixels needed by filtered presentation."""
+    changed = source_bounds.united(destination_bounds)
+    bleed = max(0, int(sampling_bleed))
+    candidate = RasterBounds(
+        changed.x - bleed,
+        changed.y - bleed,
+        changed.width + bleed * 2,
+        changed.height + bleed * 2,
+    )
+    return candidate.intersection(surface_bounds)
+
+
 @dataclass(frozen=True, slots=True)
 class RasterPixelTransition:
     """Capture the minimum pixels and surface bounds needed for exact replay."""

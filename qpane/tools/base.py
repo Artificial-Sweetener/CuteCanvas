@@ -32,6 +32,7 @@ from PySide6.QtWidgets import QApplication
 
 from .dependencies import ToolDependencies
 from .input.profile import ToolInputProfile
+from .ports import CursorInteractionPort, NavigationInteractionPort
 
 
 def _viewport_zoom_mode():
@@ -173,12 +174,10 @@ class CursorTool(BaseTool):
         self._is_image_null = lambda: True
         self._drag_start_pos: QPoint | None = None
 
-    def activate(self, dependencies: ToolDependencies) -> None:
+    def activate(self, dependencies: CursorInteractionPort) -> None:
         """Capture drag-out guards while staying otherwise inert."""
-        self._is_drag_out_allowed = dependencies.get(
-            "is_drag_out_allowed", lambda: False
-        )
-        self._is_image_null = dependencies.get("is_image_null", lambda: True)
+        self._is_drag_out_allowed = dependencies.is_drag_out_allowed
+        self._is_image_null = dependencies.is_image_null
 
     def deactivate(self):
         """Clear cached drag-out state."""
@@ -244,7 +243,7 @@ class PanZoomTool(BaseTool):
         self._set_zoom_one_to_one_interpolated = None
         self._get_dpr = lambda: 1.0
 
-    def activate(self, dependencies: ToolDependencies) -> None:
+    def activate(self, dependencies: NavigationInteractionPort) -> None:
         """Wire viewport pan and zoom hooks supplied by the host.
 
         Args:
@@ -253,28 +252,24 @@ class PanZoomTool(BaseTool):
                 back to safe defaults that keep interactions disabled when
                 content is absent.
         """
-        self._is_pan_zoom_locked = dependencies.get("is_pan_zoom_locked", lambda: True)
-        self._is_image_null = dependencies.get("is_image_null", lambda: True)
-        self._is_drag_out_allowed = dependencies.get(
-            "is_drag_out_allowed", lambda: False
+        self._is_pan_zoom_locked = dependencies.is_pan_zoom_locked
+        self._is_image_null = dependencies.is_image_null
+        self._is_drag_out_allowed = dependencies.is_drag_out_allowed
+        self._can_pan = dependencies.can_pan
+        self._get_pan = dependencies.get_pan
+        self._get_zoom = dependencies.get_zoom
+        self._get_native_zoom = dependencies.get_native_zoom
+        self._get_fit_zoom = dependencies.get_fit_zoom
+        self._get_zoom_mode = dependencies.get_zoom_mode or (
+            lambda: _viewport_zoom_mode().FIT
         )
-        self._can_pan = dependencies.get("can_pan", lambda: False)
-        self._get_pan = dependencies.get("get_pan", lambda: QPointF(0, 0))
-        self._get_zoom = dependencies.get("get_zoom", lambda: 1.0)
-        self._get_native_zoom = dependencies.get("get_native_zoom", lambda: 1.0)
-        self._get_fit_zoom = dependencies.get("get_fit_zoom", lambda: 1.0)
-        self._get_zoom_mode = dependencies.get(
-            "get_zoom_mode", lambda: _viewport_zoom_mode().FIT
+        self._set_zoom_fit = dependencies.set_zoom_fit
+        self._set_zoom_fit_interpolated = dependencies.set_zoom_fit_interpolated
+        self._set_zoom_one_to_one = dependencies.set_zoom_one_to_one
+        self._set_zoom_one_to_one_interpolated = (
+            dependencies.set_zoom_one_to_one_interpolated
         )
-        self._set_zoom_fit = dependencies.get("set_zoom_fit", lambda: None)
-        self._set_zoom_fit_interpolated = dependencies.get("set_zoom_fit_interpolated")
-        self._set_zoom_one_to_one = dependencies.get(
-            "set_zoom_one_to_one", lambda anchor=None: None
-        )
-        self._set_zoom_one_to_one_interpolated = dependencies.get(
-            "set_zoom_one_to_one_interpolated"
-        )
-        self._get_dpr = dependencies.get("get_dpr", lambda: 1.0)
+        self._get_dpr = dependencies.get_dpr
 
     def deactivate(self):
         """Reset captured hooks to defaults to avoid stale references."""

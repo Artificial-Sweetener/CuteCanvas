@@ -16,31 +16,67 @@ import numpy as np
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage
 
-from ..coverage import CoverageSnapshot
-from ..scene.identity import SceneLayerAssetKey
 from ..scene.pixel_fragments import RasterPixelFormat
-from ..scene.sources import EditableRasterSource, LayerSource
+from ..scene.raster import RasterBounds
+from ..scene.source_capabilities import (
+    RasterPresentation,
+    RasterProductPolicy,
+    RasterSourcePatch,
+)
+from ..scene.source_references import LayerSourceReference
 from .assets import EditableRasterAssetStore
-from .image_conversion import numpy_to_qimage_argb32
+from .image_conversion import numpy_to_qimage_argb32, numpy_to_qimage_argb32_at_size
+from .presentation_state import EditableRasterPresentationState
+from .source_reference import EditableRasterReference
+
+_MAX_VISIBLE_PATCH_PRODUCTS = 4
+_MAX_DENSE_SAMPLE_DIMENSION = 32_768
 
 
-class EditableRasterSourceResolver:
-    """Resolve full-resolution pixels from editable raster assets."""
+class EditableRasterSourceCapabilities:
+    """Adapt editable-raster authority to focused source capabilities."""
 
-    def __init__(self, assets: EditableRasterAssetStore) -> None:
+    def __init__(
+        self,
+        assets: EditableRasterAssetStore,
+        presentation_state: EditableRasterPresentationState,
+    ) -> None:
         """Bind the authoritative asset store."""
         self._assets = assets
+        self._presentation_state = presentation_state
 
-    def supports_source(self, source: LayerSource) -> bool:
-        """Return whether ``source`` references an editable color raster."""
-        return isinstance(source, EditableRasterSource)
+    @property
+    def presentation(self) -> RasterPresentation:
+        """Return ordinary image-raster presentation."""
+        return RasterPresentation.IMAGE
 
-    def source_image(self, source: LayerSource) -> QImage | None:
-        """Return detached full-resolution color pixels."""
+    def product_policy(self, source: LayerSourceReference) -> RasterProductPolicy:
+        """Return the stable shared-product policy for editable pixels."""
+        return (
+            RasterProductPolicy.VOLATILE
+            if isinstance(source, EditableRasterReference)
+            and self._presentation_state.is_live(source.raster_id)
+            else RasterProductPolicy.CACHEABLE
+        )
+
+    def source_image(
+        self,
+        source: LayerSourceReference,
+        *,
+        scale: float | None = None,
+    ) -> QImage | None:
+        """Return a dense small source or a sparse display sample."""
         asset = self._asset(source)
-        return None if asset is None else asset.surface.snapshot_qimage()
+        if asset is None:
+            return None
+        if scale is not None:
+            return asset.surface.sampled_qimage(scale)
+        bounds = asset.surface.bounds
+        if asset.surface.sparse_tile_count(bounds) > _MAX_VISIBLE_PATCH_PRODUCTS:
+            return None
+        return asset.surface.presentation_qimage()
 
-    def source_size(self, source: LayerSource) -> QSize | None:
+    def source_size(self, source: LayerSourceReference) -> QSize | None:
         """Return authoritative storage dimensions."""
         asset = self._asset(source)
         if asset is None:
@@ -48,53 +84,70 @@ class EditableRasterSourceResolver:
         bounds = asset.surface.bounds
         return QSize(bounds.width, bounds.height)
 
-    def source_path(self, source: LayerSource) -> Path | None:
+    def source_path(self, source: LayerSourceReference) -> Path | None:
         """Return no path because editable assets are composition memory."""
         return None
 
-    def best_fit_image(
+    def source_patches(
         self,
-        source: LayerSource,
-        *,
-        asset_key: SceneLayerAssetKey,
-        pyramid_asset_key: SceneLayerAssetKey,
-        source_size: QSize,
-        target_width: float,
-    ) -> QImage | None:
-        """Return authoritative pixels for normal render planning."""
-        return self.source_image(source)
+        source: LayerSourceReference,
+        visible_bounds: RasterBounds,
+    ) -> tuple[RasterSourcePatch, ...] | None:
+        """Return sparse editable products without transparent-gap allocation."""
+        asset = self._asset(source)
+        if asset is None:
+            return ()
+        surface_bounds = asset.surface.bounds
+        if (
+            max(surface_bounds.width, surface_bounds.height)
+            <= _MAX_DENSE_SAMPLE_DIMENSION
+            and asset.surface.sparse_tile_count(visible_bounds)
+            > _MAX_VISIBLE_PATCH_PRODUCTS
+        ):
+            return None
+        return tuple(
+            RasterSourcePatch(bounds, image, sample_bounds)
+            for bounds, sample_bounds, image in asset.surface.presentation_tiles(
+                visible_bounds
+            )
+        )
 
-    def selection_contains(self, source: LayerSource, point: QPointF) -> bool:
+    def contains(self, source: LayerSourceReference, point: QPointF) -> bool:
         """Hit test editable rasters by source alpha."""
-        image = self.source_image(source)
+        asset = self._asset(source)
+        if asset is None:
+            return False
         x = int(point.x())
         y = int(point.y())
-        if image is None or x < 0 or y < 0 or x >= image.width() or y >= image.height():
+        sample = RasterBounds(x, y, 1, 1)
+        if not asset.surface.bounds.contains(sample):
             return False
-        return image.pixelColor(x, y).alpha() > 0
-
-    def coverage_snapshot(self, source: LayerSource) -> CoverageSnapshot | None:
-        """Return no selection coverage because this is a color source."""
-        return None
+        occupancy = asset.surface.capture_alpha_occupancy(sample)
+        return bool(occupancy is not None and occupancy[0, 0] != 0)
 
     def present_pixels(
         self,
-        source: LayerSource,
+        source: LayerSourceReference,
         pixel_format: RasterPixelFormat,
         pixels: np.ndarray,
+        target_size: QSize | None = None,
     ) -> QImage | None:
         """Adapt canonical premultiplied pixels into a detached Qt image."""
         if (
-            not isinstance(source, EditableRasterSource)
+            not isinstance(source, EditableRasterReference)
             or pixel_format is not RasterPixelFormat.PREMULTIPLIED_ARGB32
         ):
             return None
-        return numpy_to_qimage_argb32(pixels)
+        return (
+            numpy_to_qimage_argb32(pixels)
+            if target_size is None
+            else numpy_to_qimage_argb32_at_size(pixels, target_size)
+        )
 
-    def _asset(self, source: LayerSource):
+    def _asset(self, source: LayerSourceReference):
         """Resolve an editable asset from a typed layer source."""
         return (
             None
-            if not isinstance(source, EditableRasterSource)
+            if not isinstance(source, EditableRasterReference)
             else self._assets.get(source.raster_id)
         )

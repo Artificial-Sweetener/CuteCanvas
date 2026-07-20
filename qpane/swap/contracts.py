@@ -31,7 +31,7 @@ from typing import Protocol, runtime_checkable
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QImage
 
-from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey
+from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey, SourceRenderAssetKey
 
 
 @runtime_checkable
@@ -63,7 +63,7 @@ class TilePrefetchManager(Protocol):
         ...
 
     def remove_tiles_for_source_asset(
-        self, pyramid_asset_key: SceneLayerAssetKey
+        self, pyramid_asset_key: SourceRenderAssetKey
     ) -> None:
         """Drop cached tiles and inflight work for ``pyramid_asset_key``."""
         ...
@@ -83,7 +83,7 @@ class PyramidPrefetchManager(Protocol):
 
     def prefetch_pyramid(
         self,
-        asset_key: SceneLayerAssetKey,
+        asset_key: SourceRenderAssetKey,
         image: QImage,
         *,
         reason: str = "prefetch",
@@ -92,8 +92,8 @@ class PyramidPrefetchManager(Protocol):
         ...
 
     def cancel_prefetch(
-        self, asset_keys: Sequence[SceneLayerAssetKey], *, reason: str = "navigation"
-    ) -> Sequence[SceneLayerAssetKey]:
+        self, asset_keys: Sequence[SourceRenderAssetKey], *, reason: str = "navigation"
+    ) -> Sequence[SourceRenderAssetKey]:
         """Cancel pyramid prefetch for ``asset_keys`` and return cancelled keys."""
         ...
 

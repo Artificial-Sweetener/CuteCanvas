@@ -35,8 +35,9 @@ from ..core.config_features import SamConfigSlice, require_sam_config
 from ..features import FeatureInstallError
 from ..rendering import Viewport
 from ..scene.identity import (
-    SceneLayerAssetKey,
     SceneLayerTileKey,
+    SourceRenderAssetKey,
+    catalog_source_asset_key,
     default_catalog_asset_key,
 )
 from .contracts import (
@@ -77,6 +78,7 @@ class SwapCoordinator:
         catalog: ImageCatalog,
         viewport: Viewport,
         tile_manager: TilePrefetchManager,
+        pyramid_manager: PyramidPrefetchManager,
         prefetch_settings: PrefetchSettings | None = None,
         scene_prefetchers: Sequence[SceneSourcePrefetcher] = (),
         sam_manager: SamPredictorManager | None = None,
@@ -88,6 +90,7 @@ class SwapCoordinator:
             catalog: Catalog storing image data and metadata.
             viewport: Viewport supplying view state for prefetch sizing.
             tile_manager: Tile manager notified about prefetch and cancellation.
+            pyramid_manager: Rendering-owned pyramid service used for prefetch.
             prefetch_settings: Optional overrides for pyramid/tile/mask/predictor depth.
             scene_prefetchers: Feature-owned scene source warming collaborators.
             sam_manager: Optional SAM manager used to warm predictors alongside swaps.
@@ -102,13 +105,16 @@ class SwapCoordinator:
         if not isinstance(tile_manager, TilePrefetchManager):
             raise TypeError("tile_manager must implement TilePrefetchManager")
         self._tile_manager: TilePrefetchManager = tile_manager
+        if not isinstance(pyramid_manager, PyramidPrefetchManager):
+            raise TypeError("pyramid_manager must implement PyramidPrefetchManager")
+        self._pyramid_manager = pyramid_manager
         self._scene_prefetchers: list[SceneSourcePrefetcher] = []
         self._sam_manager: SamPredictorManager | None = None
         self._navigation_history: deque[uuid.UUID] = deque(maxlen=16)
         self._pending_mask_prefetch_ids: set[uuid.UUID] = set()
         self._pending_predictor_ids: set[uuid.UUID] = set()
-        self._pending_pyramid_ids: set[SceneLayerAssetKey] = set()
-        self._pyramid_prefetch_recent: dict[SceneLayerAssetKey, float] = {}
+        self._pending_pyramid_ids: set[SourceRenderAssetKey] = set()
+        self._pyramid_prefetch_recent: dict[SourceRenderAssetKey, float] = {}
         self._pending_tile_prefetch_ids: set[SceneLayerTileKey] = set()
         self._navigation_inflight_start_ns: int | None = None
         self._last_navigation_duration_ms: float | None = None
@@ -121,15 +127,6 @@ class SwapCoordinator:
         self._diagnostics_missing_logged = False
         self._apply_prefetch_settings(prefetch_settings or PrefetchSettings())
         self._tile_manager.tileReady.connect(self._on_tile_ready)
-        try:
-            pyramid_manager = catalog.pyramid_manager
-        except AttributeError as exc:  # pragma: no cover - defensive guard
-            raise AttributeError("Catalog must expose pyramid_manager") from exc
-        if not isinstance(pyramid_manager, PyramidPrefetchManager):
-            raise TypeError(
-                "catalog.pyramid_manager must implement PyramidPrefetchManager"
-            )
-        self._pyramid_manager: PyramidPrefetchManager = pyramid_manager
         self._pyramid_manager.pyramidReady.connect(self._on_pyramid_ready)
         for prefetcher in scene_prefetchers:
             self.on_scene_prefetcher_attached(prefetcher)
@@ -451,7 +448,7 @@ class SwapCoordinator:
         self._pending_tile_prefetch_ids.discard(key)
         self._mark_diagnostics_dirty()
 
-    def _on_pyramid_ready(self, asset_key: SceneLayerAssetKey) -> None:
+    def _on_pyramid_ready(self, asset_key: SourceRenderAssetKey) -> None:
         """Stop tracking pyramid prefetches once they are ready."""
         self._pending_pyramid_ids.discard(asset_key)
         self._mark_diagnostics_dirty()
@@ -557,7 +554,7 @@ class SwapCoordinator:
         self._mark_diagnostics_dirty()
 
     def _cancel_pyramid_prefetches(
-        self, *, reason: str, skip: Collection[SceneLayerAssetKey] | None = None
+        self, *, reason: str, skip: Collection[SourceRenderAssetKey] | None = None
     ) -> None:
         """Cancel tracked pyramid prefetches except those in ``skip``."""
         manager = self._pyramid_manager
@@ -579,7 +576,7 @@ class SwapCoordinator:
         self._mark_diagnostics_dirty()
 
     def _cancel_tile_prefetches(
-        self, *, reason: str, skip: Collection[SceneLayerAssetKey] | None = None
+        self, *, reason: str, skip: Collection[SourceRenderAssetKey] | None = None
     ) -> None:
         """Cancel tile prefetch jobs whose asset keys are not in ``skip``."""
         manager = self._tile_manager
@@ -589,7 +586,7 @@ class SwapCoordinator:
         cancel_idents = [
             ident
             for ident in self._pending_tile_prefetch_ids
-            if ident.asset_key not in skip_keys
+            if ident.pyramid_asset_key not in skip_keys
         ]
         if cancel_idents:
             try:
@@ -605,7 +602,7 @@ class SwapCoordinator:
         self._pending_tile_prefetch_ids = {
             ident
             for ident in self._pending_tile_prefetch_ids
-            if ident.asset_key in skip_keys
+            if ident.pyramid_asset_key in skip_keys
         }
         self._mark_diagnostics_dirty()
 
@@ -663,9 +660,9 @@ class SwapCoordinator:
 
     def _asset_keys_for_image_ids(
         self, image_ids: Collection[uuid.UUID]
-    ) -> set[SceneLayerAssetKey]:
+    ) -> set[SourceRenderAssetKey]:
         """Return current default-scene asset keys for known catalog image IDs."""
-        asset_keys: set[SceneLayerAssetKey] = set()
+        asset_keys: set[SourceRenderAssetKey] = set()
         for image_id in image_ids:
             asset_key = self._asset_key_for_catalog_image(image_id)
             if asset_key is not None:
@@ -674,7 +671,7 @@ class SwapCoordinator:
 
     def _asset_key_for_catalog_image(
         self, image_id: uuid.UUID
-    ) -> SceneLayerAssetKey | None:
+    ) -> SourceRenderAssetKey | None:
         """Return the current default-scene asset key for a catalog image."""
         revision_getter = getattr(self._catalog, "getRevision", None)
         if not callable(revision_getter):
@@ -682,7 +679,7 @@ class SwapCoordinator:
         revision = revision_getter(image_id)
         if revision is None:
             return None
-        return default_catalog_asset_key(
+        return catalog_source_asset_key(
             image_id,
             revision=max(0, int(revision)),
             source_path=self._catalog.getPath(image_id),
@@ -881,8 +878,8 @@ class SwapCoordinator:
     ) -> tuple[QImage, list[SceneLayerTileKey]] | None:
         """Return a source image and centered tile identifiers for neighbor prefetching."""
         manager = self._tile_manager
-        asset_key = self._asset_key_for_catalog_image(image_id)
-        if asset_key is None:
+        source_key = self._asset_key_for_catalog_image(image_id)
+        if source_key is None:
             return None
         width = image.width()
         height = image.height()
@@ -893,7 +890,7 @@ class SwapCoordinator:
             return None
         zoom = self._viewport.zoom if self._viewport.zoom > 0 else 1.0
         target_width = width * zoom
-        source_image = self._catalog.getBestFitImageForAsset(asset_key, target_width)
+        source_image = self._catalog.getBestFitImageForAsset(source_key, target_width)
         if source_image is None or source_image.isNull():
             source_image = image
         if source_image.isNull():
@@ -926,8 +923,12 @@ class SwapCoordinator:
             if row < 0 or row >= rows or col < 0 or col >= cols:
                 continue
             ident = SceneLayerTileKey(
-                asset_key=asset_key,
-                pyramid_asset_key=asset_key,
+                asset_key=default_catalog_asset_key(
+                    image_id,
+                    revision=source_key.source_revision,
+                    source_path=source_key.source_path,
+                ),
+                pyramid_asset_key=source_key,
                 pyramid_scale=pyramid_scale,
                 row=row,
                 col=col,
@@ -937,8 +938,12 @@ class SwapCoordinator:
         if not identifiers:
             identifiers.append(
                 SceneLayerTileKey(
-                    asset_key=asset_key,
-                    pyramid_asset_key=asset_key,
+                    asset_key=default_catalog_asset_key(
+                        image_id,
+                        revision=source_key.source_revision,
+                        source_path=source_key.source_path,
+                    ),
+                    pyramid_asset_key=source_key,
                     pyramid_scale=pyramid_scale,
                     row=center_row,
                     col=center_col,

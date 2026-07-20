@@ -16,6 +16,7 @@
 
 import uuid
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -77,11 +78,16 @@ class ControlMode(str, Enum):
     CURSOR = "cursor"
     PANZOOM = "panzoom"
     MOVE = "move"
+    TRANSFORM = "transform"
     DRAW_BRUSH = "draw-brush"
     SMART_SELECT = "smart-select"
     SELECT_RECTANGLE = "select-rectangle"
     SELECT_ELLIPSE = "select-ellipse"
     SELECT_LASSO = "select-lasso"
+    VECTOR_SHAPE = "vector-shape"
+    VECTOR_PATH = "vector-path"
+    VECTOR_NODE = "vector-node"
+    VECTOR_TEXT = "vector-text"
 
 class ComparisonOrientation(str, Enum):
     VERTICAL = "vertical"
@@ -90,6 +96,21 @@ class ComparisonOrientation(str, Enum):
 class RasterExtentPolicy(str, Enum):
     FIXED = "fixed"
     EXPAND_ON_WRITE = "expand-on-write"
+    UNBOUNDED = "unbounded"
+
+class EditorCapability(str, Enum):
+    SELECT_PIXELS = "select-pixels"
+    EDIT_PIXELS = "edit-pixels"
+    PAINT = "paint"
+    MOVE_LAYERS = "move-layers"
+    TRANSFORM_LAYERS = "transform-layers"
+
+class EditorIntent(str, Enum):
+    SELECT_PIXELS = "select-pixels"
+    DELETE_PIXELS = "delete-pixels"
+    PAINT = "paint"
+    MOVE = "move"
+    TRANSFORM = "transform"
 
 class PixelSelectionMode(str, Enum):
     REPLACE = "replace"
@@ -97,9 +118,197 @@ class PixelSelectionMode(str, Enum):
     SUBTRACT = "subtract"
     INTERSECT = "intersect"
 
+class BrushOperation(str, Enum):
+    PAINT = "paint"
+    ERASE = "erase"
+
+@dataclass(frozen=True, slots=True)
+class BrushDynamics:
+    pressure_size: float = ...
+    pressure_opacity: float = ...
+    minimum_pressure_ratio: float = ...
+    pressure_gamma: float = ...
+    position_jitter: float = ...
+    size_jitter: float = ...
+    angle_jitter: float = ...
+    rotation_angle: float = ...
+    tilt_angle: float = ...
+    tangential_opacity: float = ...
+
+@dataclass(frozen=True, slots=True)
+class BrushPreset:
+    name: str = ...
+    size: float = ...
+    hardness: float = ...
+    opacity: float = ...
+    flow: float = ...
+    spacing: float = ...
+    smoothing: float = ...
+    angle: float = ...
+    texture_strength: float = ...
+    texture_scale: float = ...
+    texture_seed: int = ...
+    dynamics: BrushDynamics = ...
+
+class PaintTargetKind(str, Enum):
+    LAYER = "layer"
+    PIXEL_SELECTION = "pixel-selection"
+
 class FloatingPixelMode(str, Enum):
     CUT = "cut"
     COPY = "copy"
+
+class PlacedAssetMode(str, Enum):
+    EMBEDDED = "embedded"
+    LINKED = "linked"
+
+class PlacedAssetStatus(str, Enum):
+    READY = "ready"
+    LOADING = "loading"
+    MISSING = "missing"
+    ERROR = "error"
+
+class VectorObjectKind(str, Enum):
+    PATH = "path"
+    SHAPE = "shape"
+    TEXT = "text"
+
+class VectorShapeKind(str, Enum):
+    RECTANGLE = "rectangle"
+    ELLIPSE = "ellipse"
+
+class VectorPathCommandKind(str, Enum):
+    MOVE = "move"
+    LINE = "line"
+    QUADRATIC = "quadratic"
+    CUBIC = "cubic"
+    CLOSE = "close"
+
+class VectorFillRule(str, Enum):
+    WINDING = "winding"
+    EVEN_ODD = "even-odd"
+
+class VectorStrokeJoin(str, Enum):
+    MITER = "miter"
+    ROUND = "round"
+    BEVEL = "bevel"
+
+class VectorStrokeCap(str, Enum):
+    FLAT = "flat"
+    ROUND = "round"
+    SQUARE = "square"
+
+class VectorNodeRole(str, Enum):
+    ANCHOR = "anchor"
+    CONTROL = "control"
+    BOUNDS = "bounds"
+
+class VectorTextAlignment(str, Enum):
+    LEFT = "left"
+    CENTER = "center"
+    RIGHT = "right"
+    JUSTIFY = "justify"
+
+class VectorTextDirection(str, Enum):
+    AUTO = "auto"
+    LEFT_TO_RIGHT = "left-to-right"
+    RIGHT_TO_LEFT = "right-to-left"
+
+@dataclass(frozen=True, slots=True)
+class VectorPathCommand:
+    kind: VectorPathCommandKind
+    points: tuple[QPointF, ...] = ...
+
+@dataclass(frozen=True, slots=True)
+class VectorStyle:
+    fill: QColor | None = ...
+    stroke: QColor | None = ...
+    stroke_width: float = ...
+    opacity: float = ...
+    join: VectorStrokeJoin = ...
+    cap: VectorStrokeCap = ...
+    dash_pattern: tuple[float, ...] = ...
+    fill_rule: VectorFillRule = ...
+
+@dataclass(frozen=True, slots=True)
+class VectorTextStyle:
+    families: tuple[str, ...] = ...
+    font_size: float = ...
+    weight: int = ...
+    italic: bool = ...
+    letter_spacing: float = ...
+    color: QColor = ...
+
+@dataclass(frozen=True, slots=True)
+class VectorTextSpan:
+    start: int
+    length: int
+    style: VectorTextStyle
+
+@dataclass(frozen=True, slots=True)
+class VectorParagraphStyle:
+    alignment: VectorTextAlignment = ...
+    direction: VectorTextDirection = ...
+    line_height: float = ...
+
+@dataclass(frozen=True, slots=True)
+class VectorTextContent:
+    text: str
+    style: VectorTextStyle = ...
+    spans: tuple[VectorTextSpan, ...] = ...
+    paragraph: VectorParagraphStyle = ...
+
+@dataclass(frozen=True, slots=True)
+class QPaneTextFontResolution:
+    requested_families: tuple[str, ...]
+    resolved_family: str
+    exact_match: bool
+
+@dataclass(frozen=True, slots=True)
+class QPaneVectorTextEditState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    object_id: uuid.UUID
+    text: str
+    cursor: int
+    is_new: bool
+
+class QPaneVectorObjectState:
+    object_id: uuid.UUID
+    kind: VectorObjectKind
+    bounds: QRectF
+    transform: QTransform
+    style: VectorStyle
+    shape_kind: VectorShapeKind | None
+    path: tuple[VectorPathCommand, ...]
+    text: VectorTextContent | None
+
+class QPaneVectorDocumentState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    vector_id: uuid.UUID
+    revision: int
+    objects: tuple[QPaneVectorObjectState, ...]
+
+class QPaneVectorSelectionState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    object_ids: tuple[uuid.UUID, ...]
+
+class QPaneVectorMaskState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    vector_id: uuid.UUID
+    object_ids: tuple[uuid.UUID, ...]
+    transform: QTransform
+    inverted: bool
+
+class QPaneVectorNodeSelectionState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    object_id: uuid.UUID
+    node_index: int
+    role: VectorNodeRole
 
 class DiagnosticsDomain(str, Enum):
     CACHE: str
@@ -125,14 +334,65 @@ class QPaneSceneClip:
     coordinate_space: str
     rect: QRectF
 
+class QPaneCompositionPolicy:
+    removable: bool
+    comparison_enabled: bool
+    def __init__(
+        self,
+        removable: bool = True,
+        comparison_enabled: bool = True,
+    ) -> None: ...
+
 class QPaneLayerInteractionPolicy:
     selectable: bool
     movable: bool
     pixel_editable: bool
+    reorderable: bool
+    removable: bool
+
+class QPaneEditorPolicy:
+    capabilities: frozenset[EditorCapability]
+
+class QPaneEditorOperationState:
+    intent: EditorIntent
+    allowed: bool
+    denial: str | None
+    alternatives: tuple[str, ...]
+    scene_id: uuid.UUID | None
+    layer_id: uuid.UUID | None
+
+class CompositionLayerEntry:
+    layer_id: uuid.UUID
+    source_kind: str
+    source_id: uuid.UUID
+    label: str | None
+    role: str
+    visible: bool
+    opacity: float
+    interaction: QPaneLayerInteractionPolicy
+    transform: QTransform
 
 class QPaneLayerSelectionState:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
+
+class QPanePlacedAssetState:
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    asset_id: uuid.UUID
+    mode: PlacedAssetMode
+    status: PlacedAssetStatus
+    source_path: Path | None
+    error: str | None
+    keep_fallback: bool
+    content_revision: int
+    generation: int
+
+class QPanePaintTargetState:
+    scene_id: uuid.UUID
+    kind: PaintTargetKind
+    layer_id: uuid.UUID | None
+    source_kind: str | None
 
 class QPaneRasterSurfaceState:
     scene_id: uuid.UUID
@@ -172,6 +432,7 @@ class QPaneSceneLayer:
     source_kind: str
     source_id: uuid.UUID | None
     label: str | None
+    transform: QTransform
 
 class QPaneCatalogImageLayerRequest:
     layer_id: uuid.UUID
@@ -286,6 +547,8 @@ class CompositionEntry:
     comparison: ComparisonState
     scene_layer_count: int
     scene_bounds: QRectF | None
+    layers: tuple[CompositionLayerEntry, ...]
+    policy: QPaneCompositionPolicy
 
 class CompositionSnapshot:
     compositions: dict[uuid.UUID, CompositionEntry]
@@ -327,11 +590,16 @@ class QPane(QWidget):
     CONTROL_MODE_PANZOOM: str
     CONTROL_MODE_CURSOR: str
     CONTROL_MODE_MOVE: str
+    CONTROL_MODE_TRANSFORM: str
     CONTROL_MODE_DRAW_BRUSH: str
     CONTROL_MODE_SMART_SELECT: str
     CONTROL_MODE_SELECT_RECTANGLE: str
     CONTROL_MODE_SELECT_ELLIPSE: str
     CONTROL_MODE_SELECT_LASSO: str
+    CONTROL_MODE_VECTOR_SHAPE: str
+    CONTROL_MODE_VECTOR_PATH: str
+    CONTROL_MODE_VECTOR_NODE: str
+    CONTROL_MODE_VECTOR_TEXT: str
 
     imageLoaded: Signal
     zoomChanged: Signal
@@ -350,9 +618,19 @@ class QPane(QWidget):
     sceneChanged: Signal
     sceneEditHistoryChanged: Signal
     pixelSelectionChanged: Signal
+    paintTargetChanged: Signal
+    brushPresetChanged: Signal
+    paintColorChanged: Signal
+    vectorSelectionChanged: Signal
+    vectorNodeSelectionChanged: Signal
+    vectorToolOptionsChanged: Signal
+    vectorTextEditChanged: Signal
+    vectorRequestCompleted: Signal
     floatingPixelEditChanged: Signal
     selectedLayerChanged: Signal
+    editorPolicyChanged: Signal
     rasterBoundsRequestCompleted: Signal
+    placedAssetRequestCompleted: Signal
     samCheckpointStatusChanged: Signal
     samCheckpointProgress: Signal
 
@@ -429,6 +707,13 @@ class QPane(QWidget):
     def applySettings(
         self, *, config: Config | None = ..., **overrides: Any
     ) -> None: ...
+    def editorPolicy(self) -> QPaneEditorPolicy: ...
+    def setEditorPolicy(self, policy: QPaneEditorPolicy) -> bool: ...
+    def editorOperationState(
+        self,
+        intent: EditorIntent,
+        panel_pos: QPoint | QPointF | None = ...,
+    ) -> QPaneEditorOperationState: ...
     def setDiagnosticsOverlayEnabled(self, enabled: bool) -> None: ...
     def setDiagnosticsDomainEnabled(
         self, domain: str | DiagnosticsDomain, enabled: bool
@@ -447,6 +732,36 @@ class QPane(QWidget):
         activate: bool = ...,
         fit_view: bool = ...,
     ) -> uuid.UUID: ...
+    def createComposition(
+        self,
+        bounds: QRectF,
+        *,
+        title: str = "Untitled",
+        policy: QPaneCompositionPolicy | None = None,
+        fit_view: bool = True,
+    ) -> uuid.UUID: ...
+    def createCompositionFromImage(
+        self,
+        image_id: uuid.UUID,
+        *,
+        title: str | None = None,
+        interaction: QPaneLayerInteractionPolicy | None = None,
+        policy: QPaneCompositionPolicy | None = None,
+        fit_view: bool = True,
+    ) -> uuid.UUID: ...
+    def addCatalogImageLayer(
+        self,
+        image_id: uuid.UUID,
+        *,
+        placement: QRectF | None = None,
+        label: str | None = None,
+        interaction: QPaneLayerInteractionPolicy | None = None,
+    ) -> uuid.UUID | None: ...
+    def setCompositionPolicy(
+        self,
+        composition_id: uuid.UUID,
+        policy: QPaneCompositionPolicy,
+    ) -> bool: ...
     def composeSceneFromTemplate(
         self,
         template: QPaneSceneTemplate,
@@ -457,6 +772,16 @@ class QPane(QWidget):
     ) -> uuid.UUID: ...
     def currentScene(self) -> QPaneScene | None: ...
     def sceneHitTest(self, panel_pos: QPoint) -> QPaneSceneHit | None: ...
+    def layerTransform(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QTransform | None: ...
+    def layerLocalBounds(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QRectF | None: ...
     def setLayerInteractionPolicy(
         self,
         scene_id: uuid.UUID,
@@ -470,17 +795,209 @@ class QPane(QWidget):
         layer_id: uuid.UUID,
     ) -> bool: ...
     def clearSelectedLayer(self) -> bool: ...
+    def placeEmbeddedAsset(
+        self,
+        image: QImage,
+        *,
+        placement: QRectF | None = ...,
+        label: str | None = ...,
+        interaction: QPaneLayerInteractionPolicy | None = ...,
+    ) -> uuid.UUID | None: ...
+    def placeLinkedAsset(
+        self,
+        path: Path,
+        *,
+        placement: QRectF | None = ...,
+        label: str | None = ...,
+        interaction: QPaneLayerInteractionPolicy | None = ...,
+        keep_fallback: bool = ...,
+    ) -> uuid.UUID | None: ...
+    def duplicatePlacedAsset(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None: ...
+    def placedAssetState(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QPanePlacedAssetState | None: ...
+    def refreshPlacedAsset(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None: ...
+    def relinkPlacedAsset(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        path: Path,
+    ) -> uuid.UUID | None: ...
+    def embedPlacedAsset(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> bool: ...
+    def rasterizePlacedAsset(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixel_size: QSize | None = ...,
+    ) -> uuid.UUID | None: ...
     def setLayerPlacement(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         placement: QRectF,
     ) -> bool: ...
+    def setLayerTransform(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        transform: QTransform,
+    ) -> bool: ...
+    def setLayerIndex(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        index: int,
+    ) -> bool: ...
+    def removeLayer(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool: ...
     def rasterSurfaceState(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
     ) -> QPaneRasterSurfaceState | None: ...
+    def createVectorLayer(
+        self,
+        size: QSize | None = ...,
+        *,
+        label: str = ...,
+    ) -> uuid.UUID | None: ...
+    def vectorDocumentState(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QPaneVectorDocumentState | None: ...
+    def setVectorMask(
+        self,
+        scene_id: uuid.UUID,
+        vector_layer_id: uuid.UUID,
+        target_layer_id: uuid.UUID,
+        object_ids: Iterable[uuid.UUID] | None = ...,
+        *,
+        inverted: bool = ...,
+    ) -> bool: ...
+    def vectorMaskState(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> QPaneVectorMaskState | None: ...
+    def clearVectorMask(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool: ...
+    def addVectorShape(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        shape: VectorShapeKind,
+        bounds: QRectF,
+        style: VectorStyle | None = ...,
+    ) -> uuid.UUID | None: ...
+    def addVectorPath(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        commands: Iterable[VectorPathCommand],
+        style: VectorStyle | None = ...,
+    ) -> uuid.UUID | None: ...
+    def addVectorText(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        bounds: QRectF,
+        content: VectorTextContent,
+    ) -> uuid.UUID | None: ...
+    def updateVectorText(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_id: uuid.UUID,
+        *,
+        bounds: QRectF | None = ...,
+        content: VectorTextContent | None = ...,
+    ) -> bool: ...
+    def beginVectorTextEdit(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_id: uuid.UUID,
+    ) -> bool: ...
+    def vectorTextEditState(self) -> QPaneVectorTextEditState | None: ...
+    def commitVectorTextEdit(self) -> bool: ...
+    def cancelVectorTextEdit(self) -> bool: ...
+    def vectorTextStyle(self) -> VectorTextStyle: ...
+    def setVectorTextStyle(self, style: VectorTextStyle) -> bool: ...
+    def vectorParagraphStyle(self) -> VectorParagraphStyle: ...
+    def setVectorParagraphStyle(self, style: VectorParagraphStyle) -> bool: ...
+    def vectorTextFontResolutions(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_id: uuid.UUID,
+    ) -> tuple[QPaneTextFontResolution, ...]: ...
+    def convertVectorTextToPaths(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_id: uuid.UUID,
+    ) -> uuid.UUID | None: ...
+    def updateVectorObject(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_id: uuid.UUID,
+        *,
+        transform: QTransform | None = ...,
+        style: VectorStyle | None = ...,
+    ) -> bool: ...
+    def removeVectorObject(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_id: uuid.UUID,
+    ) -> bool: ...
+    def reorderVectorObject(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_id: uuid.UUID,
+        index: int,
+    ) -> bool: ...
+    def vectorSelectionState(self) -> QPaneVectorSelectionState | None: ...
+    def vectorNodeSelectionState(self) -> QPaneVectorNodeSelectionState | None: ...
+    def setSelectedVectorObjects(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_ids: Iterable[uuid.UUID],
+    ) -> bool: ...
+    def clearVectorSelection(self) -> bool: ...
+    def vectorToolShape(self) -> VectorShapeKind: ...
+    def setVectorToolShape(self, shape: VectorShapeKind) -> bool: ...
+    def vectorToolStyle(self) -> VectorStyle: ...
+    def setVectorToolStyle(self, style: VectorStyle) -> bool: ...
+    def convertVectorToPixelSelection(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        object_ids: Iterable[uuid.UUID] | None = ...,
+        mode: PixelSelectionMode = ...,
+    ) -> uuid.UUID | None: ...
+    def rasterizeVectorLayer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixel_size: QSize | None = ...,
+    ) -> uuid.UUID | None: ...
     def addEditableRasterLayer(
         self,
         image: QImage,
@@ -490,6 +1007,22 @@ class QPane(QWidget):
         interaction: QPaneLayerInteractionPolicy | None = ...,
         extent_policy: RasterExtentPolicy = ...,
     ) -> uuid.UUID | None: ...
+    def createPaintLayer(
+        self,
+        size: QSize | None = ...,
+        *,
+        label: str = ...,
+        extent_policy: RasterExtentPolicy = ...,
+    ) -> uuid.UUID | None: ...
+    def paintTargetState(self) -> QPanePaintTargetState | None: ...
+    def setPaintTarget(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool: ...
+    def setPixelSelectionPaintTarget(self) -> bool: ...
+    def clearPaintTarget(self) -> bool: ...
+    def brushPreset(self) -> BrushPreset: ...
+    def setBrushPreset(self, preset: BrushPreset) -> bool: ...
+    def paintColor(self) -> QColor: ...
+    def setPaintColor(self, color: QColor) -> bool: ...
+    def setBrushSize(self, size: int) -> None: ...
     def editableRasterLayerImage(
         self,
         scene_id: uuid.UUID,

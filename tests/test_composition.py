@@ -22,9 +22,17 @@ import uuid
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage
 
-from qpane import ComparisonOrientation, CompositionSnapshot, QPane
+from qpane import (
+    ComparisonOrientation,
+    CompositionLayerEntry,
+    CompositionSnapshot,
+    QPane,
+    QPaneCatalogImageLayerRequest,
+    QPaneSceneRequest,
+)
 
 
 def _image(color: QColor) -> QImage:
@@ -65,6 +73,13 @@ def test_catalog_load_creates_default_compositions(qapp) -> None:
         assert first_entry.source_image_ids == (first,)
         assert first_entry.current_image_id == first
         assert first_entry.comparison.enabled is False
+        assert first_entry.scene_layer_count == 1
+        assert len(first_entry.layers) == 1
+        base_layer = first_entry.layers[0]
+        assert isinstance(base_layer, CompositionLayerEntry)
+        assert base_layer.source_kind == "catalog-image"
+        assert base_layer.source_id == first
+        assert base_layer.role == "base-image"
         viewer.setImagesByID(
             QPane.imageMapFromLists(
                 [_image(QColor("red")), _image(QColor("blue"))],
@@ -94,6 +109,59 @@ def test_compose_creates_and_opens_explicit_composition(qapp) -> None:
         assert entry.source_image_ids == (first, second)
         assert entry.comparison.enabled is True
         assert entry.comparison.source_id == second
+    finally:
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
+def test_snapshot_inspects_inactive_layered_composition_without_activating_it(
+    qapp,
+) -> None:
+    """Snapshot metadata must not activate the layered composition it inspects."""
+    viewer = QPane(features=())
+    try:
+        first, second = _seed_two_images(viewer)
+        bottom_layer_id = uuid.uuid4()
+        top_layer_id = uuid.uuid4()
+        layered_id = viewer.composeScene(
+            QPaneSceneRequest(
+                composition_id=uuid.uuid4(),
+                title="Inactive Layers",
+                bounds=QRectF(0.0, 0.0, 32.0, 16.0),
+                layers=(
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=bottom_layer_id,
+                        image_id=first,
+                        placement=QRectF(0.0, 0.0, 16.0, 16.0),
+                    ),
+                    QPaneCatalogImageLayerRequest(
+                        layer_id=top_layer_id,
+                        image_id=second,
+                        placement=QRectF(16.0, 0.0, 16.0, 16.0),
+                    ),
+                ),
+            )
+        )
+        viewer.setCurrentImageID(first)
+        active_id = viewer.currentCompositionID()
+
+        snapshot = viewer.getCompositionSnapshot()
+
+        assert viewer.currentCompositionID() == active_id
+        current_scene = viewer.currentScene()
+        assert current_scene is not None
+        assert current_scene.composition_id == active_id
+        assert snapshot.current_composition_id == active_id
+        inactive = snapshot.compositions[layered_id]
+        assert inactive.scene_layer_count == 2
+        assert [layer.layer_id for layer in inactive.layers] == [
+            bottom_layer_id,
+            top_layer_id,
+        ]
+        inactive.layers[0].transform.translate(500.0, 300.0)
+        refreshed = viewer.getCompositionSnapshot().compositions[layered_id]
+        assert refreshed.layers[0].transform.dx() == 0.0
+        assert refreshed.layers[0].transform.dy() == 0.0
     finally:
         viewer.deleteLater()
         qapp.processEvents()

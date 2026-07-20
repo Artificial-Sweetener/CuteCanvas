@@ -184,7 +184,7 @@ def _format_tile_metrics(qpane: QPane) -> str:
 def _format_pyramid_metrics(qpane: QPane) -> str:
     """Summarize pyramid cache status for the diagnostics overlay."""
     try:
-        manager = qpane.catalog().pyramid_manager
+        manager = qpane.catalog().pyramidManager()
     except (AttributeError, RuntimeError) as exc:
         _log_snapshot_failure(
             "pyramid", "Pyramid manager unavailable for diagnostics", exc

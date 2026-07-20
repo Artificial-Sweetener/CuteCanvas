@@ -27,7 +27,6 @@ from .mask import MaskAssetStore
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_service import MaskService
-from .tools import BrushTool, connect_brush_signals, disconnect_brush_signals
 
 if TYPE_CHECKING:
     from qpane import QPane
@@ -39,19 +38,9 @@ __all__ = [
 
 def install_mask_feature(qpane: QPane) -> None:
     """Install mask management subsystems and tool wiring for a QPane."""
-    hooks = qpane.hooks
     mask_config = require_mask_config(qpane.settings)
     diagnostics_manager = qpane.diagnostics()
     mask_manager = MaskAssetStore(undo_limit=mask_config.mask_undo_limit)
-    try:
-        hooks.registerTool(
-            qpane.CONTROL_MODE_DRAW_BRUSH,
-            BrushTool,
-            on_connect=connect_brush_signals,
-            on_disconnect=disconnect_brush_signals,
-        )
-    except ValueError:
-        pass
     diagnostics_tracker = MaskStrokeDiagnostics(
         enabled=False,
         dirty_callback=lambda domain="mask": diagnostics_manager.set_dirty(domain),
@@ -86,12 +75,6 @@ def install_mask_feature(qpane: QPane) -> None:
             qpane.markDirty(dirty_rect=rect)
         qpane.update()
 
-    tm_signals = qpane._tools_manager.signals
-    tm_signals.stroke_applied.connect(service.applyStrokeSegment)
-    tm_signals.stroke_completed.connect(service.commitStroke)
-    tm_signals.stroke_cancelled.connect(service.cancelStroke)
-    tm_signals.brush_size_changed.connect(qpane.setBrushSize)
-    tm_signals.undo_state_push_requested.connect(service.pushActiveMaskState)
     controller.mask_updated.connect(_handle_mask_updated)
     controller.active_mask_properties_changed.connect(qpane.refreshCursor)
     controller.active_mask_properties_changed.connect(

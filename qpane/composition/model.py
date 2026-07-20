@@ -25,16 +25,16 @@ from pathlib import Path
 
 from PySide6.QtCore import QRectF
 
-from ..scene.model import LayerInteractionPolicy
-from ..types import ComparisonOrientation, QPaneSceneClip
+from ..types import ComparisonOrientation
 
 
-class CompositionKind(str, Enum):
-    """Kinds of compositions managed by QPane."""
+class CompositionOrigin(str, Enum):
+    """Descriptive origin metadata for composition compatibility views."""
 
     DEFAULT_IMAGE = "default-image"
     EXPLICIT = "explicit"
     LAYERED_SCENE = "layered-scene"
+    COMPOSITION = "composition"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,50 +61,32 @@ class CompositionComparison:
 
 
 @dataclass(frozen=True, slots=True)
-class CompositionSceneLayer:
-    """Normalized catalog-backed layer stored inside a layered composition."""
+class CompositionDocumentPolicy:
+    """Host-selected structural policy independent of document origin."""
 
-    layer_id: uuid.UUID
-    image_id: uuid.UUID
-    placement: QRectF
-    visible: bool
-    opacity: float
-    clip: QPaneSceneClip | None
-    hit_test: bool
-    interaction: LayerInteractionPolicy
-    role: str
-    metadata: dict[str, object]
-
-    def __post_init__(self) -> None:
-        """Detach mutable Qt geometry from stored composition state."""
-        object.__setattr__(self, "placement", QRectF(self.placement))
-        object.__setattr__(self, "metadata", dict(self.metadata))
-
-
-@dataclass(frozen=True, slots=True)
-class CompositionScene:
-    """Normalized scene payload stored by a layered composition record."""
-
-    bounds: QRectF
-    layers: tuple[CompositionSceneLayer, ...]
-
-    def __post_init__(self) -> None:
-        """Detach mutable Qt geometry and normalize layer storage."""
-        object.__setattr__(self, "bounds", QRectF(self.bounds))
-        object.__setattr__(self, "layers", tuple(self.layers))
+    removable: bool = True
+    comparison_enabled: bool = True
+    remove_if_catalog_resource_missing: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class CompositionRecord:
-    """Persistent internal composition state."""
+    """Persistent composition document state independent of its layer sources."""
 
     composition_id: uuid.UUID
-    kind: CompositionKind
+    origin: CompositionOrigin
     title: str
-    source_image_ids: tuple[uuid.UUID, ...]
-    primary_image_id: uuid.UUID | None
+    canvas_bounds: QRectF
+    navigation_image_id: uuid.UUID | None = None
     comparison: CompositionComparison | None = None
-    scene: CompositionScene | None = None
+    policy: CompositionDocumentPolicy = CompositionDocumentPolicy()
+
+    def __post_init__(self) -> None:
+        """Validate and detach mutable canvas geometry from the stored record."""
+        bounds = QRectF(self.canvas_bounds)
+        if bounds.width() <= 0.0 or bounds.height() <= 0.0:
+            raise ValueError("composition canvas bounds must be positive")
+        object.__setattr__(self, "canvas_bounds", bounds)
 
     def with_comparison(
         self, comparison: CompositionComparison | None

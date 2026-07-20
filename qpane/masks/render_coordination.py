@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QImage
 
 from ..concurrency import TaskExecutorProtocol, TaskHandle, TaskRejected
@@ -445,6 +445,7 @@ class MaskRenderWorkCoordinator:
         handle: TaskHandle | None,
         dirty_rect: QRect,
         colorized_image: QImage | None,
+        colorize_duration_ms: float | None = None,
     ) -> None:
         """Apply snippet colorization results and finalize async notifications."""
         if handle is not None:
@@ -457,12 +458,37 @@ class MaskRenderWorkCoordinator:
         ) or self._is_mask_busy(mask_id):
             self._controller.renders.complete_async(mask_id, render_revision)
             return
+        if colorize_duration_ms is not None:
+            self._controller.renders.record_background_colorize(
+                colorize_duration_ms,
+                source="snippet_async",
+            )
         mask_layer = self._assets.get_layer(mask_id)
         if mask_layer is None:
             self._controller.renders.complete_async(mask_id, render_revision)
             return
         if colorized_image is None or colorized_image.isNull():
             self._controller.renders.update_region(dirty_rect, mask_layer)
+        elif (
+            mask_layer.surface.bounds is not None
+            and dirty_rect
+            == QRect(
+                0,
+                0,
+                mask_layer.surface.bounds.width,
+                mask_layer.surface.bounds.height,
+            )
+            and colorized_image.size()
+            == QSize(
+                mask_layer.surface.bounds.width,
+                mask_layer.surface.bounds.height,
+            )
+        ):
+            self._controller.renders.commit_native(
+                mask_id,
+                mask_layer,
+                colorized_image,
+            )
         else:
             self._controller.renders.update_region(
                 dirty_rect,
@@ -508,6 +534,11 @@ class MaskRenderWorkCoordinator:
                 continue
             if not self._overlay_is_current(overlay):
                 continue
+            if overlay.colorize_duration_ms is not None:
+                self._controller.renders.record_background_colorize(
+                    overlay.colorize_duration_ms,
+                    source="prefetch",
+                )
             if self._is_mask_busy(mask_id):
                 self._deferred_overlays[mask_id] = overlay
                 deferred_mask_ids.add(mask_id)

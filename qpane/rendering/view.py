@@ -32,11 +32,16 @@ from ..core import (
     PrefetchSettings,
     QPaneState,
 )
+from ..scene.effects import LayerEffectRenderRegistry
 from ..scene.identity import SceneLayerTileKey
+from ..scene.registry import SceneProviderRegistry
+from ..scene.source_capabilities import LayerSourceCapabilities
+from ..scene.source_references import PlaceholderImageReference
 from ..swap import SwapDelegate
 from ..swap.diagnostics import swap_progress_provider, swap_summary_provider
 from .coordinates import PanelHitTest
 from .diagnostics import rendering_retry_provider
+from .placeholder_source import PlaceholderSourceCapabilities
 from .presenter import RenderingPresenter
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
@@ -51,6 +56,7 @@ if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
         SceneLayerHitTestResult,
         SceneRenderPlan,
     )
+    from .pyramid_manager import PyramidManager
 
 
 class View:
@@ -62,20 +68,47 @@ class View:
         qpane: QPane,
         state: QPaneState,
         catalog: ImageCatalog,
+        pyramid_manager: PyramidManager,
         executor: TaskExecutorProtocol,
+        scene_providers: SceneProviderRegistry,
+        source_capabilities: LayerSourceCapabilities,
+        layer_effects: LayerEffectRenderRegistry,
     ) -> None:
         """Wire rendering/swap/catalog collaborators owned by QPane.view()."""
         self._qpane = qpane
         self._state = state
         self._catalog = catalog
+        self._pyramid_manager = pyramid_manager
         self._executor = executor
         self._cache_registry: CacheRegistry | None = state.cache_registry
+        self._placeholder_source = PlaceholderSourceCapabilities()
+        source_capabilities.metadata.register(
+            PlaceholderImageReference, self._placeholder_source
+        )
+        source_capabilities.rasters.register(
+            PlaceholderImageReference, self._placeholder_source
+        )
+        source_capabilities.hit_tests.register(
+            PlaceholderImageReference, self._placeholder_source
+        )
         self._attach_pyramid_manager()
         self.presenter = RenderingPresenter(
             qpane=qpane,
             catalog=catalog,
+            pyramid_products=pyramid_manager,
             cache_registry=self._cache_registry,
             executor=executor,
+            scene_providers=scene_providers,
+            source_metadata=source_capabilities.metadata,
+            raster_sources=source_capabilities.rasters,
+            raster_patches=source_capabilities.raster_patches,
+            source_hit_tests=source_capabilities.hit_tests,
+            pixel_presentation=source_capabilities.pixel_presentation,
+            vector_sources=source_capabilities.vectors,
+            layer_effects=layer_effects,
+        )
+        qpane.destroyed.connect(
+            lambda _obj=None, presenter=self.presenter: presenter.shutdown()
         )
         self.viewport = self.presenter.viewport
         self.tile_manager = self.presenter.tile_manager
@@ -86,6 +119,7 @@ class View:
             catalog=catalog,
             viewport=self.viewport,
             tile_manager=self.tile_manager,
+            pyramid_manager=pyramid_manager,
             rendering=self.presenter,
             prefetch_settings=self._prefetch_settings_from_config(qpane.settings),
             mark_dirty=self.mark_dirty,
@@ -99,6 +133,9 @@ class View:
             swap_delegate=self.swap_delegate,
         )
         self.presenter.set_placeholder_content_provider(
+            self.catalog_controller.placeholder_content
+        )
+        self._placeholder_source.set_provider(
             self.catalog_controller.placeholder_content
         )
         self.swap_delegate.attach_catalog_controller(self.catalog_controller)
@@ -188,6 +225,11 @@ class View:
         """Return the active absolute-scene to panel transform."""
         return self.presenter.scene_to_panel_transform()
 
+    def scene_to_panel_point(self, scene_point: QPoint | QPointF) -> QPointF | None:
+        """Project one absolute scene point into the panel."""
+        transform = self.scene_to_panel_transform()
+        return None if transform is None else transform.map(QPointF(scene_point))
+
     def panel_to_layer_source_point(
         self,
         scene_id: uuid.UUID,
@@ -241,16 +283,16 @@ class View:
         self.swap_delegate.handle_pyramid_ready(asset_key)
 
     def _attach_pyramid_manager(self) -> None:
-        """Wire the catalog's pyramid manager into the shared cache registry."""
+        """Wire the rendering-owned pyramid manager into shared cache budgeting."""
         registry = self._cache_registry
         if registry is None:
             return
-        registry.attach_pyramid_manager(self._catalog.pyramid_manager)
+        registry.attach_pyramid_manager(self._pyramid_manager)
 
     def _connect_rendering_signals(self) -> None:
         """Connect tile/pyramid events directly to the rendering stack."""
         self.tile_manager.tileReady.connect(self.handle_tile_ready)
-        self._catalog.pyramidReady.connect(self.handle_pyramid_ready)
+        self._pyramid_manager.pyramidReady.connect(self.handle_pyramid_ready)
 
     def _prefetch_settings_from_config(self, config: Config) -> PrefetchSettings:
         """Return a PrefetchSettings clone from config.cache, enforcing the expected shape."""

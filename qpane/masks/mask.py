@@ -19,7 +19,8 @@ import numpy as np
 from PySide6.QtGui import QImage
 
 from ..composition.edit_controller import CompositionEditController
-from ..coverage import CoverageSnapshot, CoverageSurface
+from ..coverage import CoverageSnapshot, CoverageStateSnapshot, CoverageSurface
+from ..raster.sparse_grid import SparseRasterSnapshot
 from .history import MaskHistory
 from .mask_undo import (
     MaskHistoryChange,
@@ -112,23 +113,25 @@ class MaskAssetStore:
     def restore_mask(
         self,
         mask_id: uuid.UUID,
-        snapshot: CoverageSnapshot,
+        snapshot: CoverageStateSnapshot,
     ) -> None:
         """Install a validated durable mask snapshot with fresh edit history."""
         if not isinstance(mask_id, uuid.UUID):
             raise TypeError("mask_id must be a UUID")
-        if not isinstance(snapshot, CoverageSnapshot):
-            raise TypeError("snapshot must be CoverageSnapshot")
+        if not isinstance(snapshot, (CoverageSnapshot, SparseRasterSnapshot)):
+            raise TypeError("snapshot must be a coverage state snapshot")
         if mask_id in self._masks:
             self._history.dispose_mask(mask_id)
-        self._masks[mask_id] = MaskLayer(
-            mask_id=mask_id,
-            surface=CoverageSurface(
+        surface = (
+            CoverageSurface.from_sparse_snapshot(snapshot)
+            if isinstance(snapshot, SparseRasterSnapshot)
+            else CoverageSurface(
                 snapshot.pixels,
                 bounds=snapshot.bounds,
                 extent_policy=snapshot.extent_policy,
-            ),
+            )
         )
+        self._masks[mask_id] = MaskLayer(mask_id=mask_id, surface=surface)
         self._history.initialize_mask(mask_id)
 
     def delete_mask(self, mask_id: uuid.UUID) -> bool:
@@ -183,8 +186,8 @@ class MaskAssetStore:
     def record_applied_surface(
         self,
         mask_id: uuid.UUID,
-        before: CoverageSnapshot,
-        after: CoverageSnapshot,
+        before: CoverageStateSnapshot,
+        after: CoverageStateSnapshot,
         *,
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:

@@ -64,9 +64,13 @@ from PySide6.QtWidgets import (
 
 from examples.demo_settings import load_demo_settings, save_demo_settings
 from examples.demonstration import demo_text, hooks_examples, scene_composition
+from examples.demonstration.brush_controls import BrushControls
 from examples.demonstration.catalog.builders import build_catalog_snapshot
 from examples.demonstration.catalog.dock import CatalogDock
 from examples.demonstration.catalog.models import CatalogSnapshot
+from examples.demonstration.composition_properties_dialog import (
+    CompositionPropertiesDialog,
+)
 from examples.demonstration.config.dialog import ConfigDialog
 from examples.demonstration.config.spec import (
     build_sections_for_features,
@@ -74,8 +78,10 @@ from examples.demonstration.config.spec import (
 )
 from examples.demonstration.custom_tool import build_custom_cursor_tool
 from examples.demonstration.editor_controls import EditorControls
+from examples.demonstration.editor_policy_controls import EditorPolicyControls
 from examples.demonstration.hooks_editor import HookEditorWindow
-from examples.demonstration.layer_inspector import RasterLayerInspector
+from examples.demonstration.layer_properties_dialog import LayerPropertiesDialog
+from examples.demonstration.vector_controls import VectorControls
 from examples.demonstration.workers import ImageLoaderWorker
 from qpane import ComparisonOrientation, Config, QPane
 
@@ -479,9 +485,9 @@ class ExampleWindow(QMainWindow):
         self.status.addPermanentWidget(self._zoom_container)
 
     def _build_layer_inspector(self) -> None:
-        """Add the public-API inspector shared by editable raster layer kinds."""
-        self.layer_inspector = RasterLayerInspector(self.qpane, self)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.layer_inspector)
+        """Initialize on-demand layer properties without permanent editor clutter."""
+        self._layer_properties_dialog: LayerPropertiesDialog | None = None
+        self._composition_properties_dialog: CompositionPropertiesDialog | None = None
 
     def _finalize_startup(self) -> None:
         """Complete the final step of demo initialization."""
@@ -547,22 +553,77 @@ class ExampleWindow(QMainWindow):
         self._set_status(f"Autosaved mask {mask_id} to {path}")
 
     def _set_control_mode(self, mode: str) -> None:
-        """Switch control modes, enforcing mask readiness for brush-based modes."""
-        self.editor_controls.apply_layer_policy()
+        """Switch modes after resolving the selected editor destination."""
+        self.editor_controls.layer_policy.reconcile()
         if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
-            if not self._mask_tools_available():
-                self._set_status("Brush mode unavailable in core demo.")
+            target = self.qpane.paintTargetState()
+            scene = self.qpane.currentScene()
+            selected = self.qpane.selectedLayer()
+            selected_layer = (
+                None
+                if scene is None or selected is None
+                else next(
+                    (
+                        layer
+                        for layer in scene.layers
+                        if layer.layer_id == selected.layer_id
+                    ),
+                    None,
+                )
+            )
+            if selected_layer is not None and selected_layer.source_kind in {
+                "mask",
+                "raster",
+            }:
+                self.qpane.setPaintTarget(scene.scene_id, selected_layer.layer_id)
+                target = self.qpane.paintTargetState()
+            if target is None and self._mask_tools_available():
+                if not self._ensure_active_mask():
+                    return
+                self.editor_controls.layer_policy.select_active_mask_layer()
+                target = self.qpane.paintTargetState()
+            if target is None:
+                self._set_status("Add or select a paint-capable layer first.")
                 return
-            if not self._ensure_active_mask():
-                return
-            self.editor_controls.select_active_mask_layer()
         if mode == QPane.CONTROL_MODE_SMART_SELECT:
             if not (self._mask_tools_available() and self._sam_tools_available()):
                 self._set_status("Smart Select requires Mask+SAM features.")
                 return
             if not self._ensure_active_mask():
                 return
-            self.editor_controls.select_active_mask_layer()
+            self.editor_controls.layer_policy.select_active_mask_layer()
+        if mode in {
+            QPane.CONTROL_MODE_VECTOR_SHAPE,
+            QPane.CONTROL_MODE_VECTOR_PATH,
+            QPane.CONTROL_MODE_VECTOR_NODE,
+            QPane.CONTROL_MODE_VECTOR_TEXT,
+        }:
+            scene = self.qpane.currentScene()
+            selected = self.qpane.selectedLayer()
+            selected_layer = (
+                None
+                if scene is None or selected is None
+                else next(
+                    (
+                        layer
+                        for layer in scene.layers
+                        if layer.layer_id == selected.layer_id
+                    ),
+                    None,
+                )
+            )
+            vector_target = bool(
+                scene is not None
+                and selected_layer is not None
+                and self.qpane.vectorDocumentState(
+                    scene.scene_id,
+                    selected_layer.layer_id,
+                )
+                is not None
+            )
+            if not vector_target:
+                self._set_status("Add or select a vector layer first.")
+                return
         self.qpane.setControlMode(mode)
         self._update_mode_checks(mode)
         self._set_status(f"Mode: {self._describe_mode(mode)}")
@@ -592,9 +653,9 @@ class ExampleWindow(QMainWindow):
             QPane.CONTROL_MODE_CURSOR,
             QPane.CONTROL_MODE_PANZOOM,
             QPane.CONTROL_MODE_MOVE,
+            QPane.CONTROL_MODE_TRANSFORM,
         ]
-        if self._mask_tools_available():
-            preferred_order.append(QPane.CONTROL_MODE_DRAW_BRUSH)
+        preferred_order.append(QPane.CONTROL_MODE_DRAW_BRUSH)
         if self._sam_tools_available():
             preferred_order.append(QPane.CONTROL_MODE_SMART_SELECT)
         seen = set(preferred_order)
@@ -609,7 +670,7 @@ class ExampleWindow(QMainWindow):
             if mode == QPane.CONTROL_MODE_PANZOOM:
                 return panzoom_allowed
             if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
-                return self._mask_tools_available() and not placeholder_active
+                return not placeholder_active
             if mode == QPane.CONTROL_MODE_SMART_SELECT:
                 return (
                     self._mask_tools_available()
@@ -653,20 +714,27 @@ class ExampleWindow(QMainWindow):
             return "Pan / Zoom"
         if mode == QPane.CONTROL_MODE_MOVE:
             return "Move"
+        if mode == QPane.CONTROL_MODE_TRANSFORM:
+            return "Transform"
         if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
             return "Brush"
         if mode == QPane.CONTROL_MODE_SMART_SELECT:
             return "Smart Select (SAM)"
+        if mode == QPane.CONTROL_MODE_VECTOR_SHAPE:
+            return "Vector Shape"
+        if mode == QPane.CONTROL_MODE_VECTOR_PATH:
+            return "Vector Path"
+        if mode == QPane.CONTROL_MODE_VECTOR_NODE:
+            return "Edit Vector Nodes"
+        if mode == QPane.CONTROL_MODE_VECTOR_TEXT:
+            return "Text"
         return mode
-
-    def _refresh_current_scene_movement_policy(self, *_args: object) -> None:
-        """Follow the selected authoring layer across editor modes."""
-        self.editor_controls.apply_layer_policy()
 
     def _catalog_prefers_mask_selection(self) -> bool:
         """Return True when the catalog should highlight the active mask."""
         return self.qpane.getControlMode() in {
             QPane.CONTROL_MODE_MOVE,
+            QPane.CONTROL_MODE_TRANSFORM,
             QPane.CONTROL_MODE_DRAW_BRUSH,
             QPane.CONTROL_MODE_SMART_SELECT,
         }
@@ -677,6 +745,7 @@ class ExampleWindow(QMainWindow):
         if kind == "mask":
             if current_mode in {
                 QPane.CONTROL_MODE_MOVE,
+                QPane.CONTROL_MODE_TRANSFORM,
                 QPane.CONTROL_MODE_DRAW_BRUSH,
                 QPane.CONTROL_MODE_SMART_SELECT,
             }:
@@ -688,6 +757,7 @@ class ExampleWindow(QMainWindow):
                 QPane.CONTROL_MODE_CURSOR,
                 QPane.CONTROL_MODE_PANZOOM,
                 QPane.CONTROL_MODE_MOVE,
+                QPane.CONTROL_MODE_TRANSFORM,
             }:
                 return
             self._set_control_mode(QPane.CONTROL_MODE_PANZOOM)
@@ -702,6 +772,57 @@ class ExampleWindow(QMainWindow):
         )
         if files:
             self._load_images(Path(f) for f in files)
+
+    def _place_embedded_dialog(self) -> None:
+        """Decode a file off-thread, then place its detached pixels."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Place Embedded Asset",
+            str(Path.home()),
+            "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp)",
+        )
+        if not file_path:
+            return
+        worker = ImageLoaderWorker((Path(file_path),))
+        worker.signals.image_loaded.connect(self._place_decoded_embedded_asset)
+        worker.signals.finished.connect(
+            lambda count: (
+                self._set_status("The selected image could not be decoded.")
+                if count == 0
+                else None
+            )
+        )
+        QThreadPool.globalInstance().start(worker)
+        self._set_status(f"Preparing embedded asset {Path(file_path).name}…")
+
+    def _place_decoded_embedded_asset(self, path: Path, image: QImage) -> None:
+        """Place one worker-decoded image and select its new layer."""
+        layer_id = self.qpane.placeEmbeddedAsset(image, label=path.stem)
+        scene = self.qpane.currentScene()
+        if layer_id is None or scene is None:
+            self._set_status("Open an image composition before placing an asset.")
+            return
+        self.qpane.setSelectedLayer(scene.scene_id, layer_id)
+        self._set_status(f"Placed embedded asset {path.name}.")
+
+    def _place_linked_dialog(self) -> None:
+        """Choose a file and let QPane decode its linked source asynchronously."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Place Linked Asset",
+            str(Path.home()),
+            "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp)",
+        )
+        if not file_path:
+            return
+        request_id = self.qpane.placeLinkedAsset(
+            Path(file_path),
+            label=Path(file_path).stem,
+        )
+        if request_id is None:
+            self._set_status("Open an image composition before placing an asset.")
+            return
+        self._set_status(f"Loading linked asset {Path(file_path).name}…")
 
     def _clear_gallery(self) -> None:
         """Clear all images from the gallery via the qpane helper."""
@@ -1003,25 +1124,12 @@ class ExampleWindow(QMainWindow):
         self.qpane.compositionSelectionChanged.connect(
             lambda _composition_id: self._refresh_tool_enables()
         )
-        self.qpane.compositionSelectionChanged.connect(
-            self._refresh_current_scene_movement_policy
-        )
         self.qpane.catalogChanged.connect(lambda _event: self._refresh_tool_enables())
-        self.qpane.catalogChanged.connect(self._refresh_current_scene_movement_policy)
         self.qpane.catalogSelectionChanged.connect(
             lambda _image_id: self._refresh_tool_enables()
         )
-        self.qpane.catalogSelectionChanged.connect(
-            self._refresh_current_scene_movement_policy
-        )
         self.qpane.currentImageChanged.connect(
             lambda _image_id: self._refresh_tool_enables()
-        )
-        self.qpane.currentImageChanged.connect(
-            self._refresh_current_scene_movement_policy
-        )
-        self.qpane.selectedLayerChanged.connect(
-            self._refresh_current_scene_movement_policy
         )
         self.qpane.currentImageChanged.connect(
             lambda _image_id: self._update_image_size_readout()
@@ -1040,6 +1148,42 @@ class ExampleWindow(QMainWindow):
             self._handle_sam_checkpoint_status
         )
         self.qpane.samCheckpointProgress.connect(self._handle_sam_checkpoint_progress)
+        self.qpane.placedAssetRequestCompleted.connect(
+            self._handle_placed_asset_completion
+        )
+
+    def _handle_placed_asset_completion(
+        self,
+        _request_id: uuid.UUID,
+        scene_id: object,
+        layer_id: object,
+        succeeded: bool,
+        message: str,
+    ) -> None:
+        """Select successful placed work and present non-modal errors."""
+        if succeeded:
+            if isinstance(scene_id, uuid.UUID) and isinstance(layer_id, uuid.UUID):
+                self.qpane.setSelectedLayer(scene_id, layer_id)
+            current = self.qpane.currentScene()
+            layer = (
+                None
+                if current is None
+                else next(
+                    (
+                        candidate
+                        for candidate in current.layers
+                        if candidate.layer_id == layer_id
+                    ),
+                    None,
+                )
+            )
+            self._set_status(
+                "Rasterization complete. The layer is ready for pixel editing."
+                if layer is not None and layer.source_kind == "raster"
+                else "Placed asset operation completed."
+            )
+        else:
+            self._set_status(f"Placed asset operation failed: {message}")
 
     def _prime_zoom_readout(self) -> None:
         """Initialize the zoom status label with the viewport's current scale."""
@@ -1747,6 +1891,10 @@ class ExampleWindow(QMainWindow):
         self.open_images_action = QAction("Open Images...", self)
         self.open_images_action.setShortcut(QKeySequence.StandardKey.Open)
         self.open_images_action.triggered.connect(self._open_images_dialog)
+        self.place_embedded_action = QAction("Place Embedded…", self)
+        self.place_embedded_action.triggered.connect(self._place_embedded_dialog)
+        self.place_linked_action = QAction("Place Linked…", self)
+        self.place_linked_action.triggered.connect(self._place_linked_dialog)
         self.clear_action = QAction("Clear", self)
         self.clear_action.triggered.connect(self._clear_gallery)
         self.prev_image_action = QAction("◀ Prev", self)
@@ -1781,7 +1929,19 @@ class ExampleWindow(QMainWindow):
         self.mode_move_action.triggered.connect(
             lambda: self._set_control_mode(QPane.CONTROL_MODE_MOVE)
         )
-        self.mode_brush_action: QAction | None = None
+        self.mode_transform_action = QAction("Transform", self, checkable=True)
+        self.mode_transform_action.setShortcut(QKeySequence("Ctrl+T"))
+        self.mode_transform_action.setStatusTip(
+            "Transform the selected layer with corner and side handles; "
+            "Enter applies and Escape cancels."
+        )
+        self.mode_transform_action.triggered.connect(
+            lambda: self._set_control_mode(QPane.CONTROL_MODE_TRANSFORM)
+        )
+        self.mode_brush_action = QAction("Brush", self, checkable=True)
+        self.mode_brush_action.triggered.connect(
+            lambda: self._set_control_mode(QPane.CONTROL_MODE_DRAW_BRUSH)
+        )
         self.mode_smart_action: QAction | None = None
         self.cycle_mode_action: QAction | None = None
         self.add_mask_action: QAction | None = None
@@ -1815,10 +1975,6 @@ class ExampleWindow(QMainWindow):
                 self._cycle_masks_backward
             )
             mask_actions.append(self.cycle_masks_backward_action)
-            self.mode_brush_action = QAction("Brush", self, checkable=True)
-            self.mode_brush_action.triggered.connect(
-                lambda: self._set_control_mode(QPane.CONTROL_MODE_DRAW_BRUSH)
-            )
             if sam_enabled:
                 self.mode_smart_action = QAction("Smart Select", self, checkable=True)
                 self.mode_smart_action.triggered.connect(
@@ -1829,6 +1985,7 @@ class ExampleWindow(QMainWindow):
             self.mode_pan_action,
             self.mode_cursor_action,
             self.mode_move_action,
+            self.mode_transform_action,
         ]
         if self.mode_brush_action:
             available_modes.append(self.mode_brush_action)
@@ -1858,10 +2015,23 @@ class ExampleWindow(QMainWindow):
             (self.prev_image_action, True),
             (self.next_image_action, True),
             (self.compose_contact_sheet_action, True),
+            (self.place_embedded_action, True),
+            (self.place_linked_action, True),
         ]
         for action in mask_actions:
             self._gallery_actions.append((action, True))
         self.editor_controls = EditorControls(
+            self.qpane,
+            set_mode=self._set_control_mode,
+            show_status=self._set_status,
+            parent=self,
+        )
+        self.editor_policy_controls = EditorPolicyControls(
+            self.qpane,
+            show_status=self._set_status,
+            parent=self,
+        )
+        self.vector_controls = VectorControls(
             self.qpane,
             set_mode=self._set_control_mode,
             show_status=self._set_status,
@@ -1874,16 +2044,25 @@ class ExampleWindow(QMainWindow):
         menu_bar.clear()
         file_menu = menu_bar.addMenu("&File")
         file_menu.addAction(self.open_images_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.place_embedded_action)
+        file_menu.addAction(self.place_linked_action)
+        file_menu.addSeparator()
         file_menu.addAction(self.clear_action)
         file_menu.addSeparator()
         exit_action = file_menu.addAction("Exit")
         exit_action.triggered.connect(self.close)
         edit_menu = menu_bar.addMenu("&Edit")
         self.editor_controls.populate_edit_menu(edit_menu)
+        edit_menu.addSeparator()
+        self.editor_policy_controls.populate_menu(
+            edit_menu.addMenu("Editor Capabilities")
+        )
+        layer_menu = menu_bar.addMenu("&Layer")
+        self.editor_controls.populate_layer_menu(layer_menu)
+        self.vector_controls.populate_layer_menu(layer_menu)
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.catalog_panel_action)
-        if self.layer_inspector is not None:
-            view_menu.addAction(self.layer_inspector.toggleViewAction())
         view_menu.addAction(self.quick_reference_action)
         view_menu.addSeparator()
         view_menu.addAction(self.compare_next_action)
@@ -1940,6 +2119,18 @@ class ExampleWindow(QMainWindow):
             self._floating_pixels_toolbar = self.editor_controls.add_floating_toolbar(
                 self
             )
+        if not hasattr(self, "_brush_toolbar"):
+            self._brush_toolbar = QToolBar("Brush Controls", self)
+            self.addToolBar(Qt.TopToolBarArea, self._brush_toolbar)
+            self.brush_controls = BrushControls(
+                self.qpane,
+                self._brush_toolbar,
+                parent=self,
+            )
+        if not hasattr(self, "_vector_toolbar"):
+            self._vector_toolbar = QToolBar("Vector Controls", self)
+            self.addToolBar(Qt.TopToolBarArea, self._vector_toolbar)
+            self.vector_controls.build_context_toolbar(self._vector_toolbar)
 
         def _add_group(actions: list[QAction | None]) -> bool:
             """Add the provided actions to the tools toolbar, returning True if any were added."""
@@ -1964,6 +2155,7 @@ class ExampleWindow(QMainWindow):
             self.mode_cursor_action,
             self.mode_pan_action,
             self.mode_move_action,
+            self.mode_transform_action,
             self.mode_brush_action,
             self.mode_smart_action,
         ]
@@ -1978,6 +2170,7 @@ class ExampleWindow(QMainWindow):
             self._tools_toolbar.addSeparator()
         modes_added = _add_group(mode_actions)
         self.editor_controls.add_selection_button(self._tools_toolbar)
+        self.vector_controls.add_tool_button(self._tools_toolbar)
         modes_added = True
         if self.cycle_mode_action is not None:
             self._tools_toolbar.addAction(self.cycle_mode_action)
@@ -2022,12 +2215,68 @@ class ExampleWindow(QMainWindow):
             parent=self._catalog_container,
         )
         self.catalog_dock.visibilityChanged.connect(self._sync_catalog_toggle)
+        self.catalog_dock.layerPropertiesRequested.connect(self._open_layer_properties)
+        self.catalog_dock.compositionPropertiesRequested.connect(
+            self._open_composition_properties
+        )
         width_hint = max(self.catalog_dock.panelWidthHint(), 1)
         self._catalog_panel_width_hint = width_hint
         self._catalog_container_layout.addWidget(self.catalog_dock)
         self.catalog_dock.hide()
         self._apply_catalog_width_constraints(False)
         self._handle_catalog_event(None)
+
+    def _open_layer_properties(
+        self,
+        _composition_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> None:
+        """Open focused properties for the tree-selected active layer."""
+        scene = self.qpane.currentScene()
+        if scene is None:
+            return
+        if self._layer_properties_dialog is not None:
+            self._layer_properties_dialog.close()
+            self._layer_properties_dialog.deleteLater()
+        dialog = LayerPropertiesDialog(
+            self.qpane,
+            scene.scene_id,
+            layer_id,
+            self,
+            show_status=self._set_status,
+        )
+        dialog.finished.connect(self._clear_layer_properties_dialog)
+        self._layer_properties_dialog = dialog
+        dialog.open()
+
+    def _clear_layer_properties_dialog(self, _result: int) -> None:
+        """Release the completed layer-properties modal."""
+        dialog = self._layer_properties_dialog
+        self._layer_properties_dialog = None
+        if dialog is not None:
+            dialog.deleteLater()
+
+    def _open_composition_properties(self, composition_id: uuid.UUID) -> None:
+        """Open focused policy properties for one composition document."""
+        if self._composition_properties_dialog is not None:
+            self._composition_properties_dialog.close()
+            self._composition_properties_dialog.deleteLater()
+        dialog = CompositionPropertiesDialog(
+            self.qpane,
+            composition_id,
+            self,
+            show_status=self._set_status,
+        )
+        dialog.finished.connect(self._clear_composition_properties_dialog)
+        self._composition_properties_dialog = dialog
+        dialog.open()
+
+    def _clear_composition_properties_dialog(self, _result: int) -> None:
+        """Release the completed composition-properties modal."""
+        dialog = self._composition_properties_dialog
+        self._composition_properties_dialog = None
+        if dialog is not None:
+            dialog.deleteLater()
 
     def _apply_catalog_width_constraints(self, visible: bool) -> None:
         """Apply catalog sizing defaults while allowing user expansion."""
@@ -2129,6 +2378,7 @@ class ExampleWindow(QMainWindow):
         self.mode_cursor_action.setChecked(mode == QPane.CONTROL_MODE_CURSOR)
         self.mode_pan_action.setChecked(mode == QPane.CONTROL_MODE_PANZOOM)
         self.mode_move_action.setChecked(mode == QPane.CONTROL_MODE_MOVE)
+        self.mode_transform_action.setChecked(mode == QPane.CONTROL_MODE_TRANSFORM)
         if self.mode_brush_action:
             self.mode_brush_action.setChecked(mode == QPane.CONTROL_MODE_DRAW_BRUSH)
         if self.mode_smart_action:
@@ -2138,6 +2388,10 @@ class ExampleWindow(QMainWindow):
         if self._lens_tool_action is not None:
             self._lens_tool_action.setChecked(mode == _LENS_TOOL_MODE)
         self.editor_controls.sync_mode(mode)
+        if hasattr(self, "brush_controls"):
+            self.brush_controls.sync_mode(mode)
+        if hasattr(self, "vector_controls"):
+            self.vector_controls.sync_mode(mode)
 
     def _update_action_states(self, count: int) -> None:
         """Enable or disable actions based on catalog size and feature availability."""
@@ -2181,7 +2435,8 @@ class ExampleWindow(QMainWindow):
         _enable(self.mode_pan_action, panzoom_enabled)
         self.mode_cursor_action.setEnabled(True)
         _enable(self.mode_move_action, not placeholder_active)
-        _enable(self.mode_brush_action, mask_enabled)
+        _enable(self.mode_transform_action, not placeholder_active)
+        _enable(self.mode_brush_action, not placeholder_active)
         _enable(self.mode_smart_action, sam_enabled)
         mask_actions = (
             self.add_mask_action,
@@ -2205,11 +2460,16 @@ class ExampleWindow(QMainWindow):
         available_count = 1  # cursor
         if not placeholder_active:
             allowed_modes.add(QPane.CONTROL_MODE_MOVE)
-            available_count += 1
+            allowed_modes.add(QPane.CONTROL_MODE_TRANSFORM)
+            allowed_modes.add(QPane.CONTROL_MODE_VECTOR_SHAPE)
+            allowed_modes.add(QPane.CONTROL_MODE_VECTOR_PATH)
+            allowed_modes.add(QPane.CONTROL_MODE_VECTOR_NODE)
+            allowed_modes.add(QPane.CONTROL_MODE_VECTOR_TEXT)
+            available_count += 6
         if panzoom_enabled:
             allowed_modes.add(QPane.CONTROL_MODE_PANZOOM)
             available_count += 1
-        if mask_enabled and self.mode_brush_action is not None:
+        if not placeholder_active and self.mode_brush_action is not None:
             allowed_modes.add(QPane.CONTROL_MODE_DRAW_BRUSH)
             available_count += 1
         if sam_enabled and self.mode_smart_action is not None:

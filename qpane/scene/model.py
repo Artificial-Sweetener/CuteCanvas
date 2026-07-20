@@ -24,10 +24,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from .sources import LayerSource
+from .source_references import LayerSourceReference
 
 if TYPE_CHECKING:
-    from .raster import LayerTransform, RasterBounds
+    from .affine import LayerTransform
+    from .effects import LayerEffectReference
+    from .raster import RasterBounds
 
 
 class SceneKind(str, Enum):
@@ -44,6 +46,7 @@ class LayerKind(str, Enum):
     IMAGE = "image"
     MASK = "mask"
     RASTER = "raster"
+    VECTOR = "vector"
 
 
 class BlendMode(str, Enum):
@@ -111,6 +114,8 @@ class LayerInteractionPolicy:
     selectable: bool = False
     movable: bool = False
     pixel_editable: bool = False
+    reorderable: bool = True
+    removable: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +124,7 @@ class LayerContentCapabilities:
 
     raster_editable: bool = False
     coverage_source: bool = False
+    vector_editable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +134,7 @@ class LayerDescriptor:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     kind: LayerKind
-    source: LayerSource
+    source: LayerSourceReference
     placement: LayerPlacement
     visible: bool = True
     opacity: float = 1.0
@@ -140,6 +146,7 @@ class LayerDescriptor:
     source_revision: int = 0
     raster_bounds: RasterBounds | None = None
     transform: LayerTransform | None = None
+    effects: tuple[LayerEffectReference, ...] = ()
     label: str | None = None
 
     def __post_init__(self) -> None:

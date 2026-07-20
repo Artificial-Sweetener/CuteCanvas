@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..composition.layers import CompositionLayerInstance, CompositionLayerSourceKind
+from ..composition.layers import CompositionLayerInstance
 from ..scene.model import (
     BlendMode,
     LayerContentCapabilities,
@@ -25,7 +25,7 @@ from ..scene.model import (
     SceneDescriptor,
 )
 from ..scene.raster import RasterBounds
-from ..scene.sources import MaskLayerSource
+from .source_reference import MaskAssetReference
 
 
 class MaskDescriptorAsset(Protocol):
@@ -60,7 +60,7 @@ class MaskLayerDescriptorFactory:
     assets: MaskDescriptorAssets
     renders: MaskDescriptorRenders
     dynamic_revision: Callable[[], object]
-    source_kind = CompositionLayerSourceKind.MASK
+    source_type = MaskAssetReference
 
     def revision(self) -> object:
         """Return mask-domain state affecting descriptors."""
@@ -72,23 +72,27 @@ class MaskLayerDescriptorFactory:
         instance: CompositionLayerInstance,
     ) -> LayerDescriptor | None:
         """Resolve one mask instance into a complete scene descriptor."""
-        asset = self.assets.get_layer(instance.source_id)
+        if not isinstance(instance.source, MaskAssetReference):
+            return None
+        mask_id = instance.source.mask_id
+        asset = self.assets.get_layer(mask_id)
         if asset is None or asset.surface.is_null():
             return None
         raster_bounds: RasterBounds | None = asset.surface.bounds
         if raster_bounds is None:
             return None
-        revision = max(0, int(self.renders.render_revision(instance.source_id)))
+        revision = max(0, int(self.renders.render_revision(mask_id)))
         return LayerDescriptor(
             scene_id=scene.scene_id,
             layer_id=instance.layer_id,
             kind=LayerKind.MASK,
-            source=MaskLayerSource(mask_id=instance.source_id, revision=revision),
+            source=instance.source,
             placement=instance.transform.map_bounds(raster_bounds),
             visible=instance.visible,
             opacity=instance.opacity,
             blend_mode=BlendMode.NORMAL,
-            clip=None,
+            clip=instance.clip,
+            effects=instance.effects,
             hit_test=LayerHitTest(enabled=instance.hit_test, role=instance.role),
             interaction=instance.interaction,
             capabilities=LayerContentCapabilities(

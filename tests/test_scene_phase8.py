@@ -23,6 +23,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QSize
 
+from qpane.masks.source_reference import MaskAssetReference
 from qpane.scene.default_scene import build_default_catalog_scene
 from qpane.scene.identity import mask_layer_id
 from qpane.scene.model import (
@@ -40,7 +41,6 @@ from qpane.scene.mutations import (
     SceneMutationResult,
     SceneMutationStatus,
 )
-from qpane.scene.sources import MaskLayerSource
 
 
 class RecordingMaskOwner(BaseSceneMutationOwner):
@@ -231,7 +231,7 @@ def _scene_with_mask_layer() -> tuple[SceneDescriptor, LayerDescriptor]:
         scene_id=base_scene.scene_id,
         layer_id=mask_layer_id(base_scene.scene_id, mask_id),
         kind=LayerKind.MASK,
-        source=MaskLayerSource(mask_id=mask_id, revision=3),
+        source=MaskAssetReference(mask_id=mask_id),
         placement=LayerPlacement(0.0, 0.0, 10.0, 8.0),
         visible=True,
         opacity=0.75,

@@ -37,7 +37,7 @@ from ..concurrency import (
 )
 from ..core import CacheSettings, Config
 from ..core.threading import assert_qt_main_thread
-from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey
+from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey, SourceRenderAssetKey
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
 from .cache_utils import CacheEvictionCoordinator, ExecutorOwnerMixin
 
@@ -66,7 +66,7 @@ class Tile:
 class _SourceTilePayloadKey:
     """Source-oriented identity for one pyramid tile payload."""
 
-    pyramid_asset_key: SceneLayerAssetKey
+    pyramid_asset_key: SourceRenderAssetKey
     pyramid_scale: float
     row: int
     col: int
@@ -498,7 +498,7 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
             )
 
     def remove_tiles_for_source_asset(
-        self, pyramid_asset_key: SceneLayerAssetKey
+        self, pyramid_asset_key: SourceRenderAssetKey
     ) -> None:
         """Remove all tiles generated from a source/pyramid asset."""
         self._assert_main_thread()

@@ -13,14 +13,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt
+from PySide6.QtCore import QObject, QRect, QSize, Qt
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
-    QColor,
-    QImage,
     QKeySequence,
-    QPainter,
     QPalette,
 )
 from PySide6.QtWidgets import (
@@ -36,7 +33,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qpane import QPane, QPaneLayerInteractionPolicy, RasterExtentPolicy
+from qpane import (
+    EditorIntent,
+    QPane,
+    QPaneLayerInteractionPolicy,
+    RasterExtentPolicy,
+)
+
+from .layer_policy import DemoLayerPolicyController
 
 
 class _CenteredMenuToolButton(QToolButton):
@@ -97,7 +101,7 @@ class EditorControls(QObject):
         self._set_mode = set_mode
         self._show_status = show_status
         self._paint_layer_count = 0
-        self._policy_mask_id = None
+        self.layer_policy = DemoLayerPolicyController(qpane, self)
         self._selection_actions = self._build_selection_actions()
         self.undo_action = self._action(
             "Undo",
@@ -152,6 +156,7 @@ class EditorControls(QObject):
         qpane.pixelSelectionChanged.connect(self.refresh)
         qpane.floatingPixelEditChanged.connect(self.refresh)
         qpane.selectedLayerChanged.connect(self.refresh)
+        qpane.editorPolicyChanged.connect(self.refresh)
         qpane.sceneChanged.connect(self.refresh)
         qpane.sceneEditHistoryChanged.connect(self.refresh)
         self.refresh()
@@ -198,7 +203,6 @@ class EditorControls(QObject):
         menu.addAction(self.invert_action)
         menu.addSeparator()
         menu.addAction(self.delete_pixels_action)
-        menu.addAction(self.add_paint_layer_action)
         menu.addSeparator()
         floating_menu = menu.addMenu("Floating Pixels")
         floating_menu.addAction(self.anchor_floating_action)
@@ -206,6 +210,10 @@ class EditorControls(QObject):
         floating_menu.addAction(self.promote_floating_action)
         floating_menu.addSeparator()
         floating_menu.addAction(self.cancel_floating_action)
+
+    def populate_layer_menu(self, menu: QMenu) -> None:
+        """Add ordinary editable-layer creation to the demo's Layer menu."""
+        menu.addAction(self.add_paint_layer_action)
 
     def add_floating_toolbar(self, window: QMainWindow) -> QToolBar:
         """Add a compact contextual bar shown only for unresolved pixels."""
@@ -233,94 +241,22 @@ class EditorControls(QObject):
         for action in self._selection_actions:
             action.setChecked(action.data() == mode)
 
-    def apply_layer_policy(self) -> None:
-        """Permit edits only on the selected authoring layer; freeze images."""
-        scene = self._qpane.currentScene()
-        if scene is None:
-            return
-        frozen = QPaneLayerInteractionPolicy()
-        selectable = QPaneLayerInteractionPolicy(selectable=True)
-        editable = QPaneLayerInteractionPolicy(
-            selectable=True,
-            movable=True,
-            pixel_editable=True,
-        )
-        selected = self._qpane.selectedLayer()
-        selected_layer_id = None if selected is None else selected.layer_id
-        active_mask_id = self._qpane.activeMaskID()
-        active_mask_layer_id = next(
-            (
-                mask.layer_id
-                for mask in self._qpane.listMasksForImage()
-                if mask.mask_id == active_mask_id
-            ),
-            None,
-        )
-        if active_mask_id != self._policy_mask_id:
-            self._policy_mask_id = active_mask_id
-            selected_layer_id = active_mask_layer_id
-        if selected_layer_id is None:
-            selected_layer_id = active_mask_layer_id
-        for layer in scene.layers:
-            authoring_layer = layer.source_kind in {"mask", "raster"}
-            policy = (
-                editable
-                if authoring_layer and layer.layer_id == selected_layer_id
-                else selectable if authoring_layer else frozen
-            )
-            self._qpane.setLayerInteractionPolicy(
-                scene.scene_id,
-                layer.layer_id,
-                policy,
-            )
-        if selected_layer_id is not None:
-            self._qpane.setSelectedLayer(scene.scene_id, selected_layer_id)
-
-    def select_active_mask_layer(self) -> None:
-        """Align selected editor-layer identity with the active mask."""
-        active_mask_id = self._qpane.activeMaskID()
-        for mask in self._qpane.listMasksForImage():
-            if (
-                mask.mask_id == active_mask_id
-                and mask.scene_id is not None
-                and mask.layer_id is not None
-            ):
-                self._qpane.setLayerInteractionPolicy(
-                    mask.scene_id,
-                    mask.layer_id,
-                    QPaneLayerInteractionPolicy(selectable=True),
-                )
-                self._qpane.setSelectedLayer(mask.scene_id, mask.layer_id)
-                return
-
     def refresh(self, *_args: object) -> None:
         """Refresh action availability from detached public snapshots."""
         scene = self._qpane.currentScene()
         selection = self._qpane.pixelSelectionState()
-        selected = self._qpane.selectedLayer()
-        selected_layer = None
-        if scene is not None and selected is not None:
-            selected_layer = next(
-                (
-                    layer
-                    for layer in scene.layers
-                    if layer.layer_id == selected.layer_id
-                ),
-                None,
-            )
         has_selection = selection is not None and selection.has_selection
+        selection_state = self._qpane.editorOperationState(EditorIntent.SELECT_PIXELS)
+        delete_state = self._qpane.editorOperationState(EditorIntent.DELETE_PIXELS)
         floating = self._qpane.floatingPixelEditState()
-        editable = bool(
-            selected_layer is not None
-            and selected_layer.interaction.pixel_editable
-            and selected_layer.source_kind in {"mask", "raster"}
-        )
         self.undo_action.setEnabled(self._qpane.sceneEditUndoAvailable())
         self.redo_action.setEnabled(self._qpane.sceneEditRedoAvailable())
-        self.select_all_action.setEnabled(scene is not None)
+        self.select_all_action.setEnabled(selection_state.allowed)
         self.deselect_action.setEnabled(has_selection)
-        self.invert_action.setEnabled(scene is not None)
-        self.delete_pixels_action.setEnabled(has_selection and editable)
+        self.invert_action.setEnabled(selection_state.allowed)
+        self.delete_pixels_action.setEnabled(
+            has_selection and (delete_state.allowed or bool(delete_state.alternatives))
+        )
         self.add_paint_layer_action.setEnabled(
             self._qpane.currentImage is not None and scene is not None
         )
@@ -332,7 +268,7 @@ class EditorControls(QObject):
         if self._floating_toolbar is not None:
             self._floating_toolbar.setVisible(has_floating)
         for action in self._selection_actions:
-            action.setEnabled(scene is not None)
+            action.setEnabled(selection_state.allowed)
 
     def _build_selection_actions(self) -> tuple[QAction, ...]:
         """Create mutually exclusive shape tools with discoverable shortcuts."""
@@ -409,6 +345,17 @@ class EditorControls(QObject):
         """Clear selected pixels from the selected editable layer."""
         if self._qpane.deleteSelectedPixels():
             self._show_status("Cleared selected pixels from the active layer.")
+            return
+        state = self._qpane.editorOperationState(EditorIntent.DELETE_PIXELS)
+        if "rasterize" in state.alternatives:
+            self._show_status(
+                "The selected layer is not ready for pixel editing. Rasterize it "
+                "and wait for completion."
+            )
+        elif state.denial == "host-policy-denied":
+            self._show_status("The host editor policy disables pixel editing.")
+        else:
+            self._show_status("No editable selected pixels are available.")
 
     def _anchor_floating(self) -> None:
         """Resolve the transient payload into its source layer."""
@@ -491,45 +438,18 @@ class EditorControls(QObject):
         ):
             return
         if self._qpane.anchorFloatingPixels(scene_id, layer_id):
-            self.apply_layer_policy()
+            self.layer_policy.reconcile()
             self._show_status(f"Anchored floating pixels to {label or 'layer'}.")
             return
         self._qpane.setLayerInteractionPolicy(scene_id, layer_id, interaction)
 
     def _add_paint_layer(self) -> None:
-        """Create visible editable RGBA content through public layer APIs."""
-        source = self._qpane.currentImage
-        if source is None or source.isNull():
-            return
-        image = QImage(source.size(), QImage.Format_ARGB32_Premultiplied)
-        image.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(image)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(65, 190, 235, 150))
-        width = max(24.0, image.width() * 0.22)
-        height = max(24.0, image.height() * 0.22)
-        painter.drawEllipse(
-            QRectF(
-                image.width() * 0.39,
-                image.height() * 0.39,
-                width,
-                height,
-            )
-        )
-        painter.end()
+        """Create and target an empty expanding RGBA paint layer."""
         self._paint_layer_count += 1
-        layer_id = self._qpane.addEditableRasterLayer(
-            image,
+        layer_id = self._qpane.createPaintLayer(
             label=f"Paint {self._paint_layer_count}",
-            interaction=QPaneLayerInteractionPolicy(
-                selectable=True,
-                movable=True,
-                pixel_editable=True,
-            ),
-            extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
+            extent_policy=RasterExtentPolicy.UNBOUNDED,
         )
-        scene = self._qpane.currentScene()
-        if layer_id is not None and scene is not None:
-            self._qpane.setSelectedLayer(scene.scene_id, layer_id)
-            self._show_status("Added and selected an editable paint layer.")
+        if layer_id is not None:
+            self._set_mode(QPane.CONTROL_MODE_DRAW_BRUSH)
+            self._show_status("Added an empty paint layer and armed the brush.")

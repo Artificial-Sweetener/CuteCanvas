@@ -16,7 +16,8 @@ from PySide6.QtCore import QRect, QRectF
 from PySide6.QtGui import QColor, QImage
 
 from qpane import QPaneLayerInteractionPolicy, RasterExtentPolicy
-from qpane.masks.stroke_models import MaskStrokeSegmentPayload
+from qpane.painting import BrushStrokeSegment
+from qpane.scene.raster import RasterBounds
 from tests.helpers.mask_test_utils import drain_mask_jobs
 
 pytest_plugins = ("tests.test_mask_workflows",)
@@ -103,6 +104,52 @@ def test_mask_coverage_can_select_and_delete_through_generic_layer_editing(
     assert not layer.surface.snapshot_array().any()
 
 
+def test_unbounded_mask_selection_projects_only_canvas_relevant_sparse_pixels(
+    qpane_with_mask,
+) -> None:
+    """Saved-selection projection must not materialize distant off-canvas gaps."""
+    qpane, manager, image_id = qpane_with_mask
+    mask_id, info = _attached_mask(qpane, manager, image_id)
+    layer = manager.get_layer(mask_id)
+    assert layer is not None
+    layer.surface.fill(0)
+    assert qpane.setRasterExtentPolicy(
+        info.scene_id,
+        info.layer_id,
+        RasterExtentPolicy.UNBOUNDED,
+    )
+    for bounds in (
+        QRect(2, 2, 2, 2),
+        QRect(1_000_000, 1_000_000, 8, 8),
+    ):
+        local = RasterBounds.from_qrect(bounds)
+        assert layer.surface.ensure_writable(local).writable == local
+        storage = layer.surface.storage_rect(local)
+        assert storage is not None
+        layer.surface.mutate_storage_region(
+            storage,
+            lambda pixels, _image: pixels.fill(255),
+        )
+    allocated = layer.surface.allocated_bytes
+
+    assert qpane.selectLayerCoverage(info.scene_id, info.layer_id)
+    selection = qpane.pixelSelectionState()
+
+    assert selection is not None
+    assert selection.bounds == QRect(2, 2, 2, 2)
+    assert selection.coverage is not None
+    assert selection.coverage.size() == QRect(2, 2, 2, 2).size()
+    assert layer.surface.allocated_bytes == allocated
+    plan = qpane.view().calculateRenderPlan(is_blank=False)
+    assert plan is not None
+    visible_mask_items = [
+        item for item in plan.render_items if item.descriptor.layer_id == info.layer_id
+    ]
+    assert len(visible_mask_items) == 1
+    assert visible_mask_items[0].source_image.width() <= 514
+    assert visible_mask_items[0].source_image.height() <= 514
+
+
 def test_mask_delete_projects_through_scaled_transform_and_offset_bounds(
     qpane_with_mask,
     qapp,
@@ -172,7 +219,7 @@ def test_mask_brush_preview_and_commit_respect_pixel_selection(
     assert qpane.setPixelSelection(selection, QRect(0, 0, 4, 8))
 
     service.applyStrokeSegment(
-        MaskStrokeSegmentPayload.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
+        BrushStrokeSegment.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
     )
     preview = service.getColorizedMask(layer)
     assert preview is not None
@@ -214,7 +261,7 @@ def test_transformed_mask_brush_preview_and_commit_share_scene_selection(
     assert qpane.setPixelSelection(selection, QRect(14, 20, 8, 16))
 
     service.applyStrokeSegment(
-        MaskStrokeSegmentPayload.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
+        BrushStrokeSegment.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
     )
     preview = service.getColorizedMask(layer)
     assert preview is not None

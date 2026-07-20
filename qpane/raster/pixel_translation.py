@@ -14,7 +14,7 @@ import numpy as np
 
 from ..coverage import CoverageSnapshot
 from ..scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
-from ..scene.pixel_transitions import RasterPixelTransition
+from ..scene.pixel_transitions import RasterPixelTransition, raster_edit_patch_bounds
 from ..scene.raster import RasterBounds, RasterExtentPolicy
 from .color_surface import ColorRasterSurface
 
@@ -67,8 +67,10 @@ class ColorPixelTranslator:
             if surface.extent_policy is RasterExtentPolicy.FIXED
             else surface_bounds.united(destination_bounds)
         )
-        patch_bounds = source_bounds.united(destination_bounds).intersection(
-            after_bounds
+        patch_bounds = raster_edit_patch_bounds(
+            source_bounds,
+            destination_bounds,
+            after_bounds,
         )
         if patch_bounds is None:
             return None

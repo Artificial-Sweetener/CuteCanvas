@@ -16,22 +16,23 @@ from dataclasses import dataclass
 
 from ..composition.layers import (
     CompositionLayerInstance,
-    CompositionLayerSourceKind,
-    ImageSceneLayerStore,
+    CompositionLayerStore,
 )
 from ..editor.floating_layers import FloatingLayerTransition
+from ..scene.affine import LayerTransform
 from ..scene.identity import editable_raster_layer_id
 from ..scene.model import LayerDescriptor, SceneDescriptor
 from ..scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
 from .assets import EditableRasterAssetStore
 from .color_surface import ColorRasterSnapshot
+from .source_reference import EditableRasterReference
 
 
 @dataclass(frozen=True, slots=True)
 class EditableRasterPromotionState:
     """Retain one editable raster asset and composition instance."""
 
-    image_id: uuid.UUID
+    composition_id: uuid.UUID
     instance: CompositionLayerInstance
     snapshot: ColorRasterSnapshot
 
@@ -45,14 +46,14 @@ class EditableRasterFloatingLayerOwner:
         self,
         *,
         assets: EditableRasterAssetStore,
-        layers: ImageSceneLayerStore,
-        current_image_id: Callable[[], uuid.UUID | None],
+        layers: CompositionLayerStore,
+        current_composition_id: Callable[[], uuid.UUID | None],
         changed: Callable[[], None],
     ) -> None:
         """Bind raster assets, composition instances, and publication."""
         self._assets = assets
         self._layers = layers
-        self._current_image_id = current_image_id
+        self._current_composition_id = current_composition_id
         self._changed = changed
 
     def accepts_fragment(self, fragment: RasterPixelFragment) -> bool:
@@ -65,13 +66,12 @@ class EditableRasterFloatingLayerOwner:
         scene: SceneDescriptor,
         source_layer: LayerDescriptor,
         fragment: RasterPixelFragment,
-        delta: tuple[int, int],
+        transform: LayerTransform,
         label: str | None,
     ) -> FloatingLayerTransition | None:
         """Create one composition-owned editable raster layer."""
-        image_id = self._current_image_id()
-        transform = source_layer.transform
-        if image_id is None or transform is None or not self.accepts_fragment(fragment):
+        composition_id = self._current_composition_id()
+        if composition_id is None or not self.accepts_fragment(fragment):
             return None
         raster_id = uuid.uuid4()
         layer_id = editable_raster_layer_id(scene.scene_id, raster_id)
@@ -82,19 +82,15 @@ class EditableRasterFloatingLayerOwner:
         )
         instance = CompositionLayerInstance(
             layer_id=layer_id,
-            source_kind=CompositionLayerSourceKind.RASTER,
-            source_id=raster_id,
-            transform=transform.translated(
-                delta[0] * transform.scale_x,
-                delta[1] * transform.scale_y,
-            ),
+            source=EditableRasterReference(raster_id),
+            transform=transform,
             visible=True,
             opacity=source_layer.opacity,
             interaction=source_layer.interaction,
             role="raster",
             label=label or source_layer.label or "Floating raster",
         )
-        state = EditableRasterPromotionState(image_id, instance, snapshot)
+        state = EditableRasterPromotionState(composition_id, instance, snapshot)
         transition = FloatingLayerTransition(
             scene.scene_id,
             layer_id,
@@ -102,6 +98,7 @@ class EditableRasterFloatingLayerOwner:
             state,
             snapshot.pixels.nbytes,
             instance.transform,
+            (instance.source,),
         )
         return transition if self.restore(transition, use_after=True) else None
 
@@ -115,12 +112,15 @@ class EditableRasterFloatingLayerOwner:
         state = self._state(transition)
         if state is None:
             return False
-        asset_present = self._assets.get(state.instance.source_id) is not None
-        instance = self._layers.layer(state.image_id, state.instance.layer_id)
+        source = state.instance.source
+        if not isinstance(source, EditableRasterReference):
+            return False
+        asset_present = self._assets.get(source.raster_id) is not None
+        instance = self._layers.layer(state.composition_id, state.instance.layer_id)
         return (
             asset_present and instance == state.instance
             if use_after
-            else not asset_present and instance is None
+            else instance is None
         )
 
     def restore(
@@ -136,19 +136,21 @@ class EditableRasterFloatingLayerOwner:
         if self.matches(transition, use_after=use_after):
             return True
         if use_after:
-            if self._assets.get(state.instance.source_id) is not None:
+            source = state.instance.source
+            if not isinstance(source, EditableRasterReference):
                 return False
-            self._assets.restore(state.instance.source_id, state.snapshot)
-            if not self._layers.add_layer(state.image_id, state.instance):
-                self._assets.remove(state.instance.source_id)
+            created_asset = self._assets.get(source.raster_id) is None
+            self._assets.restore(source.raster_id, state.snapshot)
+            if not self._layers.add_layer(state.composition_id, state.instance):
+                if created_asset:
+                    self._assets.remove(source.raster_id)
                 return False
         else:
             if not self.matches(transition, use_after=True):
                 return False
-            if not self._layers.remove_layer(state.image_id, state.instance.layer_id):
-                return False
-            if not self._assets.remove(state.instance.source_id):
-                self._layers.add_layer(state.image_id, state.instance)
+            if not self._layers.remove_layer(
+                state.composition_id, state.instance.layer_id
+            ):
                 return False
         self._changed()
         return True

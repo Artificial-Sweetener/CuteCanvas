@@ -24,6 +24,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize
 
+from ..catalog.source_reference import CatalogImageReference
 from .default_scene import DefaultCatalogSceneProvider
 from .model import SceneDescriptor
 from .providers import SceneContribution, SceneResolver
@@ -78,8 +79,22 @@ class SceneAssembly:
         return None if scene is None else self._providers.process_scene(scene)
 
     def resolve_replacement(self) -> SceneDescriptor | None:
-        """Resolve the active replacement scene when one is registered."""
-        scene = self._resolve(self._providers.replacement_contributions())
+        """Resolve a replacement document through shared scene extension stages."""
+        base_scene = self._resolve(self._providers.replacement_contributions())
+        if base_scene is None:
+            return None
+        image_id = next(
+            (
+                layer.source.image_id
+                for layer in base_scene.layers
+                if layer.visible and isinstance(layer.source, CatalogImageReference)
+            ),
+            None,
+        )
+        adapted = self._providers.adapt_base_scene(base_scene, image_id)
+        contributions = [SceneContribution(adapted, order=0)]
+        contributions.extend(self._providers.contributions_for(adapted, image_id))
+        scene = self._resolve(tuple(contributions))
         return None if scene is None else self._providers.process_scene(scene)
 
     @staticmethod

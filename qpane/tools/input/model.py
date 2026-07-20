@@ -57,6 +57,11 @@ class PointerSample:
     buttons: Qt.MouseButton
     modifiers: Qt.KeyboardModifier
     timestamp_ms: int
+    tilt_x: float = 0.0
+    tilt_y: float = 0.0
+    rotation: float = 0.0
+    tangential_pressure: float = 0.0
+    device_id: str = ""
 
     @property
     def is_contact(self) -> bool:

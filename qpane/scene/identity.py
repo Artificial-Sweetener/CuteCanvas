@@ -29,6 +29,7 @@ _PLACEHOLDER_LAYER_NAMESPACE = uuid.UUID("2a82ab02-42ed-5269-9f16-21d2b48556ea")
 _PLACEHOLDER_SOURCE_NAMESPACE = uuid.UUID("af86f75f-e94d-5fb6-88fd-5ee9878ff977")
 _MASK_LAYER_NAMESPACE = uuid.UUID("80ae57c6-cf1c-5e9a-971f-5161839f0c7f")
 _EDITABLE_RASTER_LAYER_NAMESPACE = uuid.UUID("31c5ff47-caef-51c4-8f30-f4f79d2c6d87")
+_VECTOR_LAYER_NAMESPACE = uuid.UUID("fc7986d7-c0d8-566b-b709-186763a78f97")
 _COMPARE_LAYER_NAMESPACE = uuid.UUID("e618d770-1769-571f-8471-5df8cf28ab15")
 
 
@@ -54,6 +55,37 @@ def default_catalog_asset_key(
         layer_id=base_image_layer_id(image_id),
         source_id=image_id,
         source_kind="catalog-image",
+        source_revision=revision,
+        source_path=source_path,
+    )
+
+
+def catalog_source_asset_key(
+    image_id: uuid.UUID,
+    *,
+    revision: int,
+    source_path: Path | None,
+) -> SourceRenderAssetKey:
+    """Return source-product identity for a catalog image."""
+    return SourceRenderAssetKey(
+        source_id=image_id,
+        source_kind="catalog-image",
+        source_revision=revision,
+        source_path=source_path,
+    )
+
+
+def source_render_asset_key(
+    *,
+    source_id: uuid.UUID,
+    source_kind: str,
+    revision: int,
+    source_path: Path | None,
+) -> SourceRenderAssetKey:
+    """Return source-product identity independent of layer instances."""
+    return SourceRenderAssetKey(
+        source_id=source_id,
+        source_kind=source_kind,
         source_revision=revision,
         source_path=source_path,
     )
@@ -87,21 +119,9 @@ def editable_raster_layer_id(scene_id: uuid.UUID, raster_id: uuid.UUID) -> uuid.
     return uuid.uuid5(_EDITABLE_RASTER_LAYER_NAMESPACE, f"{scene_id}:{raster_id}")
 
 
-def mask_layer_asset_key(
-    *,
-    scene_id: uuid.UUID,
-    mask_id: uuid.UUID,
-    revision: int,
-) -> SceneLayerAssetKey:
-    """Return the asset key for a mask layer in a resolved scene."""
-    return SceneLayerAssetKey(
-        scene_id=scene_id,
-        layer_id=mask_layer_id(scene_id, mask_id),
-        source_id=mask_id,
-        source_kind="mask-layer",
-        source_revision=revision,
-        source_path=None,
-    )
+def vector_layer_id(scene_id: uuid.UUID, vector_id: uuid.UUID) -> uuid.UUID:
+    """Return the deterministic scene-layer ID for a vector source."""
+    return uuid.uuid5(_VECTOR_LAYER_NAMESPACE, f"{scene_id}:{vector_id}")
 
 
 def compare_layer_id(scene_id: uuid.UUID, source_id: uuid.UUID) -> uuid.UUID:
@@ -147,11 +167,26 @@ class SceneLayerAssetKey:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceRenderAssetKey:
+    """Identify one reusable source product independently of layer geometry."""
+
+    source_id: uuid.UUID
+    source_kind: str
+    source_revision: int
+    source_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        """Validate revision metadata used for source-product invalidation."""
+        if self.source_revision < 0:
+            raise ValueError("source revision must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
 class SceneLayerTileKey:
     """Identify a single tile generated from a scene layer asset."""
 
     asset_key: SceneLayerAssetKey
-    pyramid_asset_key: SceneLayerAssetKey
+    pyramid_asset_key: SourceRenderAssetKey
     pyramid_scale: float
     row: int
     col: int

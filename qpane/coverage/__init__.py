@@ -9,8 +9,10 @@
 """Shared grayscale coverage storage for masks and pixel selections."""
 
 from .operations import CoverageCombineMode, combine_coverage
+from .projection import AffineCoverageResampler
 from .surface import (
     CoverageSnapshot,
+    CoverageStateSnapshot,
     CoverageSurface,
     WritableCoverageRegion,
     normalize_coverage_array,
@@ -18,8 +20,10 @@ from .surface import (
 )
 
 __all__ = [
+    "AffineCoverageResampler",
     "CoverageCombineMode",
     "CoverageSnapshot",
+    "CoverageStateSnapshot",
     "CoverageSurface",
     "WritableCoverageRegion",
     "combine_coverage",
