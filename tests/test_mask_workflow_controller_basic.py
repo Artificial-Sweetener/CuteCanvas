@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -16,15 +16,14 @@
 
 import uuid
 
+from cutecanvas import CuteCanvas
+from cutecanvas.masks.workflow import Masks
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
 
-from qpane import QPane
-from qpane.masks.workflow import Masks
-
 
 def test_mask_workflow_bootstrap_basic(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(32, 32)
     masks = Masks(
         qpane=qpane,
@@ -39,11 +38,11 @@ def test_mask_workflow_bootstrap_basic(qapp):
     img_b.fill(0xFF000000)
     id_a = uuid.uuid4()
     id_b = uuid.uuid4()
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         [img_a, img_b], paths=[None, None], ids=[id_a, id_b]
     )
     qpane.catalog().setImagesByID(image_map, id_a)
-    # Navigation via facade should trigger QPane overlay suspension (QPane hook still active).
+    # Navigation via facade should trigger CuteCanvas overlay suspension (CuteCanvas hook still active).
     qpane.catalog().setCurrentImageID(id_b)
     assert isinstance(qpane.overlaysSuspended(), bool)
     masks_for_image = qpane.listMasksForImage(id_b)

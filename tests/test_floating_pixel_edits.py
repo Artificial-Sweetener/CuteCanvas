@@ -1,22 +1,28 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Mounted public-contract tests for unresolved floating pixel edits."""
 
 from __future__ import annotations
 
 import numpy as np
+from cutecanvas import FloatingPixelMode, LayerPolicy, RasterExtentPolicy
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-
-from qpane import FloatingPixelMode, QPaneLayerInteractionPolicy, RasterExtentPolicy
 
 from .harness.mounted_qpane import MountedQPaneHarness
 
@@ -50,13 +56,14 @@ def test_mask_fragment_release_promote_and_history_are_atomic(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
             ),
         )
         assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.configureSnapping(enabled=False)
         source = viewer.mask_service.assets.get_layer(source_mask_id)
         assert source is not None
 
@@ -64,7 +71,7 @@ def test_mask_fragment_release_promote_and_history_are_atomic(
             """Paint a bounded payload with empty surrounding storage."""
             pixels[60:100, 60:100] = 255
 
-        source.surface.mutate(paint_square)
+        source.coverage.raster.mutate(paint_square)
         viewer.invalidateActiveMaskCache()
         viewer.markDirty()
         viewer.update()
@@ -90,31 +97,33 @@ def test_mask_fragment_release_promote_and_history_are_atomic(
         assert floating.mode is FloatingPixelMode.CUT
         assert floating.source_layer_id == info.layer_id
         assert floating.offset == QPoint(50, 30)
-        assert source.surface.storage_value(60, 60) == 255
+        assert source.coverage.raster.storage_value(60, 60) == 255
         assert states and states[-1] == floating
 
         promoted_layer_id = viewer.promoteFloatingPixels("Detached mask")
 
         assert promoted_layer_id is not None
         assert viewer.floatingPixelEditState() is None
-        assert source.surface.storage_value(60, 60) == 0
+        assert source.coverage.raster.storage_value(60, 60) == 0
         masks = viewer.listMasksForImage()
         promoted = next(item for item in masks if item.layer_id == promoted_layer_id)
         promoted_source = viewer.mask_service.assets.get_layer(promoted.mask_id)
         assert promoted_source is not None
-        assert promoted_source.surface.bounds.to_qrect() == QRect(60, 60, 40, 40)
-        assert promoted_source.surface.storage_value(0, 0) == 255
+        assert promoted_source.coverage.raster.bounds.to_qrect() == QRect(
+            60, 60, 40, 40
+        )
+        assert promoted_source.coverage.raster.storage_value(0, 0) == 255
         assert viewer.selectedLayer().layer_id == promoted_layer_id
 
         assert viewer.undoSceneEdit()
-        assert source.surface.storage_value(60, 60) == 255
+        assert source.coverage.raster.storage_value(60, 60) == 255
         assert all(
             item.layer_id != promoted_layer_id for item in viewer.listMasksForImage()
         )
         assert viewer.selectedLayer().layer_id == info.layer_id
 
         assert viewer.redoSceneEdit()
-        assert source.surface.storage_value(60, 60) == 0
+        assert source.coverage.raster.storage_value(60, 60) == 0
         assert any(
             item.layer_id == promoted_layer_id for item in viewer.listMasksForImage()
         )
@@ -143,7 +152,7 @@ def test_escape_cancels_floating_cut_without_history_or_pixel_changes(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, pixel_editable=True),
+            LayerPolicy(selectable=True, pixel_editable=True),
         )
         assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
 
@@ -151,8 +160,8 @@ def test_escape_cancels_floating_cut_without_history_or_pixel_changes(
             """Paint only the selected payload for exact replay assertions."""
             pixels[40:72, 40:72] = 255
 
-        source.surface.mutate(paint_square)
-        before = source.surface.snapshot_array()
+        source.coverage.raster.mutate(paint_square)
+        before = source.coverage.raster.snapshot_array()
         selection = QImage(32, 32, QImage.Format_Grayscale8)
         selection.fill(255)
         assert viewer.setPixelSelection(selection, QRect(40, 40, 32, 32))
@@ -170,7 +179,7 @@ def test_escape_cancels_floating_cut_without_history_or_pixel_changes(
         QTest.keyClick(viewer, Qt.Key_Escape)
 
         assert viewer.floatingPixelEditState() is None
-        np.testing.assert_array_equal(source.surface.snapshot_array(), before)
+        np.testing.assert_array_equal(source.coverage.raster.snapshot_array(), before)
         selection_state = viewer.pixelSelectionState()
         assert selection_state is not None
         assert selection_state.bounds == QRect(40, 40, 32, 32)
@@ -181,11 +190,11 @@ def test_escape_cancels_floating_cut_without_history_or_pixel_changes(
         assert viewer.floatingPixelEditState() is not None
         assert viewer.undoSceneEdit()
         assert viewer.floatingPixelEditState() is None
-        np.testing.assert_array_equal(source.surface.snapshot_array(), before)
+        np.testing.assert_array_equal(source.coverage.raster.snapshot_array(), before)
         assert viewer.sceneEditRedoAvailable()
         assert viewer.redoSceneEdit()
-        assert source.surface.storage_value(40, 40) == 0
-        assert source.surface.storage_value(90, 80) == 255
+        assert source.coverage.raster.storage_value(40, 40) == 0
+        assert source.coverage.raster.storage_value(90, 80) == 255
     finally:
         harness.close()
 
@@ -230,9 +239,16 @@ def test_rgba_fragment_promotes_as_real_rendered_layer_with_atomic_history(
         assert finish is not None
         viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
 
-        QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, start.toPoint())
+        QTest.keyPress(viewer, Qt.Key_Control)
+        QTest.mousePress(viewer, Qt.LeftButton, Qt.ControlModifier, start.toPoint())
         QTest.mouseMove(viewer, finish.toPoint(), delay=0)
-        QTest.mouseRelease(viewer, Qt.LeftButton, Qt.NoModifier, finish.toPoint())
+        QTest.mouseRelease(
+            viewer,
+            Qt.LeftButton,
+            Qt.ControlModifier,
+            finish.toPoint(),
+        )
+        QTest.keyRelease(viewer, Qt.Key_Control)
         harness.drain_events()
 
         floating = viewer.floatingPixelEditState()
@@ -391,7 +407,7 @@ def test_floating_session_resolves_safely_across_structure_tool_and_teardown(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -403,7 +419,7 @@ def test_floating_session_resolves_safely_across_structure_tool_and_teardown(
             """Paint a tiny asymmetric payload for exact lifecycle checks."""
             pixels[80, 80] = 255
 
-        source.surface.mutate(paint_pixel)
+        source.coverage.raster.mutate(paint_pixel)
         selection = QImage(8, 8, QImage.Format_Grayscale8)
         selection.fill(255)
         assert viewer.setPixelSelection(selection, QRect(80, 80, 8, 8))
@@ -418,16 +434,16 @@ def test_floating_session_resolves_safely_across_structure_tool_and_teardown(
             RasterExtentPolicy.EXPAND_ON_WRITE,
         )
         assert viewer.floatingPixelEditState() is None
-        assert source.surface.storage_value(80, 80) == 0
-        assert source.surface.storage_value(81, 80) == 255
+        assert source.coverage.raster.storage_value(80, 80) == 0
+        assert source.coverage.raster.storage_value(81, 80) == 255
 
         QTest.keyClick(viewer, Qt.Key_Right)
         floating_before_tool_change = viewer.floatingPixelEditState()
         assert floating_before_tool_change is not None
         viewer.setControlMode(viewer.CONTROL_MODE_DRAW_BRUSH)
         assert viewer.floatingPixelEditState() == floating_before_tool_change
-        assert source.surface.storage_value(81, 80) == 255
-        assert source.surface.storage_value(82, 80) == 0
+        assert source.coverage.raster.storage_value(81, 80) == 255
+        assert source.coverage.raster.storage_value(82, 80) == 0
 
         viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
         assert viewer.floatingPixelEditState() == floating_before_tool_change

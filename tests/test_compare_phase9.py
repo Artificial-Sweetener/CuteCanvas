@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,9 +21,8 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from cutecanvas import ComparisonOrientation, CuteCanvas
 from PySide6.QtGui import QColor, QImage, Qt
-
-from qpane import ComparisonOrientation, QPane
 from qpane.catalog.source_reference import CatalogImageReference
 from qpane.scene.identity import (
     SceneLayerTileKey,
@@ -32,6 +31,7 @@ from qpane.scene.identity import (
 )
 from qpane.scene.model import ClipCoordinateSpace, LayerKind
 from qpane.scene.render_plan import RasterLayerRenderItem, RenderStrategy
+
 from tests.helpers.render_compare import rendered_overscanned_widget_frame
 
 
@@ -46,7 +46,7 @@ def _solid_image(
     return image
 
 
-def _cleanup_qpane(qpane: QPane, qapp) -> None:
+def _cleanup_qpane(qpane: CuteCanvas, qapp) -> None:
     """Release a test widget through Qt's event loop."""
     qpane.deleteLater()
     qapp.processEvents()
@@ -111,14 +111,14 @@ def _tile_key_for_item(
 
 def test_compare_catalog_image_resolves_as_second_scene_raster(qapp) -> None:
     """Catalog comparison should contribute a clipped image layer."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(100, 100)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
         base_image = _solid_image(color=Qt.red)
         compare_image = _solid_image(color=Qt.blue)
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [base_image, compare_image],
             [Path("base.png"), Path("compare.png")],
             [base_id, compare_id],
@@ -164,12 +164,12 @@ def test_compare_catalog_image_resolves_as_second_scene_raster(qapp) -> None:
 
 def test_tile_ready_dirty_marking_does_not_build_render_plan(qapp, monkeypatch) -> None:
     """Tile-ready callbacks should use geometry instead of full paint planning."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [
                 _solid_image(1024, 1024, Qt.red),
                 _solid_image(1024, 1024, Qt.blue),
@@ -217,12 +217,12 @@ def test_tile_ready_dirty_marking_does_not_build_render_plan(qapp, monkeypatch) 
 
 def test_tile_ready_dirty_marking_rejects_stale_layer_asset(qapp) -> None:
     """Tile-ready geometry should ignore keys outside the active scene."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(1024, 1024, Qt.red)],
                 [None],
                 [base_id],
@@ -250,12 +250,12 @@ def test_tile_ready_dirty_marking_rejects_stale_layer_asset(qapp) -> None:
 
 def test_tile_ready_dirty_marking_rejects_stale_pyramid_scale(qapp) -> None:
     """Tile-ready geometry should ignore keys from an old pyramid level."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(1024, 1024, Qt.red)],
                 [None],
                 [base_id],
@@ -284,12 +284,12 @@ def test_tile_ready_dirty_marking_rejects_stale_pyramid_scale(qapp) -> None:
 
 def test_tile_ready_dirty_marking_maps_base_raster_layer(qapp) -> None:
     """Tile-ready geometry should mark dirty rects for active base tiles."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(1024, 1024, Qt.red)],
                 [None],
                 [base_id],
@@ -320,13 +320,13 @@ def test_tile_ready_dirty_marking_maps_base_raster_layer(qapp) -> None:
 
 def test_tile_ready_dirty_marking_maps_comparison_layer(qapp) -> None:
     """Tile-ready geometry should mark dirty rects for active non-base tiles."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(1024, 1024, Qt.red), _solid_image(1024, 1024, Qt.blue)],
                 [None, None],
                 [base_id, compare_id],
@@ -360,13 +360,13 @@ def test_tile_ready_dirty_marking_maps_comparison_layer(qapp) -> None:
 
 def test_compare_split_prevents_dirty_marking_outside_revealed_side(qapp) -> None:
     """Compare tile-ready geometry should ignore clipped-away tiles."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(1024, 1024, Qt.red), _solid_image(1024, 1024, Qt.blue)],
                 [None, None],
                 [base_id, compare_id],
@@ -397,13 +397,13 @@ def test_compare_split_prevents_dirty_marking_outside_revealed_side(qapp) -> Non
 
 def test_compare_split_clips_partially_intersecting_dirty_rect(qapp) -> None:
     """Compare tile-ready geometry should dirty only the visible tile fragment."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(1024, 1024, Qt.red), _solid_image(1024, 1024, Qt.blue)],
                 [None, None],
                 [base_id, compare_id],
@@ -437,12 +437,12 @@ def test_compare_split_clips_partially_intersecting_dirty_rect(qapp) -> None:
 
 def test_compare_vertical_split_limits_requested_tiles_to_revealed_side(qapp) -> None:
     """Vertical comparison clips should constrain compare tile requests."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [
                 _solid_image(1024, 1024, Qt.red),
                 _solid_image(1024, 1024, Qt.blue),
@@ -480,12 +480,12 @@ def test_compare_vertical_split_limits_requested_tiles_to_revealed_side(qapp) ->
 
 def test_compare_tile_cancellation_keeps_base_and_compare_visible_keys(qapp) -> None:
     """Tile cancellation should receive visible keys from every raster layer."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [
                 _solid_image(2048, 2048, Qt.red),
                 _solid_image(2048, 2048, Qt.blue),
@@ -515,12 +515,12 @@ def test_compare_tile_cancellation_keeps_base_and_compare_visible_keys(qapp) -> 
 
 def test_compare_horizontal_split_limits_requested_tiles_to_revealed_side(qapp) -> None:
     """Horizontal comparison clips should constrain compare tile requests."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [
                 _solid_image(1024, 1024, Qt.red),
                 _solid_image(1024, 1024, Qt.blue),
@@ -549,12 +549,12 @@ def test_compare_horizontal_split_limits_requested_tiles_to_revealed_side(qapp) 
 
 def test_compare_empty_split_requests_no_compare_tiles(qapp) -> None:
     """A fully hidden comparison side should not request comparison tiles."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [
                 _solid_image(1024, 1024, Qt.red),
                 _solid_image(1024, 1024, Qt.blue),
@@ -580,12 +580,12 @@ def test_compare_empty_split_requests_no_compare_tiles(qapp) -> None:
 
 def test_compare_full_split_keeps_normal_compare_tile_span(qapp) -> None:
     """A fully revealed comparison side should keep normal viewport tile culling."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(256, 256)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [
                 _solid_image(1024, 1024, Qt.red),
                 _solid_image(1024, 1024, Qt.blue),
@@ -612,12 +612,12 @@ def test_compare_full_split_keeps_normal_compare_tile_span(qapp) -> None:
 
 def test_compare_split_clips_rendered_pixels(qapp) -> None:
     """Renderer should apply the comparison layer clip during painting."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(100, 100)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [_solid_image(color=Qt.red), _solid_image(color=Qt.blue)],
             [None, None],
             [base_id, compare_id],
@@ -650,12 +650,12 @@ def test_compare_split_clips_rendered_pixels(qapp) -> None:
 
 def test_compare_catalog_image_uses_scene_placement(qapp) -> None:
     """Catalog comparisons should fill their scene placement even when sizes differ."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(100, 100)
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [
                 _solid_image(100, 100, Qt.red),
                 _solid_image(50, 100, Qt.blue),
@@ -692,12 +692,12 @@ def test_compare_catalog_image_uses_scene_placement(qapp) -> None:
 
 def test_comparison_changes_do_not_emit_catalog_mutations(qapp) -> None:
     """Comparison-only updates should use comparisonChanged, not catalogChanged."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(), _solid_image(color=Qt.blue)],
                 [None, None],
                 [base_id, compare_id],
@@ -722,12 +722,12 @@ def test_comparison_changes_do_not_emit_catalog_mutations(qapp) -> None:
 
 def test_catalog_comparison_survives_source_image_replacement(qapp) -> None:
     """Replacing the catalog comparison source should keep comparison enabled."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(color=Qt.red), _solid_image(color=Qt.blue)],
                 [None, None],
                 [base_id, compare_id],
@@ -751,12 +751,12 @@ def test_catalog_comparison_survives_source_image_replacement(qapp) -> None:
 
 def test_catalog_comparison_clears_when_source_image_is_removed(qapp) -> None:
     """Removing the catalog comparison source should disable comparison."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         base_id = uuid.uuid4()
         compare_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(color=Qt.red), _solid_image(color=Qt.blue)],
                 [None, None],
                 [base_id, compare_id],
@@ -786,7 +786,7 @@ def test_catalog_comparison_clears_when_source_image_is_removed(qapp) -> None:
 
 def test_compare_horizontal_split_updates_state(qapp) -> None:
     """Horizontal split updates should clamp position and expose state."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.setComparisonSplit(2.0, "horizontal")
 
@@ -800,7 +800,7 @@ def test_compare_horizontal_split_updates_state(qapp) -> None:
 
 def test_compare_rejects_unknown_catalog_image(qapp) -> None:
     """Catalog comparison sources must already exist."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         try:
             qpane.setComparisonImageID(uuid.uuid4())

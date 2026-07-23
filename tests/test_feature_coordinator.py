@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -17,16 +17,18 @@
 import sys
 import types
 
-from qpane.core import FeatureCoordinator, FeatureFallbacks
-from qpane.core.feature_coordinator import _FeatureSpec
+from cutecanvas.core import FeatureCoordinator, FeatureFallbacks
+from cutecanvas.core.feature_coordinator import _FeatureSpec
 
 
 class DummyQPane:
-    """Minimal QPane stub used for coordinator tests."""
+    """Minimal CuteCanvas stub used for coordinator tests."""
 
 
 def test_unknown_feature_records_failure_and_fallback(monkeypatch):
-    monkeypatch.setattr("qpane.core.feature_coordinator._DEFAULT_FEATURE_SPECS", ())
+    monkeypatch.setattr(
+        "cutecanvas.core.feature_coordinator._DEFAULT_FEATURE_SPECS", ()
+    )
     fallbacks = FeatureFallbacks()
     coordinator = FeatureCoordinator(DummyQPane(), fallbacks)
     summary = coordinator.install(("mystery",))
@@ -47,7 +49,7 @@ def test_import_failure_surfaces_hint_and_cause(monkeypatch):
         hint="Install the ghost extras via 'pip install qpane[ghost]'.",
     )
     monkeypatch.setattr(
-        "qpane.core.feature_coordinator._DEFAULT_FEATURE_SPECS", (spec,)
+        "cutecanvas.core.feature_coordinator._DEFAULT_FEATURE_SPECS", (spec,)
     )
     fallbacks = FeatureFallbacks()
     coordinator = FeatureCoordinator(DummyQPane(), fallbacks)
@@ -78,7 +80,7 @@ def test_successful_install_records_success(monkeypatch):
         installer_name="install_fake_feature",
     )
     monkeypatch.setattr(
-        "qpane.core.feature_coordinator._DEFAULT_FEATURE_SPECS", (spec,)
+        "cutecanvas.core.feature_coordinator._DEFAULT_FEATURE_SPECS", (spec,)
     )
     fallbacks = FeatureFallbacks()
     qpane = DummyQPane()

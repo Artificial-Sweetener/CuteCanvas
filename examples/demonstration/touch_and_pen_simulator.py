@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import sys
 
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import (
     QColor,
@@ -46,7 +47,6 @@ from PySide6.QtWidgets import (
 )
 
 from examples.demonstration.touch_and_pen import build_touch_mask_editor
-from qpane import QPane
 
 
 class PointerSimulator:
@@ -54,7 +54,7 @@ class PointerSimulator:
 
     def __init__(
         self,
-        viewer: QPane,
+        viewer: CuteCanvas,
         *,
         device_selector: QComboBox,
         x_slider: QSlider,
@@ -230,7 +230,7 @@ class PointerSimulator:
         pressure: float,
         buttons: Qt.MouseButton,
     ) -> None:
-        """Send one synthetic tablet packet through QPane's normal QWidget surface."""
+        """Send one synthetic tablet packet through CuteCanvas's normal QWidget surface."""
         QApplication.sendEvent(
             self._viewer,
             self._tablet_event(event_type, pressure=pressure, buttons=buttons),
@@ -284,7 +284,7 @@ class PointerSimulator:
 
 
 def build_touch_input_simulator(image: QImage) -> QWidget:
-    """Build a no-hardware input laboratory around a public QPane instance."""
+    """Build a no-hardware input laboratory around a public CuteCanvas instance."""
     viewer = build_touch_mask_editor(image)
     viewer.setObjectName("touchPenViewer")
     viewer.setMinimumSize(480, 360)
@@ -336,7 +336,7 @@ def build_touch_input_simulator(image: QImage) -> QWidget:
     form.addRow(button_rows)
 
     window = QWidget()
-    window.setWindowTitle("QPane touch and pen simulator")
+    window.setWindowTitle("CuteCanvas touch and pen simulator")
     layout = QHBoxLayout(window)
     layout.addWidget(viewer, 1)
     layout.addWidget(controls)

@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Mounted adversarial proof for affine layer-transform interactions."""
 
 from __future__ import annotations
@@ -15,14 +22,14 @@ import statistics
 
 import numpy as np
 import pytest
+from cutecanvas import LayerPolicy
+from cutecanvas.editor.transform_interaction import TransformBoxPresentation
 from PySide6.QtCore import QLineF, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-
-from qpane import QPaneLayerInteractionPolicy
-from qpane.editor.transform_interaction import TransformBoxPresentation
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
+
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
@@ -53,7 +60,7 @@ def test_affine_layer_move_survives_hostile_updates_space_pan_and_replay(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -70,7 +77,7 @@ def test_affine_layer_move_survives_hostile_updates_space_pan_and_replay(
             pixels[250:650, 1120:1480] = 255
             pixels[560:760, 1050:1300] = 0
 
-        layer.surface.mutate(paint_asymmetric_mask)
+        layer.coverage.raster.mutate(paint_asymmetric_mask)
         viewer.invalidateActiveMaskCache()
         viewer.markDirty()
         viewer.update()
@@ -211,7 +218,7 @@ def test_selected_rgba_free_transform_is_live_lossless_atomic_and_fast(
         layer_id = viewer.addEditableRasterLayer(
             raster,
             label="Transform target",
-            interaction=QPaneLayerInteractionPolicy(
+            interaction=LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -309,7 +316,7 @@ def test_whole_layer_transform_is_cumulative_suspendable_atomic_and_fast(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -325,7 +332,7 @@ def test_whole_layer_transform_is_cumulative_suspendable_atomic_and_fast(
             pixels[400:960, 900:1900] = 255
             pixels[540:740, 1250:1500] = 0
 
-        layer.surface.mutate(paint_tight_content)
+        layer.coverage.raster.mutate(paint_tight_content)
         viewer.invalidateActiveMaskCache()
         viewer.markDirty()
         viewer.update()

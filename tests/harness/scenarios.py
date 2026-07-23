@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Deterministic and seeded action builders for QPane abuse sessions."""
+"""Deterministic and seeded action builders for CuteCanvas abuse sessions."""
 
 from __future__ import annotations
 

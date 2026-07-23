@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Focused public-API raster-storage properties for the demonstration."""
 
 from __future__ import annotations
@@ -13,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from cutecanvas import CuteCanvas, RasterExtentPolicy, RasterSurfaceSnapshot
 from PySide6.QtCore import QRect
 from PySide6.QtWidgets import (
     QComboBox,
@@ -27,8 +35,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qpane import QPane, QPaneRasterSurfaceState, RasterExtentPolicy
-
 _PAD_INCREMENT = 32
 _COORDINATE_LIMIT = 1_000_000_000
 
@@ -38,14 +44,14 @@ class RasterStorageProperties(QWidget):
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         parent: QWidget | None = None,
         *,
         show_status: Callable[[str], None] | None = None,
     ) -> None:
-        """Build the inspector and subscribe only to QPane's public contract."""
+        """Build the inspector and subscribe only to CuteCanvas's public contract."""
         super().__init__(parent)
         self.setObjectName("rasterLayerInspector")
         self._qpane = qpane
@@ -107,7 +113,7 @@ class RasterStorageProperties(QWidget):
         layout.addStretch(1)
 
     def _connect_signals(self) -> None:
-        """Connect host controls and public QPane state notifications."""
+        """Connect host controls and public CuteCanvas state notifications."""
         self._policy_combo.currentIndexChanged.connect(self._apply_policy)
         self._apply_button.clicked.connect(self._apply_bounds)
         self._pad_button.clicked.connect(self._pad_bounds)
@@ -122,7 +128,7 @@ class RasterStorageProperties(QWidget):
         """Return the fixed scene and layer identity supplied by the tree."""
         return self._target
 
-    def _state(self) -> QPaneRasterSurfaceState | None:
+    def _state(self) -> RasterSurfaceSnapshot | None:
         """Query the selected raster layer through the facade."""
         return self._qpane.rasterSurfaceState(*self._target_layer())
 

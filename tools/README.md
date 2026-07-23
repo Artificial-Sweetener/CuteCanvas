@@ -4,18 +4,28 @@ This directory contains scripts to enforce code quality, architectural boundarie
 
 ## 1. `check_consistency.py` (The "Trinity" Check)
 
-This is the primary validation tool for the project. It treats `qpane.pyi` (the public stub file) as the single source of truth and verifies that the implementation, documentation, and examples all agree with it.
+This is the primary validation tool for both published packages. It treats the
+QPane and CuteCanvas root stubs plus QPane's typed integration SDK stubs as the
+authoritative public contracts, then verifies implementation, documentation,
+examples, configuration defaults, and package boundaries against them.
 
 **Usage:**
-```bash
-python tools/check_consistency.py
+```powershell
+.venv\Scripts\python tools\check_consistency.py
 ```
 
 **Checks Performed:**
-- **Implementation Reality:** Verifies that every method defined in `qpane.pyi` actually exists in `qpane.py`.
-- **Demo Compliance:** Scans `examples/` to ensure demo code *only* uses public APIs exposed in `qpane.pyi`. It flags usage of internal methods or hidden attributes.
-- **Documentation Completeness:** Verifies that every public symbol in `qpane.pyi` is mentioned in the Markdown guides in `docs/`.
-- **Config Accuracy:** Compares the default values shown in `docs/configuration-reference.md` against the actual `Config` class defaults in the code.
+- **Implementation Reality:** Verifies every exported root-facade and QPane SDK
+  symbol against its typed contract, including public class members.
+- **Demo Compliance:** Ensures each package's tutorial imports only its
+  supported public facade and that both product demos are present.
+- **Documentation Completeness:** Requires same-block API explanations and
+  meaningful narrative guide coverage for every public symbol in each package.
+- **Config Accuracy:** Compares each package's documented configuration mapping
+  with the exact runtime defaults.
+- **Package Boundaries:** Enforces `CuteCanvas -> QPane`, rejects the reverse
+  dependency, and permits CuteCanvas to consume QPane only through `qpane` or
+  the explicit `qpane.sdk` namespaces.
 
 **Output:**
 - `SUCCESS`: All checks passed.

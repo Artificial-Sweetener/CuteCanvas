@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,9 +20,8 @@ import json
 import uuid
 
 import pytest
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage, Qt
-
-from qpane import Config, QPane
 
 
 def _cleanup_qpane(qpane, qapp):
@@ -63,8 +62,8 @@ def test_config_behavior():
 
 
 def test_qpane_apply_settings_overrides(qapp):
-    """Assert QPane.applySettings merges keyword overrides."""
-    qpane = QPane(features=())
+    """Assert CuteCanvas.applySettings merges keyword overrides."""
+    qpane = CuteCanvas(features=())
     try:
         # Initial state
         assert getattr(qpane.settings, "drag_out_enabled", True) is True
@@ -82,7 +81,7 @@ def test_qpane_apply_settings_overrides(qapp):
 
 def test_control_mode_behavior(qapp):
     """Assert setControlMode raises ValueError for unknown IDs."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         initial_mode = qpane.getControlMode()
         with pytest.raises(ValueError):
@@ -97,16 +96,16 @@ def test_image_map_validation(qapp):
     images = [_solid_image()]
     ids = [uuid.uuid4(), uuid.uuid4()]  # Mismatch
     with pytest.raises(ValueError):
-        QPane.imageMapFromLists(images, ids=ids)
+        CuteCanvas.imageMapFromLists(images, ids=ids)
 
 
 def test_navigation_behavior(qapp):
     """Assert setCurrentImageID no-ops on unknown ID."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         image = _solid_image()
         uid = uuid.uuid4()
-        qpane.setImagesByID(QPane.imageMapFromLists([image], [None], [uid]), uid)
+        qpane.setImagesByID(CuteCanvas.imageMapFromLists([image], [None], [uid]), uid)
         assert qpane.currentImageID() == uid
         # Unknown ID should not change selection
         unknown_id = uuid.uuid4()
@@ -122,12 +121,12 @@ def test_navigation_behavior(qapp):
 
 def test_linking_behavior(qapp):
     """Assert setAllImagesLinked requires 2+ entries."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         # 1 image
         image = _solid_image()
         uid = uuid.uuid4()
-        qpane.setImagesByID(QPane.imageMapFromLists([image], [None], [uid]), uid)
+        qpane.setImagesByID(CuteCanvas.imageMapFromLists([image], [None], [uid]), uid)
         qpane.setAllImagesLinked(True)
         assert len(qpane.linkedGroups()) == 0
         # 2 images
@@ -143,7 +142,7 @@ def test_linking_behavior(qapp):
 
 def test_diagnostics_validation(qapp):
     """Assert diagnostics methods raise on unknown domains."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         with pytest.raises(ValueError):
             qpane.diagnosticsDomainEnabled("unknown_domain")
@@ -155,7 +154,7 @@ def test_diagnostics_validation(qapp):
 
 def test_mask_active_id_clearing(qapp, monkeypatch):
     """Assert setActiveMaskID(None) clears the active mask."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         # Mock controller
         class MockController:
@@ -245,18 +244,18 @@ def test_mask_active_id_clearing(qapp, monkeypatch):
 
 def test_extensibility_behavior(qapp):
     """Assert unregisterOverlay no-ops on absent overlay and unregisterTool protections."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         # Unregister absent overlay (should not raise)
         qpane.unregisterOverlay("non_existent_overlay")
         # Try to unregister built-in tool (should raise ValueError)
         with pytest.raises(ValueError):
-            qpane.unregisterTool(QPane.CONTROL_MODE_PANZOOM)
+            qpane.unregisterTool(CuteCanvas.CONTROL_MODE_PANZOOM)
         # Try to unregister active mode
         # Register a custom tool first
-        from qpane import ExtensionTool
+        from qpane import ViewerTool
 
-        class MyTool(ExtensionTool):
+        class MyTool(ViewerTool):
             def activate(self, deps):
                 pass
 
@@ -284,7 +283,7 @@ def test_extensibility_behavior(qapp):
         assert "my_tool" in qpane.availableControlModes()
         assert qpane.getControlMode() == "my_tool"
         # Switch away and unregister
-        qpane.setControlMode(QPane.CONTROL_MODE_PANZOOM)
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_PANZOOM)
         qpane.unregisterTool("my_tool")
         assert "my_tool" not in qpane.availableControlModes()
     finally:

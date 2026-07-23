@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Bootstrap the local development environment for QPane."""
+"""Bootstrap the QPane and CuteCanvas monorepo development environment."""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def main() -> int:
     """Run the standard dev environment bootstrap steps."""
     repo_root = Path(__file__).resolve().parents[1]
     venv_dir = repo_root / ".venv"
-    requirements_path = repo_root / "requirements.txt"
+    requirements_path = repo_root / "requirements-dev.txt"
     hooks_script = repo_root / "tools" / "setup_hooks.py"
     _create_venv(venv_dir)
     venv_python = _venv_python(venv_dir)

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,6 +21,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas.tools.input import PointerInputController
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import (
     QEnterEvent,
@@ -34,14 +36,12 @@ from PySide6.QtGui import (
 )
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
-
-from qpane import QPane, QPaneLayerInteractionPolicy
-from qpane.tools.input import (
+from qpane import (
     PointerDeviceKind,
-    PointerInputController,
     PointerPhase,
     ToolInputProfile,
 )
+
 from tests.harness import PointerTransitionProbe
 
 
@@ -228,7 +228,7 @@ def test_qtest_double_tap_toggles_fit_and_one_to_one(qpane_core, qapp) -> None:
     device = QTest.createTouchDevice()
 
     def double_tap() -> None:
-        """Send two stationary taps through QPane's QWidget event surface."""
+        """Send two stationary taps through CuteCanvas's QWidget event surface."""
         for _tap in range(2):
             QTest.touchEvent(qpane_core, device).press(
                 0, QPoint(75, 85), qpane_core
@@ -294,7 +294,7 @@ def test_synthetic_tablet_event_reaches_active_brush_without_mouse(
 
 
 def test_qtest_single_finger_tap_paints_exactly_one_mask_dab(qapp) -> None:
-    viewer = QPane(features=("mask",))
+    viewer = CuteCanvas(features=("mask",))
     try:
         viewer.resize(200, 200)
         viewer.show()
@@ -330,7 +330,7 @@ def test_qtest_single_finger_tap_paints_exactly_one_mask_dab(qapp) -> None:
 
 
 def test_two_fingers_navigate_without_painting_in_brush_mode(qapp) -> None:
-    viewer = QPane(features=("mask",))
+    viewer = CuteCanvas(features=("mask",))
     try:
         viewer.applySettings(touch_inertia_enabled=False)
         viewer.resize(200, 200)
@@ -377,7 +377,7 @@ def test_two_fingers_navigate_without_painting_in_brush_mode(qapp) -> None:
 
 def test_single_finger_move_tool_translates_policy_enabled_layer(qapp) -> None:
     """Move touch input should not depend on the host's brush enablement setting."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         viewer.applySettings(touch_paint_enabled=False)
         viewer.resize(200, 200)
@@ -395,7 +395,7 @@ def test_single_finger_move_tool_translates_policy_enabled_layer(qapp) -> None:
         assert viewer.setLayerInteractionPolicy(
             scene.scene_id,
             layer.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
         qapp.processEvents()
@@ -416,9 +416,9 @@ def test_single_finger_move_tool_translates_policy_enabled_layer(qapp) -> None:
         qapp.processEvents()
 
 
-def _touch_mask_viewer(qapp) -> QPane:
+def _touch_mask_viewer(qapp) -> CuteCanvas:
     """Build a shown brush-mode viewer for direct-input feedback tests."""
-    viewer = QPane(features=("mask",))
+    viewer = CuteCanvas(features=("mask",))
     viewer.resize(200, 200)
     viewer.show()
     image = QImage(100, 100, QImage.Format.Format_ARGB32)

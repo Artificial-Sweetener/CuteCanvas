@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,14 +21,13 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from qpane.cache.consumers import (
-    MaskOverlayCacheConsumer,
-    SamPredictorCacheConsumer,
+    EvictableCacheConsumer,
+    KeyedCacheConsumer,
     _run_cache_batch_trim,
     _safe_int,
 )
-from qpane.cache.coordinator import CacheCoordinator
+from qpane.cache.coordinator import CacheCoordinator, CachePriority
 
 
 class _CoordinatorStub(CacheCoordinator):
@@ -104,7 +103,12 @@ def test_mask_overlay_consumer_delegates_protected_trim() -> None:
 
     controller = _ControllerStub()
     coordinator = CacheCoordinator(active_budget_bytes=1024)
-    consumer = MaskOverlayCacheConsumer(controller, coordinator)
+    consumer = EvictableCacheConsumer(
+        controller,
+        coordinator,
+        consumer_id="mask_overlays",
+        priority=CachePriority.DERIVED_OVERLAYS,
+    )
     consumer._trim_to(0)
     assert controller.drop_calls == ["coordinator"]
 
@@ -151,7 +155,16 @@ def test_sam_predictor_consumer_trims_and_updates_usage() -> None:
 
     manager = _ManagerStub()
     coordinator = CacheCoordinator(active_budget_bytes=1024)
-    SamPredictorCacheConsumer(manager, coordinator)
+    KeyedCacheConsumer(
+        coordinator,
+        consumer_id="predictors",
+        priority=CachePriority.BACKGROUND_MODELS,
+        get_usage=manager.cache_usage_bytes,
+        set_admission_guard=lambda _guard: None,
+        keys=lambda: tuple(manager.predictorImageIds()),
+        remove=manager.removeFromCache,
+        connect_usage_events=lambda _changed, _cleared: None,
+    )
     coordinator.set_active_budget(0)
     snapshot = coordinator.snapshot()
     assert snapshot["consumers"]["predictors"]["usage_bytes"] == 0

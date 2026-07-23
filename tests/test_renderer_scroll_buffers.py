@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,16 +20,15 @@ import uuid
 from dataclasses import replace
 
 import pytest
+from cutecanvas import (
+    CatalogLayerRequest,
+    CompositionLayerClip,
+    CompositionRequest,
+    CuteCanvas,
+)
+from cutecanvas.masks.source_reference import MaskAssetReference
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage, Qt
-
-from qpane import (
-    QPane,
-    QPaneCatalogImageLayerRequest,
-    QPaneSceneClip,
-    QPaneSceneRequest,
-)
-from qpane.masks.source_reference import MaskAssetReference
 from qpane.rendering.render import Renderer
 from qpane.scene.identity import scene_image_asset_key, source_render_asset_key
 from qpane.scene.model import ClipCoordinateSpace, LayerClip, LayerKind
@@ -37,6 +36,7 @@ from qpane.scene.render_plan import (
     RenderStrategy,
     TileRenderData,
 )
+
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.render_compare import (
     assert_images_match,
@@ -48,12 +48,12 @@ from tests.helpers.render_plan import make_render_plan
 
 @pytest.fixture()
 def qpane_with_image(qapp):
-    qpane = QPane(features=(), task_executor=StubExecutor())
+    qpane = CuteCanvas(features=(), task_executor=StubExecutor())
     qpane.resize(128, 128)
     image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.black)
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists([image], [None], [image_id])
+    image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
     qpane.setImagesByID(image_map, image_id)
     yield qpane
     qpane.deleteLater()
@@ -93,7 +93,7 @@ def _make_mask_plan(qpane_rect: QRect):
     return replace(plan, render_items=(base_item, mask_item)), mask_item
 
 
-def _render_clean_frame(qpane: QPane, pan: QPointF) -> QImage:
+def _render_clean_frame(qpane: CuteCanvas, pan: QPointF) -> QImage:
     """Return a full-redraw frame for ``pan`` using the live renderer."""
     view = qpane.view()
     renderer = view.renderer
@@ -114,7 +114,7 @@ def _render_clean_frame(qpane: QPane, pan: QPointF) -> QImage:
 
 
 def _render_scrolled_frame(
-    qpane: QPane,
+    qpane: CuteCanvas,
     *,
     start_pan: QPointF,
     target_pan: QPointF,
@@ -146,16 +146,18 @@ def _make_qpane_with_checker_image(
     size: int = 256,
     dpr: float = 1.0,
     image_format: QImage.Format | None = None,
-) -> QPane:
-    """Return a QPane containing one high-contrast image."""
-    qpane = QPane(features=(), task_executor=StubExecutor())
+) -> CuteCanvas:
+    """Return a CuteCanvas containing one high-contrast image."""
+    qpane = CuteCanvas(features=(), task_executor=StubExecutor())
     qpane.resize(128, 128)
     qpane.devicePixelRatioF = lambda: dpr  # type: ignore[method-assign]
     image = checker_image(QRect(0, 0, size, size).size())
     if image_format is not None:
         image = image.convertToFormat(image_format)
     image_id = uuid.uuid4()
-    qpane.setImagesByID(QPane.imageMapFromLists([image], [None], [image_id]), image_id)
+    qpane.setImagesByID(
+        CuteCanvas.imageMapFromLists([image], [None], [image_id]), image_id
+    )
     qpane.setZoom1To1()
     qapp.processEvents()
     return qpane
@@ -615,7 +617,7 @@ def test_scroll_repair_failure_restores_original_buffer(qapp, monkeypatch) -> No
 
 def test_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
     """Multi-layer public scenes should bypass single-raster scroll reuse."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.resize(96, 96)
         first_id = uuid.uuid4()
@@ -623,24 +625,24 @@ def test_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
         first = checker_image(QRect(0, 0, 128, 128).size())
         second = checker_image(QRect(0, 0, 128, 128).size())
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [first, second],
                 [None, None],
                 [first_id, second_id],
             ),
             first_id,
         )
-        request = QPaneSceneRequest(
+        request = CompositionRequest(
             composition_id=None,
             title="Scroll repair scene",
             bounds=QRectF(0.0, 0.0, 256.0, 128.0),
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=first_id,
                     placement=QRectF(0.0, 0.0, 128.0, 128.0),
                 ),
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=second_id,
                     placement=QRectF(128.0, 0.0, 128.0, 128.0),
@@ -678,7 +680,7 @@ def test_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
 
 def test_clipped_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
     """Clipped public scenes should bypass translation-only scroll reuse."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.resize(96, 96)
         first_id = uuid.uuid4()
@@ -687,28 +689,28 @@ def test_clipped_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
         second = checker_image(QRect(0, 0, 128, 128).size())
         second.invertPixels()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [first, second],
                 [None, None],
                 [first_id, second_id],
             ),
             first_id,
         )
-        request = QPaneSceneRequest(
+        request = CompositionRequest(
             composition_id=None,
             title="Clipped scroll repair scene",
             bounds=QRectF(0.0, 0.0, 256.0, 128.0),
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=first_id,
                     placement=QRectF(0.0, 0.0, 128.0, 128.0),
                 ),
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=second_id,
                     placement=QRectF(0.0, 0.0, 128.0, 128.0),
-                    clip=QPaneSceneClip(
+                    clip=CompositionLayerClip(
                         "scene",
                         QRectF(48.0, 0.0, 80.0, 128.0),
                     ),
@@ -872,13 +874,14 @@ def test_try_scroll_buffers_rejects_large_scroll(qpane_with_image):
     renderer = qpane.view().renderer
     renderer._buffer_pan = QPointF(0.0, 0.0)
     large_pan = QPointF(renderer._base_image_buffer.width() * 2, 0.0)
+    assert renderer.has_scroll_buffer_overlap(large_pan) is False
     result = renderer.tryScrollBuffers(large_pan)
     assert result is False
     assert renderer._buffer_pan == QPointF(0.0, 0.0)
 
 
 def test_try_scroll_buffers_requires_buffer(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         renderer = qpane.view().renderer
         renderer._base_image_buffer = None

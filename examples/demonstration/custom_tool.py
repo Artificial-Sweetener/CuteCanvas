@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,17 +14,17 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Demo-only tools used to showcase QPane's hook-based tool registration."""
+"""Demo-only tools used to showcase CuteCanvas's hook-based tool registration."""
 
 from __future__ import annotations
 
-from qpane import ExtensionTool
+from qpane import ViewerTool
 
 
 def build_custom_cursor_tool(qpane_widget):
     """Return an inert tool that relies on hook-provided cursors and overlays."""
 
-    class CustomCursorTool(ExtensionTool):
+    class CustomCursorTool(ViewerTool):
         """Cursor-only tool that requests repaints so hook visuals track the pointer."""
 
         def __init__(self):

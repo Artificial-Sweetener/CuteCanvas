@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,4 +14,10 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Demo utilities for QPane."""
+"""Source tutorials for the two published packages.
+
+Start with :mod:`examples.qpane_demo` for a polished image viewer or
+:mod:`examples.cutecanvas_demo` for a small layered editor. Their supporting
+packages separate host responsibilities so each file can be read and reused on
+its own.
+"""

@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Focused composition policy editor for the demonstration host."""
 
 from __future__ import annotations
@@ -13,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from cutecanvas import CompositionPolicy, CuteCanvas
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -22,15 +30,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qpane import QPane, QPaneCompositionPolicy
-
 
 class CompositionPropertiesDialog(QDialog):
     """Edit one document's host-owned structural policy through public API."""
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         composition_id: uuid.UUID,
         parent: QWidget | None = None,
         *,
@@ -74,7 +80,7 @@ class CompositionPropertiesDialog(QDialog):
         """Apply the detached checkbox values and close the modal."""
         changed = self._qpane.setCompositionPolicy(
             self._composition_id,
-            QPaneCompositionPolicy(
+            CompositionPolicy(
                 removable=self.removable.isChecked(),
                 comparison_enabled=self.comparison_enabled.isChecked(),
             ),

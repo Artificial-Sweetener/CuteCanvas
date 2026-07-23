@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,17 +21,16 @@ import uuid
 
 import numpy as np
 import pytest
+from cutecanvas.masks.stroke_preview import DecimatedStrokePreview
+from cutecanvas.painting import BrushStrokeSegment
+from cutecanvas.painting.rendering import render_coverage_stroke
+from cutecanvas.painting.tools import BrushTool
+from cutecanvas.tools.ports import PaintingInteractionPort
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
-
-from qpane.masks.stroke_preview import DecimatedStrokePreview
-from qpane.painting import BrushStrokeSegment
-from qpane.painting.rendering import render_coverage_stroke
-from qpane.painting.tools import BrushTool
+from qpane import PointerDeviceKind, PointerPhase, PointerSample
 from qpane.raster.image_conversion import qimage_to_numpy_view_grayscale8
 from qpane.rendering.coordinates import PanelHitTest
-from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
-from qpane.tools.ports import PaintingInteractionPort
 
 
 class _WheelEventStub:

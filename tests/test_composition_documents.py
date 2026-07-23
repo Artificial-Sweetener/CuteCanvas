@@ -1,21 +1,27 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Public composition-first document behavior and compatibility adapters."""
 
 from __future__ import annotations
 
 import uuid
 
+from cutecanvas import CompositionPolicy, CuteCanvas, LayerPolicy
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
-
-from qpane import QPane, QPaneCompositionPolicy, QPaneLayerInteractionPolicy
 
 
 def _image(color: str, width: int = 80, height: int = 60) -> QImage:
@@ -27,7 +33,7 @@ def _image(color: str, width: int = 80, height: int = 60) -> QImage:
 
 def test_empty_composition_is_editable_without_catalog_identity(qapp) -> None:
     """An empty document must own a canvas and accept ordinary layer creation."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         composition_id = viewer.createComposition(
             QRectF(-100.0, -50.0, 640.0, 480.0),
@@ -58,14 +64,14 @@ def test_empty_composition_is_editable_without_catalog_identity(qapp) -> None:
 
 def test_image_seed_is_an_ordinary_independent_layer(qapp) -> None:
     """Seeding twice from one resource must create independent mutable instances."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     image_id = uuid.uuid4()
     try:
         viewer.setImagesByID(
-            QPane.imageMapFromLists([_image("red")], ids=[image_id]),
+            CuteCanvas.imageMapFromLists([_image("red")], ids=[image_id]),
             image_id,
         )
-        interaction = QPaneLayerInteractionPolicy(
+        interaction = LayerPolicy(
             selectable=True,
             movable=True,
             pixel_editable=False,
@@ -108,10 +114,10 @@ def test_image_seed_is_an_ordinary_independent_layer(qapp) -> None:
 def test_generated_navigation_documents_do_not_derive_instance_identity(qapp) -> None:
     """Catalog convenience documents must still own independent layer identities."""
     image_id = uuid.uuid4()
-    first = QPane(features=())
-    second = QPane(features=())
+    first = CuteCanvas(features=())
+    second = CuteCanvas(features=())
     try:
-        image_map = QPane.imageMapFromLists([_image("red")], ids=[image_id])
+        image_map = CuteCanvas.imageMapFromLists([_image("red")], ids=[image_id])
         first.setImagesByID(image_map, image_id)
         second.setImagesByID(image_map, image_id)
 
@@ -130,12 +136,12 @@ def test_generated_navigation_documents_do_not_derive_instance_identity(qapp) ->
 
 def test_catalog_resources_place_into_active_composition_with_host_policy(qapp) -> None:
     """Catalog placement and structural operations must resolve the active document."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     first_id = uuid.uuid4()
     second_id = uuid.uuid4()
     try:
         viewer.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_image("red"), _image("blue", 40, 30)],
                 ids=[first_id, second_id],
             ),
@@ -148,7 +154,7 @@ def test_catalog_resources_place_into_active_composition_with_host_policy(qapp) 
         locked_id = viewer.addCatalogImageLayer(
             first_id,
             label="Locked",
-            interaction=QPaneLayerInteractionPolicy(
+            interaction=LayerPolicy(
                 selectable=True,
                 movable=False,
                 reorderable=False,
@@ -159,7 +165,7 @@ def test_catalog_resources_place_into_active_composition_with_host_policy(qapp) 
             second_id,
             placement=QRectF(100.0, 80.0, 80.0, 60.0),
             label="Movable",
-            interaction=QPaneLayerInteractionPolicy(
+            interaction=LayerPolicy(
                 selectable=True,
                 movable=True,
                 reorderable=True,
@@ -182,11 +188,11 @@ def test_catalog_resources_place_into_active_composition_with_host_policy(qapp) 
 
 def test_catalog_resource_removal_does_not_delete_independent_document(qapp) -> None:
     """Removing a referenced resource must prune its layer, not its document."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     image_id = uuid.uuid4()
     try:
         viewer.setImagesByID(
-            QPane.imageMapFromLists([_image("red")], ids=[image_id]),
+            CuteCanvas.imageMapFromLists([_image("red")], ids=[image_id]),
             image_id,
         )
         composition_id = viewer.createCompositionFromImage(image_id)
@@ -206,7 +212,7 @@ def test_catalog_resource_removal_does_not_delete_independent_document(qapp) -> 
 
 def test_empty_composition_accepts_mask_and_vector_domains(qapp) -> None:
     """Composition-scoped authoring must not require a current catalog image."""
-    viewer = QPane(features=("mask",))
+    viewer = CuteCanvas(features=("mask",))
     try:
         viewer.createComposition(QRectF(0.0, 0.0, 256.0, 192.0))
 
@@ -226,8 +232,8 @@ def test_empty_composition_accepts_mask_and_vector_domains(qapp) -> None:
 
 
 def test_image_free_composition_cycles_masks_in_generic_stack(qapp) -> None:
-    """Legacy cycle commands must adapt to the active document without an image."""
-    viewer = QPane(features=("mask",))
+    """Mask cycle commands must adapt to the active document without an image."""
+    viewer = CuteCanvas(features=("mask",))
     try:
         viewer.createComposition(QRectF(0.0, 0.0, 256.0, 192.0))
         first_id = viewer.createBlankMask(QSize(64, 48))
@@ -252,18 +258,18 @@ def test_image_free_composition_cycles_masks_in_generic_stack(qapp) -> None:
 
 def test_document_policy_is_host_controlled_and_origin_independent(qapp) -> None:
     """Hosts must control document removal and comparison without kind branches."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         composition_id = viewer.createComposition(
             QRectF(0.0, 0.0, 320.0, 240.0),
             title="Policy document",
-            policy=QPaneCompositionPolicy(
+            policy=CompositionPolicy(
                 removable=False,
                 comparison_enabled=False,
             ),
         )
         entry = viewer.getCompositionSnapshot().compositions[composition_id]
-        assert entry.policy == QPaneCompositionPolicy(
+        assert entry.policy == CompositionPolicy(
             removable=False,
             comparison_enabled=False,
         )
@@ -276,10 +282,10 @@ def test_document_policy_is_host_controlled_and_origin_independent(qapp) -> None
 
         assert viewer.setCompositionPolicy(
             composition_id,
-            QPaneCompositionPolicy(removable=True, comparison_enabled=True),
+            CompositionPolicy(removable=True, comparison_enabled=True),
         )
         assert viewer.getCompositionSnapshot().compositions[composition_id].policy == (
-            QPaneCompositionPolicy(removable=True, comparison_enabled=True)
+            CompositionPolicy(removable=True, comparison_enabled=True)
         )
         viewer.removeComposition(composition_id)
         assert composition_id not in viewer.compositionIDs()

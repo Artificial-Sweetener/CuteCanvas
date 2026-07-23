@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Reusable mounted-widget infrastructure for QPane system tests."""
+"""Reusable mounted-widget infrastructure for CuteCanvas system tests."""
 
 from .mounted_qpane import MountedQPaneHarness, PixelMeasurement
 from .pointer_transition_probe import PointerEventObservation, PointerTransitionProbe

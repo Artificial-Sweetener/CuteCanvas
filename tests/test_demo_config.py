@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -17,24 +17,24 @@
 """Example configuration dialog integration and persistence tests."""
 
 import pytest
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QCheckBox
+from qpane.features.registry import FeatureInstallError
 
-from examples.demo import ExampleOptions, ExampleWindow, parse_args
+from examples.cutecanvas_demo import ExampleOptions, ExampleWindow, parse_args
 from examples.demonstration.config.dialog import ConfigDialog, DomainCheckboxGroup
 from examples.demonstration.config.spec import (
     build_sections_for_features,
     field_sets_for_sections,
 )
-from qpane import Config, QPane
-from qpane.features.registry import FeatureInstallError
 from tests.helpers.render_plan import make_render_plan
 
 MB = 1024 * 1024
 
 
 def test_live_config_applies_without_rebuild(qapp):
-    """Live dialog updates apply without rebuilding the QPane."""
+    """Live dialog updates apply without rebuilding the CuteCanvas."""
     demo_config = Config()
     demo_config.cache.mode = "hard"
     demo_config.cache.budget_mb = 1024
@@ -49,40 +49,49 @@ def test_live_config_applies_without_rebuild(qapp):
         overrides = {
             "cache.tiles.mb": budgets.get("tiles", 0) + 128,
         }
-        if "cache.masks.mb" in config_fields:
-            overrides["cache.masks.mb"] = budgets.get("masks", 0) + 64
-        if "cache.predictors.mb" in config_fields:
-            overrides["cache.predictors.mb"] = budgets.get("predictors", 0) + 32
-        window._apply_configuration(
+        if "cache.extensions.mask_overlays.mb" in config_fields:
+            overrides["cache.extensions.mask_overlays.mb"] = (
+                budgets.get("mask_overlays", 0) + 64
+            )
+        if "cache.extensions.models.mb" in config_fields:
+            overrides["cache.extensions.models.mb"] = budgets.get("models", 0) + 32
+        window.configuration.apply_configuration(
             overrides,
             config_fields=config_fields,
         )
         assert window.qpane is old_qpane
         cache_settings = window.qpane.settings.cache
         assert cache_settings.override_mb("tiles") == overrides["cache.tiles.mb"]
-        if "cache.masks.mb" in config_fields:
-            assert cache_settings.override_mb("masks") == overrides["cache.masks.mb"]
-        else:
-            assert cache_settings.override_mb("masks") is None
-        if "cache.predictors.mb" in config_fields:
+        if "cache.extensions.mask_overlays.mb" in config_fields:
             assert (
-                cache_settings.override_mb("predictors")
-                == overrides["cache.predictors.mb"]
+                cache_settings.override_mb("mask_overlays")
+                == overrides["cache.extensions.mask_overlays.mb"]
             )
         else:
-            assert cache_settings.override_mb("predictors") is None
+            assert cache_settings.override_mb("mask_overlays") is None
+        if "cache.extensions.models.mb" in config_fields:
+            assert (
+                cache_settings.override_mb("models")
+                == overrides["cache.extensions.models.mb"]
+            )
+        else:
+            assert cache_settings.override_mb("models") is None
         demo_cache = demo_config.cache
         assert demo_cache.override_mb("tiles") == overrides["cache.tiles.mb"]
-        if "cache.masks.mb" in config_fields:
-            assert demo_cache.override_mb("masks") == overrides["cache.masks.mb"]
-        else:
-            assert demo_cache.override_mb("masks") is None
-        if "cache.predictors.mb" in config_fields:
+        if "cache.extensions.mask_overlays.mb" in config_fields:
             assert (
-                demo_cache.override_mb("predictors") == overrides["cache.predictors.mb"]
+                demo_cache.override_mb("mask_overlays")
+                == overrides["cache.extensions.mask_overlays.mb"]
             )
         else:
-            assert demo_cache.override_mb("predictors") is None
+            assert demo_cache.override_mb("mask_overlays") is None
+        if "cache.extensions.models.mb" in config_fields:
+            assert (
+                demo_cache.override_mb("models")
+                == overrides["cache.extensions.models.mb"]
+            )
+        else:
+            assert demo_cache.override_mb("models") is None
         expected_bytes = cache_settings.resolve_active_budget_bytes()
         coordinator = window.qpane.cacheCoordinator
         assert coordinator is not None
@@ -111,7 +120,7 @@ def test_demo_persists_concurrency_settings(qapp):
                 "cpu": {"sam": 1},
             },
         }
-        window._apply_configuration(
+        window.configuration.apply_configuration(
             values,
             config_fields=config_fields,
         )
@@ -132,7 +141,7 @@ def test_demo_persists_concurrency_settings(qapp):
 
 
 def test_demo_applies_internal_concurrency_live(qapp):
-    """Concurrency map tweaks trigger live QPane reconfigure even though internal."""
+    """Concurrency map tweaks trigger live CuteCanvas reconfigure even though internal."""
     demo_config = Config()
     window = ExampleWindow(ExampleOptions(feature_set="masksam"), config=demo_config)
     try:
@@ -141,7 +150,7 @@ def test_demo_applies_internal_concurrency_live(qapp):
         executor = window.qpane.executor
         before = executor.snapshot()
         assert before.category_limits.get("tiles") in (None, 0)
-        window._apply_configuration(
+        window.configuration.apply_configuration(
             {"concurrency_category_limits_map": {"tiles": 4}},
             config_fields=config_fields,
         )
@@ -214,7 +223,7 @@ def test_config_dialog_limits_device_categories_to_sam(qapp):
 
 
 def test_diagnostics_include_pyramid_level(qapp):
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         qpane_widget.resize(400, 400)
         base_image = QImage(2048, 2048, QImage.Format_ARGB32)
@@ -346,8 +355,8 @@ def test_config_dialog_hides_sam_fields_when_mask_only(qapp):
         domains_widget = dialog._widgets.get("diagnostics_domains_enabled")
         assert isinstance(domains_widget, DomainCheckboxGroup)
         assert "sam" not in domains_widget.domains()
-        assert "cache.weights.predictors" not in dialog._widgets
-        assert "cache.prefetch.predictors" not in dialog._widgets
+        assert "cache.weights.extensions.models" not in dialog._widgets
+        assert "cache.prefetch.extensions.source_warmup" not in dialog._widgets
         assert "sam_download_mode" not in dialog._widgets
         assert "sam_model_path" not in dialog._widgets
         assert "sam_model_url" not in dialog._widgets
@@ -437,7 +446,7 @@ def test_diagnostics_menu_excludes_sam_when_disabled(qapp):
     demo_config = Config()
     window = ExampleWindow(ExampleOptions(feature_set="core"), config=demo_config)
     try:
-        assert "sam" not in window._overlay_detail_actions
+        assert "sam" not in window.configuration.detail_actions
     finally:
         window.close()
         window.deleteLater()
@@ -445,7 +454,7 @@ def test_diagnostics_menu_excludes_sam_when_disabled(qapp):
 
 
 def test_demo_qpane_mask_prefetch_disabled_without_feature(qapp):
-    qpane_widget = QPane(config=Config(), features=())
+    qpane_widget = CuteCanvas(config=Config(), features=())
     try:
         with pytest.raises(FeatureInstallError):
             _ = qpane_widget.settings.mask_prefetch_enabled
@@ -457,7 +466,7 @@ def test_demo_qpane_mask_prefetch_disabled_without_feature(qapp):
 def test_demo_qpane_mask_prefetch_tracks_slice(qapp):
     demo_config = Config()
     demo_config.mask_prefetch_enabled = False
-    qpane_widget = QPane(config=demo_config, features=("mask",))
+    qpane_widget = CuteCanvas(config=demo_config, features=("mask",))
     try:
         assert qpane_widget.settings.mask_prefetch_enabled is False
         qpane_widget.applySettings(mask_prefetch_enabled=True)

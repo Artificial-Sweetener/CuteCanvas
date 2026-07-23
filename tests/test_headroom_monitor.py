@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,7 +21,8 @@ from __future__ import annotations
 import time
 from threading import Event
 
-from qpane import QPane
+from cutecanvas import CuteCanvas
+
 from tests.harness.timing import interaction_clock
 
 MB = 1024 * 1024
@@ -64,7 +65,7 @@ def _wait_until(qapp, predicate, *, timeout_seconds: float = 2.0) -> None:
 
 
 def test_headroom_monitor_updates_budget_and_snapshot(qapp) -> None:
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         state = qpane_widget._state
         state._headroom_psutil_module = _FakePsutil
@@ -89,7 +90,7 @@ def test_headroom_monitor_updates_budget_and_snapshot(qapp) -> None:
 
 
 def test_headroom_monitor_stops_in_hard_mode(qapp) -> None:
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         qpane_widget.applySettings(cache={"mode": "hard"})
         state = qpane_widget._state
@@ -102,7 +103,7 @@ def test_headroom_monitor_stops_in_hard_mode(qapp) -> None:
 
 
 def test_headroom_monitor_falls_back_when_psutil_missing(qapp) -> None:
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         state = qpane_widget._state
         state._headroom_psutil_module = _FailingPsutil
@@ -124,7 +125,7 @@ def test_headroom_monitor_falls_back_when_psutil_missing(qapp) -> None:
 
 def test_headroom_monitor_trims_when_headroom_shrinks(qapp) -> None:
     """Auto mode trims when usage exceeds the capacity after headroom recalc."""
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         state = qpane_widget._state
         coordinator = qpane_widget.cacheCoordinator
@@ -224,7 +225,7 @@ def test_headroom_monitor_never_waits_for_system_observation(qapp) -> None:
         def swap_memory(cls):
             return cls._Swap()
 
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         state = qpane_widget._state
         state._headroom_psutil_module = _SlowPsutil

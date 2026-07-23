@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Public and source-domain tests for non-destructive placed assets."""
 
 from __future__ import annotations
@@ -14,11 +21,11 @@ import time
 import uuid
 from pathlib import Path
 
+from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas.placed.source_reference import PlacedAssetReference
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 
-from qpane import QPane, QPaneLayerInteractionPolicy
-from qpane.placed.source_reference import PlacedAssetReference
 from tests.helpers.executor_stubs import RejectingStubExecutor
 
 pytest_plugins = ("tests.test_mask_workflows",)
@@ -54,7 +61,7 @@ def test_embedded_placement_duplicates_source_and_replays_lifecycle(
         _image(QColor("magenta")),
         placement=QRectF(3.0, 4.0, 24.0, 16.0),
         label="Embedded art",
-        interaction=QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        interaction=LayerPolicy(selectable=True, movable=True),
     )
     assert first_id is not None
     first_state = qpane.placedAssetState(scene.scene_id, first_id)
@@ -101,7 +108,7 @@ def test_brush_keeps_selected_placed_layer_and_exposes_forbidden_cursor(
     assert scene is not None
     layer_id = qpane.placeEmbeddedAsset(
         _image(QColor("cyan")),
-        interaction=QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        interaction=LayerPolicy(selectable=True, movable=True),
     )
     assert layer_id is not None
     assert qpane.setSelectedLayer(scene.scene_id, layer_id)
@@ -177,7 +184,7 @@ def test_rejected_async_work_returns_correlatable_terminal_request(
     executor = RejectingStubExecutor(
         reject_counts={"placed_decode": 1, "layer_rasterization": 1}
     )
-    qpane = QPane(features=(), task_executor=executor)
+    qpane = CuteCanvas(features=(), task_executor=executor)
     base = _image(QColor("black"))
     image_id = uuid.uuid4()
     qpane.setImagesByID(qpane.imageMapFromLists((base,), ids=(image_id,)), image_id)

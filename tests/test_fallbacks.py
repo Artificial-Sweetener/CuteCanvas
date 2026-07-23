@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
 
 import logging
 
-from qpane.core import FeatureFailure, FeatureFallbacks
+from cutecanvas.core import FeatureFailure, FeatureFallbacks
 
 
 def test_warning_then_debug_for_additional_context(caplog):
@@ -26,7 +26,7 @@ def test_warning_then_debug_for_additional_context(caplog):
         hint="Install the requested feature extra to enable it.",
     )
     fallbacks.record_failure("mask", failure)
-    with caplog.at_level(logging.DEBUG, logger="qpane.core.fallbacks"):
+    with caplog.at_level(logging.DEBUG, logger="cutecanvas.core.fallbacks"):
         assert fallbacks.get("mask", "initial-context", default=None) is None
         assert fallbacks.get("mask", "secondary-context", default=None) is None
     assert len(caplog.records) == 2

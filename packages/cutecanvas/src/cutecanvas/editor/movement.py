@@ -1,0 +1,275 @@
+#    CuteCanvas - High-performance layered image editor
+#    Copyright (C) 2025  Artificial Sweetener and contributors
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""Panel interaction arbitration for selected-content and layer movement."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from typing import Literal, Protocol
+
+from PySide6.QtCore import QPointF
+
+from cutecanvas.snapping.model import SnapGuide
+
+from ..scene.layer_selection import SceneLayerSelection
+from ..scene.movement_interaction import SceneLayerMovementInteraction
+from .operation_resolution import (
+    EditorOperation,
+    EditorOperationResolver,
+    EditorOperationTarget,
+)
+from .pixel_movement import SelectedPixelMovementController
+
+
+class MovementSnapPort(Protocol):
+    """Resolve movement points through one shared snap session."""
+
+    def begin(self, box: object | None, origin: QPointF) -> bool:
+        """Begin snapping for one movement target."""
+        ...
+
+    def resolve(self, scene_point: QPointF, *, suppressed: bool = False) -> QPointF:
+        """Return one corrected scene point."""
+        ...
+
+    def clear(self) -> bool:
+        """Clear snap session and guides."""
+        ...
+
+    @property
+    def guides(self) -> tuple[SnapGuide, ...]:
+        """Return current smart-guide presentation."""
+        ...
+
+
+class EditorMovementInteraction:
+    """Route one Move-tool sequence to the correct authoritative movement owner."""
+
+    def __init__(
+        self,
+        *,
+        pixels: SelectedPixelMovementController,
+        layers: SceneLayerMovementInteraction,
+        operations: EditorOperationResolver,
+        panel_to_scene: Callable[[QPointF], QPointF | None],
+        refresh_preview: Callable[[], None],
+        snapping: MovementSnapPort,
+    ) -> None:
+        """Bind selected-pixel and layer-placement movement branches."""
+        self._pixels = pixels
+        self._layers = layers
+        self._operations = operations
+        self._panel_to_scene = panel_to_scene
+        self._refresh_preview = refresh_preview
+        self._snapping = snapping
+        self._active: Literal["pixels", "layer"] | None = None
+        self._selection_hover_valid = False
+
+    @property
+    def hovered(self) -> SceneLayerSelection | None:
+        """Return layer hover only when whole-layer movement is eligible."""
+        return self._layers.hovered
+
+    @property
+    def snap_guides(self) -> tuple[SnapGuide, ...]:
+        """Return smart guides for the active movement update."""
+        return self._snapping.guides
+
+    @property
+    def target_available(self) -> bool:
+        """Return whether current hover identifies a valid movement target."""
+        return self._selection_hover_valid or self._layers.hovered is not None
+
+    def update_hover(self, panel_point: QPointF) -> bool:
+        """Refresh target feedback without changing durable selection state."""
+        candidate = self._layers.candidate_at(panel_point)
+        scene_point = self._panel_to_scene(panel_point)
+        resolution = self._operations.resolve(
+            EditorOperation.MOVE,
+            scene_point=scene_point,
+            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+        )
+        pixel_target = resolution.target in {
+            EditorOperationTarget.FLOATING_PIXELS,
+            EditorOperationTarget.SELECTED_PIXELS,
+        }
+        valid = resolution.allowed and pixel_target
+        changed = valid != self._selection_hover_valid
+        self._selection_hover_valid = valid
+        layer_changed = self._layers.set_hover(
+            candidate
+            if resolution.allowed and resolution.target is EditorOperationTarget.LAYER
+            else None
+        )
+        if changed or layer_changed:
+            self._refresh_preview()
+        return changed or layer_changed
+
+    def clear_hover(self) -> bool:
+        """Clear selection and layer hover feedback."""
+        selection_changed = self._selection_hover_valid
+        self._selection_hover_valid = False
+        layer_changed = self._layers.clear_hover()
+        if selection_changed and not layer_changed:
+            self._refresh_preview()
+        return layer_changed or selection_changed
+
+    def begin(self, panel_point: QPointF, copy: bool = False) -> bool:
+        """Begin the selection-priority movement branch for one pointer sequence."""
+        if self._active is not None:
+            return False
+        self.clear_hover()
+        candidate = self._layers.candidate_at(panel_point)
+        scene_point = self._panel_to_scene(panel_point)
+        resolution = self._operations.resolve(
+            EditorOperation.MOVE,
+            scene_point=scene_point,
+            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+        )
+        if resolution.target in {
+            EditorOperationTarget.FLOATING_PIXELS,
+            EditorOperationTarget.SELECTED_PIXELS,
+        }:
+            if (
+                not resolution.allowed
+                or scene_point is None
+                or not self._pixels.begin(
+                    scene_point,
+                    copy,
+                    target=resolution.selected_pixels,
+                )
+            ):
+                return False
+            self._active = "pixels"
+            self._snapping.begin(self._pixels.transform_box_state(), scene_point)
+            return True
+        if (
+            not resolution.allowed
+            or resolution.target is not EditorOperationTarget.LAYER
+            or candidate is None
+            or not self._layers.begin(candidate)
+        ):
+            return False
+        self._active = "layer"
+        self._snapping.begin(self._layers.transform_box_state(), candidate.scene_point)
+        return True
+
+    def update(self, panel_point: QPointF, suppress_snap: bool = False) -> bool:
+        """Update the active movement branch."""
+        if self._active == "layer":
+            scene_point = self._panel_to_scene(panel_point)
+            return bool(
+                scene_point is not None
+                and self._layers.update_scene(
+                    self._snapping.resolve(scene_point, suppressed=suppress_snap)
+                )
+            )
+        if self._active != "pixels":
+            return False
+        scene_point = self._panel_to_scene(panel_point)
+        return scene_point is not None and self._pixels.update(
+            self._snapping.resolve(scene_point, suppressed=suppress_snap)
+        )
+
+    def finish(self, panel_point: QPointF, suppress_snap: bool = False) -> bool:
+        """Finish the active drag and clear sequence ownership."""
+        active = self._active
+        self._active = None
+        scene_point = self._panel_to_scene(panel_point)
+        resolved_point = (
+            None
+            if scene_point is None
+            else self._snapping.resolve(scene_point, suppressed=suppress_snap)
+        )
+        self._snapping.clear()
+        if active == "layer":
+            return bool(
+                resolved_point is not None and self._layers.finish_scene(resolved_point)
+            )
+        if active != "pixels":
+            return False
+        return resolved_point is not None and self._pixels.finish(resolved_point)
+
+    def cancel(self) -> bool:
+        """Cancel whichever movement branch owns the current sequence."""
+        active = self._active
+        self._active = None
+        self._snapping.clear()
+        if active == "pixels":
+            return self._pixels.cancel()
+        if active == "layer":
+            return self._layers.cancel()
+        return self._pixels.cancel()
+
+    def suspend(self) -> bool:
+        """Release input ownership while preserving unresolved floating pixels."""
+        active = self._active
+        self._active = None
+        self._snapping.clear()
+        if active == "pixels":
+            return self._pixels.suspend_drag()
+        if active == "layer":
+            return self._layers.suspend()
+        return False
+
+    def synchronize_context(self) -> bool:
+        """Release gesture and guide state after authoritative scene changes."""
+        active = self._active
+        self._active = None
+        interaction_changed = False
+        if active == "pixels":
+            interaction_changed = self._pixels.suspend_drag()
+        elif active == "layer":
+            interaction_changed = self._layers.suspend()
+        guides_changed = self._snapping.clear()
+        hover_changed = self.clear_hover()
+        return (
+            interaction_changed or guides_changed or hover_changed or active is not None
+        )
+
+    def nudge(self, delta_x: int, delta_y: int) -> bool:
+        """Move selected pixels first, or the selected movable layer otherwise."""
+        resolution = self._operations.resolve(EditorOperation.MOVE)
+        if not resolution.allowed:
+            return False
+        if resolution.target in {
+            EditorOperationTarget.FLOATING_PIXELS,
+            EditorOperationTarget.SELECTED_PIXELS,
+        }:
+            return self._pixels.nudge(delta_x, delta_y)
+        return self._layers.nudge(delta_x, delta_y)
+
+    def anchor_floating_pixels(self) -> bool:
+        """Commit an unresolved floating edit to its source layer."""
+        return self._pixels.anchor_to_source()
+
+    def anchor_floating_pixels_to(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> bool:
+        """Commit an unresolved floating edit to a compatible layer."""
+        return self._pixels.anchor_to(scene_id, layer_id)
+
+    def promote_floating_pixels(self, label: str | None = None) -> uuid.UUID | None:
+        """Commit an unresolved floating edit as a new composition layer."""
+        return self._pixels.promote_to_layer(label)
+
+    @property
+    def pixels(self) -> SelectedPixelMovementController:
+        """Expose the selected-pixel owner to the facade adapter."""
+        return self._pixels

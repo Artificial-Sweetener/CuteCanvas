@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,22 +14,21 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Record post-delivery pointer state from an offscreen production QPane."""
+"""Record post-delivery pointer state from an offscreen production CuteCanvas."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QMouseEvent, QPointerEvent
 from PySide6.QtWidgets import QApplication
 
-from qpane import QPane
-
 
 @dataclass(frozen=True, slots=True)
 class PointerEventObservation:
-    """Describe one Qt pointer event after QPane finished handling it."""
+    """Describe one Qt pointer event after CuteCanvas finished handling it."""
 
     sequence: int
     event_type: str
@@ -50,9 +49,9 @@ class PointerEventObservation:
 
 
 class PointerTransitionProbe:
-    """Deliver Qt events and record QPane's exact post-handler state."""
+    """Deliver Qt events and record CuteCanvas's exact post-handler state."""
 
-    def __init__(self, viewer: QPane) -> None:
+    def __init__(self, viewer: CuteCanvas) -> None:
         """Bind the probe to a production viewer and its QApplication."""
         self._viewer = viewer
         application = QApplication.instance()

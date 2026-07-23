@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify

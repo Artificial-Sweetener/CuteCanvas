@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Characterize exact NumPy mask morphology and resize semantics."""
 
 from __future__ import annotations
@@ -15,8 +22,7 @@ from time import process_time
 
 import numpy as np
 import pytest
-
-from qpane.masks.image_ops import (
+from cutecanvas.masks.image_ops import (
     adjust_connected_component,
     outer_mask_border,
     resize_mask_nearest,

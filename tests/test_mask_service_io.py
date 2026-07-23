@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,19 +22,19 @@ from types import MethodType, SimpleNamespace
 
 import numpy as np
 import pytest
+from cutecanvas import RasterExtentPolicy
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks import autosave_coordination
+from cutecanvas.masks.autosave import AutosaveManager
+from cutecanvas.masks.combiner import MaskCombiner
+from cutecanvas.masks.component_adjustment import MaskComponentAdjustmentTool
+from cutecanvas.masks.layer_workflows import random_mask_color
+from cutecanvas.masks.mask import MaskAssetStore
 from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QImage, Qt
-
-from qpane import RasterExtentPolicy
-from qpane.core.config_features import MaskConfigSlice
-from qpane.masks import autosave_coordination
-from qpane.masks.autosave import AutosaveManager
-from qpane.masks.combiner import MaskCombiner
-from qpane.masks.component_adjustment import MaskComponentAdjustmentTool
-from qpane.masks.layer_workflows import random_mask_color
-from qpane.masks.mask import MaskAssetStore
 from qpane.raster.image_conversion import numpy_to_qimage_grayscale8
 from qpane.scene.raster import RasterBounds
+
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
 from tests.test_mask_workflows import (
@@ -205,7 +205,7 @@ def test_adjust_component_out_of_bounds_guard():
     mask_id = manager.create_mask(base_image)
     layer = manager.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.white)
+    layer.coverage.raster.fill(Qt.white)
     baseline_state = manager.get_undo_state(mask_id)
     assert baseline_state is not None
     result = MaskComponentAdjustmentTool(manager).adjusted_surface(
@@ -269,8 +269,8 @@ def test_adjust_component_grows_storage_only_when_extent_policy_allows() -> None
     assert layer is not None
     pixels = np.zeros((4, 4), dtype=np.uint8)
     pixels[0, 0] = 255
-    layer.surface.replace_with_array(pixels)
-    layer.surface.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
+    layer.coverage.raster.replace_with_array(pixels)
+    layer.coverage.raster.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
 
     result = MaskComponentAdjustmentTool(manager).adjusted_surface(
         mask_id,
@@ -283,7 +283,7 @@ def test_adjust_component_grows_storage_only_when_extent_policy_allows() -> None
     assert result.pixels[1, 0] == 255
     assert result.pixels[0, 1] == 255
 
-    layer.surface.set_extent_policy(RasterExtentPolicy.FIXED)
+    layer.coverage.raster.set_extent_policy(RasterExtentPolicy.FIXED)
     fixed = MaskComponentAdjustmentTool(manager).adjusted_surface(
         mask_id,
         QPoint(0, 0),
@@ -304,7 +304,7 @@ def test_async_strokes_sync_undo_and_autosave(monkeypatch, qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(0)
+    layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     autosave_manager = qpane.autosaveManager()
     assert autosave_manager is not None

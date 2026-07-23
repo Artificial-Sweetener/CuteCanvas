@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,10 +21,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from cutecanvas import ComparisonOrientation, CuteCanvas
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage, Qt
-
-from qpane import ComparisonOrientation, QPane
 from qpane.scene.render_plan import RasterLayerRenderItem
 
 
@@ -44,14 +43,14 @@ def _viewer_with_comparison(
     *,
     base_size: tuple[int, int],
     compare_size: tuple[int, int],
-) -> tuple[QPane, uuid.UUID, uuid.UUID]:
+) -> tuple[CuteCanvas, uuid.UUID, uuid.UUID]:
     """Return a viewer with active vertical comparison."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     viewer.resize(400, 200)
     base_id = uuid.uuid4()
     compare_id = uuid.uuid4()
     viewer.setImagesByID(
-        QPane.imageMapFromLists(
+        CuteCanvas.imageMapFromLists(
             [
                 _solid_image(*base_size, color=Qt.red),
                 _solid_image(*compare_size, color=Qt.blue),
@@ -67,13 +66,13 @@ def _viewer_with_comparison(
     return viewer, base_id, compare_id
 
 
-def _cleanup_qpane(viewer: QPane, qapp) -> None:
+def _cleanup_qpane(viewer: CuteCanvas, qapp) -> None:
     """Release a test widget through Qt's event loop."""
     viewer.deleteLater()
     qapp.processEvents()
 
 
-def _raster_items(viewer: QPane) -> tuple[RasterLayerRenderItem, ...]:
+def _raster_items(viewer: CuteCanvas) -> tuple[RasterLayerRenderItem, ...]:
     """Return raster items from the current render plan."""
     plan = viewer.view().calculateRenderPlan(is_blank=False)
     assert plan is not None

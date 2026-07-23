@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -36,9 +36,9 @@ CUSTOM_MODE = globals().get("CUSTOM_MODE")
 
 
 def cursor(qpane):
-    """Return a crosshair cursor registered via QPane.registerCursorProvider.
+    """Return a crosshair cursor registered via CuteCanvas.registerCursorProvider.
 
-    QPane invokes this hook when it needs a cursor for the active tool; return
+    CuteCanvas invokes this hook when it needs a cursor for the active tool; return
     None to defer to the default cursor when the tool is inactive.
     """
     if qpane.getControlMode() != CUSTOM_MODE:

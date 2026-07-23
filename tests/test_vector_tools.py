@@ -1,21 +1,27 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Focused gesture tests for vector shape and path tools."""
 
 from __future__ import annotations
 
+from cutecanvas.tools.ports import VectorInteractionPort, VectorNodeInteractionPort
+from cutecanvas.vector.node_tool import VectorNodeTool
+from cutecanvas.vector.tools import VectorPathTool, VectorShapeTool
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
-
-from qpane.tools.ports import VectorInteractionPort, VectorNodeInteractionPort
-from qpane.vector.node_tool import VectorNodeTool
-from qpane.vector.tools import VectorPathTool, VectorShapeTool
 
 
 def _mouse(

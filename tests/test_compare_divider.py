@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,14 +21,15 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+import cutecanvas
 import pytest
+from cutecanvas import ComparisonOrientation, CuteCanvas
 from PySide6.QtCore import QEvent, QLineF, QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent
-
-import qpane
-from qpane import ComparisonOrientation, ExtensionTool, QPane
+from qpane import ViewerTool
 from qpane.rendering.clip_geometry import projected_comparison_boundary
 from qpane.scene.render_plan import SceneRenderPlan
+
 from tests.helpers.render_compare import rendered_overscanned_widget_frame
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -73,14 +74,14 @@ def _viewer_with_comparison(
     compare_size: tuple[int, int] = (100, 100),
     orientation: ComparisonOrientation = ComparisonOrientation.VERTICAL,
     split: float = 0.5,
-) -> tuple[QPane, uuid.UUID, uuid.UUID]:
-    """Return a QPane with two catalog images and active comparison."""
-    viewer = QPane(features=())
+) -> tuple[CuteCanvas, uuid.UUID, uuid.UUID]:
+    """Return a CuteCanvas with two catalog images and active comparison."""
+    viewer = CuteCanvas(features=())
     viewer.resize(160, 160)
     base_id = uuid.uuid4()
     compare_id = uuid.uuid4()
     viewer.setImagesByID(
-        QPane.imageMapFromLists(
+        CuteCanvas.imageMapFromLists(
             [
                 _solid_image(*base_size, color=Qt.red),
                 _solid_image(*compare_size, color=Qt.blue),
@@ -97,13 +98,13 @@ def _viewer_with_comparison(
     return viewer, base_id, compare_id
 
 
-def _cleanup_qpane(viewer: QPane, qapp) -> None:
+def _cleanup_qpane(viewer: CuteCanvas, qapp) -> None:
     """Release a test widget through Qt's event loop."""
     viewer.deleteLater()
     qapp.processEvents()
 
 
-def _render_buffer(viewer: QPane) -> tuple[SceneRenderPlan, QImage]:
+def _render_buffer(viewer: CuteCanvas) -> tuple[SceneRenderPlan, QImage]:
     """Render the current plan and return a detached renderer buffer."""
     viewer.view().allocate_buffers()
     viewer.view().mark_dirty()
@@ -162,7 +163,7 @@ def _segment_y(segment: QLineF) -> float:
     return segment.p1().y()
 
 
-def _assert_vertical_segment_matches_rendered_transition(viewer: QPane) -> None:
+def _assert_vertical_segment_matches_rendered_transition(viewer: CuteCanvas) -> None:
     """Assert vertical divider state matches the rendered pixel transition."""
     plan, buffer = _render_buffer(viewer)
     divider = viewer.comparisonDividerState()
@@ -187,7 +188,7 @@ def _assert_vertical_segment_matches_rendered_transition(viewer: QPane) -> None:
     )
 
 
-def _assert_horizontal_segment_matches_rendered_transition(viewer: QPane) -> None:
+def _assert_horizontal_segment_matches_rendered_transition(viewer: CuteCanvas) -> None:
     """Assert horizontal divider state matches the rendered pixel transition."""
     plan, buffer = _render_buffer(viewer)
     divider = viewer.comparisonDividerState()
@@ -213,15 +214,15 @@ def _assert_horizontal_segment_matches_rendered_transition(viewer: QPane) -> Non
 
 
 def test_public_api_exposes_divider_state_not_style() -> None:
-    """QPane should expose host-drawing state, not a painted-divider style type."""
-    assert "ComparisonDividerState" in qpane.__all__
-    assert hasattr(qpane, "ComparisonDividerState")
-    assert "ComparisonDividerStyle" not in qpane.__all__
-    assert not hasattr(qpane, "ComparisonDividerStyle")
+    """CuteCanvas should expose host-drawing state, not a painted-divider style type."""
+    assert "ComparisonDividerState" in cutecanvas.__all__
+    assert hasattr(cutecanvas, "ComparisonDividerState")
+    assert "ComparisonDividerStyle" not in cutecanvas.__all__
+    assert not hasattr(cutecanvas, "ComparisonDividerStyle")
 
 
 def test_default_comparison_has_no_qpane_painted_divider_path(qapp) -> None:
-    """The divider should be interactive without a QPane-owned paint hook."""
+    """The divider should be interactive without a CuteCanvas-owned paint hook."""
     viewer, _base_id, _compare_id = _viewer_with_comparison(qapp)
     try:
         divider = viewer.comparisonDividerState()
@@ -495,7 +496,7 @@ def test_comparison_source_change_marks_full_dirty(qapp, monkeypatch) -> None:
     viewer, _base_id, _compare_id = _viewer_with_comparison(qapp)
     try:
         next_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [_solid_image(color=Qt.red), _solid_image(color=Qt.blue)],
             [Path("base.png"), Path("next-compare.png")],
             [viewer.currentImageID(), next_id],
@@ -547,7 +548,7 @@ def test_disabled_divider_interaction_routes_to_active_tool(qapp) -> None:
     viewer, _base_id, _compare_id = _viewer_with_comparison(qapp)
     events: list[str] = []
 
-    class ProbeTool(ExtensionTool):
+    class ProbeTool(ViewerTool):
         """Record mouse events routed through the public tool surface."""
 
         def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -574,7 +575,7 @@ def test_disabled_divider_interaction_routes_to_active_tool(qapp) -> None:
         assert events == ["press"]
         assert viewer.comparisonState().split_position == pytest.approx(0.5)
     finally:
-        viewer.setControlMode(QPane.CONTROL_MODE_PANZOOM)
+        viewer.setControlMode(CuteCanvas.CONTROL_MODE_PANZOOM)
         viewer.unregisterTool("probe")
         _cleanup_qpane(viewer, qapp)
 
@@ -584,7 +585,7 @@ def test_non_boundary_drag_routes_to_active_tool(qapp) -> None:
     viewer, _base_id, _compare_id = _viewer_with_comparison(qapp)
     events: list[str] = []
 
-    class ProbeTool(ExtensionTool):
+    class ProbeTool(ViewerTool):
         """Record mouse events routed through the public tool surface."""
 
         def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -621,7 +622,7 @@ def test_non_boundary_drag_routes_to_active_tool(qapp) -> None:
         assert events == ["press", "move", "release"]
         assert viewer.comparisonState().split_position == pytest.approx(0.5)
     finally:
-        viewer.setControlMode(QPane.CONTROL_MODE_PANZOOM)
+        viewer.setControlMode(CuteCanvas.CONTROL_MODE_PANZOOM)
         viewer.unregisterTool("probe")
         _cleanup_qpane(viewer, qapp)
 
@@ -666,14 +667,18 @@ def test_comparison_disabled_returns_disabled_divider_state(qapp) -> None:
 
 def test_removed_divider_style_api_is_absent_from_stub_and_demo() -> None:
     """Removed painted-divider APIs should not remain in public files or demo."""
-    stub_text = (_PROJECT_ROOT / "qpane" / "qpane.pyi").read_text(encoding="utf-8")
+    stub_text = (
+        _PROJECT_ROOT / "packages/cutecanvas/src/cutecanvas/cutecanvas.pyi"
+    ).read_text(encoding="utf-8")
     demo_text = (
         _PROJECT_ROOT / "examples" / "demonstration" / "demo_window.py"
     ).read_text(encoding="utf-8")
     demo_copy = (
         _PROJECT_ROOT / "examples" / "demonstration" / "demo_text.py"
     ).read_text(encoding="utf-8")
-    qpane_text = (_PROJECT_ROOT / "qpane" / "qpane.py").read_text(encoding="utf-8")
+    canvas_text = (
+        _PROJECT_ROOT / "packages/cutecanvas/src/cutecanvas/canvas.py"
+    ).read_text(encoding="utf-8")
 
     for removed in (
         "ComparisonDividerStyle",
@@ -684,4 +689,4 @@ def test_removed_divider_style_api_is_absent_from_stub_and_demo() -> None:
         assert removed not in stub_text
         assert removed not in demo_text
         assert removed not in demo_copy
-    assert "comparisonDividerInteraction().draw_overlay" not in qpane_text
+    assert "comparisonDividerInteraction().draw_overlay" not in canvas_text

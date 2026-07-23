@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,16 +14,15 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests for QPaneState concurrency updates and propagation."""
+"""Tests for CuteCanvas state concurrency updates and propagation."""
 
 from types import SimpleNamespace
 
+from cutecanvas.core.config import Config
+from cutecanvas.core.state import CuteCanvasState
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
-
 from qpane.concurrency import QThreadPoolExecutor, build_thread_policy
-from qpane.core.config import Config
-from qpane.core.state import QPaneState
 
 
 class _DummyPool:
@@ -67,7 +66,7 @@ def test_apply_settings_pushes_concurrency_to_executor_live() -> None:
         policy=build_thread_policy(config), pool=pool, name="state-test"
     )
     qpane = _DummyQPane()
-    state = QPaneState(
+    state = CuteCanvasState(
         qpane=qpane,
         initial_config=config,
         config_overrides=None,
@@ -94,7 +93,7 @@ def test_executor_dirty_callback_wired_even_without_qpane_diagnostics() -> None:
         policy=build_thread_policy(config), pool=pool, name="state-test"
     )
     qpane = _DummyQPane()
-    state = QPaneState(
+    state = CuteCanvasState(
         qpane=qpane,
         initial_config=config,
         config_overrides=None,

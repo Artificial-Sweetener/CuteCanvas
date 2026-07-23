@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,9 +22,8 @@ import json
 import logging
 
 import pytest
-
 import qpane.core.config as cache_config_module
-from qpane import Config, QPane
+from cutecanvas import Config, CuteCanvas
 from qpane.core.config import CacheSettings as CacheConfig
 from qpane.core.config import CacheWeights
 
@@ -49,7 +48,7 @@ class _MissingPsutil:
 
 def test_cache_settings_default_overrides_are_none() -> None:
     settings = CacheConfig()
-    for bucket in ("tiles", "pyramids", "masks", "predictors"):
+    for bucket in ("tiles", "pyramids"):
         assert settings.override_mb(bucket) is None
 
 
@@ -76,7 +75,7 @@ def test_cache_settings_distribution_honors_weights_and_overrides() -> None:
     settings = CacheConfig(
         mode="hard",
         budget_mb=100,
-        weights=CacheWeights(tiles=2, pyramids=1, masks=0, predictors=0),
+        weights=CacheWeights(tiles=2, pyramids=1),
     )
     budget_bytes = settings.resolve_active_budget_bytes()
     base = settings.resolve_consumer_budgets_bytes(
@@ -138,8 +137,7 @@ def test_cache_settings_prefetch_defaults() -> None:
     settings = CacheConfig()
     assert settings.prefetch.pyramids == 2
     assert settings.prefetch.tiles == 2
-    assert settings.prefetch.masks == -1
-    assert settings.prefetch.predictors == 0
+    assert settings.prefetch.extensions == {}
     assert settings.prefetch.tiles_per_neighbor == 4
 
 
@@ -155,9 +153,11 @@ def test_cache_settings_prefetch_apply_mapping() -> None:
 
 def test_config_configure_prefetch_block() -> None:
     config = Config()
-    config.configure(cache={"prefetch": {"masks": 0, "predictors": 0}})
-    assert config.cache.prefetch.masks == 0
-    assert config.cache.prefetch.predictors == 0
+    config.configure(
+        cache={"prefetch": {"extensions": {"scene_sources": 0, "source_warmup": 0}}}
+    )
+    assert config.cache.prefetch.extensions["scene_sources"] == 0
+    assert config.cache.prefetch.extensions["source_warmup"] == 0
 
 
 def test_config_updates_prefetch_mapping() -> None:
@@ -190,12 +190,13 @@ def test_cache_settings_ignore_incompatible_fields_with_warning(caplog) -> None:
 
 
 def test_qpane_updates_consumer_budgets(qapp) -> None:
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         qpane_widget.applySettings(cache={"mode": "hard", "budget_mb": 1024})
         cache_settings = qpane_widget.settings.cache
         budgets_bytes = cache_settings.resolve_consumer_budgets_bytes(
-            cache_settings.resolve_active_budget_bytes()
+            cache_settings.resolve_active_budget_bytes(),
+            active_consumers={"tiles", "pyramids", "mask_overlays", "models"},
         )
         view = qpane_widget.view()
         tile_limit = view.tile_manager.cache_limit_bytes

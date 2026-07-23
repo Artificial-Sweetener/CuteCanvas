@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,11 +22,11 @@ import uuid
 from collections.abc import Callable
 
 import pytest
+from cutecanvas.sam.manager import SamManager
 from PySide6.QtGui import QColor, QImage
+from qpane.cache.consumers import KeyedCacheConsumer
+from qpane.cache.coordinator import CacheCoordinator, CachePriority
 
-from qpane.cache.consumers import SamPredictorCacheConsumer
-from qpane.cache.coordinator import CacheCoordinator
-from qpane.sam.manager import SamManager
 from tests.helpers.executor_stubs import StubExecutor
 
 
@@ -93,11 +93,31 @@ class _ManagerMissingHook(_ManagerStub):
         self.cancelPendingPredictor = None
 
 
+def _attach_consumer(manager, coordinator: CacheCoordinator) -> KeyedCacheConsumer:
+    """Adapt a predictor cache through QPane's source-neutral cache contract."""
+
+    def connect_usage_events(changed, cleared) -> None:
+        manager.predictorReady.connect(lambda *_args: changed())
+        manager.predictorRemoved.connect(lambda *_args: changed())
+        manager.predictorCacheCleared.connect(cleared)
+
+    return KeyedCacheConsumer(
+        coordinator,
+        consumer_id="predictors",
+        priority=CachePriority.BACKGROUND_MODELS,
+        get_usage=manager.cache_usage_bytes,
+        set_admission_guard=lambda _guard: None,
+        keys=lambda: tuple(manager.predictorImageIds()),
+        remove=manager.removeFromCache,
+        connect_usage_events=connect_usage_events,
+    )
+
+
 def test_predictor_consumer_tracks_only_resident_predictor_usage():
     """Pending work stays separate while ready predictors count as cache usage."""
     manager = _ManagerStub()
     coordinator = CacheCoordinator(512 * 1024 * 1024)
-    SamPredictorCacheConsumer(manager, coordinator)
+    _attach_consumer(manager, coordinator)
     image_id = uuid.uuid4()
     manager.pending_bytes = 4096
     manager.cache_bytes = 0
@@ -119,7 +139,7 @@ def test_pending_predictor_is_not_treated_as_evictable_cache_usage(caplog) -> No
     """Pending predictor work must not enter resident-cache enforcement."""
     manager = _ManagerStub()
     coordinator = CacheCoordinator(0)
-    SamPredictorCacheConsumer(manager, coordinator)
+    _attach_consumer(manager, coordinator)
     manager.pending_bytes = 128 * 1024 * 1024
     manager.release_pending_after_queries = 2
 
@@ -141,7 +161,7 @@ def test_real_manager_pending_request_stays_outside_cache_budget(
     executor = StubExecutor()
     manager = SamManager(executor=executor, checkpoint_path=checkpoint)
     coordinator = CacheCoordinator(0)
-    SamPredictorCacheConsumer(manager, coordinator)
+    _attach_consumer(manager, coordinator)
     image = QImage(16, 16, QImage.Format_ARGB32)
     image.fill(QColor("white"))
     image_id = uuid.uuid4()
@@ -159,15 +179,19 @@ def test_real_manager_pending_request_stays_outside_cache_budget(
         manager.shutdown()
 
 
-def test_predictor_consumer_errors_when_required_hook_missing(caplog):
+def test_predictor_consumer_surfaces_injected_key_enumeration_failure(caplog):
     manager = _ManagerMissingHook()
     coordinator = CacheCoordinator(512 * 1024 * 1024)
-    with (
-        caplog.at_level("ERROR"),
-        pytest.raises(RuntimeError, match="cancelPendingPredictor"),
-    ):
-        SamPredictorCacheConsumer(manager, coordinator)
-    assert (
-        "Cannot wrap missing manager hook _ManagerMissingHook.cancelPendingPredictor"
-        in caplog.text
+    consumer = KeyedCacheConsumer(
+        coordinator,
+        consumer_id="predictors",
+        priority=CachePriority.BACKGROUND_MODELS,
+        get_usage=manager.cache_usage_bytes,
+        set_admission_guard=lambda _guard: None,
+        keys=lambda: (_ for _ in ()).throw(RuntimeError("key enumeration failed")),
+        remove=manager.removeFromCache,
+        connect_usage_events=lambda _changed, _cleared: None,
     )
+    manager.cache_bytes = 8
+    with pytest.raises(RuntimeError, match="key enumeration failed"):
+        consumer._trim_to(0)

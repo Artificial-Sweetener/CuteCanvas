@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Contextual modal layer properties for the demonstration host."""
 
 from __future__ import annotations
@@ -13,14 +20,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from cutecanvas import CuteCanvas
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QVBoxLayout,
     QWidget,
 )
-
-from qpane import QPane
 
 from .layer_inspector import RasterStorageProperties
 from .placed_asset_controls import PlacedAssetControls
@@ -32,14 +38,14 @@ class LayerPropertiesDialog(QDialog):
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         parent: QWidget | None = None,
         *,
         show_status: Callable[[str], None] | None = None,
     ) -> None:
-        """Build a modal whose controls use only QPane's public API."""
+        """Build a modal whose controls use only CuteCanvas's public API."""
         super().__init__(parent)
         self.setWindowTitle("Layer Properties")
         self.setModal(True)

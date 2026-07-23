@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,19 +20,23 @@ import math
 import uuid
 from pathlib import Path
 
+import qpane.rendering.scene_compiler as scene_compiler_module
+from cutecanvas.catalog.descriptor_factory import CatalogLayerDescriptorFactory
+from cutecanvas.composition.layers import CompositionLayerInstance
+from cutecanvas.coverage import CoverageAsset, CoverageSurface
+from cutecanvas.masks.descriptor_factory import MaskLayerDescriptorFactory
+from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas.masks.source_resolver import MaskSourceCapabilities
+from cutecanvas.scene.identity import mask_layer_id
+from cutecanvas.scene.layer_assembly import CompositionLayerSceneAssembler
+from cutecanvas.scene.source_capabilities import EditorSourceCapabilities
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage, QPixmap, Qt
 from PySide6.QtWidgets import QWidget
-
-import qpane.rendering.scene_compiler as scene_compiler_module
-from qpane.catalog.descriptor_factory import CatalogLayerDescriptorFactory
+from qpane.catalog.scene_resolver import CatalogSceneResolver
 from qpane.catalog.source_capabilities import CatalogSourceCapabilities
 from qpane.catalog.source_reference import CatalogImageReference
-from qpane.composition.layers import CompositionLayerInstance
 from qpane.core import CacheSettings
-from qpane.masks.descriptor_factory import MaskLayerDescriptorFactory
-from qpane.masks.source_reference import MaskAssetReference
-from qpane.masks.source_resolver import MaskSourceCapabilities
 from qpane.rendering import (
     RenderingPresenter,
     ViewportZoomMode,
@@ -44,9 +48,7 @@ from qpane.scene.identity import (
     base_image_layer_id,
     catalog_source_asset_key,
     default_scene_id,
-    mask_layer_id,
 )
-from qpane.scene.layer_assembly import CompositionLayerSceneAssembler
 from qpane.scene.model import (
     BlendMode,
     LayerDescriptor,
@@ -58,7 +60,6 @@ from qpane.scene.model import (
     SceneKind,
 )
 from qpane.scene.providers import SceneContribution
-from qpane.scene.raster import RasterBounds
 from qpane.scene.registry import SceneProviderRegistry
 from qpane.scene.render_plan import RenderStrategy
 from qpane.scene.source_capabilities import LayerSourceCapabilities
@@ -88,8 +89,9 @@ def _register_mask_capabilities(
     capabilities.metadata.register(MaskAssetReference, owner)
     capabilities.rasters.register(MaskAssetReference, owner)
     capabilities.hit_tests.register(MaskAssetReference, owner)
-    capabilities.coverage.register(MaskAssetReference, owner)
-    capabilities.pixel_presentation.register(MaskAssetReference, owner)
+    editor_capabilities = qpane.editorSourceCapabilities()
+    editor_capabilities.coverage.register(MaskAssetReference, owner)
+    editor_capabilities.pixel_presentation.register(MaskAssetReference, owner)
 
 
 class StubSettings:
@@ -142,6 +144,7 @@ class StubQPane(QWidget):
         self.mask_service = None
         self._scene_providers = SceneProviderRegistry()
         self._source_capabilities = LayerSourceCapabilities.create()
+        self._editor_source_capabilities = EditorSourceCapabilities.create()
         self._current_image_id = uuid.uuid4()
         self._is_blank = True
         self.resize(*size)
@@ -178,6 +181,10 @@ class StubQPane(QWidget):
     def layerSourceCapabilities(self) -> LayerSourceCapabilities:
         """Return focused source capabilities used by the presenter."""
         return self._source_capabilities
+
+    def editorSourceCapabilities(self) -> EditorSourceCapabilities:
+        """Return editor-only source capabilities used by test mask owners."""
+        return self._editor_source_capabilities
 
 
 class StubCatalog:
@@ -320,19 +327,23 @@ class PresenterHarness:
         capabilities.hit_tests.register(CatalogImageReference, catalog_capabilities)
         self.executor = NoopExecutor()
         self.qpane.original_image = base_image
+        self.scene_resolver = CatalogSceneResolver(
+            self.catalog,
+            self.qpane.sceneProviderRegistry(),
+        )
         self.presenter = RenderingPresenter(
             qpane=self.qpane,
-            catalog=self.catalog,
             pyramid_products=self.catalog,
             cache_registry=None,
             executor=self.executor,
-            scene_providers=self.qpane.sceneProviderRegistry(),
+            scene_provider=self.scene_resolver.scene,
+            scene_revision=self.scene_resolver.revision,
             source_metadata=capabilities.metadata,
             raster_sources=capabilities.rasters,
             raster_patches=capabilities.raster_patches,
             source_hit_tests=capabilities.hit_tests,
-            pixel_presentation=capabilities.pixel_presentation,
             vector_sources=capabilities.vectors,
+            hybrid_sources=capabilities.hybrids,
             layer_effects=LayerEffectRenderRegistry(),
         )
         self.qpane.attach_presenter(self.presenter)
@@ -401,25 +412,11 @@ class StubMaskLayer:
 
     def __init__(self, image: QImage) -> None:
         self.mask_image = image
-        self.surface = StubMaskSurface(image)
-
-
-class StubMaskSurface:
-    """Expose mask geometry and point reads without production pixel ownership."""
-
-    def __init__(self, image: QImage) -> None:
-        self._image = image
-        self.bounds = RasterBounds.from_size(image.size())
-
-    def is_null(self) -> bool:
-        """Return whether the backing test image is null."""
-        return self._image.isNull()
-
-    def storage_value(self, x: int, y: int) -> int:
-        """Return one grayscale test pixel or zero outside storage."""
-        if x < 0 or y < 0 or x >= self._image.width() or y >= self._image.height():
-            return 0
-        return self._image.pixelColor(x, y).red()
+        asset_id = uuid.uuid4()
+        self.coverage = CoverageAsset(
+            asset_id,
+            CoverageSurface.from_qimage(image),
+        )
 
 
 class StubMaskAssets:
@@ -991,14 +988,14 @@ def test_current_content_snapshot_reuses_cached_resolution(qapp, monkeypatch):
     try:
         presenter = harness.presenter
         compiler = presenter._scene_compiler
-        original = compiler._resolve_active_content
+        original = compiler._scene_provider
         calls = []
 
         def resolve_once():
             calls.append("resolve")
             return original()
 
-        monkeypatch.setattr(compiler, "_resolve_active_content", resolve_once)
+        monkeypatch.setattr(compiler, "_scene_provider", resolve_once)
 
         first = presenter.current_content_snapshot()
         second = presenter.current_content_snapshot()
@@ -1025,14 +1022,14 @@ def test_calculate_render_plan_reuses_cached_active_content(qapp, monkeypatch):
     try:
         presenter = harness.presenter
         compiler = presenter._scene_compiler
-        original = compiler._resolve_active_content
+        original = compiler._scene_provider
         calls = []
 
         def resolve_once():
             calls.append("resolve")
             return original()
 
-        monkeypatch.setattr(compiler, "_resolve_active_content", resolve_once)
+        monkeypatch.setattr(compiler, "_scene_provider", resolve_once)
 
         first = presenter.calculateRenderPlan(is_blank=False)
         second = presenter.calculateRenderPlan(is_blank=False)

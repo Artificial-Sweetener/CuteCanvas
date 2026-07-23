@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -18,12 +18,12 @@
 
 import uuid
 
+from cutecanvas import CuteCanvas
+from cutecanvas.sam.manager import SamManager
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 
-from examples.demo import ExampleOptions, ExampleWindow
-from qpane import QPane
-from qpane.sam.manager import SamManager
+from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
 
 
 def _solid_image() -> QImage:
@@ -43,7 +43,7 @@ def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
     window = ExampleWindow(ExampleOptions(feature_set="masksam"))
     try:
         image_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists([_solid_image()], [None], [image_id])
+        image_map = CuteCanvas.imageMapFromLists([_solid_image()], [None], [image_id])
         window.qpane.setImagesByID(image_map, current_id=image_id)
         image = window.qpane.currentImage
         assert image is not None
@@ -55,29 +55,30 @@ def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
         window.qpane.setCurrentImageID(None)
         qapp.processEvents()
 
-        assert window.catalog_dock is not None
-        window.catalog_dock._catalog_action.setChecked(True)
+        assert window.catalog_ui.dock is not None
+        window.catalog_ui.dock._catalog_action.setChecked(True)
         qapp.processEvents()
 
         def _items():
             """Return the current catalog tree items after refreshes."""
-            tree = window.catalog_dock._tree
+            assert window.catalog_ui.dock is not None
+            tree = window.catalog_ui.dock._tree
             return tree._mask_items[(image_id, mask_id)], tree._image_items[image_id]
 
-        window._set_control_mode(QPane.CONTROL_MODE_CURSOR)
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_CURSOR)
         mask_item, image_item = _items()
-        window.catalog_dock._handle_item_clicked(mask_item, 0)
+        window.catalog_ui.dock._handle_item_clicked(mask_item, 0)
         qapp.processEvents()
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_DRAW_BRUSH
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_DRAW_BRUSH
 
-        window._set_control_mode(QPane.CONTROL_MODE_SMART_SELECT)
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_SMART_SELECT)
         mask_item, image_item = _items()
-        window.catalog_dock._handle_item_clicked(mask_item, 0)
+        window.catalog_ui.dock._handle_item_clicked(mask_item, 0)
         qapp.processEvents()
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_SMART_SELECT
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_SMART_SELECT
 
-        window._set_control_mode(QPane.CONTROL_MODE_MOVE)
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_MOVE)
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_MOVE
         scene = window.qpane.currentScene()
         assert scene is not None
         base_layers = [
@@ -106,19 +107,19 @@ def test_demo_catalog_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
         assert mask_policies[inactive_mask_id].movable
         assert mask_policies[inactive_mask_id].pixel_editable
         mask_item, image_item = _items()
-        window.catalog_dock._handle_item_clicked(mask_item, 0)
+        window.catalog_ui.dock._handle_item_clicked(mask_item, 0)
         qapp.processEvents()
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_MOVE
         mask_item, image_item = _items()
-        window.catalog_dock._handle_item_clicked(image_item, 0)
+        window.catalog_ui.dock._handle_item_clicked(image_item, 0)
         qapp.processEvents()
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_MOVE
 
-        window._set_control_mode(QPane.CONTROL_MODE_DRAW_BRUSH)
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
         mask_item, image_item = _items()
-        window.catalog_dock._handle_item_clicked(image_item, 0)
+        window.catalog_ui.dock._handle_item_clicked(image_item, 0)
         qapp.processEvents()
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_PANZOOM
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
     finally:
         window.close()
         window.deleteLater()

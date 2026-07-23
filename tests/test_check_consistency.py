@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,7 +20,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import tools.check_consistency as consistency
+from tools.trinity import documentation
+from tools.trinity.model import ProductContract
 
 
 def _write(path: Path, text: str) -> Path:
@@ -28,103 +29,116 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
+def _product(tmp_path: Path) -> ProductContract:
+    """Create one isolated product documentation contract."""
+    root = tmp_path / "product"
+    docs = root / "docs"
+    docs.mkdir(parents=True)
+    _write(root / "README.md", "A friendly tutorial uses Example.foo for hosts.\n")
+    return ProductContract(
+        package="example",
+        facade_class="Example",
+        root=root,
+        stub_name="example.pyi",
+        demo_paths=(),
+        config_class="Config",
+    )
+
+
 def test_missing_public_symbol_in_api_reference_fails(tmp_path, monkeypatch):
     """Missing API reference coverage remains a hard failure."""
-    docs = tmp_path / "docs"
-    docs.mkdir()
+    del monkeypatch
+    product = _product(tmp_path)
+    docs = product.docs
     _write(
         docs / "api-reference.md",
-        "- QPane.foo - Open the active test workflow for the host.\n",
+        "- CuteCanvas.foo - Open the active test workflow for the host.\n",
     )
     _write(
         docs / "guide.md",
-        "Use QPane.foo when the host needs to open the active test workflow.\n"
-        "Use QPane.bar when the host needs to close that workflow cleanly.\n",
+        "Use CuteCanvas.foo when the host needs to open the active test workflow.\n"
+        "Use CuteCanvas.bar when the host needs to close that workflow cleanly.\n",
     )
-    monkeypatch.setattr(consistency, "DOCS_DIR", docs)
-
-    errors = consistency.check_doc_consistency(
-        {"QPane.foo", "QPane.bar"},
-        set(),
+    errors = documentation.validate_documentation(
+        product,
+        {"CuteCanvas.foo", "CuteCanvas.bar"},
     )
 
-    assert "[API Reference] Missing: QPane.bar" in errors
+    assert "example: [API Reference] Missing: CuteCanvas.bar" in errors
 
 
 def test_api_reference_symbol_without_explainer_fails(tmp_path):
     """API reference entries must include a short explainer."""
-    pattern = consistency.build_symbol_pattern({"QPane"})
-    path = _write(tmp_path / "api-reference.md", "- QPane.foo\n")
+    pattern = documentation.build_symbol_pattern({"CuteCanvas"})
+    path = _write(tmp_path / "api-reference.md", "- CuteCanvas.foo\n")
 
-    _symbols, errors = consistency.collect_api_reference_symbols(path, pattern)
+    _symbols, errors = documentation.collect_api_reference_symbols(path, pattern)
 
     assert any("Missing short explainer" in error for error in errors)
 
 
 def test_missing_guide_symbol_fails_even_when_reference_has_it(tmp_path, monkeypatch):
     """Guide coverage remains mandatory in addition to API reference coverage."""
-    docs = tmp_path / "docs"
-    docs.mkdir()
+    del monkeypatch
+    product = _product(tmp_path)
+    docs = product.docs
     _write(
         docs / "api-reference.md",
-        "- QPane.foo - Open the active test workflow for the host.\n"
-        "- QPane.bar - Close the active test workflow for the host.\n",
+        "- CuteCanvas.foo - Open the active test workflow for the host.\n"
+        "- CuteCanvas.bar - Close the active test workflow for the host.\n",
     )
     _write(
         docs / "guide.md",
-        "Use QPane.foo when the host needs to open the active test workflow.\n",
+        "Use CuteCanvas.foo when the host needs to open the active test workflow.\n",
     )
-    monkeypatch.setattr(consistency, "DOCS_DIR", docs)
-
-    errors = consistency.check_doc_consistency(
-        {"QPane.foo", "QPane.bar"},
-        set(),
+    errors = documentation.validate_documentation(
+        product,
+        {"CuteCanvas.foo", "CuteCanvas.bar"},
     )
 
-    assert "[Guides] Missing: QPane.bar" in errors
+    assert "example: [Guides] Missing: CuteCanvas.bar" in errors
 
 
 def test_dataclass_field_missing_from_guides_fails(tmp_path, monkeypatch):
     """Dataclass field symbols must be explained in guides too."""
-    docs = tmp_path / "docs"
-    docs.mkdir()
+    del monkeypatch
+    product = _product(tmp_path)
+    docs = product.docs
     _write(
         docs / "api-reference.md",
-        "- QPaneScene.title - Host-facing scene title shown in composition browsers.\n",
+        "- SceneSnapshot.title - Host-facing scene title shown in composition browsers.\n",
     )
     _write(docs / "guide.md", "Scene titles label composition rows for hosts.\n")
-    monkeypatch.setattr(consistency, "DOCS_DIR", docs)
-
-    errors = consistency.check_doc_consistency(
-        {"QPaneScene.title"},
-        set(),
+    errors = documentation.validate_documentation(
+        product,
+        {"SceneSnapshot.title"},
     )
 
-    assert "[Guides] Missing: QPaneScene.title" in errors
+    assert "example: [Guides] Missing: SceneSnapshot.title" in errors
 
 
 def test_reference_section_symbols_do_not_count_for_guides(tmp_path):
     """Reference-style guide sections fail and do not satisfy guide coverage."""
-    pattern = consistency.build_symbol_pattern({"QPane"})
+    pattern = documentation.build_symbol_pattern({"CuteCanvas"})
     guide = _write(
         tmp_path / "guide.md",
         "## Scene API Reference\n\n"
-        "QPane.foo stores the requested scene composition for later use.\n",
+        "CuteCanvas.foo stores the requested scene composition for later use.\n",
     )
 
-    symbols, errors = consistency.collect_valid_guide_symbols([guide], pattern)
+    symbols, errors = documentation.collect_valid_guide_symbols([guide], pattern)
 
-    assert "QPane.foo" not in symbols
+    assert "CuteCanvas.foo" not in symbols
     assert any("Reference-style heading" in error for error in errors)
 
 
 def test_long_symbol_list_does_not_count_for_guides(tmp_path):
     """Long symbol runs are rejected as guide coverage."""
-    pattern = consistency.build_symbol_pattern({"QPane"})
-    bullets = "\n".join(f"- QPane.method{i}" for i in range(13))
+    pattern = documentation.build_symbol_pattern({"CuteCanvas"})
+    bullets = "\n".join(f"- CuteCanvas.method{i}" for i in range(13))
     guide = _write(tmp_path / "guide.md", bullets)
 
-    symbols, errors = consistency.collect_valid_guide_symbols([guide], pattern)
+    symbols, errors = documentation.collect_valid_guide_symbols([guide], pattern)
 
     assert symbols == set()
     assert any("Symbol dump" in error for error in errors)
@@ -132,33 +146,33 @@ def test_long_symbol_list_does_not_count_for_guides(tmp_path):
 
 def test_related_apis_pass_with_host_context(tmp_path):
     """Short related API callouts pass when they explain host usage."""
-    pattern = consistency.build_symbol_pattern({"QPane"})
+    pattern = documentation.build_symbol_pattern({"CuteCanvas"})
     guide = _write(
         tmp_path / "guide.md",
         "## Related APIs\n\n"
-        "- QPane.foo opens the active workflow when the host wants to show it.\n",
+        "- CuteCanvas.foo opens the active workflow when the host wants to show it.\n",
     )
 
-    symbols, errors = consistency.collect_valid_guide_symbols([guide], pattern)
+    symbols, errors = documentation.collect_valid_guide_symbols([guide], pattern)
 
-    assert "QPane.foo" in symbols
+    assert "CuteCanvas.foo" in symbols
     assert errors == []
 
 
 def test_prose_or_nearby_code_explains_symbol(tmp_path):
     """Tutorial prose and adjacent examples both count as guide coverage."""
-    pattern = consistency.build_symbol_pattern({"QPane"})
+    pattern = documentation.build_symbol_pattern({"CuteCanvas"})
     guide = _write(
         tmp_path / "guide.md",
-        "Use QPane.foo when the host needs to open the active workflow.\n\n"
-        "QPane.bar prepares the workflow state before the host activates it.\n\n"
+        "Use CuteCanvas.foo when the host needs to open the active workflow.\n\n"
+        "CuteCanvas.bar prepares the workflow state before the host activates it.\n\n"
         "```python\n"
         "viewer.bar()\n"
         "```\n",
     )
 
-    symbols, errors = consistency.collect_valid_guide_symbols([guide], pattern)
+    symbols, errors = documentation.collect_valid_guide_symbols([guide], pattern)
 
-    assert "QPane.foo" in symbols
-    assert "QPane.bar" in symbols
+    assert "CuteCanvas.foo" in symbols
+    assert "CuteCanvas.bar" in symbols
     assert errors == []

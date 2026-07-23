@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Exact domain semantics for selected raster pixel translation."""
 
 from __future__ import annotations
@@ -15,17 +22,17 @@ from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
+from cutecanvas.coverage import CoverageAsset, CoverageSnapshot, CoverageSurface
+from cutecanvas.masks.mask import MaskLayer
+from cutecanvas.masks.pixel_edits import MaskLayerPixelMutationOwner
+from cutecanvas.masks.pixel_translation import MaskPixelTranslator
+from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas.raster.color_surface import ColorRasterSurface
+from cutecanvas.raster.pixel_translation import ColorPixelTranslator
+from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtGui import QColor, QImage
-
-from qpane.coverage import CoverageSnapshot, CoverageSurface
-from qpane.masks.mask import MaskLayer
-from qpane.masks.pixel_edits import MaskLayerPixelMutationOwner
-from qpane.masks.pixel_translation import MaskPixelTranslator
-from qpane.masks.source_reference import MaskAssetReference
-from qpane.raster.color_surface import ColorRasterSurface
-from qpane.raster.pixel_translation import ColorPixelTranslator
 from qpane.scene.model import LayerDescriptor
-from qpane.scene.raster import RasterBounds, RasterExtentPolicy
+from qpane.scene.raster import RasterBounds
 
 
 def _coverage(values: list[int], *, x: int = 0) -> CoverageSnapshot:
@@ -38,118 +45,116 @@ def _coverage(values: list[int], *, x: int = 0) -> CoverageSnapshot:
     )
 
 
+def _mask(
+    pixels: np.ndarray,
+    *,
+    extent_policy: RasterExtentPolicy = RasterExtentPolicy.FIXED,
+) -> MaskLayer:
+    """Return one hybrid mask fixture with raster-only initial authority."""
+    mask_id = uuid.uuid4()
+    return MaskLayer(
+        mask_id,
+        CoverageAsset(
+            mask_id,
+            CoverageSurface(pixels, extent_policy=extent_policy),
+        ),
+    )
+
+
 def test_mask_translation_moves_values_without_overlap_smear() -> None:
     """Overlapping mask movement must read every value from pre-move pixels."""
-    mask = MaskLayer(
-        uuid.uuid4(),
-        CoverageSurface(np.array([[10, 20, 30]], dtype=np.uint8)),
-    )
+    mask = _mask(np.array([[10, 20, 30]], dtype=np.uint8))
     translator = MaskPixelTranslator()
 
     transition = translator.move(mask, _coverage([255, 255]), 1, 0)
 
     assert transition is not None
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[0, 10, 20]], dtype=np.uint8),
     )
     assert translator.restore(mask, transition, use_after=False)
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[10, 20, 30]], dtype=np.uint8),
     )
     assert translator.restore(mask, transition, use_after=True)
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[0, 10, 20]], dtype=np.uint8),
     )
 
 
 def test_mask_translation_treats_zero_as_a_scalar_value() -> None:
     """Moving selected black mask pixels must replace destination coverage."""
-    mask = MaskLayer(
-        uuid.uuid4(),
-        CoverageSurface(np.array([[0, 255]], dtype=np.uint8)),
-    )
+    mask = _mask(np.array([[0, 255]], dtype=np.uint8))
 
     transition = MaskPixelTranslator().move(mask, _coverage([255]), 1, 0)
 
     assert transition is not None
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[0, 0]], dtype=np.uint8),
     )
 
 
 def test_mask_translation_preserves_soft_selection_coverage() -> None:
     """Feathered selection must proportionally clear and place mask values."""
-    mask = MaskLayer(
-        uuid.uuid4(),
-        CoverageSurface(np.array([[200, 100]], dtype=np.uint8)),
-    )
+    mask = _mask(np.array([[200, 100]], dtype=np.uint8))
 
     transition = MaskPixelTranslator().move(mask, _coverage([128]), 1, 0)
 
     assert transition is not None
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[100, 150]], dtype=np.uint8),
     )
 
 
 def test_expanding_mask_translation_retains_off_surface_values() -> None:
     """Expand-on-write movement must retain translated local pixels and undo bounds."""
-    mask = MaskLayer(
-        uuid.uuid4(),
-        CoverageSurface(
-            np.array([[255, 0]], dtype=np.uint8),
-            extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
-        ),
+    mask = _mask(
+        np.array([[255, 0]], dtype=np.uint8),
+        extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
     )
     translator = MaskPixelTranslator()
 
     transition = translator.move(mask, _coverage([255]), -2, 0)
 
     assert transition is not None
-    assert mask.surface.bounds == RasterBounds(-2, 0, 4, 1)
+    assert mask.coverage.raster.bounds == RasterBounds(-2, 0, 4, 1)
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[255, 0, 0, 0]], dtype=np.uint8),
     )
     assert translator.restore(mask, transition, use_after=False)
-    assert mask.surface.bounds == RasterBounds(0, 0, 2, 1)
+    assert mask.coverage.raster.bounds == RasterBounds(0, 0, 2, 1)
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[255, 0]], dtype=np.uint8),
     )
 
 
 def test_fixed_mask_translation_clips_destination_without_growing_bounds() -> None:
     """Fixed movement may discard off-surface payload while clearing its origin."""
-    mask = MaskLayer(
-        uuid.uuid4(),
-        CoverageSurface(
-            np.array([[0, 255]], dtype=np.uint8),
-            extent_policy=RasterExtentPolicy.FIXED,
-        ),
+    mask = _mask(
+        np.array([[0, 255]], dtype=np.uint8),
+        extent_policy=RasterExtentPolicy.FIXED,
     )
 
     transition = MaskPixelTranslator().move(mask, _coverage([255], x=1), 2, 0)
 
     assert transition is not None
-    assert mask.surface.bounds == RasterBounds(0, 0, 2, 1)
+    assert mask.coverage.raster.bounds == RasterBounds(0, 0, 2, 1)
     np.testing.assert_array_equal(
-        mask.surface.snapshot_array(),
+        mask.coverage.raster.snapshot_array(),
         np.array([[0, 0]], dtype=np.uint8),
     )
 
 
 def test_mask_owner_exposes_nonzero_content_as_binary_movement_occupancy() -> None:
     """Zero mask pixels should not travel while every painted soft value remains data."""
-    mask = MaskLayer(
-        uuid.uuid4(),
-        CoverageSurface(np.array([[0, 1, 128, 255]], dtype=np.uint8)),
-    )
+    mask = _mask(np.array([[0, 1, 128, 255]], dtype=np.uint8))
 
     class Lookup:
         """Resolve the single mask used by the source-domain owner."""

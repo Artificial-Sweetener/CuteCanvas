@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -31,8 +31,6 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from shiboken6 import isValid
-
 from qpane.concurrency import (
     QThreadPoolExecutor,
     TaskHandle,
@@ -47,6 +45,8 @@ from qpane.concurrency.metrics import (
     gather_executor_snapshot,
     retry_summary_provider,
 )
+from shiboken6 import isValid
+
 from tests.helpers.executor_stubs import CallableRunnable, StubExecutor
 
 
@@ -414,13 +414,7 @@ class TestExecutorDiagnostics:
 
     def test_retry_summary_provider_skips_missing_managers(self) -> None:
         """Retry summaries should be empty when no managers expose snapshots."""
-        qpane = SimpleNamespace(
-            view=lambda: None,
-            catalog=lambda: None,
-            autosaveManager=lambda: None,
-            samManager=lambda: None,
-        )
-        assert tuple(retry_summary_provider(qpane)) == ()
+        assert tuple(retry_summary_provider({})) == ()
 
     def test_retry_summary_provider_formats_first_two_categories(self) -> None:
         """Retry summaries should include tiles and pyramid categories first."""
@@ -436,25 +430,17 @@ class TestExecutorDiagnostics:
                 }
             )
 
-        qpane = SimpleNamespace(
-            view=lambda: SimpleNamespace(
-                tile_manager=SimpleNamespace(
-                    retrySnapshot=lambda: _snapshot("tiles", 2, 5, 3)
-                )
+        managers = {
+            "tiles": SimpleNamespace(retrySnapshot=lambda: _snapshot("tiles", 2, 5, 3)),
+            "pyramid": SimpleNamespace(
+                retrySnapshot=lambda: _snapshot("pyramid", 1, 4, None)
             ),
-            catalog=lambda: SimpleNamespace(
-                pyramidManager=lambda: SimpleNamespace(
-                    retrySnapshot=lambda: _snapshot("pyramid", 1, 4, None)
-                )
-            ),
-            autosaveManager=lambda: SimpleNamespace(
+            "autosave": SimpleNamespace(
                 retrySnapshot=lambda: _snapshot("autosave", 1, 2, None)
             ),
-            samManager=lambda: SimpleNamespace(
-                retrySnapshot=lambda: _snapshot("sam", 3, 6, 4)
-            ),
-        )
-        records = tuple(retry_summary_provider(qpane))
+            "sam": SimpleNamespace(retrySnapshot=lambda: _snapshot("sam", 3, 6, 4)),
+        }
+        records = tuple(retry_summary_provider(managers))
         assert records
         assert records[0].label == "Retry|Summary"
         assert "tiles:2/5" in records[0].value

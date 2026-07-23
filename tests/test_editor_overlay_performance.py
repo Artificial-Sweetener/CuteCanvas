@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Behavioral performance safeguards for cached editor feedback geometry."""
 
 from __future__ import annotations
@@ -13,13 +20,13 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.selection import PixelSelectionState, SelectionBoundaryBuilder
+from cutecanvas.types import RasterExtentPolicy
+from cutecanvas.ui.editor_overlays import PixelSelectionOverlayRenderer
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication
-
-from qpane.coverage import CoverageSnapshot
-from qpane.scene.raster import RasterBounds, RasterExtentPolicy
-from qpane.selection import PixelSelectionState, SelectionBoundaryBuilder
-from qpane.ui.editor_overlays import PixelSelectionOverlayRenderer
+from qpane.scene.raster import RasterBounds
 
 
 def test_translated_selection_reuses_cached_boundary_topology(

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -19,27 +19,29 @@
 from __future__ import annotations
 
 import pytest
-
+from cutecanvas.core.config_features import (
+    BRUSH_DESCRIPTOR,
+    MASK_DESCRIPTOR,
+    SAM_DESCRIPTOR,
+    MaskConfigSlice,
+    iter_descriptors,
+)
 from qpane.core.config_features import (
     CORE_DESCRIPTOR,
     DIAGNOSTICS_DESCRIPTOR,
     INPUT_DESCRIPTOR,
-    MASK_DESCRIPTOR,
-    SAM_DESCRIPTOR,
-    ConfigFeatureRegistry,
-    FeatureConfigDescriptor,
-    MaskConfigSlice,
-    iter_descriptors,
 )
+from qpane.core.config_schema import ConfigFeatureRegistry, FeatureConfigDescriptor
 
 
 def test_iter_descriptors_returns_expected_order() -> None:
     descriptors = iter_descriptors()
     assert descriptors[0] is CORE_DESCRIPTOR
     assert descriptors[1] is INPUT_DESCRIPTOR
-    assert descriptors[2] is MASK_DESCRIPTOR
-    assert descriptors[3] is DIAGNOSTICS_DESCRIPTOR
-    assert descriptors[4] is SAM_DESCRIPTOR
+    assert descriptors[2] is DIAGNOSTICS_DESCRIPTOR
+    assert descriptors[3] is BRUSH_DESCRIPTOR
+    assert descriptors[4] is MASK_DESCRIPTOR
+    assert descriptors[5] is SAM_DESCRIPTOR
 
 
 def test_registry_rejects_duplicate_namespaces() -> None:
@@ -56,7 +58,7 @@ def test_core_defaults_clone_mutable_members() -> None:
     assert first is not second
     first.concurrency["max_workers"] = 99
     assert second.concurrency["max_workers"] == 2
-    assert second.concurrency["category_priorities"]["mask_stroke"] == 60
-    assert second.concurrency["category_priorities"]["mask_snippet"] == 50
+    assert "mask_stroke" not in second.concurrency["category_priorities"]
+    assert "mask_snippet" not in second.concurrency["category_priorities"]
     first.cache.headroom_cap_mb = 1
     assert second.cache.headroom_cap_mb == 4096

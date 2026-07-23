@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,156 +14,113 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""Verify that both package facades implement their typed method contracts."""
 
-"""Verify that qpane.py follows the defined code organization and API visibility rules.
-
-Ensures that public methods defined in qpane.pyi are located above the internal
-implementation banner in qpane.py, and that internal methods are below it.
-"""
+from __future__ import annotations
 
 import ast
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-LAYOUT_GUIDELINES = """
-# Code Organization Guide
 
-This repository follows a consistent layout to keep modules readable and predictable. Use the ordering below when adding or refactoring classes, modules, or scripts.
+@dataclass(frozen=True, slots=True)
+class FacadeContract:
+    """Describe one public facade and the focused classes implementing it."""
 
-- **Module preamble**: Start with a concise module docstring, then imports grouped as stdlib -> third-party -> local. Keep TYPE_CHECKING imports isolated and initialize the module logger (e.g., `logger = logging.getLogger(__name__)`).
-- **Public surface first**: Place public constants, enums, signals/events, and simple static helpers near the top so callers see the API before the internals.
-- **Facade/proxy accessors**: Group thin accessors that expose key collaborators (view/presenter/catalog equivalents, managers, registries) together so ownership boundaries stay clear and pre-init guards live in one place.
-- **Construction and wiring**: Cluster the constructor and core setup helpers next. Build foundational collaborators first, then optional/feature-specific wiring. Keep normalization/default-selection helpers adjacent to where they are used.
-- **Configuration and diagnostics**: Follow setup with configuration applicators, diagnostics collectors, and status/overlay creation helpers. These functions should reapply config and refresh dependent services.
-- **Registration/attachment utilities**: Keep registration and attach/detach helpers together (tools, overlays, cursors, services, autosave, etc.). These should be slim pass-throughs that preserve single ownership of state.
-- **Domain-focused operations**: Organize feature logic in cohesive blocks (e.g., catalog-like operations, mask-like workflows, viewport/navigation helpers). Within each block, prefer the sequence: read/query helpers -> mutating operations -> async/prefetch helpers.
-- **State persistence and view adjustments**: Place pan/zoom or analogous state persistence helpers near the operations that rely on them to keep flow obvious.
-- **Rendering/processing entry points**: Keep core "apply/set" entry points (like setting content, allocating buffers, or marking dirty regions) grouped and close to related helpers.
-- **Geometry/utility helpers**: Follow with geometry/coordinate conversions or other utility helpers that support rendering or interaction.
-- **Event handlers last**: Finish with UI/event plumbing (paint, resize, wheel/mouse/key/enter/leave/show handlers). Handlers should delegate to the interaction layer/delegates rather than owning logic directly.
-
-General style notes:
-
-- Favor expressive names and focused functions so the code explains itself; inline comments should only clarify non-obvious behaviour.
-- Keep docstrings concise and in present tense; add Args/Returns/Raises only when signatures are not self-evident.
-- Route interactive state through the appropriate delegate/interaction layer; obtain rendering/caching/catalog collaborators via their exposed facades rather than directly reaching into private attributes.
-- Group related helpers tightly and avoid scattering lifecycle hooks across the file. If you add a new domain block, keep its accessors, mutators, and lifecycle utilities together.
-"""
+    name: str
+    stub: Path
+    sources: tuple[Path, ...]
+    implementation_classes: frozenset[str]
 
 
-def get_public_methods(pyi_path: Path) -> set[str]:
-    """Extract method names defined in the QPane class within the .pyi file."""
-    if not pyi_path.exists():
-        print(f"Error: Stub file not found at {pyi_path}")
-        sys.exit(1)
-    try:
-        tree = ast.parse(pyi_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, SyntaxError) as e:
-        print(f"Error parsing {pyi_path}: {e}")
-        sys.exit(1)
-    public_methods = set()
+def contracted_methods(stub: Path, class_name: str) -> set[str]:
+    """Return all methods declared on one public facade class."""
+    tree = ast.parse(stub.read_text(encoding="utf-8"), filename=str(stub))
     for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "QPane":
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    public_methods.add(item.name)
-                # Handle decorated properties
-                if isinstance(item, ast.FunctionDef):
-                    for decorator in item.decorator_list:
-                        if (
-                            isinstance(decorator, ast.Name)
-                            and decorator.id == "property"
-                        ):
-                            public_methods.add(item.name)
-    return public_methods
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return {
+                member.name
+                for member in node.body
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise ValueError(f"{stub} does not declare class {class_name}")
 
 
-def get_implementation_details(py_path: Path) -> tuple[int, dict[str, int]]:
-    """Find the banner line and map method names to line numbers in the .py file."""
-    if not py_path.exists():
-        print(f"Error: Source file not found at {py_path}")
-        sys.exit(1)
-    content = py_path.read_text(encoding="utf-8")
-    lines = content.splitlines()
-    banner_line = -1
-    for i, line in enumerate(lines):
-        if "# Internal Implementation" in line:
-            banner_line = i + 1
-            break
-    if banner_line == -1:
-        print(f"Error: Could not find '# Internal Implementation' banner in {py_path}")
-        sys.exit(1)
-    try:
-        tree = ast.parse(content)
-    except SyntaxError as e:
-        print(f"Error parsing {py_path}: {e}")
-        sys.exit(1)
-    method_lines = {}
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "QPane":
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    method_lines[item.name] = item.lineno
-    return banner_line, method_lines
+def implemented_methods(contract: FacadeContract) -> set[str]:
+    """Return methods implemented by the facade and its focused API mixins."""
+    methods: set[str] = set()
+    for source in contract.sources:
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in tree.body:
+            if (
+                isinstance(node, ast.ClassDef)
+                and node.name in contract.implementation_classes
+            ):
+                methods.update(
+                    member.name
+                    for member in node.body
+                    if isinstance(
+                        member,
+                        (ast.FunctionDef, ast.AsyncFunctionDef),
+                    )
+                )
+    return methods
 
 
-def main():
+def _contracts(root: Path) -> tuple[FacadeContract, ...]:
+    """Build the two monorepo facade contracts."""
+    cutecanvas_root = root / "packages/cutecanvas/src/cutecanvas"
+    return (
+        FacadeContract(
+            "QPane",
+            root / "packages/qpane/src/qpane/qpane.pyi",
+            (root / "packages/qpane/src/qpane/viewer.py",),
+            frozenset({"QPane"}),
+        ),
+        FacadeContract(
+            "CuteCanvas",
+            cutecanvas_root / "cutecanvas.pyi",
+            (
+                cutecanvas_root / "canvas.py",
+                *tuple(sorted((cutecanvas_root / "facade").glob("*_api.py"))),
+            ),
+            frozenset(
+                {
+                    "CuteCanvas",
+                    "ViewerApiMixin",
+                    "CompositionApiMixin",
+                    "CoverageApiMixin",
+                    "EffectApiMixin",
+                    "PlacedAssetApiMixin",
+                    "VectorApiMixin",
+                    "RasterApiMixin",
+                    "SnappingApiMixin",
+                    "InteractionApiMixin",
+                    "LayerApiMixin",
+                }
+            ),
+        ),
+    )
+
+
+def main() -> None:
+    """Fail when either public stub advertises an unimplemented method."""
     root = Path(__file__).resolve().parent.parent
-    pyi_path = root / "qpane" / "qpane.pyi"
-    py_path = root / "qpane" / "qpane.py"
-    public_methods = get_public_methods(pyi_path)
-    banner_line, method_lines = get_implementation_details(py_path)
-    hidden_public_api = []
-    leaking_internal_api = []
-    for name, lineno in method_lines.items():
-        is_public = name in public_methods
-        is_above_banner = lineno < banner_line
-        if is_public and not is_above_banner:
-            hidden_public_api.append((name, lineno))
-        elif not is_public and is_above_banner:
-            # Optional: Ignore dunder methods if they aren't in pyi?
-            # For now, we flag everything to be strict as requested.
-            leaking_internal_api.append((name, lineno))
-    if not hidden_public_api and not leaking_internal_api:
-        print("SUCCESS: QPane API organization matches the contract.")
-        sys.exit(0)
-    print(f"\n[FAIL] API Organization Violation in {py_path.relative_to(root)}")
-    if hidden_public_api:
-        print("\nVIOLATION: Hidden Public API")
-        print("----------------------------")
-        print(
-            "The following methods are defined in qpane.pyi (Public Contract) but are located"
+    errors: list[str] = []
+    for contract in _contracts(root):
+        declared = contracted_methods(contract.stub, contract.name)
+        missing = declared - implemented_methods(contract)
+        errors.extend(
+            f"{contract.name}: {method!r} has no facade implementation"
+            for method in sorted(missing)
         )
-        print("BELOW the 'Internal Implementation' banner in qpane.py:")
-        print()
-        for name, lineno in sorted(hidden_public_api, key=lambda x: x[1]):
-            print(f"  - {name} (Line {lineno})")
-        print(
-            "\nFIX: Move these methods UP, above the 'Internal Implementation' banner."
-        )
-        print("     Public API methods must be visible at the top of the file.")
-    if leaking_internal_api:
-        print("\nVIOLATION: Leaking Internal API")
-        print("-------------------------------")
-        print(
-            "The following methods are NOT in qpane.pyi but are located ABOVE the banner:"
-        )
-        print()
-        for name, lineno in sorted(leaking_internal_api, key=lambda x: x[1]):
-            print(f"  - {name} (Line {lineno})")
-        print("\nFIX:")
-        print(
-            "  1. If this IS public: Add it to qpane.pyi to declare it as part of the contract."
-        )
-        print(
-            "  2. If this IS internal: Move it DOWN, below the 'Internal Implementation' banner."
-        )
-    print("\n" + "=" * 60)
-    print("REFERENCE: LAYOUT GUIDELINES")
-    print("=" * 60)
-    print(LAYOUT_GUIDELINES)
-    print("=" * 60)
-    sys.exit(1)
+    if errors:
+        print("FAILED: Facade API contracts are incomplete.")
+        for error in errors:
+            print(f"  - {error}")
+        sys.exit(1)
+    print("SUCCESS: QPane and CuteCanvas facades match their contracts.")
 
 
 if __name__ == "__main__":

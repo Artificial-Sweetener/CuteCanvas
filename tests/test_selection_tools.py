@@ -1,25 +1,35 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Tests for geometric pixel-selection tools."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
-
-from qpane.coverage import CoverageCombineMode
-from qpane.tools.ports import PixelSelectionInteractionPort
-from qpane.tools.selection_shapes import (
+from cutecanvas.coverage import (
+    CoverageCombineMode,
+    CoverageDocument,
+    CoverageDocumentEvaluator,
+)
+from cutecanvas.tools.ports import PixelSelectionInteractionPort
+from cutecanvas.tools.selection_shapes import (
     EllipseSelectionTool,
     LassoSelectionTool,
     RectangleSelectionTool,
 )
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 
 def _event(
@@ -75,19 +85,20 @@ def test_rectangle_tool_commits_scene_geometry_once() -> None:
     tool.activate(
         PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: point + QPointF(10.0, 20.0),
-            commit_pixel_selection=lambda coverage, mode: commits.append(
-                (coverage, mode)
-            )
-            or True,
+            commit_coverage_item=lambda item: commits.append(item) or True,
         )
     )
 
     _drag(tool, [QPointF(1.0, 2.0), QPointF(6.0, 8.0)])
 
     assert len(commits) == 1
-    assert commits[0][0].bounds.x == 11
-    assert commits[0][0].bounds.y == 22
-    assert commits[0][1] is CoverageCombineMode.REPLACE
+    bounds = CoverageDocumentEvaluator().content_bounds(
+        CoverageDocument().add(commits[0])
+    )
+    assert bounds is not None
+    assert bounds.x == 11
+    assert bounds.y == 22
+    assert commits[0].combine_mode is CoverageCombineMode.REPLACE
 
 
 def test_selection_modifiers_choose_add_subtract_and_intersect() -> None:
@@ -99,7 +110,7 @@ def test_selection_modifiers_choose_add_subtract_and_intersect() -> None:
             panel_to_scene_point=lambda point: point,
             is_shift_held=lambda: modifier["shift"],
             is_alt_held=lambda: modifier["alt"],
-            commit_pixel_selection=lambda _coverage, mode: modes.append(mode) or True,
+            commit_coverage_item=lambda item: modes.append(item.combine_mode) or True,
         )
     )
 
@@ -120,10 +131,7 @@ def test_lasso_requires_area_and_commits_accumulated_points() -> None:
     tool.activate(
         PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: point,
-            commit_pixel_selection=lambda coverage, mode: commits.append(
-                (coverage, mode)
-            )
-            or True,
+            commit_coverage_item=lambda item: commits.append(item) or True,
         )
     )
 
@@ -135,7 +143,8 @@ def test_lasso_requires_area_and_commits_accumulated_points() -> None:
         [QPointF(), QPointF(8.0, 1.0), QPointF(5.0, 8.0), QPointF(1.0, 5.0)],
     )
     assert len(commits) == 1
-    assert commits[0][0].pixels.max() == 255
+    snapshot = CoverageDocumentEvaluator().rasterize(CoverageDocument().add(commits[0]))
+    assert snapshot.pixels.max() == 255
 
 
 def test_escape_cancels_active_geometry_without_committing() -> None:
@@ -145,10 +154,7 @@ def test_escape_cancels_active_geometry_without_committing() -> None:
     tool.activate(
         PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: point,
-            commit_pixel_selection=lambda coverage, mode: commits.append(
-                (coverage, mode)
-            )
-            or True,
+            commit_coverage_item=lambda item: commits.append(item) or True,
         )
     )
     tool.mousePressEvent(
@@ -181,3 +187,42 @@ def test_escape_cancels_active_geometry_without_committing() -> None:
 
     assert escape.isAccepted()
     assert not commits
+
+
+def test_shape_modifiers_constrain_geometry_and_preserve_feather() -> None:
+    """Mid-gesture Shift and Alt should constrain without changing algebra."""
+    modifiers = {"shift": False, "alt": False}
+    commits = []
+    tool = RectangleSelectionTool()
+    tool.activate(
+        PixelSelectionInteractionPort(
+            panel_to_scene_point=lambda point: point,
+            is_shift_held=lambda: modifiers["shift"],
+            is_alt_held=lambda: modifiers["alt"],
+            get_shape_feather_radius=lambda: 7.5,
+            commit_coverage_item=lambda item: commits.append(item) or True,
+        )
+    )
+    tool.mousePressEvent(
+        _event(
+            QEvent.Type.MouseButtonPress,
+            QPointF(20.0, 20.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+        )
+    )
+    modifiers.update(shift=True, alt=True)
+    tool.mouseReleaseEvent(
+        _event(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(30.0, 25.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+        )
+    )
+
+    assert len(commits) == 1
+    item = commits[0]
+    assert item.geometry.local_bounds == (10.0, 10.0, 20.0, 20.0)
+    assert item.feather_radius == 7.5
+    assert item.combine_mode is CoverageCombineMode.REPLACE

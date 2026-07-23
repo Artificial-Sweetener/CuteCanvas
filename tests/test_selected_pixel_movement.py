@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Tests for selection-priority editor movement and atomic history."""
 
 from __future__ import annotations
@@ -14,27 +21,30 @@ import uuid
 from types import SimpleNamespace
 
 import numpy as np
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QImage
-
-from qpane.composition.edit_controller import CompositionEditController
-from qpane.composition.edit_history import CompositionEditHistory
-from qpane.coverage import CoverageSnapshot
-from qpane.editor.movement import EditorMovementInteraction
-from qpane.editor.operation_resolution import (
+from cutecanvas.composition.edit_controller import CompositionEditController
+from cutecanvas.composition.edit_history import CompositionEditHistory
+from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.editor.movement import EditorMovementInteraction
+from cutecanvas.editor.operation_resolution import (
     EditorOperation,
     EditorOperationDenial,
     EditorOperationResolution,
     EditorOperationTarget,
 )
-from qpane.editor.pixel_movement import SelectedPixelMovementController
-from qpane.editor.selection_projection import LayerSelectionProjectionCache
-from qpane.raster.assets import EditableRasterAssetStore
+from cutecanvas.editor.pixel_movement import SelectedPixelMovementController
+from cutecanvas.editor.selection_projection import LayerSelectionProjectionCache
+from cutecanvas.raster.assets import EditableRasterAssetStore
+from cutecanvas.raster.pixel_edits import EditableRasterPixelMutationOwner
+from cutecanvas.raster.source_reference import EditableRasterReference
+from cutecanvas.scene.layer_selection import SceneLayerSelectionController
+from cutecanvas.scene.mutations import SceneMutationCoordinator
+from cutecanvas.scene.pixel_owners import LayerPixelOwnerRegistry
+from cutecanvas.selection import PixelSelectionService
+from cutecanvas.types import RasterExtentPolicy
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor, QImage
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
-from qpane.raster.pixel_edits import EditableRasterPixelMutationOwner
-from qpane.raster.source_reference import EditableRasterReference
 from qpane.scene.affine import LayerTransform
-from qpane.scene.layer_selection import SceneLayerSelectionController
 from qpane.scene.model import (
     LayerContentCapabilities,
     LayerDescriptor,
@@ -44,16 +54,13 @@ from qpane.scene.model import (
     SceneDescriptor,
     SceneKind,
 )
-from qpane.scene.mutations import SceneMutationCoordinator
-from qpane.scene.pixel_owners import LayerPixelOwnerRegistry
-from qpane.scene.raster import RasterBounds, RasterExtentPolicy
+from qpane.scene.raster import RasterBounds
 from qpane.scene.transform_geometry import (
     TransformHandle,
     TransformModifiers,
     TransformOperation,
     TransformOperationKind,
 )
-from qpane.selection import PixelSelectionService
 
 
 def _movement_fixture(
@@ -95,7 +102,7 @@ def _movement_fixture(
     layer_selection = SceneLayerSelectionController()
     layer_selection.select(scene_id, layer.layer_id)
     selection = PixelSelectionService()
-    selection.restore(
+    selection.replace_with_raster(
         scene_id,
         CoverageSnapshot(
             RasterBounds(1, 0, 2, 1),
@@ -175,7 +182,7 @@ def _cross_layer_fixture():
     layer_selection = SceneLayerSelectionController()
     layer_selection.select(scene_id, source_layer.layer_id)
     selection = PixelSelectionService()
-    selection.restore(
+    selection.replace_with_raster(
         scene_id,
         CoverageSnapshot(
             RasterBounds(1, 0, 2, 1),
@@ -315,7 +322,11 @@ def test_floating_pixels_support_repeated_drags_and_lossless_cancel() -> None:
 
     assert movement.cancel()
     assert asset.surface.snapshot_qimage() == before
-    assert selection.state(scene.scene_id).coverage == before_selection
+    restored_selection = selection.state(scene.scene_id).coverage
+    assert restored_selection is not None
+    assert before_selection is not None
+    assert restored_selection.bounds == before_selection.bounds
+    assert np.array_equal(restored_selection.pixels, before_selection.pixels)
     assert not edits.can_undo(scene.scene_id)
 
 
@@ -490,7 +501,10 @@ class _LayerMovementSpy:
 
     def candidate_at(self, _point: QPointF):
         """Return one stable hit-test candidate."""
-        return SimpleNamespace(hit=SimpleNamespace(layer_id=uuid.uuid4()))
+        return SimpleNamespace(
+            hit=SimpleNamespace(layer_id=uuid.uuid4()),
+            scene_point=QPointF(_point),
+        )
 
     def set_hover(self, _candidate) -> bool:
         """Report unchanged hover state."""
@@ -500,6 +514,10 @@ class _LayerMovementSpy:
         """Record an invalid layer fallback."""
         self.begin_calls += 1
         return True
+
+    def transform_box_state(self):
+        """Return no geometry because the snap double ignores it."""
+        return
 
     def cancel(self) -> bool:
         """Report no active sequence."""
@@ -530,6 +548,27 @@ class _MovementOperationResolver:
         )
 
 
+class _MovementSnapSpy:
+    """Pass movement points through unchanged for routing tests."""
+
+    def begin(self, _box, _origin: QPointF) -> bool:
+        """Accept an inert snap session."""
+        return True
+
+    def resolve(self, point: QPointF, *, suppressed: bool = False) -> QPointF:
+        """Return the raw point."""
+        return QPointF(point)
+
+    def clear(self) -> bool:
+        """Clear no state."""
+        return False
+
+    @property
+    def guides(self):
+        """Return no smart guides."""
+        return ()
+
+
 def test_active_selection_rejection_never_falls_through_to_layer_movement() -> None:
     """A click outside selected pixels must not move an underlying layer."""
     pixels = _PixelsRejectingStart()
@@ -540,6 +579,7 @@ def test_active_selection_rejection_never_falls_through_to_layer_movement() -> N
         operations=_MovementOperationResolver(None),
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
+        snapping=_MovementSnapSpy(),
     )
 
     assert not interaction.begin(QPointF(50.0, 50.0))
@@ -555,6 +595,7 @@ def test_no_selection_preserves_whole_layer_movement_branch() -> None:
         operations=_MovementOperationResolver(EditorOperationTarget.LAYER),
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
+        snapping=_MovementSnapSpy(),
     )
 
     assert interaction.begin(QPointF(5.0, 5.0))
@@ -570,6 +611,7 @@ def test_selection_without_layer_content_falls_through_to_layer_movement() -> No
         operations=_MovementOperationResolver(EditorOperationTarget.LAYER),
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
+        snapping=_MovementSnapSpy(),
     )
 
     assert interaction.begin(QPointF(5.0, 5.0))
@@ -605,7 +647,7 @@ def test_move_selection_excludes_transparent_pixels_from_resulting_coverage() ->
         RasterExtentPolicy.EXPAND_ON_WRITE,
         np.full((1, 4), 255, dtype=np.uint8),
     )
-    assert selection.restore(scene.scene_id, geometric)
+    assert selection.replace_with_raster(scene.scene_id, geometric)
 
     assert movement.begin(QPointF(1.5, 0.5))
     assert movement.update(QPointF(2.5, 0.5))
@@ -654,7 +696,7 @@ def test_move_preserves_soft_selection_without_squaring_source_alpha() -> None:
         asset.surface.bounds,
         qimage_to_numpy_argb32(image),
     )
-    assert selection.restore(
+    assert selection.replace_with_raster(
         scene.scene_id,
         CoverageSnapshot(
             RasterBounds(1, 0, 1, 1),
@@ -680,7 +722,7 @@ def test_selection_over_only_transparent_pixels_cannot_begin_content_move() -> N
     )
     transparent = np.zeros((2, 6, 4), dtype=np.uint8)
     assert asset.surface.restore_patch(asset.surface.bounds, transparent)
-    assert selection.restore(
+    assert selection.replace_with_raster(
         scene.scene_id,
         CoverageSnapshot(
             RasterBounds(0, 0, 6, 2),
@@ -701,7 +743,7 @@ def test_content_filtered_move_maps_transformed_layer_coverage_exactly() -> None
             transform=LayerTransform(m11=2.0, m22=2.0, dx=10.0, dy=20.0),
         )
     )
-    assert selection.restore(
+    assert selection.replace_with_raster(
         scene.scene_id,
         CoverageSnapshot(
             RasterBounds(10, 20, 8, 2),

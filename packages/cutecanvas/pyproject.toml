@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools==83.0.0", "wheel==0.47.0", "setuptools_scm==10.2.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cutecanvas"
+dynamic = ["version"]
+description = "A polished layered PySide6 editor built on QPane"
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [
+  { name = "Artificial Sweetener", email = "artificialsweetenerai@proton.me" }
+]
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+classifiers = [
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics :: Editors",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+  "qpane>=0.1.0,<0.2.0",
+  "PySide6>=6.7.3",
+  "numpy>=1.21",
+  "typing-extensions>=4.0",
+]
+
+[project.optional-dependencies]
+sam = [
+  "torch>=2.1",
+  "mobilesam-mirror>=1.0.0",
+  "timm>=0.9",
+]
+
+[project.urls]
+Homepage = "https://artificialsweetener.ai"
+Documentation = "https://github.com/Artificial-Sweetener/QPane/tree/main/packages/cutecanvas/docs"
+Repository = "https://github.com/Artificial-Sweetener/QPane"
+Issues = "https://github.com/Artificial-Sweetener/QPane/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["cutecanvas", "cutecanvas.*"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+zip-safe = false
+
+[tool.setuptools.package-data]
+cutecanvas = ["*.pyi", "py.typed"]
+
+[tool.setuptools_scm]
+root = "../.."
+fallback_version = "0.1.0"
+
+[tool.setuptools_scm.tag]
+regex = "^cutecanvas-v(?P<version>.+)$"
+
+[tool.setuptools_scm.scm.git]
+describe_command = "git describe --dirty --tags --long --abbrev=40 --match cutecanvas-v*[0-9]*"

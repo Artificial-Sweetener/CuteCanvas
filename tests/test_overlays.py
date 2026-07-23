@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,60 +14,48 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests for overlay resumption helpers."""
+"""Tests for the editor's authoritative overlay state owner."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-from qpane.ui.overlays import maybe_resume_overlays, resume_overlays
+from cutecanvas.tools.overlay_controller import EditorOverlayController
 
 
-def test_maybe_resume_overlays_noop_when_flags_clear() -> None:
-    """Resume helper should not toggle state when flags are inactive."""
-    interaction = SimpleNamespace(
-        overlays_suspended=False, overlays_resume_pending=False
-    )
-    qpane = SimpleNamespace(
-        _masks_controller=SimpleNamespace(is_activation_pending=lambda _id: False)
-    )
-    maybe_resume_overlays(qpane, interaction)
-    assert interaction.overlays_suspended is False
-    assert interaction.overlays_resume_pending is False
+def test_overlay_controller_starts_visible() -> None:
+    """A fresh editor overlay owner has no pending navigation handoff."""
+    controller = EditorOverlayController(lambda: None)
+    assert controller.suspended is False
+    assert controller.resume_pending is False
 
 
-def test_maybe_resume_overlays_resumes_on_workflow_error() -> None:
-    """Workflow failures should force a defensive resume."""
-
-    class _WorkflowStub:
-        def is_activation_pending(self, _image_id):
-            raise RuntimeError("boom")
-
-    interaction = SimpleNamespace(overlays_suspended=True, overlays_resume_pending=True)
-    qpane = SimpleNamespace(
-        _masks_controller=_WorkflowStub(),
-        catalog=lambda: SimpleNamespace(currentImageID=lambda: "image-1"),
-    )
-    maybe_resume_overlays(qpane, interaction)
-    assert interaction.overlays_suspended is False
-    assert interaction.overlays_resume_pending is False
+def test_overlay_controller_suspends_and_resumes_atomically() -> None:
+    """Navigation state changes never leave only one suspension flag set."""
+    controller = EditorOverlayController(lambda: None)
+    controller.suspend()
+    assert controller.suspended is True
+    assert controller.resume_pending is True
+    controller.resume()
+    assert controller.suspended is False
+    assert controller.resume_pending is False
 
 
-def test_maybe_resume_overlays_keeps_suspended_when_pending() -> None:
-    """Pending activations should keep overlays suspended."""
-    interaction = SimpleNamespace(overlays_suspended=True, overlays_resume_pending=True)
-    qpane = SimpleNamespace(
-        _masks_controller=SimpleNamespace(is_activation_pending=lambda _id: True),
-        catalog=lambda: SimpleNamespace(currentImageID=lambda: "image-1"),
-    )
-    maybe_resume_overlays(qpane, interaction)
-    assert interaction.overlays_suspended is True
-    assert interaction.overlays_resume_pending is True
+def test_overlay_controller_repaint_is_explicit() -> None:
+    """Only repainting resume requests schedule a new widget frame."""
+    repaints: list[bool] = []
+    controller = EditorOverlayController(lambda: repaints.append(True))
+    controller.suspend()
+    controller.resume()
+    assert not repaints
+    controller.suspend()
+    controller.resume(repaint=True)
+    assert repaints == [True]
 
 
-def test_resume_overlays_clears_flags() -> None:
-    """resume_overlays should clear suspension flags."""
-    interaction = SimpleNamespace(overlays_suspended=True, overlays_resume_pending=True)
-    resume_overlays(interaction)
-    assert interaction.overlays_suspended is False
-    assert interaction.overlays_resume_pending is False
+def test_overlay_controller_uses_shared_qpane_registry() -> None:
+    """Content overlay registration remains a single shared implementation."""
+    controller = EditorOverlayController(lambda: None)
+    draw = lambda _painter, _state: None
+    controller.register_content("test", draw)
+    assert controller.content == {"test": draw}
+    controller.unregister_content("test")
+    assert not controller.content

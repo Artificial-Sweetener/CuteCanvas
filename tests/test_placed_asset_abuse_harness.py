@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Mounted and generation-controlled abuse proof for placed assets."""
 
 from __future__ import annotations
@@ -14,13 +21,13 @@ import statistics
 import uuid
 from pathlib import Path
 
+from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas.placed.source_reference import PlacedAssetReference
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
 from PySide6.QtWidgets import QApplication
-
-from qpane import QPane, QPaneLayerInteractionPolicy
-from qpane.placed.source_reference import PlacedAssetReference
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
+
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
@@ -57,7 +64,7 @@ def test_mounted_placed_instances_stay_exact_responsive_and_cache_shared(
         layer_id = viewer.placeEmbeddedAsset(
             _image(QColor(20, 170, 220, 220), QSize(1024, 1024)),
             placement=QRectF(240.0, 80.0, 700.0, 700.0),
-            interaction=QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            interaction=LayerPolicy(selectable=True, movable=True),
         )
         assert layer_id is not None
         duplicate_id = viewer.duplicatePlacedAsset(scene.scene_id, layer_id)
@@ -114,7 +121,7 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
 ) -> None:
     """Late cancelled generations must never publish or resurrect removed sources."""
     executor = StubExecutor(name="placed-abuse")
-    viewer = QPane(features=(), task_executor=executor)
+    viewer = CuteCanvas(features=(), task_executor=executor)
     base = _image(QColor("white"), QSize(64, 64))
     image_id = uuid.uuid4()
     viewer.setImagesByID(viewer.imageMapFromLists((base,), ids=(image_id,)), image_id)
@@ -205,7 +212,7 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
 ) -> None:
     """Inactive scenes and deleted layers must reject late work without resurrection."""
     executor = StubExecutor(name="placed-navigation-abuse")
-    viewer = QPane(features=(), task_executor=executor)
+    viewer = CuteCanvas(features=(), task_executor=executor)
     first_id, second_id = uuid.uuid4(), uuid.uuid4()
     base = _image(QColor("black"), QSize(1200, 900))
     viewer.setImagesByID(

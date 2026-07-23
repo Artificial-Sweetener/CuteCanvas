@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -25,16 +25,16 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from cutecanvas import Config, sam
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.coverage import CoverageAsset, CoverageSurface
+from cutecanvas.masks.generated_edits import MaskGeneratedEditService
+from cutecanvas.masks.mask import MaskAssetStore, MaskLayer
+from cutecanvas.masks.mask_controller import MaskController
+from cutecanvas.masks.projection import MaskCanvasProjectionService
+from cutecanvas.sam.manager import SamManager, SamWorker
 from PySide6.QtGui import QColor, QImage
 
-from qpane import Config, sam
-from qpane.core.config_features import MaskConfigSlice
-from qpane.coverage import CoverageSurface
-from qpane.masks.generated_edits import MaskGeneratedEditService
-from qpane.masks.mask import MaskAssetStore, MaskLayer
-from qpane.masks.mask_controller import MaskController
-from qpane.masks.projection import MaskCanvasProjectionService
-from qpane.sam.manager import SamManager, SamWorker
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
 DEFAULT_CHECKPOINT = Path("sam-checkpoint.pt")
@@ -117,7 +117,8 @@ def test_mask_controller_handles_none_mask():
     mask_image.fill(0)
     mask_id = uuid.uuid4()
     mask_manager._masks[mask_id] = MaskLayer(
-        mask_id=mask_id, surface=CoverageSurface.from_qimage(mask_image)
+        mask_id=mask_id,
+        coverage=CoverageAsset(mask_id, CoverageSurface.from_qimage(mask_image)),
     )
     controller._active_mask_id = mask_id
     emissions: list[tuple[uuid.UUID, object]] = []

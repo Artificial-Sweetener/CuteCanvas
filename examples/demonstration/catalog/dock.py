@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from cutecanvas import CuteCanvas, LayerPolicy, LinkedGroup
 from PySide6.QtCore import QItemSelectionModel, QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
@@ -47,7 +48,6 @@ from examples.demonstration.catalog.models import (
     CatalogMask,
     CatalogSnapshot,
 )
-from qpane import LinkedGroup, QPane, QPaneLayerInteractionPolicy
 
 FocusPolicy = Callable[[str], None]
 SelectionPolicy = Callable[[], bool]
@@ -58,7 +58,7 @@ _BROWSER_CATALOG = "catalog"
 
 
 class CatalogDock(QWidget):
-    """Panel that mirrors QPane snapshots and exposes catalog actions."""
+    """Panel that mirrors CuteCanvas snapshots and exposes catalog actions."""
 
     visibilityChanged = Signal(bool)
     layerPropertiesRequested = Signal(object, object)
@@ -66,7 +66,7 @@ class CatalogDock(QWidget):
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         *,
         show_mask_selection: SelectionPolicy,
         on_focus_requested: FocusPolicy,
@@ -194,7 +194,7 @@ class CatalogDock(QWidget):
         self._set_status(f"{label} active.")
 
     def _handle_selection_changed(self, image_id: uuid.UUID | None) -> None:
-        """Sync tree selection when the QPane selection changes."""
+        """Sync tree selection when the CuteCanvas selection changes."""
         if self._browser_mode == _BROWSER_COMPOSITIONS:
             return
         if (
@@ -291,9 +291,9 @@ class CatalogDock(QWidget):
         self._set_status("Created an empty composition.")
 
     @staticmethod
-    def _frozen_image_policy() -> QPaneLayerInteractionPolicy:
+    def _frozen_image_policy() -> LayerPolicy:
         """Return the demo host's policy for ordinary image layers."""
-        return QPaneLayerInteractionPolicy(
+        return LayerPolicy(
             selectable=True,
             movable=False,
             pixel_editable=False,

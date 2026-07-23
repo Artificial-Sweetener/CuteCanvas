@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -17,10 +17,9 @@
 import types
 import uuid
 
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
-
-from qpane import QPane
 
 
 def _cleanup_qpane(qpane, qapp):
@@ -32,7 +31,7 @@ def _load_default_image(qpane):
     image = QImage(16, 16, QImage.Format_ARGB32)
     image.fill(Qt.white)
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         [image],
         paths=[None],
         ids=[image_id],
@@ -44,8 +43,9 @@ class DummyCacheRegistry:
     def __init__(self):
         self.mask_controller = None
 
-    def attach_mask_controller(self, controller):
-        self.mask_controller = controller
+    def attach_extension(self, consumer_id, factory):
+        self.mask_controller = consumer_id
+        self.factory = factory
 
 
 class RecordingMaskService:
@@ -106,7 +106,7 @@ def _make_recorder(flag_map, label):
 
 
 def test_applySettings_propagates_to_dependents(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(64, 64)
     _load_default_image(qpane)
     try:
@@ -152,7 +152,7 @@ def test_applySettings_propagates_to_dependents(qapp, monkeypatch):
 
 
 def test_attach_and_detachMaskService_wires_hooks(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(32, 32)
     _load_default_image(qpane)
     qpane._state.cache_registry = DummyCacheRegistry()
@@ -186,7 +186,7 @@ def test_attach_and_detachMaskService_wires_hooks(qapp, monkeypatch):
         assert service.refresh_calls == 1
         assert len(attached) == 1
         assert attached[0].service is service
-        assert qpane._state.cache_registry.mask_controller is service.controller.renders
+        assert qpane._state.cache_registry.mask_controller == "mask_overlays"
         qpane.detachMaskService()
         assert detached == attached
         assert service.disconnected_callback == undo_callback

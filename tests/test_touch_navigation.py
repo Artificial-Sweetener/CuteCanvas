@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,8 +22,7 @@ from dataclasses import dataclass, field
 
 import pytest
 from PySide6.QtCore import QPointF, QRectF
-
-from qpane.tools.input import TouchNavigationSession
+from qpane import TouchNavigationPort, TouchNavigationSession
 
 
 @dataclass
@@ -40,30 +39,29 @@ class _Viewport:
         self.pan = QPointF(pan)
         self.changes.append((zoom, QPointF(pan)))
 
+    def start_translation_inertia(
+        self,
+        velocity: QPointF,
+        deceleration: float,
+    ) -> bool:
+        del velocity, deceleration
+        return True
 
-@dataclass
-class _View:
-    viewport: _Viewport
 
-
-class _Pane:
-    def __init__(self, viewport: _Viewport, dpr: float = 2.0) -> None:
-        self._view = _View(viewport)
-        self._dpr = dpr
-
-    def view(self) -> _View:
-        return self._view
-
-    def devicePixelRatioF(self) -> float:
-        return self._dpr
-
-    def physicalViewportRect(self) -> QRectF:
-        return QRectF(0.0, 0.0, 200.0, 200.0)
+def _port(viewport: _Viewport, dpr: float = 2.0) -> TouchNavigationPort:
+    """Build the focused viewport boundary used by each test."""
+    return TouchNavigationPort(
+        viewport=lambda: viewport,
+        device_pixel_ratio=lambda: dpr,
+        physical_viewport_rect=lambda: QRectF(0.0, 0.0, 200.0, 200.0),
+        inertia_enabled=lambda: True,
+        inertia_deceleration=lambda: 4500.0,
+    )
 
 
 def test_one_finger_pan_tracks_contact_in_physical_pixels() -> None:
     viewport = _Viewport()
-    session = TouchNavigationSession(_Pane(viewport))
+    session = TouchNavigationSession(_port(viewport))
 
     session.update({1: QPointF(20.0, 30.0)})
     session.update({1: QPointF(30.0, 35.0)})
@@ -73,7 +71,7 @@ def test_one_finger_pan_tracks_contact_in_physical_pixels() -> None:
 
 def test_two_finger_pinch_keeps_content_under_centroid() -> None:
     viewport = _Viewport()
-    session = TouchNavigationSession(_Pane(viewport))
+    session = TouchNavigationSession(_port(viewport))
 
     session.update({1: QPointF(40.0, 50.0), 2: QPointF(60.0, 50.0)})
     session.update({1: QPointF(50.0, 50.0), 2: QPointF(90.0, 50.0)})
@@ -86,7 +84,7 @@ def test_two_finger_pinch_keeps_content_under_centroid() -> None:
 
 def test_contact_count_transitions_rebaseline_without_jumping() -> None:
     viewport = _Viewport()
-    session = TouchNavigationSession(_Pane(viewport))
+    session = TouchNavigationSession(_port(viewport))
 
     session.update({1: QPointF(20.0, 20.0)})
     session.update({1: QPointF(30.0, 20.0)})
@@ -98,7 +96,7 @@ def test_contact_count_transitions_rebaseline_without_jumping() -> None:
 
 def test_cancel_discards_gesture_baseline() -> None:
     viewport = _Viewport()
-    session = TouchNavigationSession(_Pane(viewport))
+    session = TouchNavigationSession(_port(viewport))
 
     session.update({1: QPointF(20.0, 20.0)})
     session.reset()

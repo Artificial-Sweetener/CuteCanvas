@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Snapshot models mapping QPane catalog state to dock rows for the example.
+"""Snapshot models mapping CuteCanvas catalog state to dock rows for the example.
 
 Each dataclass mirrors the fields the dock renders: images and masks grouped by
 link membership, with selection identifiers carried alongside.

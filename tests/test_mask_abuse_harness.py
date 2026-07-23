@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""System-level checks for the reusable mounted QPane abuse harness."""
+"""System-level checks for the reusable mounted CuteCanvas abuse harness."""
 
 from __future__ import annotations
 
@@ -22,13 +22,13 @@ from itertools import product
 
 import numpy as np
 import pytest
+from cutecanvas import LayerPolicy, RasterExtentPolicy
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QCursor, QImage, QMouseEvent
+from PySide6.QtGui import QCursor, QEnterEvent, QImage, QMouseEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
-
-from qpane import QPaneLayerInteractionPolicy, RasterExtentPolicy
+from PySide6.QtWidgets import QApplication
 from qpane.scene.model import LayerKind
+
 from tests.harness.abuse_model import (
     AbuseAction,
     AbuseReport,
@@ -245,7 +245,7 @@ def test_moved_default_mask_keeps_fixed_image_sized_write_bounds(
         assert harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
@@ -307,7 +307,7 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
         assert harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
@@ -342,7 +342,7 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
         assert layer is not None
         storage_x = -50 - state.bounds.x()
         storage_y = 200 - state.bounds.y()
-        assert layer.surface.snapshot_array()[storage_y, storage_x] > 0
+        assert layer.coverage.raster.snapshot_array()[storage_y, storage_x] > 0
 
         returned_translation_x = 300.0
         assert harness.viewer.setLayerPlacement(
@@ -396,7 +396,7 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
         assert harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -437,7 +437,7 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
         assert moved_layer.placement == QRectF(80.0, 0.0, 400.0, 400.0)
         layer = harness.viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
-        before = layer.surface.snapshot_array()
+        before = layer.coverage.raster.snapshot_array()
         assert np.any(before[190:210, 30:200])
 
         harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_SELECT_RECTANGLE)
@@ -461,7 +461,7 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
 
         assert harness.viewer.deleteSelectedPixels()
         assert harness.wait_for_mask_render_idle()
-        after = layer.surface.snapshot_array()
+        after = layer.coverage.raster.snapshot_array()
 
         assert not np.any(after[160:240, 30:190])
         assert (
@@ -480,7 +480,7 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
             assert harness.viewer.undoSceneEdit()
             assert harness.wait_for_mask_render_idle()
             harness.viewer.repaint()
-        assert np.array_equal(layer.surface.snapshot_array(), before)
+        assert np.array_equal(layer.coverage.raster.snapshot_array(), before)
         assert harness.wait_for_mask_tint(QPoint(130, 200)).latency_ms is not None
         assert all(
             harness.is_mask_tint(frame.color_at(retained_point))
@@ -490,7 +490,7 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
             assert harness.viewer.redoSceneEdit()
             assert harness.wait_for_mask_render_idle()
             harness.viewer.repaint()
-        assert not np.any(layer.surface.snapshot_array()[160:240, 30:190])
+        assert not np.any(layer.coverage.raster.snapshot_array()[160:240, 30:190])
         assert (
             harness.wait_for_background(QPoint(130, 200), timeout_ms=1000).latency_ms
             is not None
@@ -522,7 +522,7 @@ def test_4096_moved_mask_delete_stays_within_interaction_budget(
         assert harness.viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -536,7 +536,7 @@ def test_4096_moved_mask_delete_stays_within_interaction_budget(
         )
         layer = harness.viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
-        layer.surface.fill(255)
+        layer.coverage.raster.fill(255)
         harness.viewer.invalidateActiveMaskCache()
         harness.viewer.markDirty()
         harness.viewer.update()
@@ -570,16 +570,16 @@ def test_4096_moved_mask_delete_stays_within_interaction_budget(
             started = interaction_clock()
             assert harness.viewer.deleteSelectedPixels()
             latencies_ms.append((interaction_clock() - started) * 1000.0)
-            assert layer.surface.storage_value(600, 1200) == 0
+            assert layer.coverage.raster.storage_value(600, 1200) == 0
             started = interaction_clock()
             assert harness.viewer.undoSceneEdit()
             latencies_ms.append((interaction_clock() - started) * 1000.0)
-            assert layer.surface.storage_value(600, 1200) == 255
+            assert layer.coverage.raster.storage_value(600, 1200) == 255
         assert harness.viewer.deleteSelectedPixels()
 
         if absolute_latency_assertions_are_isolated():
             assert max(latencies_ms) < 100.0
-        pixels = layer.surface.snapshot_array()
+        pixels = layer.coverage.raster.snapshot_array()
         assert not np.any(pixels[1024:2048, 512:1536])
         assert np.all(pixels[1024:2048, :511] == 255)
         assert np.all(pixels[1024:2048, 1537:] == 255)
@@ -616,7 +616,7 @@ def test_delete_and_history_follow_expanded_negative_mask_bounds(
         assert harness.viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -651,7 +651,7 @@ def test_delete_and_history_follow_expanded_negative_mask_bounds(
         assert state.bounds.x() < 0
         layer = harness.viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
-        before = layer.surface.snapshot_array()
+        before = layer.coverage.raster.snapshot_array()
 
         selection = QImage(60, 60, QImage.Format_Grayscale8)
         selection.fill(255)
@@ -662,15 +662,15 @@ def test_delete_and_history_follow_expanded_negative_mask_bounds(
         storage_x = -50 - state.bounds.x()
         storage_y = 200 - state.bounds.y()
         retained_x = 110 - state.bounds.x()
-        assert layer.surface.storage_value(storage_x, storage_y) == 0
-        assert layer.surface.storage_value(retained_x, storage_y) == 255
+        assert layer.coverage.raster.storage_value(storage_x, storage_y) == 0
+        assert layer.coverage.raster.storage_value(retained_x, storage_y) == 255
         assert (
             harness.wait_for_background(QPoint(50, 200), timeout_ms=1000).latency_ms
             is not None
         )
         assert harness.wait_for_mask_tint(QPoint(210, 200)).latency_ms is not None
         assert harness.viewer.undoSceneEdit()
-        assert np.array_equal(layer.surface.snapshot_array(), before)
+        assert np.array_equal(layer.coverage.raster.snapshot_array(), before)
         assert harness.wait_for_mask_tint(QPoint(50, 200)).latency_ms is not None
     finally:
         harness.close()
@@ -702,7 +702,7 @@ def test_expanding_mask_grows_every_edge_through_mounted_brush_input(
         assert harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         assert harness.viewer.setRasterExtentPolicy(
             mask_info.scene_id,
@@ -751,7 +751,7 @@ def test_expanding_mask_grows_every_edge_through_mounted_brush_input(
         assert state.bounds.y() + state.bounds.height() > 400
         layer = harness.viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
-        pixels = layer.surface.snapshot_array()
+        pixels = layer.coverage.raster.snapshot_array()
         for local_x, local_y in ((-50, 200), (450, 200), (200, -50), (200, 450)):
             assert (
                 pixels[
@@ -790,7 +790,7 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
         assert harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
@@ -860,7 +860,7 @@ def test_expanding_mask_live_preview_never_flashes_painted_pixels(
         assert harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
@@ -940,7 +940,7 @@ def test_expanding_mask_structural_undo_never_flashes_retained_pixels(
         assert harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
@@ -1153,7 +1153,7 @@ def test_inside_mouse_reconciles_stale_effective_window_cursor_after_touch(
     qapp: QApplication,
     source: Qt.MouseEventSource,
 ) -> None:
-    """Inside motion must repair a blank QWindow despite a brush QWidget cursor."""
+    """Canvas entry must repair a stale QWindow cursor after touch input."""
     harness = MountedQPaneHarness(
         qapp,
         image_size=QSize(2048, 2048),
@@ -1232,16 +1232,17 @@ def test_inside_mouse_reconciles_stale_effective_window_cursor_after_touch(
         harness.drain_events()
         assert window.cursor().shape() != Qt.CursorShape.BlankCursor
 
-        outside_canvas = QWidget(harness.host)
-        outside_canvas.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-        outside_canvas.setGeometry(0, 0, 40, 40)
-        outside_canvas.show()
-        outside_canvas.raise_()
-        QTest.mouseMove(window, QPoint(20, 20), delay=1)
-        harness.drain_events()
+        window.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
         assert window.cursor().shape() == Qt.CursorShape.ArrowCursor
 
-        QTest.mouseMove(window, QPoint(360, 260), delay=1)
+        qapp.sendEvent(
+            harness.viewer,
+            QEnterEvent(
+                position,
+                position,
+                QPointF(harness.viewer.mapToGlobal(position.toPoint())),
+            ),
+        )
         harness.drain_events()
         assert window.cursor().shape() != Qt.CursorShape.BlankCursor
         assert not window.cursor().pixmap().isNull()

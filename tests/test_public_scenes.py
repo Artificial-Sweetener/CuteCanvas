@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,27 +21,27 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from cutecanvas import (
+    CatalogLayerRequest,
+    ComparisonOrientation,
+    CompositionLayerClip,
+    CompositionRequest,
+    CompositionTemplate,
+    CuteCanvas,
+    LayerPolicy,
+    SceneSnapshot,
+    TemplateBindings,
+    TemplateLayer,
+)
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, Qt, QTransform
 from PySide6.QtTest import QTest
-
-from examples.demonstration import scene_composition
-from qpane import (
-    ComparisonOrientation,
-    QPane,
-    QPaneCatalogImageLayerRequest,
-    QPaneLayerInteractionPolicy,
-    QPaneScene,
-    QPaneSceneClip,
-    QPaneSceneRequest,
-    QPaneSceneTemplate,
-    QPaneSceneTemplateBindings,
-    QPaneTemplateLayer,
-)
 from qpane.scene.affine import LayerTransform
 from qpane.scene.identity import catalog_source_asset_key
 from qpane.scene.model import LayerPlacement
 from qpane.scene.render_plan import RasterLayerRenderItem, RenderStrategy
+
+from examples.demonstration import scene_composition
 from tests.helpers.render_compare import rendered_overscanned_widget_frame
 
 
@@ -56,18 +56,20 @@ def _solid_image(
     return image
 
 
-def _cleanup_qpane(qpane: QPane, qapp) -> None:
-    """Release a QPane through Qt's event loop."""
+def _cleanup_qpane(qpane: CuteCanvas, qapp) -> None:
+    """Release a CuteCanvas through Qt's event loop."""
     qpane.deleteLater()
     qapp.processEvents()
 
 
-def _load_images(qpane: QPane, *, large: bool = False) -> tuple[uuid.UUID, uuid.UUID]:
+def _load_images(
+    qpane: CuteCanvas, *, large: bool = False
+) -> tuple[uuid.UUID, uuid.UUID]:
     """Load two catalog images and return their IDs."""
     first_id, second_id = uuid.uuid4(), uuid.uuid4()
     size = 1024 if large else 100
     qpane.setImagesByID(
-        QPane.imageMapFromLists(
+        CuteCanvas.imageMapFromLists(
             [
                 _solid_image(size, size, Qt.red),
                 _solid_image(size, size, Qt.blue),
@@ -80,21 +82,21 @@ def _load_images(qpane: QPane, *, large: bool = False) -> tuple[uuid.UUID, uuid.
     return first_id, second_id
 
 
-def _scene_request(first_id: uuid.UUID, second_id: uuid.UUID) -> QPaneSceneRequest:
+def _scene_request(first_id: uuid.UUID, second_id: uuid.UUID) -> CompositionRequest:
     """Return a two-layer public scene request."""
-    return QPaneSceneRequest(
+    return CompositionRequest(
         composition_id=None,
         title="Contact sheet",
         bounds=QRectF(0.0, 0.0, 200.0, 100.0),
         layers=(
-            QPaneCatalogImageLayerRequest(
+            CatalogLayerRequest(
                 layer_id=uuid.uuid4(),
                 image_id=first_id,
                 placement=QRectF(0.0, 0.0, 100.0, 100.0),
                 role="thumbnail",
                 metadata={"slot": 0},
             ),
-            QPaneCatalogImageLayerRequest(
+            CatalogLayerRequest(
                 layer_id=uuid.uuid4(),
                 image_id=second_id,
                 placement=QRectF(100.0, 0.0, 100.0, 100.0),
@@ -107,15 +109,15 @@ def _scene_request(first_id: uuid.UUID, second_id: uuid.UUID) -> QPaneSceneReque
 
 def _clipped_scene_request(
     image_id: uuid.UUID,
-    clip: QPaneSceneClip,
-) -> QPaneSceneRequest:
+    clip: CompositionLayerClip,
+) -> CompositionRequest:
     """Return a one-layer scene request using ``clip``."""
-    return QPaneSceneRequest(
+    return CompositionRequest(
         composition_id=None,
         title="Clipped scene",
         bounds=QRectF(0.0, 0.0, 100.0, 100.0),
         layers=(
-            QPaneCatalogImageLayerRequest(
+            CatalogLayerRequest(
                 layer_id=uuid.uuid4(),
                 image_id=image_id,
                 placement=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -142,28 +144,28 @@ def _assert_rect(
 
 def test_fit_scene_rect_preserves_portrait_aspect_inside_landscape_target() -> None:
     """fitSceneRect should fit portrait sources without distortion."""
-    rect = QPane.fitSceneRect(QSize(200, 400), QRectF(0.0, 0.0, 320.0, 240.0))
+    rect = CuteCanvas.fitSceneRect(QSize(200, 400), QRectF(0.0, 0.0, 320.0, 240.0))
 
     _assert_rect(rect, x=100.0, y=0.0, width=120.0, height=240.0)
 
 
 def test_fit_scene_rect_preserves_landscape_aspect_inside_portrait_target() -> None:
     """fitSceneRect should fit landscape sources without distortion."""
-    rect = QPane.fitSceneRect(QSize(400, 200), QRectF(0.0, 0.0, 100.0, 300.0))
+    rect = CuteCanvas.fitSceneRect(QSize(400, 200), QRectF(0.0, 0.0, 100.0, 300.0))
 
     _assert_rect(rect, x=0.0, y=125.0, width=100.0, height=50.0)
 
 
 def test_fill_scene_rect_covers_target_without_distortion() -> None:
     """fillSceneRect should cover the target while preserving source aspect."""
-    rect = QPane.fillSceneRect(QSize(200, 400), QRectF(0.0, 0.0, 320.0, 240.0))
+    rect = CuteCanvas.fillSceneRect(QSize(200, 400), QRectF(0.0, 0.0, 320.0, 240.0))
 
     _assert_rect(rect, x=0.0, y=-200.0, width=320.0, height=640.0)
 
 
 def test_scene_rect_helpers_center_zero_area_targets() -> None:
     """Aspect helpers should return centered zero-area rectangles for empty slots."""
-    rect = QPane.fitSceneRect(QSize(10, 20), QRectF(10.0, 20.0, 0.0, 240.0))
+    rect = CuteCanvas.fitSceneRect(QSize(10, 20), QRectF(10.0, 20.0, 0.0, 240.0))
 
     _assert_rect(rect, x=10.0, y=140.0, width=0.0, height=0.0)
 
@@ -171,14 +173,14 @@ def test_scene_rect_helpers_center_zero_area_targets() -> None:
 def test_scene_rect_helpers_reject_invalid_dimensions() -> None:
     """Aspect helpers should reject invalid source and target dimensions."""
     with pytest.raises(ValueError, match="source_size dimensions must be positive"):
-        QPane.fitSceneRect(QSize(0, 10), QRectF(0.0, 0.0, 10.0, 10.0))
+        CuteCanvas.fitSceneRect(QSize(0, 10), QRectF(0.0, 0.0, 10.0, 10.0))
     with pytest.raises(ValueError, match="target_rect dimensions must be non-negative"):
-        QPane.fillSceneRect(QSize(10, 10), QRectF(0.0, 0.0, -1.0, 10.0))
+        CuteCanvas.fillSceneRect(QSize(10, 10), QRectF(0.0, 0.0, -1.0, 10.0))
 
 
 def test_layer_index_reorders_one_stack_and_replays_exactly(qapp) -> None:
     """Public z-order edits should use the composition's atomic stack history."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         request = _scene_request(first_id, second_id)
@@ -234,13 +236,13 @@ def test_contact_sheet_demo_packs_fitted_thumbnail_placements() -> None:
 
 def test_compose_scene_renders_catalog_layers_and_reuses_pyramids(qapp) -> None:
     """Public scenes should render catalog-backed layers through pyramid assets."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 100)
     try:
         first_id, second_id = _load_images(qpane)
         request = _scene_request(first_id, second_id)
 
-        changed: list[QPaneScene | None] = []
+        changed: list[SceneSnapshot | None] = []
         qpane.sceneChanged.connect(changed.append)
         composition_id = qpane.composeScene(request)
         plan = qpane.view().calculateRenderPlan(is_blank=False)
@@ -284,18 +286,18 @@ def test_compose_scene_renders_catalog_layers_and_reuses_pyramids(qapp) -> None:
 
 def test_catalog_source_products_are_shared_across_compositions(qapp) -> None:
     """Independent instances of one catalog source must reuse render identity."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(160, 120)
     try:
         image_id, _other_id = _load_images(qpane)
         first_layer_id = uuid.uuid4()
         first_composition = qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="First use",
                 bounds=QRectF(0.0, 0.0, 100.0, 100.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=first_layer_id,
                         image_id=image_id,
                         placement=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -309,12 +311,12 @@ def test_catalog_source_products_are_shared_across_compositions(qapp) -> None:
 
         second_layer_id = uuid.uuid4()
         second_composition = qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="Second use",
                 bounds=QRectF(0.0, 0.0, 100.0, 100.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=second_layer_id,
                         image_id=image_id,
                         placement=QRectF(20.0, 10.0, 70.0, 80.0),
@@ -336,7 +338,7 @@ def test_catalog_source_products_are_shared_across_compositions(qapp) -> None:
 
 def test_default_and_host_scenes_share_the_composition_instance_store(qapp) -> None:
     """Both compatibility paths must publish from one authoritative layer store."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 100)
     try:
         first_id, _second_id = _load_images(qpane)
@@ -347,17 +349,17 @@ def test_default_and_host_scenes_share_the_composition_instance_store(qapp) -> N
 
         first_layer_id = uuid.uuid4()
         second_layer_id = uuid.uuid4()
-        request = QPaneSceneRequest(
+        request = CompositionRequest(
             composition_id=None,
             title="Shared source",
             bounds=QRectF(0.0, 0.0, 200.0, 100.0),
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=first_layer_id,
                     image_id=first_id,
                     placement=QRectF(0.0, 0.0, 100.0, 100.0),
                 ),
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=second_layer_id,
                     image_id=first_id,
                     placement=QRectF(100.0, 0.0, 100.0, 100.0),
@@ -383,22 +385,22 @@ def test_default_and_host_scenes_share_the_composition_instance_store(qapp) -> N
 
 def test_compose_scene_applies_catalog_layer_opacity(qapp) -> None:
     """Public catalog layers should composite using their requested opacity."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(100, 100)
     try:
         first_id, second_id = _load_images(qpane)
         qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="Opacity",
                 bounds=QRectF(0.0, 0.0, 100.0, 100.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=uuid.uuid4(),
                         image_id=first_id,
                         placement=QRectF(0.0, 0.0, 100.0, 100.0),
                     ),
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=uuid.uuid4(),
                         image_id=second_id,
                         placement=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -434,10 +436,10 @@ def test_compose_scene_applies_catalog_layer_opacity(qapp) -> None:
 
 def test_compose_scene_detaches_request_clip(qapp) -> None:
     """Mutating the original clip after composition should not alter stored scene state."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, _second_id = _load_images(qpane)
-        clip = QPaneSceneClip("scene", QRectF(0.0, 0.0, 10.0, 10.0))
+        clip = CompositionLayerClip("scene", QRectF(0.0, 0.0, 10.0, 10.0))
 
         qpane.composeScene(_clipped_scene_request(first_id, clip))
 
@@ -458,10 +460,10 @@ def test_compose_scene_detaches_request_clip(qapp) -> None:
 
 def test_current_scene_detaches_returned_clip_snapshot(qapp) -> None:
     """Mutating a returned scene clip should not alter later scene snapshots."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, _second_id = _load_images(qpane)
-        clip = QPaneSceneClip("scene", QRectF(0.0, 0.0, 12.0, 12.0))
+        clip = CompositionLayerClip("scene", QRectF(0.0, 0.0, 12.0, 12.0))
 
         qpane.composeScene(_clipped_scene_request(first_id, clip))
         scene = qpane.currentScene()
@@ -481,7 +483,7 @@ def test_current_scene_detaches_returned_clip_snapshot(qapp) -> None:
 
 def test_scene_raster_smoothing_is_decided_per_layer(qapp) -> None:
     """Scene thumbnails should smooth when minified but stay sharp when magnified."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(110, 50)
     try:
         base_id = uuid.uuid4()
@@ -490,7 +492,7 @@ def test_scene_raster_smoothing_is_decided_per_layer(qapp) -> None:
         minified_layer_id = uuid.uuid4()
         magnified_layer_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [
                     _solid_image(100, 100, Qt.red),
                     _solid_image(1000, 1000, Qt.blue),
@@ -502,22 +504,22 @@ def test_scene_raster_smoothing_is_decided_per_layer(qapp) -> None:
             base_id,
         )
         qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="Scale checks",
                 bounds=QRectF(0.0, 0.0, 110.0, 50.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=uuid.uuid4(),
                         image_id=base_id,
                         placement=QRectF(0.0, 0.0, 10.0, 10.0),
                     ),
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=minified_layer_id,
                         image_id=minified_id,
                         placement=QRectF(20.0, 0.0, 50.0, 50.0),
                     ),
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=magnified_layer_id,
                         image_id=magnified_id,
                         placement=QRectF(80.0, 0.0, 30.0, 30.0),
@@ -545,22 +547,22 @@ def test_scene_raster_smoothing_is_decided_per_layer(qapp) -> None:
 
 def test_compose_scene_validates_public_inputs(qapp) -> None:
     """Public scene activation should reject invalid scenes before mutation."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
-        valid_layer = QPaneCatalogImageLayerRequest(
+        valid_layer = CatalogLayerRequest(
             layer_id=uuid.uuid4(),
             image_id=first_id,
             placement=QRectF(0.0, 0.0, 100.0, 100.0),
         )
         with pytest.raises(KeyError):
             qpane.composeScene(
-                QPaneSceneRequest(
+                CompositionRequest(
                     composition_id=None,
                     title=None,
                     bounds=QRectF(0.0, 0.0, 100.0, 100.0),
                     layers=(
-                        QPaneCatalogImageLayerRequest(
+                        CatalogLayerRequest(
                             layer_id=uuid.uuid4(),
                             image_id=uuid.uuid4(),
                             placement=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -570,7 +572,7 @@ def test_compose_scene_validates_public_inputs(qapp) -> None:
             )
         with pytest.raises(ValueError):
             qpane.composeScene(
-                QPaneSceneRequest(
+                CompositionRequest(
                     composition_id=None,
                     title=None,
                     bounds=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -579,7 +581,7 @@ def test_compose_scene_validates_public_inputs(qapp) -> None:
             )
         with pytest.raises(ValueError):
             qpane.composeScene(
-                QPaneSceneRequest(
+                CompositionRequest(
                     composition_id=None,
                     title=None,
                     bounds=QRectF(0.0, 0.0, 0.0, 100.0),
@@ -588,12 +590,12 @@ def test_compose_scene_validates_public_inputs(qapp) -> None:
             )
         with pytest.raises(ValueError):
             qpane.composeScene(
-                QPaneSceneRequest(
+                CompositionRequest(
                     composition_id=None,
                     title=None,
                     bounds=QRectF(0.0, 0.0, 100.0, 100.0),
                     layers=(
-                        QPaneCatalogImageLayerRequest(
+                        CatalogLayerRequest(
                             layer_id=uuid.uuid4(),
                             image_id=second_id,
                             placement=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -609,7 +611,7 @@ def test_compose_scene_validates_public_inputs(qapp) -> None:
 
 def test_compose_scene_stores_reopens_and_replaces_composition(qapp) -> None:
     """Layered scenes should behave like stored composition records."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         request = _scene_request(first_id, second_id)
@@ -629,12 +631,12 @@ def test_compose_scene_stores_reopens_and_replaces_composition(qapp) -> None:
         assert qpane.currentCompositionID() == stored_id
         assert qpane.currentScene().composition_id == stored_id
 
-        replacement = QPaneSceneRequest(
+        replacement = CompositionRequest(
             composition_id=stored_id,
             title="Replacement",
             bounds=QRectF(0.0, 0.0, 100.0, 100.0),
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=second_id,
                     placement=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -650,17 +652,17 @@ def test_compose_scene_stores_reopens_and_replaces_composition(qapp) -> None:
 
 def test_active_scene_replacement_without_activation_refreshes_scene(qapp) -> None:
     """Replacing the active scene in place should refresh content without reselecting."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 100)
     try:
         first_id, second_id = _load_images(qpane)
         composition_id = qpane.composeScene(_scene_request(first_id, second_id))
-        replacement = QPaneSceneRequest(
+        replacement = CompositionRequest(
             composition_id=composition_id,
             title="Active replacement",
             bounds=QRectF(0.0, 0.0, 50.0, 100.0),
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=second_id,
                     placement=QRectF(0.0, 0.0, 50.0, 100.0),
@@ -669,7 +671,7 @@ def test_active_scene_replacement_without_activation_refreshes_scene(qapp) -> No
             ),
         )
         composition_events = []
-        scene_events: list[QPaneScene | None] = []
+        scene_events: list[SceneSnapshot | None] = []
         selection_events = []
         qpane.compositionChanged.connect(composition_events.append)
         qpane.sceneChanged.connect(scene_events.append)
@@ -706,19 +708,19 @@ def test_inactive_scene_replacement_without_activation_only_updates_browser(
     qapp,
 ) -> None:
     """Replacing an inactive scene should not disturb the active render scene."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         stored_id = qpane.composeScene(
             _scene_request(first_id, second_id), activate=False
         )
         active_scene = qpane.currentScene()
-        replacement = QPaneSceneRequest(
+        replacement = CompositionRequest(
             composition_id=stored_id,
             title="Inactive replacement",
             bounds=QRectF(0.0, 0.0, 50.0, 50.0),
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=second_id,
                     placement=QRectF(0.0, 0.0, 50.0, 50.0),
@@ -744,21 +746,21 @@ def test_inactive_scene_replacement_without_activation_only_updates_browser(
 
 def test_compose_scene_from_template_expands_bindings(qapp) -> None:
     """Scene templates should expand into stored layered compositions."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
-        template = QPaneSceneTemplate(
+        template = CompositionTemplate(
             template_id=uuid.uuid4(),
             title="Template title",
             bounds=QRectF(0.0, 0.0, 200.0, 100.0),
             layers=(
-                QPaneTemplateLayer(
+                TemplateLayer(
                     layer_id=uuid.uuid4(),
                     source_slot="left",
                     placement=QRectF(0.0, 0.0, 100.0, 100.0),
                     metadata={"slot": "template"},
                 ),
-                QPaneTemplateLayer(
+                TemplateLayer(
                     layer_id=uuid.uuid4(),
                     source_slot="right",
                     placement=QRectF(100.0, 0.0, 100.0, 100.0),
@@ -767,7 +769,7 @@ def test_compose_scene_from_template_expands_bindings(qapp) -> None:
         )
         composition_id = qpane.composeSceneFromTemplate(
             template,
-            QPaneSceneTemplateBindings(
+            TemplateBindings(
                 composition_id=None,
                 title="Bound title",
                 catalog_images={
@@ -788,7 +790,7 @@ def test_compose_scene_from_template_expands_bindings(qapp) -> None:
         with pytest.raises(ValueError):
             qpane.composeSceneFromTemplate(
                 template,
-                QPaneSceneTemplateBindings(
+                TemplateBindings(
                     composition_id=None,
                     catalog_images={"left": first_id},
                 ),
@@ -799,7 +801,7 @@ def test_compose_scene_from_template_expands_bindings(qapp) -> None:
 
 def test_scene_hit_test_returns_public_layer_metadata_without_selection(qapp) -> None:
     """Public scene hit testing should return opaque host metadata without navigation."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 100)
     try:
         first_id, second_id = _load_images(qpane)
@@ -821,19 +823,19 @@ def test_scene_layer_interaction_policy_round_trips_and_updates_generically(
     qapp,
 ) -> None:
     """Stored scene policy should survive normalization and generic mutation."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 100)
     try:
         first_id, second_id = _load_images(qpane)
         request = _scene_request(first_id, second_id)
-        movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+        movable = LayerPolicy(selectable=True, movable=True)
         first = request.layers[0]
-        request = QPaneSceneRequest(
+        request = CompositionRequest(
             composition_id=request.composition_id,
             title=request.title,
             bounds=request.bounds,
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=first.layer_id,
                     image_id=first.image_id,
                     placement=first.placement,
@@ -868,7 +870,7 @@ def test_scene_layer_interaction_policy_round_trips_and_updates_generically(
         assert qpane.redoSceneEdit()
         assert qpane.currentScene().layers[0].placement == moved
 
-        locked = QPaneLayerInteractionPolicy()
+        locked = LayerPolicy()
         assert qpane.setLayerInteractionPolicy(
             composition_id,
             first.layer_id,
@@ -891,24 +893,24 @@ def test_scene_layer_interaction_policy_round_trips_and_updates_generically(
 
 def test_move_interaction_previews_then_commits_generic_layer_placement(qapp) -> None:
     """Move interaction should preview geometry and commit one undoable placement."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 100)
     try:
         first_id, second_id = _load_images(qpane)
         request = _scene_request(first_id, second_id)
         first = request.layers[0]
-        request = QPaneSceneRequest(
+        request = CompositionRequest(
             composition_id=request.composition_id,
             title=request.title,
             bounds=request.bounds,
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=first.layer_id,
                     image_id=first.image_id,
                     placement=first.placement,
                     role=first.role,
                     metadata=first.metadata,
-                    interaction=QPaneLayerInteractionPolicy(
+                    interaction=LayerPolicy(
                         selectable=True,
                         movable=True,
                     ),
@@ -955,22 +957,22 @@ def test_move_interaction_previews_then_commits_generic_layer_placement(qapp) ->
 
 def test_public_affine_transform_round_trips_renders_hits_and_undoes(qapp) -> None:
     """Exact affine geometry must remain one public, rendered, undoable value."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 120)
     try:
         image_id, _second_id = _load_images(qpane)
         layer_id = uuid.uuid4()
         composition_id = qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="Affine layer",
                 bounds=QRectF(0.0, 0.0, 200.0, 120.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=layer_id,
                         image_id=image_id,
                         placement=QRectF(10.0, 10.0, 100.0, 100.0),
-                        interaction=QPaneLayerInteractionPolicy(
+                        interaction=LayerPolicy(
                             selectable=True,
                             movable=True,
                         ),
@@ -1038,22 +1040,22 @@ def test_public_affine_transform_round_trips_renders_hits_and_undoes(qapp) -> No
 
 def test_move_preview_preserves_rotated_linear_geometry(qapp) -> None:
     """Move gestures translate exact geometry without flattening its rotation."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(160, 120)
     try:
         image_id, _second_id = _load_images(qpane)
         layer_id = uuid.uuid4()
         composition_id = qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="Move rotated layer",
                 bounds=QRectF(0.0, 0.0, 160.0, 120.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=layer_id,
                         image_id=image_id,
                         placement=QRectF(0.0, 0.0, 100.0, 100.0),
-                        interaction=QPaneLayerInteractionPolicy(
+                        interaction=LayerPolicy(
                             selectable=True,
                             movable=True,
                         ),
@@ -1099,22 +1101,22 @@ def test_move_preview_preserves_rotated_linear_geometry(qapp) -> None:
 
 def test_space_pan_suspends_without_discarding_layer_transform_preview(qapp) -> None:
     """Temporary navigation must not cancel or commit unresolved layer geometry."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(160, 120)
     try:
         image_id, _second_id = _load_images(qpane)
         layer_id = uuid.uuid4()
         composition_id = qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="Suspended transform",
                 bounds=QRectF(0.0, 0.0, 160.0, 120.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=layer_id,
                         image_id=image_id,
                         placement=QRectF(0.0, 0.0, 100.0, 100.0),
-                        interaction=QPaneLayerInteractionPolicy(
+                        interaction=LayerPolicy(
                             selectable=True,
                             movable=True,
                         ),
@@ -1183,12 +1185,12 @@ def test_space_pan_suspends_without_discarding_layer_transform_preview(qapp) -> 
 
 def test_move_interaction_paints_transient_placement_before_commit(qapp) -> None:
     """Dragging should repaint moved scene pixels before durable placement changes."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(100, 100)
     try:
         image_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_solid_image(50, 50, Qt.red)],
                 [None],
                 [image_id],
@@ -1197,16 +1199,16 @@ def test_move_interaction_paints_transient_placement_before_commit(qapp) -> None
         )
         layer_id = uuid.uuid4()
         qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title="Painted movement preview",
                 bounds=QRectF(0.0, 0.0, 100.0, 100.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=layer_id,
                         image_id=image_id,
                         placement=QRectF(0.0, 0.0, 50.0, 50.0),
-                        interaction=QPaneLayerInteractionPolicy(
+                        interaction=LayerPolicy(
                             selectable=True,
                             movable=True,
                         ),
@@ -1250,13 +1252,13 @@ def test_move_interaction_paints_transient_placement_before_commit(qapp) -> None
 
 def test_generated_default_image_layer_uses_generic_movement_policy(qapp) -> None:
     """Default catalog layers should use the same policy and placement mutation path."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         _load_images(qpane)
         scene = qpane.currentScene()
         assert scene is not None
         layer = scene.layers[0]
-        policy = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+        policy = LayerPolicy(selectable=True, movable=True)
 
         assert qpane.setLayerInteractionPolicy(scene.scene_id, layer.layer_id, policy)
         assert qpane.setLayerPlacement(
@@ -1276,25 +1278,25 @@ def test_generated_default_image_layer_uses_generic_movement_policy(qapp) -> Non
 
 def test_scene_hit_test_respects_clips(qapp) -> None:
     """Scene clips should constrain public hit testing."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(100, 100)
     try:
         first_id, second_id = _load_images(qpane)
-        request = QPaneSceneRequest(
+        request = CompositionRequest(
             composition_id=None,
             title=None,
             bounds=QRectF(0.0, 0.0, 100.0, 100.0),
             layers=(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=first_id,
                     placement=QRectF(0.0, 0.0, 100.0, 100.0),
                 ),
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=second_id,
                     placement=QRectF(0.0, 0.0, 100.0, 100.0),
-                    clip=QPaneSceneClip(
+                    clip=CompositionLayerClip(
                         coordinate_space="scene",
                         rect=QRectF(50.0, 0.0, 50.0, 100.0),
                     ),
@@ -1316,22 +1318,22 @@ def test_scene_hit_test_respects_clips(qapp) -> None:
 
 def test_large_public_scene_layers_use_tiles(qapp) -> None:
     """Large public scene layers should enter tiled rendering."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(100, 100)
     try:
         first_id, second_id = _load_images(qpane, large=True)
         qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title=None,
                 bounds=QRectF(0.0, 0.0, 2048.0, 1024.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=uuid.uuid4(),
                         image_id=first_id,
                         placement=QRectF(0.0, 0.0, 1024.0, 1024.0),
                     ),
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=uuid.uuid4(),
                         image_id=second_id,
                         placement=QRectF(1024.0, 0.0, 1024.0, 1024.0),
@@ -1360,7 +1362,7 @@ def test_layered_scene_returns_to_default_compositions_after_catalog_changes(
     qapp,
 ) -> None:
     """Catalog removals and navigation should reopen normal composition snapshots."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         cleared: list[object | None] = []
@@ -1388,7 +1390,7 @@ def test_layered_scene_returns_to_default_compositions_after_catalog_changes(
 
 def test_scene_survives_catalog_replacement_with_same_ids(qapp) -> None:
     """Replacing catalog pixels with the same IDs should keep the scene active."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         qpane.composeScene(_scene_request(first_id, second_id))
@@ -1410,17 +1412,17 @@ def test_scene_survives_catalog_replacement_with_same_ids(qapp) -> None:
 
 def test_public_scene_suppresses_comparison_contributions(qapp) -> None:
     """Public scenes should render their declared layers without comparison layers."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         qpane.setComparisonImageID(second_id)
         qpane.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=None,
                 title=None,
                 bounds=QRectF(0.0, 0.0, 100.0, 100.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=uuid.uuid4(),
                         image_id=first_id,
                         placement=QRectF(0.0, 0.0, 100.0, 100.0),
@@ -1445,7 +1447,7 @@ def test_public_scene_suppresses_comparison_contributions(qapp) -> None:
 
 def test_layered_scene_rejects_image_scoped_comparison_mutations(qapp) -> None:
     """Layered scenes should not mutate comparison state through stale image scope."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         qpane.setComparisonSplit(0.25, ComparisonOrientation.HORIZONTAL)
@@ -1471,7 +1473,7 @@ def test_composition_masks_delegate_without_catalog_image_anchor(
     qapp, monkeypatch
 ) -> None:
     """Generic mask identity and editing must not depend on catalog navigation."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         first_id, second_id = _load_images(qpane)
         qpane.composeScene(_scene_request(first_id, second_id))
@@ -1602,7 +1604,7 @@ def test_composition_masks_delegate_without_catalog_image_anchor(
 
 def test_scene_overlays_receive_layer_geometry(qapp) -> None:
     """Scene overlays should receive public layer snapshots with transforms."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(200, 100)
     try:
         first_id, second_id = _load_images(qpane)
@@ -1622,7 +1624,7 @@ def test_scene_overlays_receive_layer_geometry(qapp) -> None:
         assert [layer.layer_id for layer in state.layers] == [
             layer.layer_id for layer in request.layers
         ]
-        assert [layer.image_id for layer in state.layers] == [first_id, second_id]
+        assert [layer.source_id for layer in state.layers] == [first_id, second_id]
         assert state.layers[0].role == "thumbnail"
         assert state.layers[0].metadata == {"slot": 0}
         assert state.layers[0].placement == request.layers[0].placement

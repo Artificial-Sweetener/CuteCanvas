@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Private durable composition archive round-trip and validation tests."""
 
 from __future__ import annotations
@@ -17,10 +24,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QColor, QImage
-
-from qpane import (
+from cutecanvas import (
     RasterExtentPolicy,
     VectorFillRule,
     VectorParagraphStyle,
@@ -33,39 +37,50 @@ from qpane import (
     VectorTextSpan,
     VectorTextStyle,
 )
-from qpane.catalog.source_reference import CatalogImageReference
-from qpane.composition.layers import (
+from cutecanvas.composition.layers import (
     CompositionLayerInstance,
     CompositionLayerStore,
 )
-from qpane.composition.model import (
+from cutecanvas.composition.model import (
     CompositionDocumentPolicy,
     CompositionOrigin,
     CompositionRecord,
 )
-from qpane.composition.resource_lifetime import CompositionResourceLifetime
-from qpane.composition.service import CompositionService
-from qpane.masks.mask import MaskAssetStore
-from qpane.masks.source_reference import MaskAssetReference
-from qpane.persistence import (
+from cutecanvas.composition.resource_lifetime import CompositionResourceLifetime
+from cutecanvas.composition.service import CompositionService
+from cutecanvas.coverage import (
+    CoverageCombineMode,
+    CoverageGeometryFactory,
+    CoverageSnapshot,
+    RasterCoverageItem,
+    StrokeCoverageItem,
+    VectorCoverageItem,
+)
+from cutecanvas.masks.mask import MaskAssetStore
+from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas.painting import BrushStrokeSegment
+from cutecanvas.persistence import (
     CompositionArchiveCodec,
     CompositionArchiveRestorer,
     capture_composition,
 )
-from qpane.placed.model import FileFingerprint, PlacedAssetStatus
-from qpane.placed.source_reference import PlacedAssetReference
-from qpane.placed.store import PlacedAssetStore
-from qpane.raster.assets import EditableRasterAssetStore
-from qpane.raster.source_reference import EditableRasterReference
+from cutecanvas.placed.model import FileFingerprint, PlacedAssetStatus
+from cutecanvas.placed.source_reference import PlacedAssetReference
+from cutecanvas.placed.store import PlacedAssetStore
+from cutecanvas.raster.assets import EditableRasterAssetStore
+from cutecanvas.raster.source_reference import EditableRasterReference
+from cutecanvas.vector.effects import VectorMaskEffect
+from cutecanvas.vector.source_reference import VectorDocumentReference
+from cutecanvas.vector.store import VectorAssetStore
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QColor, QImage
+from qpane.catalog.source_reference import CatalogImageReference
 from qpane.scene.affine import LayerTransform
 from qpane.scene.identity import base_image_layer_id
 from qpane.scene.model import LayerInteractionPolicy, LayerPlacement
 from qpane.scene.raster import RasterBounds
-from qpane.vector.effects import VectorMaskEffect
 from qpane.vector.model import VectorObject
 from qpane.vector.public import VectorObjectKind
-from qpane.vector.source_reference import VectorDocumentReference
-from qpane.vector.store import VectorAssetStore
 
 
 class _FailingOnceLayerStore(CompositionLayerStore):
@@ -195,9 +210,9 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     mask = masks.get_layer(mask_id)
     assert mask is not None
     expanded_bounds = RasterBounds(-3, -2, 13, 10)
-    mask.surface.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
-    mask.surface.set_bounds(expanded_bounds)
-    mask.surface.mutate(lambda pixels, _image: pixels.__setitem__((1, 1), 217))
+    mask.coverage.raster.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
+    mask.coverage.raster.set_bounds(expanded_bounds)
+    mask.coverage.raster.mutate(lambda pixels, _image: pixels.__setitem__((1, 1), 217))
     mask_instance = CompositionLayerInstance(
         layer_id=uuid.uuid4(),
         source=MaskAssetReference(mask_id),
@@ -270,7 +285,7 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     )
     with zipfile.ZipFile(archive_path) as container:
         manifest = json.loads(container.read("manifest.json"))
-    assert manifest["version"] == 8
+    assert manifest["version"] == 9
     assert manifest["document"]["canvas_bounds"] == [0.0, 0.0, 8.0, 6.0]
     assert len(manifest["instances"]) == 4
     assert len(manifest["resources"]) == 3
@@ -297,7 +312,7 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     ) == layers.layers_for_composition(image_id)
     restored_mask = restored_masks.get_layer(mask_id)
     assert restored_mask is not None
-    restored = restored_mask.surface.snapshot()
+    restored = restored_mask.coverage.raster.snapshot()
     assert restored.bounds == expanded_bounds
     assert restored.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
     assert restored.pixels[1, 1] == 217
@@ -308,6 +323,87 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     assert raster_snapshot.bounds == RasterBounds(-5, 7, 4, 3)
     assert raster_snapshot.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
     assert np.array_equal(raster_snapshot.pixels, expected_raster_pixels)
+
+
+def test_archive_round_trip_preserves_hybrid_mask_authorship(tmp_path) -> None:
+    """Raster, vector, and procedural mask items remain editable after restore."""
+    composition_id = uuid.uuid4()
+    layers = CompositionLayerStore(CompositionResourceLifetime())
+    _ensure_default(layers, composition_id, composition_id, 64, 48)
+    masks = MaskAssetStore()
+    mask_id = masks.create_mask(QImage(64, 48, QImage.Format_Grayscale8))
+    mask = masks.get_layer(mask_id)
+    assert mask is not None
+    raster_pixels = np.full((4, 5), 171, dtype=np.uint8)
+    raster_item = RasterCoverageItem(
+        uuid.uuid4(),
+        CoverageSnapshot(
+            RasterBounds(3, 4, 5, 4),
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+            raster_pixels,
+        ),
+        CoverageCombineMode.ADD,
+        LayerTransform(dx=2.0, dy=-1.0),
+    )
+    vector_item = VectorCoverageItem(
+        uuid.uuid4(),
+        CoverageGeometryFactory().ellipse(QRectF(16.0, 8.0, 12.0, 10.0)),
+        CoverageCombineMode.SUBTRACT,
+        LayerTransform(m11=1.5, m22=0.75, dx=-3.0, dy=2.0),
+        2.5,
+    )
+    stroke_item = StrokeCoverageItem(
+        uuid.uuid4(),
+        (BrushStrokeSegment.fixed((1.0, 2.0), (20.0, 15.0), 7.0, False),),
+        CoverageCombineMode.ADD,
+        LayerTransform(dx=4.0, dy=3.0),
+    )
+    for item in (raster_item, vector_item, stroke_item):
+        assert mask.coverage.append(item)
+    assert layers.add_layer(
+        composition_id,
+        CompositionLayerInstance(
+            layer_id=uuid.uuid4(),
+            source=MaskAssetReference(mask_id),
+            interaction=LayerInteractionPolicy(
+                selectable=True,
+                movable=True,
+                pixel_editable=True,
+            ),
+        ),
+    )
+    expected = mask.coverage.snapshot()
+    path = tmp_path / "hybrid-mask.qpc"
+    codec = CompositionArchiveCodec()
+    codec.write(
+        capture_composition(
+            _document(composition_id, 64, 48),
+            layers,
+            masks,
+            EditableRasterAssetStore(),
+            PlacedAssetStore(),
+            VectorAssetStore(),
+        ),
+        path,
+    )
+
+    decoded = codec.read(path)
+    retained = decoded.masks[mask_id].retained
+    assert tuple(type(item) for item in retained.items) == (
+        RasterCoverageItem,
+        VectorCoverageItem,
+        StrokeCoverageItem,
+    )
+    decoded_raster = retained.items[0]
+    assert isinstance(decoded_raster, RasterCoverageItem)
+    np.testing.assert_array_equal(decoded_raster.coverage.pixels, raster_pixels)
+    restored = MaskAssetStore()
+    restored.restore_mask(mask_id, decoded.masks[mask_id])
+    restored_layer = restored.get_layer(mask_id)
+    assert restored_layer is not None
+    actual = restored_layer.coverage.snapshot()
+    assert actual.bounds == expected.bounds
+    np.testing.assert_array_equal(actual.pixels, expected.pixels)
 
 
 def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -> None:
@@ -327,17 +423,17 @@ def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -
     mask_id = masks.create_mask(mask_seed)
     mask = masks.get_layer(mask_id)
     assert mask is not None
-    assert mask.surface.set_extent_policy(RasterExtentPolicy.UNBOUNDED)
+    assert mask.coverage.raster.set_extent_policy(RasterExtentPolicy.UNBOUNDED)
     for bounds, value in ((negative, 83), (positive, 197)):
-        writable = mask.surface.ensure_writable(bounds)
+        writable = mask.coverage.raster.ensure_writable(bounds)
         assert writable.writable == bounds
-        storage = mask.surface.storage_rect(bounds)
+        storage = mask.coverage.raster.storage_rect(bounds)
         assert storage is not None
-        mask.surface.mutate_storage_region(
+        mask.coverage.raster.mutate_storage_region(
             storage,
             lambda pixels, _image, fill=value: pixels.fill(fill),
         )
-    assert mask.surface.allocated_bytes <= 2 * 512 * 512
+    assert mask.coverage.raster.allocated_bytes <= 2 * 512 * 512
     assert layers.add_layer(
         image_id,
         CompositionLayerInstance(
@@ -398,7 +494,7 @@ def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -
     )
     assert archive_path.stat().st_size < 8 * 1024 * 1024
     decoded = codec.read(archive_path)
-    assert decoded.masks[mask_id].retained_bytes <= 2 * 512 * 512
+    assert decoded.masks[mask_id].raster.retained_bytes <= 2 * 512 * 512
     assert decoded.rasters[raster.raster_id].retained_bytes <= 2 * 512 * 512 * 4
 
     restored_layers = CompositionLayerStore(CompositionResourceLifetime())
@@ -419,8 +515,8 @@ def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -
     restored_raster = restored_rasters.get(raster.raster_id)
     assert restored_mask is not None
     assert restored_raster is not None
-    assert np.all(restored_mask.surface.capture_region(negative) == 83)
-    assert np.all(restored_mask.surface.capture_region(positive) == 197)
+    assert np.all(restored_mask.coverage.raster.capture_region(negative) == 83)
+    assert np.all(restored_mask.coverage.raster.capture_region(positive) == 197)
     assert np.all(restored_raster.surface.capture_region(negative)[:, :, 0] == 111)
     assert np.all(restored_raster.surface.capture_region(positive)[:, :, 0] == 223)
 
@@ -638,7 +734,7 @@ def test_vector_documents_round_trip_semantics_and_version_four_migrates(
     document = document.add(vector_object)
     text_content = VectorTextContent(
         "Semantic 😀\nمرحبا",
-        VectorTextStyle(("Missing QPane Font", "Arial"), 26.0),
+        VectorTextStyle(("Missing CuteCanvas Font", "Arial"), 26.0),
         (
             VectorTextSpan(
                 9,

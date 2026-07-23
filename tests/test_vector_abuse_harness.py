@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Mounted and generation-controlled abuse proof for semantic vectors."""
 
 from __future__ import annotations
@@ -13,12 +20,7 @@ from __future__ import annotations
 import statistics
 import uuid
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QTransform
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
-
-from qpane import (
+from cutecanvas import (
     VectorPathCommand,
     VectorPathCommandKind,
     VectorShapeKind,
@@ -26,8 +28,13 @@ from qpane import (
     VectorTextContent,
     VectorTextStyle,
 )
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QKeyEvent, QTransform
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.scene.render_plan import VectorLayerRenderItem
+
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
@@ -92,7 +99,20 @@ def test_large_durable_text_refines_off_thread_without_stale_or_blank_terminal_f
                 refined = candidate
                 break
         assert refined is not None
-        assert viewer.view().presenter._vector_refinement.pending_count == 0
+        assert harness.wait_for_render_refinement_idle(timeout_ms=5000)
+        settled_plan = viewer.view().calculateRenderPlan()
+        assert settled_plan is not None
+        refined = next(
+            (
+                item
+                for item in settled_plan.render_items
+                if isinstance(item, VectorLayerRenderItem)
+                and item.descriptor.layer_id == layer_id
+            ),
+            None,
+        )
+        assert refined is not None and refined.refined_tiles
+        assert viewer.view().presenter._render_refinement.pending_count == 0
         renderer = viewer.view().presenter.renderer
         harness.drain_events(wait_ms=10)
         incremental = renderer.get_base_buffer()
@@ -392,10 +412,10 @@ def test_large_visible_path_refines_asynchronously_without_stale_frames(
         while deadline > 0:
             harness.drain_events(wait_ms=2)
             presenter = viewer.view().presenter
-            if presenter._vector_refinement.pending_count == 0:
+            if presenter._render_refinement.pending_count == 0:
                 break
             deadline -= 2
-        assert viewer.view().presenter._vector_refinement.pending_count == 0
+        assert viewer.view().presenter._render_refinement.pending_count == 0
         harness.drain_events(wait_ms=10)
         renderer = viewer.view().presenter.renderer
         incremental = renderer.get_base_buffer()
@@ -407,7 +427,7 @@ def test_large_visible_path_refines_asynchronously_without_stale_frames(
         full = renderer.get_base_buffer()
         assert full is not None
         assert (qimage_to_numpy_argb32(full.copy()) == before).all()
-        cache = viewer.view().presenter._vector_tile_cache
+        cache = viewer.view().presenter._render_tile_cache
         assert 0 < cache.usage_bytes <= cache.budget_bytes
         assert statistics.median(samples) < _SUBMISSION_BUDGET_MS / 2.0
     finally:
@@ -514,9 +534,9 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
 ) -> None:
     """Late vector jobs must not overwrite edits, selections, or removed layers."""
     executor = StubExecutor(name="vector-abuse")
-    from qpane import QPane
+    from cutecanvas import CuteCanvas
 
-    viewer = QPane(features=(), task_executor=executor)
+    viewer = CuteCanvas(features=(), task_executor=executor)
     image = QImage(320, 240, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor("white"))
     image_id = uuid.uuid4()

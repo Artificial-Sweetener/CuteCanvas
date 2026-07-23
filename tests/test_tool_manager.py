@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -19,13 +19,9 @@
 import logging
 
 import pytest
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
-
-from qpane.tools import ToolDependencies
-from qpane.tools.base import BaseTool, CursorTool, ExtensionTool, PanZoomTool
-from qpane.tools.ports import (
+from cutecanvas.tools import ToolDependencies
+from cutecanvas.tools.base import BaseTool
+from cutecanvas.tools.ports import (
     CursorInteractionPort,
     MoveInteractionPort,
     NavigationInteractionPort,
@@ -36,7 +32,11 @@ from qpane.tools.ports import (
     TransformInteractionPort,
     tool_activation_ports,
 )
-from qpane.tools.tools import Tools
+from cutecanvas.tools.tools import Tools
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QApplication
+from qpane import CursorTool, PanZoomTool, ViewerTool
 
 pytestmark = [
     pytest.mark.filterwarnings("ignore:Failed to disconnect.*"),
@@ -71,7 +71,7 @@ class DummyTool(BaseTool):
         return None
 
 
-class EmptyTool(ExtensionTool):
+class EmptyTool(ViewerTool):
     def __init__(self) -> None:
         super().__init__()
 
@@ -262,7 +262,7 @@ def test_cursor_tool_is_registered_and_inert(qapp):
         ToolActivationPorts(
             cursor=CursorInteractionPort(
                 is_drag_out_allowed=lambda: True,
-                is_image_null=lambda: False,
+                is_content_empty=lambda: False,
             ),
         ),
     )
@@ -270,13 +270,13 @@ def test_cursor_tool_is_registered_and_inert(qapp):
     assert isinstance(tool, CursorTool)
     assert tool.getCursor().shape() == Qt.CursorShape.ArrowCursor
     assert manager.get_control_mode() == Tools.CONTROL_MODE_CURSOR
-    assert tool._is_drag_out_allowed()
-    assert not tool._is_image_null()
-    assert tool._drag_start_pos is None
+    assert tool._port.is_drag_out_allowed()
+    assert not tool._port.is_content_empty()
+    assert tool._drag_start_position is None
     manager_drag_events = []
     tool_drag_events = []
-    manager.signals.drag_start_maybe_requested.connect(manager_drag_events.append)
-    tool.signals.drag_start_maybe_requested.connect(tool_drag_events.append)
+    manager.signals.drag_out_requested.connect(manager_drag_events.append)
+    tool.signals.drag_out_requested.connect(tool_drag_events.append)
     press = QMouseEvent(
         QEvent.Type.MouseButtonPress,
         QPointF(0, 0),
@@ -285,7 +285,7 @@ def test_cursor_tool_is_registered_and_inert(qapp):
         Qt.KeyboardModifier.NoModifier,
     )
     tool.mousePressEvent(press)
-    assert tool._drag_start_pos is not None
+    assert tool._drag_start_position is not None
     start_distance = QApplication.instance().startDragDistance()
     move = QMouseEvent(
         QEvent.Type.MouseMove,
@@ -295,7 +295,7 @@ def test_cursor_tool_is_registered_and_inert(qapp):
         Qt.KeyboardModifier.NoModifier,
     )
     assert (
-        move.position().toPoint() - tool._drag_start_pos
+        move.position().toPoint() - tool._drag_start_position
     ).manhattanLength() >= start_distance
     tool.mouseMoveEvent(move)
     release = QMouseEvent(
@@ -318,8 +318,8 @@ def test_panzoom_tool_emits_drag_out_via_shared_path(qapp):
         Tools.CONTROL_MODE_PANZOOM,
         ToolActivationPorts(
             navigation=NavigationInteractionPort(
-                is_pan_zoom_locked=lambda: False,
-                is_image_null=lambda: False,
+                is_navigation_locked=lambda: False,
+                is_content_empty=lambda: False,
                 is_drag_out_allowed=lambda: True,
             ),
         ),
@@ -328,8 +328,8 @@ def test_panzoom_tool_emits_drag_out_via_shared_path(qapp):
     assert isinstance(tool, PanZoomTool)
     manager_drag_events = []
     tool_drag_events = []
-    manager.signals.drag_start_maybe_requested.connect(manager_drag_events.append)
-    tool.signals.drag_start_maybe_requested.connect(tool_drag_events.append)
+    manager.signals.drag_out_requested.connect(manager_drag_events.append)
+    tool.signals.drag_out_requested.connect(tool_drag_events.append)
     press = QMouseEvent(
         QEvent.Type.MouseButtonPress,
         QPointF(0, 0),
@@ -338,7 +338,7 @@ def test_panzoom_tool_emits_drag_out_via_shared_path(qapp):
         Qt.KeyboardModifier.NoModifier,
     )
     tool.mousePressEvent(press)
-    assert tool.drag_start_pos is not None
+    assert tool._drag_start_position is not None
     start_distance = QApplication.instance().startDragDistance()
     move = QMouseEvent(
         QEvent.Type.MouseMove,
@@ -348,6 +348,6 @@ def test_panzoom_tool_emits_drag_out_via_shared_path(qapp):
         Qt.KeyboardModifier.NoModifier,
     )
     tool.mouseMoveEvent(move)
-    assert tool.drag_start_pos is None
+    assert tool._drag_start_position is None
     assert tool_drag_events, "Pan/zoom tool should emit drag-out attempts"
     assert manager_drag_events, "Pan/zoom drag-out should reach manager signals"

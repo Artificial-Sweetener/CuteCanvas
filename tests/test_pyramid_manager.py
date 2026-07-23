@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -24,11 +24,11 @@ import uuid
 from pathlib import Path
 
 import pytest
+from cutecanvas import Config
 from PySide6.QtGui import QImage, Qt
-
-from qpane import Config
 from qpane.rendering import ImagePyramid, PyramidManager, PyramidStatus
 from qpane.scene.identity import SourceRenderAssetKey, catalog_source_asset_key
+
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
@@ -422,7 +422,7 @@ class TestPyramidManager:
             cache={
                 "mode": "hard",
                 "budget_mb": 1,
-                "weights": {"pyramids": 1, "tiles": 0, "masks": 0, "predictors": 0},
+                "weights": {"pyramids": 1, "tiles": 0},
             }
         )
         executor = StubExecutor()

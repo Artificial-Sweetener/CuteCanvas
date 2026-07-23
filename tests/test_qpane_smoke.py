@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""QPane smoke tests covering core interactions, overlays, and feature fallbacks."""
+"""CuteCanvas smoke tests covering core interactions, overlays, and feature fallbacks."""
 
 from __future__ import annotations
 
@@ -23,15 +23,15 @@ import time
 import uuid
 
 import pytest
+from cutecanvas import Config, CuteCanvas, LinkedGroup, OverlayState
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QImage, QTransform
-
-from qpane import Config, LinkedGroup, OverlayState, QPane
 from qpane.catalog import CatalogMutationEvent
 from qpane.features import FeatureInstallError
 from qpane.rendering import Tile, ViewportZoomMode
 from qpane.scene.identity import SceneLayerTileKey, default_catalog_asset_key
 from qpane.scene.render_plan import RenderStrategy
+
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs
 from tests.helpers.render_plan import make_render_plan, make_tile_key
@@ -43,7 +43,7 @@ from tests.test_mask_workflows import (
 
 
 def _cleanup_qpane(qpane, qapp):
-    """Delete a QPane and flush Qt events."""
+    """Delete a CuteCanvas and flush Qt events."""
     qpane.deleteLater()
     qapp.processEvents()
 
@@ -59,8 +59,8 @@ def _solid_image(
 
 @pytest.mark.usefixtures("qapp")
 def test_qpane_general_smoke(qapp, monkeypatch, caplog, tmp_path):
-    """Exercise the bulk of QPane facade behaviors with a single widget instance."""
-    qpane = QPane(features=())
+    """Exercise the bulk of CuteCanvas facade behaviors with a single widget instance."""
+    qpane = CuteCanvas(features=())
     baseline_config = qpane.settings
     try:
         _assert_core_initial_state(qpane)
@@ -104,7 +104,7 @@ _CURSOR_IMAGE_EDGE = 32
 
 @pytest.mark.usefixtures("qapp")
 def test_qpane_mask_smoke(qapp):
-    """Aggregate mask-specific smoke checks to minimise QPane instantiations."""
+    """Aggregate mask-specific smoke checks to minimise CuteCanvas instantiations."""
     executor = StubExecutor(auto_finish=True)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     baseline_config = qpane.settings
@@ -137,7 +137,7 @@ def test_qpane_feature_installation_paths(monkeypatch, caplog, qapp):
     _assert_full_feature_install_with_stubs(monkeypatch, qapp)
 
 
-def _assert_core_initial_state(qpane: QPane) -> None:
+def _assert_core_initial_state(qpane: CuteCanvas) -> None:
     """Validate default feature wiring before any catalog state loads."""
     assert qpane.installedFeatures == ()
     assert qpane.mask_controller is None
@@ -149,7 +149,7 @@ def _assert_core_initial_state(qpane: QPane) -> None:
     assert qpane.failedFeatures() == {}
 
 
-def _assert_view_alignment(qpane: QPane) -> None:
+def _assert_view_alignment(qpane: CuteCanvas) -> None:
     """Ensure the view exposes the same presenter managed by the facade."""
     view = qpane.view()
     presenter = qpane.presenter()
@@ -158,7 +158,7 @@ def _assert_view_alignment(qpane: QPane) -> None:
     assert view.tile_manager is presenter.tile_manager
 
 
-def _assert_view_handles_tile_ready(qpane: QPane, monkeypatch) -> None:
+def _assert_view_handles_tile_ready(qpane: CuteCanvas, monkeypatch) -> None:
     """Verify tile-ready callbacks delegate to the swap layer."""
     view = qpane.view()
     sentinel = make_tile_key()
@@ -168,7 +168,7 @@ def _assert_view_handles_tile_ready(qpane: QPane, monkeypatch) -> None:
     assert calls == [sentinel]
 
 
-def _assert_view_handles_pyramid_ready(qpane: QPane, monkeypatch) -> None:
+def _assert_view_handles_pyramid_ready(qpane: CuteCanvas, monkeypatch) -> None:
     """Verify pyramid-ready callbacks delegate to the swap layer."""
     view = qpane.view()
     sentinel = default_catalog_asset_key(uuid.uuid4(), revision=0, source_path=None)
@@ -178,8 +178,8 @@ def _assert_view_handles_pyramid_ready(qpane: QPane, monkeypatch) -> None:
     assert calls == [sentinel]
 
 
-def _assert_mark_dirty_delegates(qpane: QPane, monkeypatch) -> None:
-    """Ensure QPane.markDirty forwards the request to the View."""
+def _assert_mark_dirty_delegates(qpane: CuteCanvas, monkeypatch) -> None:
+    """Ensure CuteCanvas.markDirty forwards the request to the View."""
     sentinel = QRect(0, 0, 5, 5)
     calls: list[QRect] = []
     monkeypatch.setattr(qpane.view(), "mark_dirty", lambda rect: calls.append(rect))
@@ -187,10 +187,10 @@ def _assert_mark_dirty_delegates(qpane: QPane, monkeypatch) -> None:
     assert calls == [sentinel]
 
 
-def _assert_image_facade_helpers(qpane: QPane) -> None:
-    """Exercise QPane.imageMap helpers and current image navigation."""
+def _assert_image_facade_helpers(qpane: CuteCanvas) -> None:
+    """Exercise CuteCanvas.imageMap helpers and current image navigation."""
     first_id, second_id = uuid.uuid4(), uuid.uuid4()
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         images=[_solid_image(), _solid_image()],
         paths=[None, None],
         ids=[first_id, second_id],
@@ -204,10 +204,10 @@ def _assert_image_facade_helpers(qpane: QPane) -> None:
     qpane.clearImages()
 
 
-def _assert_catalog_signals_emit(qpane: QPane, qapp) -> None:
+def _assert_catalog_signals_emit(qpane: CuteCanvas, qapp) -> None:
     """Confirm catalogChanged and catalogSelectionChanged emit for mutations."""
     first_id, second_id = uuid.uuid4(), uuid.uuid4()
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         images=[_solid_image(), _solid_image()],
         paths=[None, None],
         ids=[first_id, second_id],
@@ -228,8 +228,8 @@ def _assert_catalog_signals_emit(qpane: QPane, qapp) -> None:
         qpane.clearImages()
 
 
-def _assert_zoom_signal_matches_accessor(qpane: QPane, qapp) -> None:
-    """Verify zoomChanged emits and matches QPane.currentZoom."""
+def _assert_zoom_signal_matches_accessor(qpane: CuteCanvas, qapp) -> None:
+    """Verify zoomChanged emits and matches CuteCanvas.currentZoom."""
     zooms: list[float] = []
     qpane.zoomChanged.connect(zooms.append)
     try:
@@ -242,7 +242,7 @@ def _assert_zoom_signal_matches_accessor(qpane: QPane, qapp) -> None:
         qpane.zoomChanged.disconnect(zooms.append)
 
 
-def _assert_viewport_rect_signal_on_resize(qpane: QPane, qapp) -> None:
+def _assert_viewport_rect_signal_on_resize(qpane: CuteCanvas, qapp) -> None:
     """Ensure viewportRectChanged fires when the widget resizes."""
     rects: list[QRectF] = []
     qpane.viewportRectChanged.connect(rects.append)
@@ -258,10 +258,10 @@ def _assert_viewport_rect_signal_on_resize(qpane: QPane, qapp) -> None:
         qpane.viewportRectChanged.disconnect(rects.append)
 
 
-def _assert_panel_hit_test_facade(qpane: QPane, qapp) -> None:
+def _assert_panel_hit_test_facade(qpane: CuteCanvas, qapp) -> None:
     """Check qpane.panelHitTest surfaces the same data as the view."""
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists([_solid_image()], [None], [image_id])
+    image_map = CuteCanvas.imageMapFromLists([_solid_image()], [None], [image_id])
     qpane.setImagesByID(image_map, current_id=image_id)
     qapp.processEvents()
     panel_point = QPoint(qpane.width() // 2, qpane.height() // 2)
@@ -271,10 +271,10 @@ def _assert_panel_hit_test_facade(qpane: QPane, qapp) -> None:
     qpane.clearImages()
 
 
-def _assert_linked_groups_facade(qpane: QPane) -> None:
+def _assert_linked_groups_facade(qpane: CuteCanvas) -> None:
     """Verify link groups emit changes only when membership changes."""
     first_id, second_id, third_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         images=[_solid_image(), _solid_image(), _solid_image()],
         paths=[None, None, None],
         ids=[first_id, second_id, third_id],
@@ -310,7 +310,7 @@ def _assert_linked_groups_facade(qpane: QPane) -> None:
         qpane.clearImages()
 
 
-def _assert_diagnostics_signals_emit(qpane: QPane) -> None:
+def _assert_diagnostics_signals_emit(qpane: CuteCanvas) -> None:
     """Ensure diagnostics overlay and domain toggles emit their signals."""
     overlay_events: list[bool] = []
     domain_events: list[tuple[str, bool]] = []
@@ -334,7 +334,7 @@ def _assert_diagnostics_signals_emit(qpane: QPane) -> None:
         qpane.diagnosticsDomainToggled.disconnect(_record_domain)
 
 
-def _assert_overlay_registry_handles_registration(qpane: QPane) -> None:
+def _assert_overlay_registry_handles_registration(qpane: CuteCanvas) -> None:
     """Confirm overlays can be registered, rejected when duplicated, and removed."""
 
     def draw_fn(painter, state):
@@ -350,7 +350,7 @@ def _assert_overlay_registry_handles_registration(qpane: QPane) -> None:
     assert "diagnostics" not in qpane.contentOverlays()
 
 
-def _assert_overlay_draw_invoked_during_paint(qpane: QPane, monkeypatch) -> None:
+def _assert_overlay_draw_invoked_during_paint(qpane: CuteCanvas, monkeypatch) -> None:
     """Ensure overlay draw functions receive the presenter state during paint."""
     qpane.resize(20, 20)
     source_image = _solid_image(2, 2)
@@ -433,7 +433,7 @@ def _assert_overlay_draw_invoked_during_paint(qpane: QPane, monkeypatch) -> None
         qpane._tools_manager.draw_overlay = original_overlay
 
 
-def _assert_missing_mask_warning_once(qpane: QPane, caplog) -> None:
+def _assert_missing_mask_warning_once(qpane: CuteCanvas, caplog) -> None:
     """Check that missing mask feature warnings emit once per session."""
     qpane.featureFallbacks().reset()
     caplog.clear()
@@ -446,21 +446,21 @@ def _assert_missing_mask_warning_once(qpane: QPane, caplog) -> None:
     assert not caplog.records
 
 
-def _assert_missing_sam_warning_once(qpane: QPane, caplog) -> None:
+def _assert_missing_sam_warning_once(qpane: CuteCanvas, caplog) -> None:
     """Check that missing SAM feature warnings also dedupe."""
     qpane.featureFallbacks().reset()
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="qpane.fallbacks"):
-        qpane.setControlMode(QPane.CONTROL_MODE_SMART_SELECT)
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_SMART_SELECT)
     assert any("Feature 'sam'" in record.message for record in caplog.records)
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="qpane.fallbacks"):
-        qpane.setControlMode(QPane.CONTROL_MODE_SMART_SELECT)
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_SMART_SELECT)
     assert not caplog.records
 
 
 def _assert_apply_settings_updates_dependants(
-    qpane: QPane, baseline_config: Config
+    qpane: CuteCanvas, baseline_config: Config
 ) -> None:
     """Ensure applySettings refreshes viewer collaborators and cache config."""
     original_settings = qpane.settings
@@ -472,12 +472,12 @@ def _assert_apply_settings_updates_dependants(
     assert qpane_view.tile_manager.tile_size == 512
     assert catalog.pyramid_manager.cache_limit_bytes == 4096 * 1024 * 1024
     assert qpane_view.viewport._config is qpane.settings
-    assert catalog._config is qpane.settings
+    assert not hasattr(catalog, "_config")
     qpane.applySettings(config=baseline_config)
 
 
 def _assert_apply_settings_clears_tile_cache(
-    qpane: QPane, tmp_path, baseline_config: Config
+    qpane: CuteCanvas, tmp_path, baseline_config: Config
 ) -> None:
     """Changing tile size should flush tile cache and worker metadata."""
     tile_manager = qpane.view().tile_manager
@@ -496,7 +496,7 @@ def _assert_apply_settings_clears_tile_cache(
 
 
 def _assert_minimum_size_hint_clamps_to_safe_zoom(
-    qpane: QPane, baseline_config: Config
+    qpane: CuteCanvas, baseline_config: Config
 ) -> None:
     """Minimum size hints should never drop below one pixel even with tiny config."""
     config = Config(min_view_size_px=0.05, safe_min_zoom=1e-5)
@@ -505,7 +505,7 @@ def _assert_minimum_size_hint_clamps_to_safe_zoom(
     image = QImage(16, 16, QImage.Format_ARGB32)
     image.fill(Qt.white)
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists([image], [None], [image_id])
+    image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
     qpane.setImagesByID(image_map, image_id)
     hint = qpane.minimumSizeHint()
     assert hint.isValid()
@@ -515,20 +515,20 @@ def _assert_minimum_size_hint_clamps_to_safe_zoom(
     qpane.applySettings(config=baseline_config)
 
 
-def _assert_cursor_falls_back_when_tool_missing(qpane: QPane, monkeypatch) -> None:
-    """If no tool provides a cursor, QPane should fall back to Arrow."""
+def _assert_cursor_falls_back_when_tool_missing(qpane: CuteCanvas, monkeypatch) -> None:
+    """If no tool provides a cursor, CuteCanvas should fall back to Arrow."""
     monkeypatch.setattr(qpane._tools_manager, "get_active_tool", lambda: None)
     qpane.refreshCursor()
     assert qpane.cursor().shape() == Qt.CursorShape.ArrowCursor
 
 
-def _assert_is_drag_out_allowed_respects_zoom_mode(qpane: QPane) -> None:
+def _assert_is_drag_out_allowed_respects_zoom_mode(qpane: CuteCanvas) -> None:
     """Drag-out availability depends on the current zoom mode and factor."""
     qpane.resize(64, 64)
     image = QImage(16, 16, QImage.Format_ARGB32)
     image.fill(Qt.white)
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists([image], [None], [image_id])
+    image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
     qpane.setImagesByID(image_map, image_id)
     viewport = qpane.view().viewport
     assert viewport.get_zoom_mode() == ViewportZoomMode.FIT
@@ -546,7 +546,7 @@ def _assert_is_drag_out_allowed_respects_zoom_mode(qpane: QPane) -> None:
 
 
 def _assert_is_drag_out_allowed_respects_config(
-    qpane: QPane, baseline_config: Config
+    qpane: CuteCanvas, baseline_config: Config
 ) -> None:
     """Global drag-out disablement should override zoom-based allowances."""
     config = Config()
@@ -556,7 +556,7 @@ def _assert_is_drag_out_allowed_respects_config(
     image = QImage(16, 16, QImage.Format_ARGB32)
     image.fill(Qt.white)
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists([image], [None], [image_id])
+    image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
     qpane.setImagesByID(image_map, image_id)
     assert qpane.isDragOutAllowed() is False
     qpane.clearImages()
@@ -564,7 +564,7 @@ def _assert_is_drag_out_allowed_respects_config(
 
 
 def _assert_presenter_ensure_view_alignment_updates_fit(
-    qpane: QPane, monkeypatch
+    qpane: CuteCanvas, monkeypatch
 ) -> None:
     """ensure_view_alignment should re-fit and allocate buffers when view size changes."""
     qpane.resize(120, 80)
@@ -589,7 +589,7 @@ def _assert_presenter_ensure_view_alignment_updates_fit(
 
 
 def _assert_presenter_ensure_view_alignment_detects_dpr_change(
-    qpane: QPane, monkeypatch
+    qpane: CuteCanvas, monkeypatch
 ) -> None:
     """DPR changes should trigger fit + buffer reallocation even without size change."""
     qpane.resize(120, 80)
@@ -615,8 +615,8 @@ def _assert_presenter_ensure_view_alignment_detects_dpr_change(
     assert presenter._last_device_pixel_ratio == 2.0
 
 
-def _assert_qpane_rebase_zoom_behaviors(qpane: QPane, monkeypatch) -> None:
-    """Cover the zoom rebasing permutations without repeated QPane construction."""
+def _assert_qpane_rebase_zoom_behaviors(qpane: CuteCanvas, monkeypatch) -> None:
+    """Cover the zoom rebasing permutations without repeated CuteCanvas construction."""
     original_normalize = qpane.settings.normalize_zoom_on_screen_change
     original_one_to_one = qpane.settings.normalize_zoom_for_one_to_one
     view = qpane.view()
@@ -707,7 +707,7 @@ def _assert_qpane_rebase_zoom_behaviors(qpane: QPane, monkeypatch) -> None:
 
 
 def _assert_presenter_ensure_view_alignment_preserves_custom(
-    qpane: QPane, monkeypatch
+    qpane: CuteCanvas, monkeypatch
 ) -> None:
     """Custom zoom modes should avoid forcing a fit while still realigning pan."""
     qpane.resize(120, 80)
@@ -732,7 +732,9 @@ def _assert_presenter_ensure_view_alignment_preserves_custom(
     assert pan_calls and pan_calls[-1] == viewport.pan
 
 
-def _assert_swap_apply_image_realigns_view(qpane: QPane, monkeypatch, tmp_path) -> None:
+def _assert_swap_apply_image_realigns_view(
+    qpane: CuteCanvas, monkeypatch, tmp_path
+) -> None:
     """Swap delegate should force alignment when a new image lands."""
     qpane.resize(80, 60)
     qpane.original_image = _solid_image(40, 30)
@@ -753,8 +755,8 @@ def _assert_swap_apply_image_realigns_view(qpane: QPane, monkeypatch, tmp_path) 
     assert calls and calls[-1] is True
 
 
-def _assert_qpane_resize_event_forces_alignment(qpane: QPane, monkeypatch) -> None:
-    """QPane.resizeEvent should always force view alignment."""
+def _assert_qpane_resize_event_forces_alignment(qpane: CuteCanvas, monkeypatch) -> None:
+    """CuteCanvas.resizeEvent should always force view alignment."""
     calls: list[bool] = []
 
     def fake_align(*, force=False):
@@ -765,7 +767,9 @@ def _assert_qpane_resize_event_forces_alignment(qpane: QPane, monkeypatch) -> No
     assert calls == [True]
 
 
-def _assert_qpane_paint_event_triggers_alignment(qpane: QPane, monkeypatch) -> None:
+def _assert_qpane_paint_event_triggers_alignment(
+    qpane: CuteCanvas, monkeypatch
+) -> None:
     """Non-blank paint events should request alignment without flagging force."""
     qpane.resize(64, 64)
     qpane._is_blank = False
@@ -812,7 +816,7 @@ def _assert_qpane_paint_event_triggers_alignment(qpane: QPane, monkeypatch) -> N
 
 
 def _assert_apply_settings_accepts_external_config_snapshot(
-    qpane: QPane, baseline_config: Config
+    qpane: CuteCanvas, baseline_config: Config
 ) -> None:
     """Reapplying an external Config snapshot should clone and propagate defaults."""
     new_config = Config(default_brush_size=47, mask_autosave_enabled=False)
@@ -826,7 +830,7 @@ def _assert_apply_settings_accepts_external_config_snapshot(
 
 
 def _assert_mask_helper_wrappers_delegate_to_workflow(
-    qpane: QPane, image: QImage
+    qpane: CuteCanvas, image: QImage
 ) -> None:
     """Mask helper facade methods should round-trip through the workflow service."""
     service = _mask_service(qpane)
@@ -840,7 +844,7 @@ def _assert_mask_helper_wrappers_delegate_to_workflow(
 
 
 def _assert_brush_cursor_stays_responsive_with_worker_load(
-    qpane: QPane,
+    qpane: CuteCanvas,
     image: QImage,
     executor: StubExecutor,
 ) -> None:
@@ -865,13 +869,13 @@ def _assert_brush_cursor_stays_responsive_with_worker_load(
 
 def _assert_failed_mask_install_warning(monkeypatch, caplog, qapp) -> None:
     """Mask installation failures should surface their hint in the fallback warning."""
-    from qpane.masks import install as mask
+    from cutecanvas.masks import install as mask
 
     def failing_install(qpane):
         raise FeatureInstallError("Requires optional runtime")
 
     monkeypatch.setattr(mask, "install_mask_feature", failing_install)
-    qpane = QPane(features=("mask",))
+    qpane = CuteCanvas(features=("mask",))
     try:
         caplog.clear()
         with caplog.at_level(logging.WARNING, logger="qpane.fallbacks"):
@@ -885,7 +889,7 @@ def _assert_failed_mask_install_warning(monkeypatch, caplog, qapp) -> None:
 
 def _assert_mask_feature_installs_with_stub(monkeypatch, qapp) -> None:
     """Mask feature installers should register overlays and autosave managers."""
-    from qpane.masks import install as mask
+    from cutecanvas.masks import install as mask
 
     def fake_install(qpane):
         qpane.mask_controller = object()
@@ -893,7 +897,7 @@ def _assert_mask_feature_installs_with_stub(monkeypatch, qapp) -> None:
         qpane.registerOverlay("mask_stub", lambda painter, state: None)
 
     monkeypatch.setattr(mask, "install_mask_feature", fake_install)
-    qpane = QPane(features=("mask",))
+    qpane = CuteCanvas(features=("mask",))
     try:
         assert qpane.installedFeatures == ("mask",)
         assert qpane.mask_controller is not None
@@ -906,8 +910,8 @@ def _assert_mask_feature_installs_with_stub(monkeypatch, qapp) -> None:
 
 def _assert_full_feature_install_with_stubs(monkeypatch, qapp) -> None:
     """Installing mask + SAM should attach both controllers via their stubs."""
-    from qpane.masks import install as mask
-    from qpane.masks import sam_feature as sam
+    from cutecanvas.masks import install as mask
+    from cutecanvas.masks import sam_feature as sam
 
     def mask_install(qpane):
         qpane.mask_controller = object()
@@ -918,7 +922,7 @@ def _assert_full_feature_install_with_stubs(monkeypatch, qapp) -> None:
 
     monkeypatch.setattr(mask, "install_mask_feature", mask_install)
     monkeypatch.setattr(sam, "install_sam_feature", sam_install)
-    qpane = QPane(features=("mask", "sam"))
+    qpane = CuteCanvas(features=("mask", "sam"))
     try:
         assert set(qpane.installedFeatures) == {"mask", "sam"}
         assert qpane.samManager() is not None

@@ -1,28 +1,35 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Stable lower-bound performance guards for selected-pixel translation."""
 
 from __future__ import annotations
 
 import uuid
-from statistics import median
 
 import numpy as np
+from cutecanvas.coverage import CoverageAsset, CoverageSnapshot, CoverageSurface
+from cutecanvas.masks.mask import MaskLayer
+from cutecanvas.masks.pixel_translation import MaskPixelTranslator
+from cutecanvas.raster.color_surface import ColorRasterSurface
+from cutecanvas.raster.pixel_translation import ColorPixelTranslator
+from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtGui import QColor, QImage
+from qpane.scene.raster import RasterBounds
 
-from qpane.coverage import CoverageSnapshot, CoverageSurface
-from qpane.masks.mask import MaskLayer
-from qpane.masks.pixel_translation import MaskPixelTranslator
-from qpane.raster.color_surface import ColorRasterSurface
-from qpane.raster.pixel_translation import ColorPixelTranslator
-from qpane.scene.raster import RasterBounds, RasterExtentPolicy
-from tests.harness.timing import interaction_clock, stable_latency_samples
+from tests.harness.timing import average_interaction_latency_ms
 
 _RGBA_MEDIAN_BUDGET_MS = 50.0
 _MASK_MEDIAN_BUDGET_MS = 15.0
@@ -42,36 +49,54 @@ def test_one_megapixel_hard_translation_stays_below_commit_budgets() -> None:
     selection = _large_hard_selection()
     image = QImage(1200, 1000, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(30, 120, 210, 255))
-    color_surface = ColorRasterSurface(image)
+    repetitions = 8
+    color_surfaces = tuple(ColorRasterSurface(image.copy()) for _ in range(repetitions))
     color_translator = ColorPixelTranslator()
-    mask = MaskLayer(
-        uuid.uuid4(),
-        CoverageSurface(np.full((1000, 1200), 255, dtype=np.uint8)),
+    masks = tuple(
+        MaskLayer(
+            mask_id,
+            CoverageAsset(
+                mask_id,
+                CoverageSurface(np.full((1000, 1200), 255, dtype=np.uint8)),
+            ),
+        )
+        for mask_id in (uuid.uuid4() for _ in range(repetitions))
     )
     mask_translator = MaskPixelTranslator()
-    color_ms: list[float] = []
-    mask_ms: list[float] = []
+    color_sources = iter(color_surfaces)
+    mask_sources = iter(masks)
+    color_transitions = []
+    mask_transitions = []
 
-    for _sample in range(8):
-        started = interaction_clock()
+    def move_color() -> None:
+        """Exercise one RGBA translation on an independent source."""
+        color_surface = next(color_sources)
         color_transition = color_translator.move(color_surface, selection, 200, 0)
-        color_ms.append((interaction_clock() - started) * 1000.0)
         assert color_transition is not None
         assert not color_transition.before_pixels.flags.writeable
         assert not color_transition.after_pixels.flags.writeable
-        assert color_translator.restore(
-            color_surface,
-            color_transition,
-            use_after=False,
-        )
+        color_transitions.append((color_surface, color_transition))
 
-        started = interaction_clock()
+    def move_mask() -> None:
+        """Exercise one mask translation on an independent source."""
+        mask = next(mask_sources)
         mask_transition = mask_translator.move(mask, selection, 200, 0)
-        mask_ms.append((interaction_clock() - started) * 1000.0)
         assert mask_transition is not None
         assert not mask_transition.before_pixels.flags.writeable
         assert not mask_transition.after_pixels.flags.writeable
-        assert mask_translator.restore(mask, mask_transition, use_after=False)
+        mask_transitions.append((mask, mask_transition))
 
-    assert median(stable_latency_samples(color_ms)) < _RGBA_MEDIAN_BUDGET_MS
-    assert median(stable_latency_samples(mask_ms)) < _MASK_MEDIAN_BUDGET_MS
+    color_ms = average_interaction_latency_ms(
+        move_color,
+        repetitions=repetitions,
+    )
+    mask_ms = average_interaction_latency_ms(
+        move_mask,
+        repetitions=repetitions,
+    )
+    assert color_ms < _RGBA_MEDIAN_BUDGET_MS
+    assert mask_ms < _MASK_MEDIAN_BUDGET_MS
+    for color_surface, transition in color_transitions:
+        assert color_translator.restore(color_surface, transition, use_after=False)
+    for mask, transition in mask_transitions:
+        assert mask_translator.restore(mask, transition, use_after=False)

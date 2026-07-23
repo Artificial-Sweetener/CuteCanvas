@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,10 +20,9 @@ import types
 import uuid
 
 import pytest
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QEnterEvent, QImage, QKeyEvent, QWheelEvent
-
-from qpane import QPane
 
 
 def _cleanup_qpane(qpane, qapp):
@@ -43,7 +42,7 @@ def _make_images(colors):
 def _load_images(qpane, colors):
     image_ids = [uuid.uuid4() for _ in colors]
     images = _make_images(colors)
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         images, paths=[None] * len(images), ids=image_ids
     )
     qpane.setImagesByID(image_map, image_ids[0])
@@ -55,7 +54,7 @@ def _load_images(qpane, colors):
     [(Qt.Key_Alt, "alt_key_held"), (Qt.Key_Shift, "shift_key_held")],
 )
 def test_modifier_keys_toggle_internal_state(qapp, key, attr):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(64, 64)
     _load_images(qpane, [Qt.white])
     try:
@@ -70,7 +69,7 @@ def test_modifier_keys_toggle_internal_state(qapp, key, attr):
 
 
 def test_wheel_event_routes_to_tool_manager(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(64, 64)
     _load_images(qpane, [Qt.white])
     try:
@@ -103,7 +102,7 @@ def test_wheel_event_routes_to_tool_manager(qapp, monkeypatch):
 
 
 def test_enter_and_leave_events_delegate_to_tool_manager(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(64, 64)
     _load_images(qpane, [Qt.white])
     try:
@@ -135,22 +134,22 @@ def test_enter_and_leave_events_delegate_to_tool_manager(qapp, monkeypatch):
 
 def test_control_mode_selected_before_show_is_preserved(qapp) -> None:
     """An explicit host selection should win over first-show initialization."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(64, 64)
     _load_images(qpane, [Qt.white])
     try:
-        qpane.setControlMode(QPane.CONTROL_MODE_CURSOR)
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_CURSOR)
 
         qpane.show()
         qapp.processEvents()
 
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_CURSOR
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_CURSOR
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
 def test_set_current_image_id_suspends_overlays(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(64, 64)
     image_ids = _load_images(qpane, [Qt.white, Qt.black])
     try:
@@ -183,7 +182,7 @@ def test_set_current_image_id_suspends_overlays(qapp, monkeypatch):
 
 
 def test_blank_forwards_to_delegate(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(64, 64)
     _load_images(qpane, [Qt.white])
     try:
@@ -200,7 +199,7 @@ def test_blank_forwards_to_delegate(qapp, monkeypatch):
 
 
 def test_resume_helpers_forward_to_delegate(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         calls: dict[str, int] = {"resume": 0, "resume_update": 0, "maybe": 0}
 

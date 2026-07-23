@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,7 +22,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from qpane import (
+from cutecanvas import (
     CacheMode,
     Config,
     DiagnosticsDomain,
@@ -181,7 +181,7 @@ VIEWER_CACHE_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="core",
     ),
     FieldSpec(
-        path="cache.weights.masks",
+        path="cache.weights.extensions.mask_overlays",
         kind="spin",
         minimum=0,
         maximum=100,
@@ -192,7 +192,7 @@ VIEWER_CACHE_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="mask",
     ),
     FieldSpec(
-        path="cache.weights.predictors",
+        path="cache.weights.extensions.models",
         kind="spin",
         minimum=0,
         maximum=100,
@@ -227,7 +227,7 @@ VIEWER_CACHE_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="core",
     ),
     FieldSpec(
-        path="cache.masks.mb",
+        path="cache.extensions.mask_overlays.mb",
         kind="spin",
         minimum=-1,
         maximum=8192,
@@ -239,7 +239,7 @@ VIEWER_CACHE_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="mask",
     ),
     FieldSpec(
-        path="cache.predictors.mb",
+        path="cache.extensions.models.mb",
         kind="spin",
         minimum=-1,
         maximum=8192,
@@ -286,7 +286,7 @@ VIEWER_PREFETCH_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="core",
     ),
     FieldSpec(
-        path="cache.prefetch.masks",
+        path="cache.prefetch.extensions.scene_sources",
         kind="spin",
         minimum=-1,
         maximum=8,
@@ -297,7 +297,7 @@ VIEWER_PREFETCH_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="mask",
     ),
     FieldSpec(
-        path="cache.prefetch.predictors",
+        path="cache.prefetch.extensions.source_warmup",
         kind="spin",
         minimum=-1,
         maximum=8,

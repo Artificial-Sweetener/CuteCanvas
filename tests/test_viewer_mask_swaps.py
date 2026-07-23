@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -25,13 +25,13 @@ from contextlib import contextmanager
 from statistics import mean
 
 import pytest
+from cutecanvas import CuteCanvas
+from cutecanvas.masks.mask import MaskAssetStore
+from cutecanvas.masks.mask_controller import MaskController
+from cutecanvas.masks.mask_service import MaskService
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage
 
-from qpane import QPane
-from qpane.masks.mask import MaskAssetStore
-from qpane.masks.mask_controller import MaskController
-from qpane.masks.mask_service import MaskService
 from tests.helpers.executor_stubs import StubExecutor
 
 WARM_SWAP_THRESHOLD_MS = 120.0
@@ -57,7 +57,7 @@ def _drain_executor(executor: StubExecutor) -> None:
 
 
 def _measure_swap(
-    qpane: QPane,
+    qpane: CuteCanvas,
     image_id: uuid.UUID,
     *,
     qapp,
@@ -77,15 +77,15 @@ def _measure_swap(
 @contextmanager
 def _mask_swap_environment(
     qapp, monkeypatch, *, mask_presence: MaskPresence
-) -> Iterator[tuple[QPane, StubExecutor, tuple[uuid.UUID, uuid.UUID]]]:
+) -> Iterator[tuple[CuteCanvas, StubExecutor, tuple[uuid.UUID, uuid.UUID]]]:
     """Yield a qpane and executor configured according to ``mask_presence``."""
-    from qpane.masks import install as mask
+    from cutecanvas.masks import install as mask
 
     executor = StubExecutor()
     manager_box: dict[str, MaskAssetStore] = {}
     controller_box: dict[str, MaskController] = {}
 
-    def install_mask_feature(qpane: QPane) -> None:
+    def install_mask_feature(qpane: CuteCanvas) -> None:
         mask_manager = MaskAssetStore(undo_limit=qpane.settings.mask_undo_limit)
         controller = MaskController(
             mask_manager,
@@ -114,7 +114,7 @@ def _mask_swap_environment(
         controller_box["controller"] = controller
 
     monkeypatch.setattr(mask, "install_mask_feature", install_mask_feature)
-    qpane = QPane(features=("mask",), task_executor=executor)
+    qpane = CuteCanvas(features=("mask",), task_executor=executor)
     assert qpane.swapDelegate is not None
     qpane.resize(512, 512)
     try:
@@ -125,7 +125,7 @@ def _mask_swap_environment(
         second_id = uuid.uuid4()
         first_image = _make_image(_IMAGE_EDGE_PX, _IMAGE_EDGE_PX, Qt.white)
         second_image = _make_image(_IMAGE_EDGE_PX, _IMAGE_EDGE_PX, Qt.black)
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             images=[first_image, second_image],
             paths=[None, None],
             ids=[first_id, second_id],
@@ -141,7 +141,7 @@ def _mask_swap_environment(
                 mask_id = manager.create_mask(image)
                 layer = manager.get_layer(mask_id)
                 assert layer is not None
-                layer.surface.fill(fill_value)
+                layer.coverage.raster.fill(fill_value)
                 assert mask_service.layers.attach(
                     mask_id,
                     image_id,
@@ -177,7 +177,7 @@ def _mask_swap_environment(
 @pytest.fixture
 def mask_swap_environment(
     qapp, monkeypatch, request
-) -> Iterator[tuple[QPane, StubExecutor, tuple[uuid.UUID, uuid.UUID]]]:
+) -> Iterator[tuple[CuteCanvas, StubExecutor, tuple[uuid.UUID, uuid.UUID]]]:
     """Provide warmed overlays for the requested mask presence setup."""
     mask_presence = getattr(request, "param", (True, True))
     if len(mask_presence) != 2:
@@ -191,7 +191,7 @@ def mask_swap_environment(
 
 
 def _exercise_and_assert_swaps(
-    qpane: QPane,
+    qpane: CuteCanvas,
     executor: StubExecutor,
     image_ids: tuple[uuid.UUID, uuid.UUID],
     *,

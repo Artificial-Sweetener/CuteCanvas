@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Run bounded or soaking mounted-QPane abuse campaigns."""
+"""Run bounded or soaking mounted-CuteCanvas abuse campaigns."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def run_trace(
     image_size: int,
     artifact_directory: Path | None,
 ) -> AbuseReport:
-    """Execute one action trace against a fresh production QPane."""
+    """Execute one action trace against a fresh production CuteCanvas."""
     harness = MountedQPaneHarness(
         qapp,
         image_size=QSize(image_size, image_size),

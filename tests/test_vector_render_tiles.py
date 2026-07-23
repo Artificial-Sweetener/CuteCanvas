@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Correctness and lifecycle tests for asynchronous vector refinement."""
 
 from __future__ import annotations
@@ -14,15 +21,20 @@ import uuid
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
+from qpane.rendering.render_tile_cache import RenderTileCache
+from qpane.rendering.render_tile_geometry import visible_tile_requests
+from qpane.rendering.render_tile_types import RenderRefinement
+from qpane.rendering.render_tiles import RenderTileWorkCoordinator
 from qpane.scene.affine import LayerTransform
 from qpane.scene.raster import RasterBounds
 from qpane.vector.drawing import draw_vector_document
 from qpane.vector.model import VectorDocument, VectorObject
 from qpane.vector.public import VectorObjectKind, VectorShapeKind, VectorStyle
-from qpane.vector.render_tiles import VectorRenderWorkCoordinator, VectorTileCache
+from qpane.vector.tile_source import VectorRenderTileSource
+
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
 
@@ -30,14 +42,14 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
     """Tile bleed and source projection must reproduce direct raster pixels."""
     document = _document(12)
     executor = StubExecutor(name="vector-tiles")
-    cache = VectorTileCache(8 * 1024 * 1024)
+    cache = RenderTileCache(8 * 1024 * 1024)
     ready_count = 0
 
     def _ready() -> None:
         nonlocal ready_count
         ready_count += 1
 
-    coordinator = VectorRenderWorkCoordinator(
+    coordinator = RenderTileWorkCoordinator(
         executor=executor,
         cache=cache,
         ready=_ready,
@@ -45,25 +57,24 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
     transform = QTransform.fromScale(4.0, 4.0)
     try:
         assert coordinator.request(
-            document=document,
-            revision_key=(document.revision, 0),
+            source=VectorRenderTileSource(document, (document.revision, 0)),
             source_to_panel=transform,
             panel_rect=QRectF(0.0, 0.0, 1024.0, 768.0),
             device_pixel_ratio=1.0,
         ).pending
-        assert coordinator.pending_count == 1
-        executor.run_category("vector_render")
+        assert coordinator.pending_count == 3
+        executor.run_category("render_refinement")
         qapp.processEvents()
+        _settle_refinement(qapp)
         refinement = coordinator.request(
-            document=document,
-            revision_key=(document.revision, 0),
+            source=VectorRenderTileSource(document, (document.revision, 0)),
             source_to_panel=transform,
             panel_rect=QRectF(0.0, 0.0, 1024.0, 768.0),
             device_pixel_ratio=1.0,
         )
         assert refinement.products is not None
         products = refinement.products
-        assert ready_count == 1
+        assert ready_count == 3
         tiled = _transparent_image(1024, 768)
         painter = QPainter(tiled)
         try:
@@ -92,14 +103,14 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
 def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> None:
     """Superseded work cannot publish and cache pressure must evict exactly."""
     executor = StubExecutor(name="vector-stale")
-    cache = VectorTileCache(2 * 512 * 512 * 4)
+    cache = RenderTileCache(2 * 512 * 512 * 4)
     ready_count = 0
 
     def _ready() -> None:
         nonlocal ready_count
         ready_count += 1
 
-    coordinator = VectorRenderWorkCoordinator(
+    coordinator = RenderTileWorkCoordinator(
         executor=executor,
         cache=cache,
         ready=_ready,
@@ -122,27 +133,25 @@ def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> N
     }
     try:
         assert coordinator.request(
-            document=first,
-            revision_key=first.revision,
+            source=VectorRenderTileSource(first, first.revision),
             **request_args,
         ).pending
         assert coordinator.request(
-            document=changed,
-            revision_key=changed.revision,
+            source=VectorRenderTileSource(changed, changed.revision),
             **request_args,
         ).pending
-        assert len(executor.cancelled) == 1
-        executor.run_category("vector_render")
+        assert len(executor.cancelled) == 2
+        executor.run_category("render_refinement")
         qapp.processEvents()
+        _settle_refinement(qapp)
         refinement = coordinator.request(
-            document=changed,
-            revision_key=changed.revision,
+            source=VectorRenderTileSource(changed, changed.revision),
             **request_args,
         )
         assert refinement.products is not None
         products = refinement.products
         assert all(product.key.revision_key == changed.revision for product in products)
-        assert ready_count == 1
+        assert ready_count == 3
         assert cache.usage_bytes <= 2 * 512 * 512 * 4
     finally:
         coordinator.shutdown()
@@ -150,23 +159,22 @@ def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> N
 
 def test_rejection_and_shutdown_remain_bounded(qapp: QApplication) -> None:
     """Rejected and teardown work must not retry-loop or publish."""
-    executor = RejectingStubExecutor(reject_counts={"vector_render": 1})
-    cache = VectorTileCache()
+    executor = RejectingStubExecutor(reject_counts={"render_refinement": 1})
+    cache = RenderTileCache()
     ready_count = 0
 
     def _ready() -> None:
         nonlocal ready_count
         ready_count += 1
 
-    coordinator = VectorRenderWorkCoordinator(
+    coordinator = RenderTileWorkCoordinator(
         executor=executor,
         cache=cache,
         ready=_ready,
     )
     document = _document(4)
     args = {
-        "document": document,
-        "revision_key": document.revision,
+        "source": VectorRenderTileSource(document, document.revision),
         "source_to_panel": QTransform(),
         "panel_rect": QRectF(0.0, 0.0, 256.0, 192.0),
         "device_pixel_ratio": 1.0,
@@ -180,15 +188,331 @@ def test_rejection_and_shutdown_remain_bounded(qapp: QApplication) -> None:
     assert ready_count == 0
     assert coordinator.pending_count == 0
 
-    disabled = VectorRenderWorkCoordinator(
+    disabled = RenderTileWorkCoordinator(
         executor=executor,
-        cache=VectorTileCache(0),
+        cache=RenderTileCache(0),
         ready=_ready,
     )
     unavailable = disabled.request(**args)
     assert unavailable.products is None
     assert not unavailable.pending
     disabled.shutdown()
+
+
+def test_fallback_is_atomic_and_limited_to_compatible_source_geometry(
+    qapp: QApplication,
+) -> None:
+    """Revisions may reuse settled tiles only when their coordinate space matches."""
+    executor = StubExecutor(name="render-fallback")
+    cache = RenderTileCache(8 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        executor=executor,
+        cache=cache,
+        ready=lambda: None,
+    )
+    original = _document(6)
+    request_args = {
+        "source_to_panel": QTransform(),
+        "panel_rect": QRectF(0.0, 0.0, 256.0, 192.0),
+        "device_pixel_ratio": 1.0,
+    }
+    try:
+        assert coordinator.request(
+            source=VectorRenderTileSource(original, 0),
+            **request_args,
+        ).pending
+        executor.run_category("render_refinement")
+        qapp.processEvents()
+        _settle_refinement(qapp)
+        exact = coordinator.request(
+            source=VectorRenderTileSource(original, 0),
+            **request_args,
+        )
+        assert exact.exact and exact.products
+
+        compatible = coordinator.request(
+            source=VectorRenderTileSource(original, 1),
+            **request_args,
+        )
+        assert compatible.pending and not compatible.exact
+        assert compatible.products == exact.products
+
+        resized = VectorDocument(
+            original.vector_id,
+            RasterBounds(-20, 0, 276, 192),
+            original.objects,
+            revision=2,
+        )
+        incompatible = coordinator.request(
+            source=VectorRenderTileSource(resized, 2),
+            **request_args,
+        )
+        assert incompatible.pending and incompatible.products is None
+    finally:
+        coordinator.shutdown()
+
+
+def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
+    qapp: QApplication,
+) -> None:
+    """A settled view must already contain the next tiles exposed by panning."""
+    executor = StubExecutor(name="vector-pan-guard")
+    cache = RenderTileCache(24 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        executor=executor,
+        cache=cache,
+        ready=lambda: None,
+    )
+    document = VectorDocument(
+        uuid.uuid4(),
+        RasterBounds(0, 0, 4096, 4096),
+        _document(12).objects,
+    )
+    panel_rect = QRectF(0.0, 0.0, 1024.0, 768.0)
+
+    def request_at(panel_x: float) -> RenderRefinement:
+        """Request one high-zoom viewport translated by ``panel_x``."""
+        return coordinator.request(
+            source=VectorRenderTileSource(document, document.revision),
+            source_to_panel=QTransform(4.0, 0.0, 0.0, 4.0, panel_x, 0.0),
+            panel_rect=panel_rect,
+            device_pixel_ratio=1.0,
+        )
+
+    try:
+        initial = request_at(0.0)
+        assert initial.pending and initial.products is None
+        initial_tile_count = coordinator.pending_tile_count
+        assert initial_tile_count > 1
+        executor.run_category("render_refinement")
+        qapp.processEvents()
+        _settle_refinement(qapp)
+        assert request_at(0.0).exact
+
+        first_exposed = request_at(-520.0)
+        assert first_exposed.exact
+        assert first_exposed.products
+
+        second_exposed = request_at(-1040.0)
+        assert second_exposed.exact
+        assert second_exposed.products
+        assert coordinator.pending_count == 1
+        assert 0 < coordinator.pending_tile_count < initial_tile_count
+        assert not executor.cancelled
+
+        executor.run_category("render_refinement")
+        qapp.processEvents()
+        third_exposed = request_at(-1560.0)
+        assert third_exposed.exact
+        assert third_exposed.products
+        assert not executor.cancelled
+    finally:
+        coordinator.shutdown()
+
+
+def test_overview_fallback_covers_an_arbitrary_high_zoom_pan(
+    qapp: QApplication,
+) -> None:
+    """A distant viewport must retain coarse complete content while refining."""
+    executor = StubExecutor(name="vector-pan-overview")
+    cache = RenderTileCache(24 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        executor=executor,
+        cache=cache,
+        ready=lambda: None,
+    )
+    document = VectorDocument(
+        uuid.uuid4(),
+        RasterBounds(0, 0, 4096, 4096),
+        _document(12).objects,
+    )
+    panel_rect = QRectF(0.0, 0.0, 1024.0, 768.0)
+    initial_transform = QTransform(4.0, 0.0, 0.0, 4.0, 0.0, 0.0)
+    distant_transform = QTransform(4.0, 0.0, 0.0, 4.0, -5000.0, -5000.0)
+    source = VectorRenderTileSource(document, document.revision)
+    try:
+        assert coordinator.request(
+            source=source,
+            source_to_panel=initial_transform,
+            panel_rect=panel_rect,
+            device_pixel_ratio=1.0,
+        ).pending
+        executor.run_category("render_refinement")
+        qapp.processEvents()
+
+        distant = coordinator.request(
+            source=source,
+            source_to_panel=distant_transform,
+            panel_rect=panel_rect,
+            device_pixel_ratio=1.0,
+        )
+        assert distant.pending and not distant.exact
+        assert distant.products
+        visible = visible_tile_requests(
+            source_kind=source.source_kind,
+            source_id=source.source_id,
+            revision_key=source.revision_key,
+            fallback_key=source.fallback_key,
+            bounds=source.bounds,
+            source_to_panel=distant_transform,
+            panel_rect=panel_rect,
+            device_pixel_ratio=1.0,
+            budget_bytes=cache.budget_bytes,
+        )
+        assert visible
+        assert all(
+            any(
+                product.source_rect.contains(request.source_rect)
+                for product in distant.products
+            )
+            for request in visible
+        )
+        assert max(product.key.scale for product in distant.products) < 4.0
+    finally:
+        coordinator.shutdown()
+
+
+def test_pan_storm_cannot_cancel_whole_source_continuity_work(
+    qapp: QApplication,
+) -> None:
+    """Viewport churn must replace detail work without starving stable coverage."""
+    executor = StubExecutor(name="vector-continuity-starvation")
+    cache = RenderTileCache(24 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        executor=executor,
+        cache=cache,
+        ready=lambda: None,
+    )
+    document = VectorDocument(
+        uuid.uuid4(),
+        RasterBounds(0, 0, 4096, 4096),
+        _document(12).objects,
+    )
+    source = VectorRenderTileSource(document, document.revision)
+    panel_rect = QRectF(0.0, 0.0, 1024.0, 768.0)
+
+    def request_at(panel_x: float) -> RenderRefinement:
+        """Request one translated high-density viewport."""
+        return coordinator.request(
+            source=source,
+            source_to_panel=QTransform(4.0, 0.0, 0.0, 4.0, panel_x, 0.0),
+            panel_rect=panel_rect,
+            device_pixel_ratio=1.0,
+        )
+
+    try:
+        assert request_at(0.0).pending
+        for panel_x in range(-400, -6401, -400):
+            assert request_at(float(panel_x)).pending
+        assert coordinator.pending_count == 3
+        assert len(executor.cancelled) < 16
+
+        executor.run_category("render_refinement")
+        qapp.processEvents()
+        distant = request_at(-6400.0)
+        assert distant.products
+        assert not distant.exact
+        assert max(product.key.scale for product in distant.products) < 1.0
+    finally:
+        coordinator.shutdown()
+
+
+def test_pan_storm_keeps_one_fallback_density_until_viewport_settles(
+    qapp: QApplication,
+) -> None:
+    """Cached detail and overview products must not alternate during motion."""
+    executor = StubExecutor(name="vector-continuity-density")
+    cache = RenderTileCache(24 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        executor=executor,
+        cache=cache,
+        ready=lambda: None,
+    )
+    document = VectorDocument(
+        uuid.uuid4(),
+        RasterBounds(0, 0, 4096, 4096),
+        _document(12).objects,
+    )
+    source = VectorRenderTileSource(document, document.revision)
+    panel_rect = QRectF(0.0, 0.0, 1024.0, 768.0)
+
+    def request_at(panel_x: float) -> RenderRefinement:
+        """Request one translated high-density viewport."""
+        return coordinator.request(
+            source=source,
+            source_to_panel=QTransform(4.0, 0.0, 0.0, 4.0, panel_x, 0.0),
+            panel_rect=panel_rect,
+            device_pixel_ratio=1.0,
+        )
+
+    try:
+        assert request_at(0.0).pending
+        executor.run_category("render_refinement")
+        qapp.processEvents()
+        _settle_refinement(qapp)
+        exact = request_at(0.0)
+        assert exact.exact and exact.products
+        assert {product.key.scale for product in exact.products} == {4.0}
+
+        distant = request_at(-6400.0)
+        assert not distant.exact and distant.products
+        fallback_scale = {product.key.scale for product in distant.products}
+        assert max(fallback_scale) < 1.0
+
+        for panel_x in (0.0, -6400.0) * 12:
+            frame = request_at(panel_x)
+            assert not frame.exact and frame.products
+            assert {product.key.scale for product in frame.products} == fallback_scale
+
+        assert not request_at(0.0).exact
+        _settle_refinement(qapp)
+        restored = request_at(0.0)
+        assert restored.exact and restored.products
+        assert {product.key.scale for product in restored.products} == {4.0}
+    finally:
+        coordinator.shutdown()
+
+
+def test_partial_previous_view_is_never_presented_as_fallback(
+    qapp: QApplication,
+) -> None:
+    """A cache without whole-source coverage must not draw unrelated old strips."""
+    executor = StubExecutor(name="vector-non-covering-fallback")
+    cache = RenderTileCache(3 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        executor=executor,
+        cache=cache,
+        ready=lambda: None,
+    )
+    document = VectorDocument(
+        uuid.uuid4(),
+        RasterBounds(0, 0, 4096, 4096),
+        _document(12).objects,
+    )
+    source = VectorRenderTileSource(document, document.revision)
+    panel_rect = QRectF(0.0, 0.0, 1024.0, 768.0)
+
+    def request_at(panel_x: float) -> RenderRefinement:
+        """Request one translated view under a detail-only cache budget."""
+        return coordinator.request(
+            source=source,
+            source_to_panel=QTransform(4.0, 0.0, 0.0, 4.0, panel_x, 0.0),
+            panel_rect=panel_rect,
+            device_pixel_ratio=1.0,
+        )
+
+    try:
+        assert request_at(0.0).pending
+        executor.run_category("render_refinement")
+        qapp.processEvents()
+        _settle_refinement(qapp)
+        assert request_at(0.0).exact
+
+        distant = request_at(-6400.0)
+        assert distant.pending
+        assert distant.products is None
+    finally:
+        coordinator.shutdown()
 
 
 def _document(object_count: int) -> VectorDocument:
@@ -218,6 +542,12 @@ def _document(object_count: int) -> VectorDocument:
         RasterBounds(0, 0, 256, 192),
         objects,
     )
+
+
+def _settle_refinement(qapp: QApplication) -> None:
+    """Cross the production idle boundary before asserting exact promotion."""
+    QTest.qWait(100)
+    qapp.processEvents()
 
 
 def _transparent_image(width: int, height: int) -> QImage:

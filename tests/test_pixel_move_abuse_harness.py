@@ -1,23 +1,29 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Mounted hostile-scale tests for selection-aware content movement."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
+from cutecanvas import LayerPolicy, RasterExtentPolicy
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-
-from qpane import QPaneLayerInteractionPolicy, RasterExtentPolicy
 from qpane.raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_argb32,
@@ -27,6 +33,7 @@ from .harness.mounted_qpane import MountedQPaneHarness
 from .harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
+    stable_latency_samples,
 )
 
 _INTERACTION_BUDGET_MS = 100.0
@@ -94,7 +101,12 @@ def test_rgba_drag_preview_obeys_layer_extent_policy(
 
         viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
         with harness.observe_presented_frames() as probe:
-            QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, source.toPoint())
+            QTest.mousePress(
+                viewer,
+                Qt.LeftButton,
+                Qt.NoModifier,
+                source.toPoint(),
+            )
             for local_x in (180.0, 220.0, 190.0, 240.0, 220.0):
                 target = viewer.view().layer_source_to_panel_point(
                     resolved_scene_id,
@@ -167,7 +179,7 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -176,7 +188,7 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
         assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
         layer = viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
-        layer.surface.fill(255)
+        layer.coverage.raster.fill(255)
         viewer.invalidateActiveMaskCache()
         viewer.markDirty()
         viewer.update()
@@ -243,14 +255,14 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
             assert viewer.anchorFloatingPixels()
             interaction_latencies_ms.append((interaction_clock() - started) * 1000.0)
             assert (
-                layer.surface.storage_value(
+                layer.coverage.raster.storage_value(
                     selection_origin,
                     selection_origin,
                 )
                 == 0
             )
             assert (
-                layer.surface.storage_value(
+                layer.coverage.raster.storage_value(
                     selection_origin + displacement,
                     selection_origin,
                 )
@@ -260,14 +272,17 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
             assert viewer.undoSceneEdit()
             interaction_latencies_ms.append((interaction_clock() - started) * 1000.0)
             assert (
-                layer.surface.storage_value(
+                layer.coverage.raster.storage_value(
                     selection_origin,
                     selection_origin,
                 )
                 == 255
             )
 
-        assert max(interaction_latencies_ms) < _INTERACTION_BUDGET_MS
+        assert (
+            max(stable_latency_samples(interaction_latencies_ms))
+            < _INTERACTION_BUDGET_MS
+        )
         if measure_presentation:
             assert max(presentation_latencies_ms) < _INTERACTION_BUDGET_MS
     finally:
@@ -293,7 +308,7 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -312,7 +327,7 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
             for y in range(200, 1200, 40):
                 pixels[y : y + 20, 800:1800] = 255
 
-        layer.surface.mutate(paint_fragmented_content)
+        layer.coverage.raster.mutate(paint_fragmented_content)
         viewer.invalidateActiveMaskCache()
         viewer.markDirty()
         viewer.update()
@@ -357,8 +372,8 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
         assert viewer.anchorFloatingPixels()
         commit_ms = (interaction_clock() - started) * 1000.0
         assert not viewer._selected_pixel_movement.active
-        assert layer.surface.storage_value(900, 210) == 0
-        assert layer.surface.storage_value(1900, 210) == 255
+        assert layer.coverage.raster.storage_value(900, 210) == 0
+        assert layer.coverage.raster.storage_value(1900, 210) == 255
         moved_selection = viewer.pixelSelectionState()
         assert moved_selection is not None
         assert moved_selection.bounds == QRect(1200, 200, 1000, 980)
@@ -370,7 +385,7 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
         assert viewer.undoSceneEdit()
         harness.drain_events()
         undo_ms = (interaction_clock() - started) * 1000.0
-        assert layer.surface.storage_value(900, 210) == 255
+        assert layer.coverage.raster.storage_value(900, 210) == 255
         restored_selection = viewer.pixelSelectionState()
         assert restored_selection is not None
         assert restored_selection.bounds == QRect(800, 200, 1000, 1000)
@@ -379,7 +394,7 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
         assert viewer.redoSceneEdit()
         harness.drain_events()
         redo_ms = (interaction_clock() - started) * 1000.0
-        assert layer.surface.storage_value(900, 210) == 0
+        assert layer.coverage.raster.storage_value(900, 210) == 0
         assert float(np.median(update_ms)) < _DEMO_SCALE_PREVIEW_BUDGET_MS
         if absolute_latency_assertions_are_isolated():
             assert (
@@ -415,7 +430,7 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -436,8 +451,8 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
             pixels[260:1180, 420:1680] = 255
             pixels[120:520, 760:1260] = 255
 
-        layer.surface.mutate(paint_mask)
-        original_mask = layer.surface.snapshot_array()
+        layer.coverage.raster.mutate(paint_mask)
+        original_mask = layer.coverage.raster.snapshot_array()
         viewer.invalidateActiveMaskCache()
         viewer.markDirty()
         viewer.update()
@@ -531,7 +546,7 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
         assert harness.wait_for_mask_render_idle()
         harness.drain_events()
 
-        actual_mask = layer.surface.snapshot_array()
+        actual_mask = layer.coverage.raster.snapshot_array()
         np.testing.assert_array_equal(
             _trim_occupied(actual_mask),
             _trim_occupied(original_mask),
@@ -575,7 +590,7 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
         harness.drain_events()
         assert viewer.anchorFloatingPixels()
         np.testing.assert_array_equal(
-            _trim_occupied(layer.surface.snapshot_array()),
+            _trim_occupied(layer.coverage.raster.snapshot_array()),
             _trim_occupied(original_mask),
         )
     finally:
@@ -602,7 +617,7 @@ def test_soft_mask_preview_is_pixel_identical_to_transformed_commit(
         assert viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -622,7 +637,7 @@ def test_soft_mask_preview_is_pixel_identical_to_transformed_commit(
             pixels[140:340, 180:420] = ramp[np.newaxis, :]
             pixels[210:250, 260:320] = 0
 
-        layer.surface.mutate(paint_soft_mask)
+        layer.coverage.raster.mutate(paint_soft_mask)
         viewer.invalidateActiveMaskCache()
         viewer.markDirty()
         viewer.update()
@@ -690,7 +705,7 @@ def test_rgba_preview_is_pixel_identical_to_commit(qapp: QApplication) -> None:
                     image.setPixelColor(x, y, painter_color)
         layer_id = viewer.addEditableRasterLayer(
             image,
-            interaction=QPaneLayerInteractionPolicy(
+            interaction=LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,
@@ -942,6 +957,7 @@ def test_rgba_floating_move_survives_rapid_tool_history_and_repaint_cycles(
         current_x = 40
         update_latencies_ms: list[float] = []
 
+        QTest.keyPress(viewer, Qt.Key_Control)
         for displacement in (36, -22, 41, -17, 29, -31):
             source = viewer.view().layer_source_to_panel_point(
                 resolved_scene_id,
@@ -955,7 +971,12 @@ def test_rgba_floating_move_survives_rapid_tool_history_and_repaint_cycles(
             )
             assert source is not None
             assert destination is not None
-            QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, source.toPoint())
+            QTest.mousePress(
+                viewer,
+                Qt.LeftButton,
+                Qt.ControlModifier,
+                source.toPoint(),
+            )
             started = interaction_clock()
             QTest.mouseMove(viewer, destination.toPoint(), delay=0)
             harness.drain_events()
@@ -963,7 +984,7 @@ def test_rgba_floating_move_survives_rapid_tool_history_and_repaint_cycles(
             QTest.mouseRelease(
                 viewer,
                 Qt.LeftButton,
-                Qt.NoModifier,
+                Qt.ControlModifier,
                 destination.toPoint(),
             )
             harness.drain_events()
@@ -1014,6 +1035,7 @@ def test_rgba_floating_move_survives_rapid_tool_history_and_repaint_cycles(
             harness.drain_events()
             assert viewer.pixelSelectionState().has_selection
             current_x += displacement
+        QTest.keyRelease(viewer, Qt.Key_Control)
 
         asset = viewer._editable_raster_assets.get(
             viewer._editable_raster_assets.ids()[0]

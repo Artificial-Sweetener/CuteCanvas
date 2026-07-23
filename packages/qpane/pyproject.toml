@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools==83.0.0", "wheel==0.47.0", "setuptools_scm==10.2.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qpane"
+dynamic = ["version"]
+description = "High-performance Qt raster and vector rendering SDK and viewer"
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [
+  { name = "Artificial Sweetener", email = "artificialsweetenerai@proton.me" }
+]
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+classifiers = [
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+  "PySide6>=6.7.3",
+  "numpy>=1.21",
+  "psutil>=5.9",
+  "typing-extensions>=4.0",
+]
+
+[project.urls]
+Homepage = "https://artificialsweetener.ai"
+Documentation = "https://github.com/Artificial-Sweetener/QPane/tree/main/packages/qpane/docs"
+Repository = "https://github.com/Artificial-Sweetener/QPane"
+Issues = "https://github.com/Artificial-Sweetener/QPane/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["qpane", "qpane.*"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+zip-safe = false
+
+[tool.setuptools.package-data]
+qpane = ["*.pyi", "py.typed"]
+
+[tool.setuptools_scm]
+root = "../.."
+fallback_version = "0.1.0"
+
+[tool.setuptools_scm.tag]
+regex = "^qpane-v(?P<version>.+)$"
+
+[tool.setuptools_scm.scm.git]
+describe_command = "git describe --dirty --tags --long --abbrev=40 --match qpane-v*[0-9]*"

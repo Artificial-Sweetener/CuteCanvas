@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -18,12 +18,11 @@
 
 import uuid
 
+from cutecanvas import Config
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks.mask import MaskAssetStore
+from cutecanvas.masks.mask_controller import MaskController
 from PySide6.QtCore import QRect
-
-from qpane import Config
-from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.mask import MaskAssetStore
-from qpane.masks.mask_controller import MaskController
 
 
 def test_mask_updated_accepts_uuid(qapp):

@@ -1,27 +1,33 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Public and domain integration tests for semantic vector layers."""
 
 from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QPointF, QRectF, QSize
-from PySide6.QtGui import QColor, QTransform
-
-from qpane import (
+from cutecanvas import (
     VectorFillRule,
     VectorPathCommand,
     VectorPathCommandKind,
     VectorShapeKind,
     VectorStyle,
 )
+from PySide6.QtCore import QPointF, QRectF, QSize
+from PySide6.QtGui import QColor, QTransform
 from qpane.scene.render_plan import RasterLayerRenderItem, VectorLayerRenderItem
 
 pytest_plugins = ("tests.test_mask_workflows",)
@@ -74,6 +80,33 @@ def test_vector_layer_renders_semantic_shapes_and_replays_history(
     assert qpane.redoSceneEdit()
     redone = qpane.vectorDocumentState(scene.scene_id, layer_id)
     assert redone is not None and redone.objects[0].object_id == object_id
+
+
+def test_vector_layer_content_bounds_include_visible_stroke(qpane_with_mask) -> None:
+    """Manipulation geometry must match the pixels painted by a vector layer."""
+    qpane, _manager, _image_id = qpane_with_mask
+    scene = qpane.currentScene()
+    assert scene is not None
+    layer_id = qpane.createVectorLayer(QSize(128, 96), label="Stroked bounds")
+    assert layer_id is not None
+    assert qpane.addVectorShape(
+        scene.scene_id,
+        layer_id,
+        VectorShapeKind.RECTANGLE,
+        QRectF(10.0, 12.0, 60.0, 40.0),
+        VectorStyle(
+            fill=QColor("white"),
+            stroke=QColor("blue"),
+            stroke_width=8.0,
+        ),
+    )
+
+    assert qpane.layerLocalBounds(scene.scene_id, layer_id) == QRectF(
+        6.0,
+        8.0,
+        68.0,
+        48.0,
+    )
 
 
 def test_vector_path_selection_and_updates_remain_independent(

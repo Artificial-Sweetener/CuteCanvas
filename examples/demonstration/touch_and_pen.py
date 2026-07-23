@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,18 +14,17 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Build a mask editor configured for professional touch and active-pen input."""
+"""Build a small mask editor configured for touch and active-pen input."""
 
 from __future__ import annotations
 
 import uuid
 
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage
 
-from qpane import Config, QPane
 
-
-def build_touch_mask_editor(image: QImage) -> QPane:
+def build_touch_mask_editor(image: QImage) -> CuteCanvas:
     """Create a viewer where a finger or active pen can edit a blank mask."""
     if image.isNull():
         raise ValueError("image must contain pixels")
@@ -40,15 +39,15 @@ def build_touch_mask_editor(image: QImage) -> QPane:
         palm_rejection_ms=800,
         touch_inertia_enabled=True,
     )
-    viewer = QPane(config=config, features=("mask",))
+    viewer = CuteCanvas(config=config, features=("mask",))
     image_id = uuid.uuid4()
     viewer.setImagesByID(
-        QPane.imageMapFromLists([image], ids=[image_id]),
+        CuteCanvas.imageMapFromLists([image], ids=[image_id]),
         image_id,
     )
     mask_id = viewer.createBlankMask(image.size())
     if mask_id is None:
         raise RuntimeError("mask support is unavailable")
     viewer.setActiveMaskID(mask_id)
-    viewer.setControlMode(QPane.CONTROL_MODE_DRAW_BRUSH)
+    viewer.setControlMode(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
     return viewer

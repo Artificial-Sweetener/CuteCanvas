@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -51,10 +51,11 @@ class DemoLaunchSettings:
 
 DEMO_TIERS: Mapping[str, DemoTier] = MappingProxyType(
     {
+        "qpane": DemoTier(extra=None, features="qpane", label="QPane"),
         "core": DemoTier(extra=None, features="core", label="Core"),
-        "mask": DemoTier(extra="mask", features="mask", label="Masks"),
+        "mask": DemoTier(extra=None, features="mask", label="Masks"),
         "masksam": DemoTier(
-            extra="full",
+            extra="sam",
             features="masksam",
             label="Mask+SAM",
         ),
@@ -116,17 +117,28 @@ class DemoEnvironmentManager:
         probe = self._probe_demo_import(tier)
         if probe.returncode != 0:
             details = (probe.stderr or probe.stdout).strip()
+            product = "QPane" if tier == "qpane" else "CuteCanvas"
             raise DemoEnvironmentError(
-                f"The {tier!r} demo environment cannot import QPane: {details}"
+                f"The {tier!r} demo environment cannot import {product}: {details}"
             )
 
     def launch(self, tier: str, settings: DemoLaunchSettings) -> int:
         """Run the demo as a child of its requested tier environment."""
+        if tier == "qpane":
+            return subprocess.call(
+                [
+                    str(self.python_path(tier)),
+                    "-m",
+                    "examples.qpane_demo",
+                    "--skip-bootstrap",
+                ],
+                cwd=self._project_root,
+            )
         definition = self._tier(tier)
         command = [
             str(self.python_path(tier)),
             "-m",
-            "examples.demo",
+            "examples.cutecanvas_demo",
             "--features",
             definition.features,
             "--log-level",
@@ -155,7 +167,16 @@ class DemoEnvironmentManager:
             cwd=self._project_root,
         )
         definition = self._tier(tier)
-        target = str(self._project_root)
+        qpane_target = str(self._project_root / "packages" / "qpane")
+        subprocess.run(
+            [str(python_path), "-m", "pip", "install", "-e", qpane_target],
+            check=True,
+            cwd=self._project_root,
+        )
+        if tier == "qpane":
+            self._write_fingerprint(tier)
+            return
+        target = str(self._project_root / "packages" / "cutecanvas")
         if definition.extra:
             target = f"{target}[{definition.extra}]"
         subprocess.run(
@@ -163,21 +184,21 @@ class DemoEnvironmentManager:
             check=True,
             cwd=self._project_root,
         )
-        self._fingerprint_path(tier).write_text(
-            self._required_fingerprint(tier),
-            encoding="utf-8",
-        )
+        self._write_fingerprint(tier)
 
     def _probe_demo_import(self, tier: str) -> subprocess.CompletedProcess[str]:
         """Import the same module graph used immediately after process handoff."""
+        module = (
+            "examples.qpane_demonstration.window"
+            if tier == "qpane"
+            else "examples.demonstration.demo_window"
+        )
+        symbols = "ViewerWindow" if tier == "qpane" else "ExampleOptions, ExampleWindow"
         return subprocess.run(
             [
                 str(self.python_path(tier)),
                 "-c",
-                (
-                    "from examples.demonstration.demo_window import "
-                    "ExampleOptions, ExampleWindow"
-                ),
+                (f"from {module} import {symbols}"),
             ],
             cwd=self._project_root,
             capture_output=True,
@@ -188,9 +209,26 @@ class DemoEnvironmentManager:
     def _required_fingerprint(self, tier: str) -> str:
         """Hash install metadata that can change a tier's dependencies."""
         digest = hashlib.sha256()
-        digest.update((self._project_root / "pyproject.toml").read_bytes())
+        for metadata in (
+            self._project_root / "pyproject.toml",
+            self._project_root / "packages" / "qpane" / "pyproject.toml",
+        ):
+            digest.update(metadata.read_bytes())
+        if tier != "qpane":
+            digest.update(
+                (
+                    self._project_root / "packages" / "cutecanvas" / "pyproject.toml"
+                ).read_bytes()
+            )
         digest.update(tier.encode("utf-8"))
         return digest.hexdigest()
+
+    def _write_fingerprint(self, tier: str) -> None:
+        """Record the successfully installed metadata fingerprint."""
+        self._fingerprint_path(tier).write_text(
+            self._required_fingerprint(tier),
+            encoding="utf-8",
+        )
 
     def _installed_fingerprint(self, tier: str) -> str | None:
         """Read the fingerprint associated with the current tier installation."""

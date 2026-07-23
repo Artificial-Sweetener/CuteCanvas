@@ -1,2 +1,2 @@
-# Install the viewer with all optional features and dev tooling.
--e .[dev]
+# Install both monorepo packages and the shared development toolchain.
+-r requirements-dev.txt

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from qpane.masks.delegate import MaskDelegate
+from cutecanvas.masks.delegate import MaskDelegate
 
 
 def test_update_mask_from_file_rejects_missing_inputs() -> None:

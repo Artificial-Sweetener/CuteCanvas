@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import uuid
 
+from cutecanvas import CuteCanvas
 from PySide6.QtGui import QImage, Qt
-
-from qpane import QPane
 from qpane.scene.model import LayerKind
 
 
@@ -34,8 +33,8 @@ def _solid_image() -> QImage:
 
 
 def test_qpane_does_not_register_removed_layer_domain_services(qapp) -> None:
-    """QPane should not expose removed private layer-domain services."""
-    qpane = QPane(features=())
+    """CuteCanvas should not expose removed private layer-domain services."""
+    qpane = CuteCanvas(features=())
     try:
         assert not hasattr(qpane, "adjustmentService")
         assert not hasattr(qpane, "editableRasterService")
@@ -46,11 +45,11 @@ def test_qpane_does_not_register_removed_layer_domain_services(qapp) -> None:
 
 def test_current_product_scene_resolution_omits_removed_layer_domains(qapp) -> None:
     """Current product scenes should not resolve removed concrete layer domains."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         image_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists([_solid_image()], [None], [image_id]),
+            CuteCanvas.imageMapFromLists([_solid_image()], [None], [image_id]),
             image_id,
         )
 

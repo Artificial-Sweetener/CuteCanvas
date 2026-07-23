@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Public-API affine controls for the demo's selected movable layer."""
 
 from __future__ import annotations
@@ -13,6 +20,7 @@ from __future__ import annotations
 import math
 import uuid
 
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QTransform
 from PySide6.QtWidgets import (
@@ -26,8 +34,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qpane import QPane
-
 _POSITION_LIMIT = 1_000_000_000.0
 _SCALE_LIMIT = 10_000.0
 
@@ -37,7 +43,7 @@ class LayerTransformControls(QGroupBox):
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         parent: QWidget | None = None,

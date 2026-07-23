@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Compact public-API vector creation controls for the demonstration host."""
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import replace
 
+from cutecanvas import CuteCanvas, VectorShapeKind, VectorTextAlignment
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
@@ -27,15 +35,13 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
-from qpane import QPane, VectorShapeKind, VectorTextAlignment
-
 
 class VectorControls(QObject):
     """Own the demo's intentional vector-layer and contextual tool controls."""
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         *,
         set_mode: Callable[[str], None],
         show_status: Callable[[str], None],
@@ -52,22 +58,22 @@ class VectorControls(QObject):
         self.shape_action = QAction("Shape", self, checkable=True)
         self.shape_action.setShortcut(QKeySequence("U"))
         self.shape_action.triggered.connect(
-            lambda: self._set_mode(QPane.CONTROL_MODE_VECTOR_SHAPE)
+            lambda: self._set_mode(CuteCanvas.CONTROL_MODE_VECTOR_SHAPE)
         )
         self.path_action = QAction("Path", self, checkable=True)
         self.path_action.setShortcut(QKeySequence("P"))
         self.path_action.triggered.connect(
-            lambda: self._set_mode(QPane.CONTROL_MODE_VECTOR_PATH)
+            lambda: self._set_mode(CuteCanvas.CONTROL_MODE_VECTOR_PATH)
         )
         self.node_action = QAction("Edit Nodes", self, checkable=True)
         self.node_action.setShortcut(QKeySequence("A"))
         self.node_action.triggered.connect(
-            lambda: self._set_mode(QPane.CONTROL_MODE_VECTOR_NODE)
+            lambda: self._set_mode(CuteCanvas.CONTROL_MODE_VECTOR_NODE)
         )
         self.text_action = QAction("Text", self, checkable=True)
         self.text_action.setShortcut(QKeySequence("T"))
         self.text_action.triggered.connect(
-            lambda: self._set_mode(QPane.CONTROL_MODE_VECTOR_TEXT)
+            lambda: self._set_mode(CuteCanvas.CONTROL_MODE_VECTOR_TEXT)
         )
         self.to_selection_action = QAction("To Selection", self)
         self.to_selection_action.triggered.connect(self._convert_to_selection)
@@ -188,23 +194,23 @@ class VectorControls(QObject):
 
     def sync_mode(self, mode: str) -> None:
         """Synchronize action state and contextual toolbar visibility."""
-        self.shape_action.setChecked(mode == QPane.CONTROL_MODE_VECTOR_SHAPE)
-        self.path_action.setChecked(mode == QPane.CONTROL_MODE_VECTOR_PATH)
-        self.node_action.setChecked(mode == QPane.CONTROL_MODE_VECTOR_NODE)
-        self.text_action.setChecked(mode == QPane.CONTROL_MODE_VECTOR_TEXT)
+        self.shape_action.setChecked(mode == CuteCanvas.CONTROL_MODE_VECTOR_SHAPE)
+        self.path_action.setChecked(mode == CuteCanvas.CONTROL_MODE_VECTOR_PATH)
+        self.node_action.setChecked(mode == CuteCanvas.CONTROL_MODE_VECTOR_NODE)
+        self.text_action.setChecked(mode == CuteCanvas.CONTROL_MODE_VECTOR_TEXT)
         if self._toolbar is not None:
             self._toolbar.setVisible(
                 mode
                 in {
-                    QPane.CONTROL_MODE_VECTOR_SHAPE,
-                    QPane.CONTROL_MODE_VECTOR_PATH,
-                    QPane.CONTROL_MODE_VECTOR_NODE,
-                    QPane.CONTROL_MODE_VECTOR_TEXT,
+                    CuteCanvas.CONTROL_MODE_VECTOR_SHAPE,
+                    CuteCanvas.CONTROL_MODE_VECTOR_PATH,
+                    CuteCanvas.CONTROL_MODE_VECTOR_NODE,
+                    CuteCanvas.CONTROL_MODE_VECTOR_TEXT,
                 }
             )
             creating = mode in {
-                QPane.CONTROL_MODE_VECTOR_SHAPE,
-                QPane.CONTROL_MODE_VECTOR_PATH,
+                CuteCanvas.CONTROL_MODE_VECTOR_SHAPE,
+                CuteCanvas.CONTROL_MODE_VECTOR_PATH,
             }
             for widget in (
                 self._shape_combo,
@@ -213,7 +219,7 @@ class VectorControls(QObject):
                 self._width,
             ):
                 widget.setVisible(creating)
-            text_mode = mode == QPane.CONTROL_MODE_VECTOR_TEXT
+            text_mode = mode == CuteCanvas.CONTROL_MODE_VECTOR_TEXT
             for widget in (self._font, self._font_size, self._alignment):
                 widget.setVisible(text_mode)
             for action in (
@@ -284,7 +290,7 @@ class VectorControls(QObject):
             self._show_status("Load an image before adding vector artwork.")
             return
         self._qpane.setSelectedLayer(scene.scene_id, layer_id)
-        self._set_mode(QPane.CONTROL_MODE_VECTOR_SHAPE)
+        self._set_mode(CuteCanvas.CONTROL_MODE_VECTOR_SHAPE)
         self._show_status("Added a vector layer. Drag to create a shape.")
 
     def _set_shape(self, _index: int) -> None:

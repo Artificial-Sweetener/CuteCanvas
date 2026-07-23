@@ -1,22 +1,28 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Public-API host policy controls for the demonstration editor."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
+from cutecanvas import CuteCanvas, EditorCapability, EditorPolicy
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
-
-from qpane import EditorCapability, QPane, QPaneEditorPolicy
 
 _CAPABILITY_LABELS = (
     (EditorCapability.SELECT_PIXELS, "Pixel Selection"),
@@ -32,7 +38,7 @@ class EditorPolicyControls(QObject):
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         *,
         show_status: Callable[[str], None],
         parent: QObject,
@@ -64,11 +70,11 @@ class EditorPolicyControls(QObject):
             for capability, action in self._actions.items()
             if action.isChecked()
         )
-        if self._qpane.setEditorPolicy(QPaneEditorPolicy(capabilities)):
+        if self._qpane.setEditorPolicy(EditorPolicy(capabilities)):
             enabled = len(capabilities)
             self._show_status(f"Host editor policy enables {enabled} capabilities.")
 
-    def _synchronize(self, policy: QPaneEditorPolicy) -> None:
+    def _synchronize(self, policy: EditorPolicy) -> None:
         """Mirror an externally replaced policy without recursive writes."""
         self._synchronizing = True
         try:

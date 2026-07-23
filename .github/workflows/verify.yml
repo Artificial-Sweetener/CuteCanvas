@@ -23,7 +23,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            requirements-dev.txt
+            packages/qpane/pyproject.toml
+            packages/cutecanvas/pyproject.toml
 
       - name: Install Linux Qt runtime dependencies
         run: |
@@ -33,7 +36,7 @@ jobs:
       - name: Install development dependencies
         run: |
           python -m pip install "pip==${{ env.PIP_VERSION }}"
-          python -m pip install -e .[dev]
+          python -m pip install -r requirements-dev.txt
 
       - name: Run hook-equivalent quality checks
         run: |
@@ -76,7 +79,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            requirements-dev.txt
+            packages/qpane/pyproject.toml
+            packages/cutecanvas/pyproject.toml
 
       - name: Install Linux Qt runtime dependencies
         if: runner.os == 'Linux'
@@ -87,19 +93,19 @@ jobs:
       - name: Install development dependencies
         run: |
           python -m pip install "pip==${{ env.PIP_VERSION }}"
-          python -m pip install -e .[dev]
+          python -m pip install -r requirements-dev.txt
 
       - name: Run test suite
         run: python -m pytest -n auto
 
-      - name: Run mounted QPane abuse profile
+      - name: Run mounted CuteCanvas abuse profile
         run: python -m tests.harness --profile ci --seed 20260716
 
       - name: Upload mounted QPane failure evidence
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: qpane-abuse-${{ matrix.os }}-py${{ matrix.python }}
+          name: cutecanvas-abuse-${{ matrix.os }}-py${{ matrix.python }}
           path: qpane-abuse-artifacts
           if-no-files-found: ignore
 

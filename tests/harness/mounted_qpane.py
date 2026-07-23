@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Mount and observe a real QPane under Qt's offscreen platform."""
+"""Mount and observe a real CuteCanvas under Qt's offscreen platform."""
 
 from __future__ import annotations
 
@@ -26,15 +26,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MethodType, TracebackType
 
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
-from typing_extensions import Self
-
-from qpane import QPane
 from qpane.scene.model import LayerKind
 from qpane.scene.render_plan import SceneRenderPlan
+from typing_extensions import Self
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +51,7 @@ class PresentedMaskFrame:
     image: QImage
     overscan_margin: int
     mask_layer_count: int
+    mask_sample_scales: tuple[float, ...]
 
     def color_at(self, point: QPoint) -> QColor:
         """Return the backing-buffer color presented at a widget point."""
@@ -84,11 +84,22 @@ class PresentedFrameProbe:
             mask_layer_count = sum(
                 item.descriptor.kind is LayerKind.MASK for item in plan.render_items
             )
+            mask_sample_scales = tuple(
+                round(
+                    tile.image_source_rect.width() / tile.source_rect.width(),
+                    6,
+                )
+                for item in plan.render_items
+                if item.descriptor.kind is LayerKind.MASK
+                for tile in getattr(item, "tiles", ())
+                if tile.source_rect.width() > 0.0
+            )
             self.frames.append(
                 PresentedMaskFrame(
                     image=buffer.copy(),
                     overscan_margin=self._renderer._BUFFER_OVERSCAN_PHYSICAL_PX,
                     mask_layer_count=mask_layer_count,
+                    mask_sample_scales=mask_sample_scales,
                 )
             )
 
@@ -109,7 +120,7 @@ class PresentedFrameProbe:
 
 
 class MountedQPaneHarness:
-    """Own a shown production QPane and its event-loop observation boundary."""
+    """Own a shown production CuteCanvas and its event-loop observation boundary."""
 
     def __init__(
         self,
@@ -134,7 +145,7 @@ class MountedQPaneHarness:
         host_layout = QVBoxLayout(self.host)
         host_layout.setContentsMargins(0, 0, 0, 0)
         host_layout.setSpacing(0)
-        self.viewer = QPane(features=("mask",))
+        self.viewer = CuteCanvas(features=("mask",))
         self.viewer.setParent(self.host)
         host_layout.addWidget(self.viewer)
         self.viewer.applySettings(
@@ -164,7 +175,7 @@ class MountedQPaneHarness:
         if readiness.latency_ms is None:
             self.close()
             raise RuntimeError(
-                "Mounted QPane did not present source pixels before input "
+                "Mounted CuteCanvas did not present source pixels before input "
                 f"(center={readiness.color.getRgb()})"
             )
 
@@ -181,7 +192,7 @@ class MountedQPaneHarness:
         """Activate and return the mask at ``index``."""
         mask_id = self.mask_ids[index]
         if not self.viewer.setActiveMaskID(mask_id):
-            raise RuntimeError(f"QPane rejected active mask {mask_id}")
+            raise RuntimeError(f"CuteCanvas rejected active mask {mask_id}")
         self.drain_events()
         return mask_id
 
@@ -247,6 +258,22 @@ class MountedQPaneHarness:
             QTest.qWait(1)
         return False
 
+    def wait_for_render_refinement_idle(
+        self,
+        *,
+        timeout_ms: int = 3000,
+    ) -> bool:
+        """Wait until QPane has no queued vector or hybrid tile refinement."""
+        deadline = time.perf_counter() + timeout_ms / 1000.0
+        while time.perf_counter() < deadline:
+            self.qapp.processEvents()
+            coordinator = self.viewer.view().presenter._render_refinement
+            if coordinator.pending_count == 0:
+                self.qapp.processEvents()
+                return True
+            QTest.qWait(1)
+        return False
+
     def wait_for_raster_render_idle(
         self,
         *,
@@ -296,7 +323,7 @@ class MountedQPaneHarness:
         """Save the current composited widget image or raise on failure."""
         path.parent.mkdir(parents=True, exist_ok=True)
         if not self.capture().save(str(path)):
-            raise RuntimeError(f"Failed to save QPane capture to {path}")
+            raise RuntimeError(f"Failed to save CuteCanvas capture to {path}")
 
     def color_at(self, point: QPoint) -> QColor:
         """Sample one pixel from the mounted widget composition."""
@@ -361,5 +388,5 @@ class MountedQPaneHarness:
         """Create one mask through the public facade and require success."""
         mask_id = self.viewer.createBlankMask(image_size)
         if mask_id is None:
-            raise RuntimeError("QPane failed to create a blank abuse-harness mask")
+            raise RuntimeError("CuteCanvas failed to create a blank abuse-harness mask")
         return mask_id

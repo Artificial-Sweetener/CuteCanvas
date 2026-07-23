@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,17 +14,17 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests ensuring full coverage of the QPane public API surface."""
+"""Tests ensuring full coverage of the CuteCanvas public API surface."""
 
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtCore import QPoint, QRectF, QSize
 from PySide6.QtGui import QImage, Qt
-
-from qpane import Config, ExtensionTool, QPane
+from qpane import ViewerTool
 
 
 def _cleanup_qpane(qpane, qapp):
@@ -43,13 +43,13 @@ def test_placeholder_active_delegates(qapp, tmp_path):
     placeholder_path = tmp_path / "placeholder.png"
     _solid_image().save(str(placeholder_path))
     config = Config(placeholder={"source": str(placeholder_path)})
-    qpane = QPane(config=config, features=())
+    qpane = CuteCanvas(config=config, features=())
     try:
         assert qpane.placeholderActive() is True
         image = _solid_image()
         image_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists([image], [None], [image_id]), image_id
+            CuteCanvas.imageMapFromLists([image], [None], [image_id]), image_id
         )
         assert qpane.placeholderActive() is False
     finally:
@@ -57,14 +57,15 @@ def test_placeholder_active_delegates(qapp, tmp_path):
 
 
 def test_image_properties_delegate(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         image1 = _solid_image()
         image2 = _solid_image()
         id1 = uuid.uuid4()
         id2 = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists([image1, image2], [None, None], [id1, id2]), id1
+            CuteCanvas.imageMapFromLists([image1, image2], [None, None], [id1, id2]),
+            id1,
         )
         current_image = qpane.currentImage
         assert current_image is not None
@@ -76,7 +77,7 @@ def test_image_properties_delegate(qapp):
 
 
 def test_diagnostics_getters(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         assert qpane.diagnosticsOverlayEnabled() is False
         qpane.setDiagnosticsOverlayEnabled(True)
@@ -93,7 +94,7 @@ def test_diagnostics_getters(qapp):
 
 
 def test_feature_availability(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         assert qpane.samFeatureAvailable() is False
         # To test True, we'd need to mock the feature installation or use the 'sam' feature if available in env
@@ -102,7 +103,7 @@ def test_feature_availability(qapp):
 
 
 def test_sam_checkpoint_helpers(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         assert qpane.samCheckpointReady() is False
         assert qpane.samCheckpointPath() is None
@@ -114,20 +115,20 @@ def test_sam_checkpoint_helpers(qapp):
 
 
 def test_control_modes(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         modes = qpane.availableControlModes()
-        assert QPane.CONTROL_MODE_PANZOOM in modes
-        assert QPane.CONTROL_MODE_CURSOR in modes
+        assert CuteCanvas.CONTROL_MODE_PANZOOM in modes
+        assert CuteCanvas.CONTROL_MODE_CURSOR in modes
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
 def test_tool_registration_delegates(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
 
-        class MyTool(ExtensionTool):
+        class MyTool(ViewerTool):
             def activate(self, deps):
                 pass
 
@@ -152,7 +153,7 @@ def test_tool_registration_delegates(qapp):
 
 
 def test_catalog_snapshot_delegates(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         snapshot = qpane.getCatalogSnapshot()
         assert snapshot is not None
@@ -163,14 +164,15 @@ def test_catalog_snapshot_delegates(qapp):
 
 
 def test_set_all_images_linked(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         image1 = _solid_image()
         image2 = _solid_image()
         id1 = uuid.uuid4()
         id2 = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists([image1, image2], [None, None], [id1, id2]), id1
+            CuteCanvas.imageMapFromLists([image1, image2], [None, None], [id1, id2]),
+            id1,
         )
         qpane.setAllImagesLinked(True)
         groups = qpane.linkedGroups()
@@ -185,7 +187,7 @@ def test_set_all_images_linked(qapp):
 
 def test_mask_delegates_stub(qapp, monkeypatch):
     # Basic check that these methods don't crash when mask feature is missing
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         assert qpane.listMasksForImage() == ()
         assert qpane.setMaskProperties(uuid.uuid4(), opacity=0.5) is False
@@ -293,13 +295,13 @@ def test_mask_delegates_stub(qapp, monkeypatch):
         # Need a current image for cycleMasks
         image_id = uuid.uuid4()
         qpane.setImagesByID(
-            QPane.imageMapFromLists([_solid_image()], [None], [image_id]), image_id
+            CuteCanvas.imageMapFromLists([_solid_image()], [None], [image_id]), image_id
         )
         qpane.cycleMasksForward()
         assert mock_service.calls[-1] == ("cycleMasks", image_id, True)
         qpane.cycleMasksBackward()
         assert mock_service.calls[-1] == ("cycleMasks", image_id, False)
-        # Mock controller method for listMasksForImage to verify delegation from QPane to Controller
+        # Mock controller method for listMasksForImage to verify delegation from CuteCanvas to Controller
         monkeypatch.setattr(
             qpane._masks_controller,
             "listMasksForImage",
@@ -312,7 +314,7 @@ def test_mask_delegates_stub(qapp, monkeypatch):
 
 def test_settings_api(qapp):
     config = Config()
-    qpane = QPane(config=config, features=())
+    qpane = CuteCanvas(config=config, features=())
     try:
         assert qpane.settings is not None
         new_config = Config(placeholder={"source": "test"})
@@ -325,7 +327,7 @@ def test_settings_api(qapp):
 
 
 def test_image_management_extended(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         assert qpane.hasImages() is False
         assert qpane.imageIDs() == []
@@ -352,11 +354,11 @@ def test_image_management_extended(qapp):
 
 
 def test_view_state_api(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         image = _solid_image(100, 100)
         id1 = uuid.uuid4()
-        qpane.setImagesByID(QPane.imageMapFromLists([image], [None], [id1]), id1)
+        qpane.setImagesByID(CuteCanvas.imageMapFromLists([image], [None], [id1]), id1)
         zoom = qpane.currentZoom()
         assert isinstance(zoom, float)
         rect = qpane.currentViewportRect()
@@ -369,7 +371,7 @@ def test_view_state_api(qapp):
 
 
 def test_mask_api_holes(qapp, monkeypatch):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         # Mock controller methods to verify delegation
         controller = qpane._masks_controller
@@ -414,7 +416,7 @@ def test_mask_api_holes(qapp, monkeypatch):
 
 
 def test_signals_existence(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         # Just verify they exist and can be connected
         def slot(*args):
@@ -440,7 +442,7 @@ def test_signals_existence(qapp):
 
 
 def test_installed_features(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         assert isinstance(qpane.installedFeatures, tuple)
         assert len(qpane.installedFeatures) == 0
@@ -449,17 +451,17 @@ def test_installed_features(qapp):
 
 
 def test_control_modes_extended(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_PANZOOM
-        qpane.setControlMode(QPane.CONTROL_MODE_CURSOR)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_CURSOR
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_CURSOR)
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_CURSOR
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
 def test_overlays_api(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
 
         def draw_fn(painter, state):
@@ -475,7 +477,7 @@ def test_overlays_api(qapp):
 
 def test_overlay_registry_snapshots_are_read_only(qapp):
     """Overlay registry accessors should not expose live mutable registries."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
 
         def draw_fn(painter, state):
@@ -510,7 +512,7 @@ def test_overlay_registry_snapshots_are_read_only(qapp):
 
 
 def test_linked_groups_extended(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         from qpane.types import LinkedGroup
 

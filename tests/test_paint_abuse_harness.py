@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Mounted adversarial proof for shared color and selection paint targets."""
 
 from __future__ import annotations
@@ -14,22 +21,23 @@ import statistics
 import time
 
 import numpy as np
+from cutecanvas import (
+    BrushPreset,
+    CuteCanvas,
+    LayerPolicy,
+    RasterExtentPolicy,
+)
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-
-from qpane import (
-    BrushPreset,
-    QPane,
-    QPaneLayerInteractionPolicy,
-    RasterExtentPolicy,
-)
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
+
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
+    stable_latency_samples,
 )
 
 _MEDIAN_POINTER_BUDGET_MS = 16.0
@@ -161,15 +169,23 @@ def test_mounted_selection_paint_and_stale_target_cancel_without_residue(
             )
         )
         viewer.setControlMode(viewer.CONTROL_MODE_DRAW_BRUSH)
-        started = interaction_clock()
-        QTest.mouseClick(viewer, Qt.LeftButton, Qt.NoModifier, QPoint(320, 320))
-        harness.drain_events()
-        elapsed_ms = (interaction_clock() - started) * 1000.0
-        selection = viewer.pixelSelectionState()
-        assert selection is not None and selection.coverage is not None
-        assert selection.bounds is not None
-        assert selection.bounds.width() >= 990
-        assert elapsed_ms < 100.0
+        paint_latencies_ms: list[float] = []
+        selection = None
+        for sample in range(8):
+            started = interaction_clock()
+            QTest.mouseClick(viewer, Qt.LeftButton, Qt.NoModifier, QPoint(320, 320))
+            harness.drain_events()
+            paint_latencies_ms.append((interaction_clock() - started) * 1000.0)
+            selection = viewer.pixelSelectionState()
+            assert selection is not None and selection.coverage is not None
+            assert selection.bounds is not None
+            assert selection.bounds.width() >= 990
+            if sample < 7:
+                assert viewer.undoSceneEdit()
+                undone = viewer.pixelSelectionState()
+                assert undone is not None and not undone.has_selection
+        assert max(stable_latency_samples(paint_latencies_ms)) < 100.0
+        assert selection is not None
         assert viewer.undoSceneEdit()
         undone = viewer.pixelSelectionState()
         assert undone is not None and not undone.has_selection
@@ -193,7 +209,7 @@ def test_empty_composition_mask_paint_is_responsive_and_exact(
     qapp: QApplication,
 ) -> None:
     """A mask in an image-free document must paint and replay through generic layers."""
-    viewer = QPane(features=("mask",))
+    viewer = CuteCanvas(features=("mask",))
     viewer.resize(640, 640)
     viewer.show()
     try:
@@ -205,7 +221,7 @@ def test_empty_composition_mask_paint_is_responsive_and_exact(
         assert viewer.setLayerInteractionPolicy(
             scene.scene_id,
             layer.layer_id,
-            QPaneLayerInteractionPolicy(
+            LayerPolicy(
                 selectable=True,
                 movable=True,
                 pixel_editable=True,

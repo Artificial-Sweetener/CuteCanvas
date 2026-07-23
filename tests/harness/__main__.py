@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Command-line entry point for mounted QPane abuse campaigns."""
+"""Command-line entry point for mounted CuteCanvas abuse campaigns."""
 
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ def main() -> int:
 def _argument_parser() -> argparse.ArgumentParser:
     """Build the stable assistant-facing command contract."""
     parser = argparse.ArgumentParser(
-        description="Abuse a real mounted QPane with replayable mixed input.",
+        description="Abuse a real mounted CuteCanvas with replayable mixed input.",
     )
     parser.add_argument("--profile", choices=("ci", "soak"), default="ci")
     parser.add_argument("--seed", type=int, default=0)

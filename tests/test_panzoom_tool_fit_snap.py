@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -19,10 +19,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF
-
+from qpane import NavigationInteractionPort, PanZoomTool
 from qpane.rendering import ViewportZoomMode
-from qpane.tools import PanZoomTool
-from qpane.tools.ports import NavigationInteractionPort
 
 
 class _WheelEventStub:
@@ -52,8 +50,8 @@ def test_panzoom_wheel_snaps_to_fit_zoom(qapp):
     tool.signals.zoom_snap_requested.connect(on_snap)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,
@@ -82,8 +80,8 @@ def test_panzoom_wheel_snaps_to_fit_zoom_crossing(qapp):
     tool.signals.zoom_snap_requested.connect(on_snap)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,
@@ -111,8 +109,8 @@ def test_panzoom_wheel_snaps_to_fit_zoom_reverse(qapp):
     tool.signals.zoom_snap_requested.connect(on_snap)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,
@@ -140,8 +138,8 @@ def test_panzoom_prioritizes_native_over_fit_if_both_crossed(qapp):
     tool.signals.zoom_snap_requested.connect(on_snap)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,

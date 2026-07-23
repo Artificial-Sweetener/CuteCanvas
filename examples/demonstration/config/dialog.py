@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Config dialog used by the example to edit QPane settings."""
+"""Config dialog used by the example to edit CuteCanvas settings."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from cutecanvas import Config
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -58,7 +59,6 @@ from examples.demonstration.config.spec import (
     build_sections_for_features,
     field_sets_for_sections,
 )
-from qpane import Config
 
 DEFAULT_CONCURRENCY_CATEGORIES: tuple[str, ...] = (
     "tiles",
@@ -355,7 +355,7 @@ class FilterStatusLabel(QLabel):
 
 
 class ConfigDialog(QDialog):
-    """Dialog that edits QPane configuration settings for the demo.
+    """Dialog that edits CuteCanvas configuration settings for the demo.
 
     Args:
         config: Starting Config snapshot to edit.
@@ -377,7 +377,7 @@ class ConfigDialog(QDialog):
     ) -> None:
         """Initialize the configuration dialog with a snapshot of the current settings."""
         super().__init__(parent)
-        self.setWindowTitle("QPane Configuration")
+        self.setWindowTitle("CuteCanvas Configuration")
         self.setModal(True)
         self.setMinimumWidth(420)
         self._original = config.copy()
@@ -541,15 +541,41 @@ class ConfigDialog(QDialog):
                 if isinstance(ratios, Mapping):
                     return ratios.get(tail[1])
                 return None
-            if head in {"tiles", "pyramids", "masks", "predictors"}:
+            if head == "weights" and len(tail) == 3 and tail[1] == "extensions":
+                ratios = cache_settings.get("weights", {})
+                extensions = (
+                    ratios.get("extensions", {}) if isinstance(ratios, Mapping) else {}
+                )
+                return (
+                    extensions.get(tail[2]) if isinstance(extensions, Mapping) else None
+                )
+            if head in {"tiles", "pyramids"}:
                 bucket = cache_settings.get(head)
                 if len(tail) == 2 and tail[1] == "mb" and isinstance(bucket, Mapping):
+                    override = bucket.get("mb")
+                    return -1 if override is None else override
+            if head == "extensions" and len(tail) == 3 and tail[2] == "mb":
+                extensions = cache_settings.get("extensions", {})
+                bucket = (
+                    extensions.get(tail[1]) if isinstance(extensions, Mapping) else None
+                )
+                if isinstance(bucket, Mapping):
                     override = bucket.get("mb")
                     return -1 if override is None else override
             if head == "prefetch" and len(tail) == 2:
                 prefetch = cache_settings.get("prefetch")
                 if isinstance(prefetch, Mapping):
                     return prefetch.get(tail[1])
+            if head == "prefetch" and len(tail) == 3 and tail[1] == "extensions":
+                prefetch = cache_settings.get("prefetch", {})
+                extensions = (
+                    prefetch.get("extensions", {})
+                    if isinstance(prefetch, Mapping)
+                    else {}
+                )
+                return (
+                    extensions.get(tail[2]) if isinstance(extensions, Mapping) else None
+                )
             return None
         if name == "concurrency_max_workers":
             concurrency = (

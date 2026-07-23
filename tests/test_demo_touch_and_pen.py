@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -16,6 +16,7 @@
 
 """Tests for the no-hardware touch and active-pen demonstration."""
 
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
@@ -26,7 +27,6 @@ from examples.demonstration.touch_and_pen_simulator import (
     build_touch_input_simulator,
     create_simulator_image,
 )
-from qpane import QPane
 
 
 def test_touch_mask_editor_mouse_touch_mouse_cursor_lifecycle(qapp) -> None:
@@ -83,7 +83,7 @@ def test_touch_and_pen_simulator_exercises_feedback_transitions(qapp) -> None:
     try:
         window.show()
         qapp.processEvents()
-        viewer = window.findChild(QPane, "touchPenViewer")
+        viewer = window.findChild(CuteCanvas, "touchPenViewer")
         assert viewer is not None
         hover = window.findChild(QPushButton, "penHover")
         pen_leave = window.findChild(QPushButton, "penLeave")

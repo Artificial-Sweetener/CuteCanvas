@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -19,8 +19,7 @@
 from __future__ import annotations
 
 import pytest
-
-from qpane import Config, QPane
+from cutecanvas import Config, CuteCanvas
 from qpane.core.config import CacheSettings, PlaceholderSettings
 from qpane.types import (
     CacheMode,
@@ -71,20 +70,22 @@ def test_placeholder_settings_normalize_enums_and_sizes() -> None:
         settings.apply_mapping({"unsupported": True})
 
 
-def test_diagnostics_domains_normalized_and_validated() -> None:
-    """Diagnostics domains normalize to canonical strings and reject unknown entries."""
+def test_diagnostics_domains_normalize_and_allow_extensions() -> None:
+    """Diagnostics configuration should accept renderer and extension domains."""
     config = Config()
     config.configure(
         diagnostics_domains_enabled=(DiagnosticsDomain.CACHE, "swap"),
     )
     assert config.diagnostics_domains_enabled == ("cache", "swap")
+    config.configure(diagnostics_domains_enabled=("custom-domain",))
+    assert config.diagnostics_domains_enabled == ("custom-domain",)
     with pytest.raises(ValueError):
-        config.configure(diagnostics_domains_enabled=("invalid-domain",))
+        config.configure(diagnostics_domains_enabled=(" ",))
 
 
 def test_qpane_rejects_unknown_diagnostics_domain(qapp) -> None:
-    """QPane raises when toggling diagnostics domains that are unavailable."""
-    qpane = QPane(features=())
+    """CuteCanvas raises when toggling diagnostics domains that are unavailable."""
+    qpane = CuteCanvas(features=())
     try:
         available = set(qpane.diagnosticsDomains())
         unknown = "custom.missing"

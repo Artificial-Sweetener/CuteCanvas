@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,15 +20,15 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from cutecanvas import Config
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks import autosave
+from cutecanvas.masks.autosave import AutosaveManager
+from cutecanvas.masks.install import should_enable_mask_autosave
 from PySide6.QtCore import QBuffer, QIODevice, QObject, QSize
 from PySide6.QtGui import QImage, Qt
-
-from qpane import Config
 from qpane.concurrency import TaskRejected
-from qpane.core.config_features import MaskConfigSlice
-from qpane.masks import autosave
-from qpane.masks.autosave import AutosaveManager
-from qpane.masks.install import should_enable_mask_autosave
+
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
 
@@ -301,7 +301,7 @@ def test_save_mask_to_path_emits_failure_payload(monkeypatch, tmp_path, qapp):
 def _build_dummy_qpane(
     *, mask_feature: bool = True, sam_manager=None, enabled: bool = True
 ):
-    """Construct a minimal QPane stand-in for mask autosave tests."""
+    """Construct a minimal CuteCanvas stand-in for mask autosave tests."""
     mask_settings = MaskConfigSlice(mask_autosave_enabled=enabled)
     mask_service = SimpleNamespace() if mask_feature else None
     workflow = SimpleNamespace(

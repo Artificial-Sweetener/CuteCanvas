@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,24 +14,25 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Cycle mode behavior for the example QPane."""
+"""Cycle mode behavior for the example CuteCanvas."""
 
 from __future__ import annotations
 
 import uuid
 from pathlib import Path
 
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage
 
-from qpane import Config, QPane
 
-
-def _add_image(qpane: QPane) -> None:
+def _add_image(qpane: CuteCanvas) -> None:
     """Populate the qpane with a single image to disable the placeholder."""
     image = QImage(8, 8, QImage.Format_ARGB32)
     image.fill(0)
     image_id = uuid.uuid4()
-    qpane.setImagesByID(QPane.imageMapFromLists([image], [None], [image_id]), image_id)
+    qpane.setImagesByID(
+        CuteCanvas.imageMapFromLists([image], [None], [image_id]), image_id
+    )
 
 
 def _placeholder_path(tmp_path: Path) -> Path:
@@ -42,7 +43,7 @@ def _placeholder_path(tmp_path: Path) -> Path:
     return path
 
 
-def _cycle(qpane: QPane) -> None:
+def _cycle(qpane: CuteCanvas) -> None:
     placeholder_active = qpane.placeholderActive()
     placeholder = getattr(qpane.settings, "placeholder", None)
     panzoom_allowed = (not placeholder_active) or bool(
@@ -51,15 +52,15 @@ def _cycle(qpane: QPane) -> None:
     mask_available = qpane.maskFeatureAvailable()
     sam_available = qpane.samFeatureAvailable()
     preferred_order: list[str] = [
-        QPane.CONTROL_MODE_CURSOR,
-        QPane.CONTROL_MODE_PANZOOM,
-        QPane.CONTROL_MODE_MOVE,
-        QPane.CONTROL_MODE_TRANSFORM,
+        CuteCanvas.CONTROL_MODE_CURSOR,
+        CuteCanvas.CONTROL_MODE_PANZOOM,
+        CuteCanvas.CONTROL_MODE_MOVE,
+        CuteCanvas.CONTROL_MODE_TRANSFORM,
     ]
     if mask_available:
-        preferred_order.append(QPane.CONTROL_MODE_DRAW_BRUSH)
+        preferred_order.append(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
     if sam_available:
-        preferred_order.append(QPane.CONTROL_MODE_SMART_SELECT)
+        preferred_order.append(CuteCanvas.CONTROL_MODE_SMART_SELECT)
     seen = set(preferred_order)
     for mode in qpane.availableControlModes():
         if mode in seen:
@@ -68,15 +69,16 @@ def _cycle(qpane: QPane) -> None:
         seen.add(mode)
 
     def _mode_allowed(mode: str) -> bool:
-        if mode == QPane.CONTROL_MODE_PANZOOM:
+        if mode == CuteCanvas.CONTROL_MODE_PANZOOM:
             return panzoom_allowed
-        if mode == QPane.CONTROL_MODE_DRAW_BRUSH:
+        if mode == CuteCanvas.CONTROL_MODE_DRAW_BRUSH:
             return mask_available and not placeholder_active
-        if mode == QPane.CONTROL_MODE_SMART_SELECT:
+        if mode == CuteCanvas.CONTROL_MODE_SMART_SELECT:
             return mask_available and sam_available and not placeholder_active
         return not (
             placeholder_active
-            and mode not in {QPane.CONTROL_MODE_CURSOR, QPane.CONTROL_MODE_PANZOOM}
+            and mode
+            not in {CuteCanvas.CONTROL_MODE_CURSOR, CuteCanvas.CONTROL_MODE_PANZOOM}
         )
 
     ordered_modes = [mode for mode in preferred_order if _mode_allowed(mode)]
@@ -93,8 +95,8 @@ def _cycle(qpane: QPane) -> None:
     if (
         next_mode
         in {
-            QPane.CONTROL_MODE_DRAW_BRUSH,
-            QPane.CONTROL_MODE_SMART_SELECT,
+            CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
+            CuteCanvas.CONTROL_MODE_SMART_SELECT,
         }
         and qpane.activeMaskID() is None
     ):
@@ -108,7 +110,7 @@ def _cycle(qpane: QPane) -> None:
 
 def test_cycle_order_matches_toolbar(monkeypatch, qapp):
     """Cycle through enabled tools without starting unrelated SAM inference."""
-    from qpane.sam.manager import SamManager
+    from cutecanvas.sam.manager import SamManager
 
     def ignore_predictor_request(
         _manager, _image, _image_id, *, source_path=None
@@ -121,34 +123,38 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
         ignore_predictor_request,
     )
     config = Config()
-    qpane = QPane(config=config, features=("mask", "sam"))
+    qpane = CuteCanvas(config=config, features=("mask", "sam"))
     try:
         _add_image(qpane)
-        qpane.setControlMode(QPane.CONTROL_MODE_CURSOR)
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_CURSOR)
         _cycle(qpane)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_PANZOOM
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
         _cycle(qpane)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_MOVE
         _cycle(qpane)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_TRANSFORM
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_TRANSFORM
         _cycle(qpane)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_DRAW_BRUSH
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_DRAW_BRUSH
         _cycle(qpane)
         if qpane.samFeatureAvailable():
-            assert qpane.getControlMode() == QPane.CONTROL_MODE_SMART_SELECT
+            assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_SMART_SELECT
         assert qpane.getControlMode() in {
-            QPane.CONTROL_MODE_DRAW_BRUSH,
-            QPane.CONTROL_MODE_SMART_SELECT,
+            CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
+            CuteCanvas.CONTROL_MODE_SMART_SELECT,
         }
         for expected in (
-            QPane.CONTROL_MODE_SELECT_RECTANGLE,
-            QPane.CONTROL_MODE_SELECT_ELLIPSE,
-            QPane.CONTROL_MODE_SELECT_LASSO,
-            QPane.CONTROL_MODE_VECTOR_SHAPE,
-            QPane.CONTROL_MODE_VECTOR_PATH,
-            QPane.CONTROL_MODE_VECTOR_NODE,
-            QPane.CONTROL_MODE_VECTOR_TEXT,
-            QPane.CONTROL_MODE_CURSOR,
+            CuteCanvas.CONTROL_MODE_PAINT_BUCKET,
+            CuteCanvas.CONTROL_MODE_SELECT_RECTANGLE,
+            CuteCanvas.CONTROL_MODE_SELECT_ELLIPSE,
+            CuteCanvas.CONTROL_MODE_SELECT_LASSO,
+            CuteCanvas.CONTROL_MODE_MASK_RECTANGLE,
+            CuteCanvas.CONTROL_MODE_MASK_ELLIPSE,
+            CuteCanvas.CONTROL_MODE_MASK_LASSO,
+            CuteCanvas.CONTROL_MODE_VECTOR_SHAPE,
+            CuteCanvas.CONTROL_MODE_VECTOR_PATH,
+            CuteCanvas.CONTROL_MODE_VECTOR_NODE,
+            CuteCanvas.CONTROL_MODE_VECTOR_TEXT,
+            CuteCanvas.CONTROL_MODE_CURSOR,
         ):
             _cycle(qpane)
             assert qpane.getControlMode() == expected
@@ -164,14 +170,14 @@ def test_cycle_placeholder_panzoom_enabled(qapp, tmp_path: Path):
             "panzoom_enabled": True,
         }
     )
-    qpane = QPane(config=config, features=())
+    qpane = CuteCanvas(config=config, features=())
     try:
-        qpane.setControlMode(QPane.CONTROL_MODE_CURSOR)
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_CURSOR)
         assert qpane.placeholderActive() is True
         _cycle(qpane)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_PANZOOM
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
         _cycle(qpane)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_CURSOR
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_CURSOR
     finally:
         qpane.deleteLater()
         qapp.processEvents()
@@ -184,12 +190,12 @@ def test_cycle_placeholder_panzoom_disabled_noop(qapp, tmp_path: Path):
             "panzoom_enabled": False,
         }
     )
-    qpane = QPane(config=config, features=())
+    qpane = CuteCanvas(config=config, features=())
     try:
-        qpane.setControlMode(QPane.CONTROL_MODE_CURSOR)
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_CURSOR)
         assert qpane.placeholderActive() is True
         _cycle(qpane)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_CURSOR
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_CURSOR
     finally:
         qpane.deleteLater()
         qapp.processEvents()

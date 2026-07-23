@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Public-API integration coverage for the demo raster layer inspector."""
 
 from __future__ import annotations
@@ -15,17 +22,17 @@ import time
 import uuid
 from pathlib import Path
 
+from cutecanvas import CuteCanvas, RasterExtentPolicy, VectorShapeKind
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMessageBox
+from qpane.rendering.layer_rasterization import LayerRasterizer
 
-from examples.demo import ExampleOptions, ExampleWindow
+from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
 from examples.demonstration.layer_inspector import RasterStorageProperties
 from examples.demonstration.placed_asset_controls import PlacedAssetControls
 from examples.demonstration.transform_controls import LayerTransformControls
-from qpane import QPane, RasterExtentPolicy, VectorShapeKind
-from qpane.rendering.layer_rasterization import LayerRasterizer
 from tests.harness.mounted_qpane import MountedQPaneHarness
 
 
@@ -42,10 +49,12 @@ def _wait_for(qapp, predicate, timeout: float = 3.0) -> None:
 
 def test_demo_layer_inspector_changes_policy_and_pads_through_public_api(qapp) -> None:
     """The demo inspector should teach the complete host-facing resize workflow."""
-    viewer = QPane(features=("mask",))
+    viewer = CuteCanvas(features=("mask",))
     image_id = uuid.uuid4()
     image = QImage(12, 10, QImage.Format_RGB32)
-    viewer.setImagesByID(QPane.imageMapFromLists([image], ids=[image_id]), image_id)
+    viewer.setImagesByID(
+        CuteCanvas.imageMapFromLists([image], ids=[image_id]), image_id
+    )
     mask_id = viewer.createBlankMask(image.size())
     assert mask_id is not None
     assert viewer.setActiveMaskID(mask_id)
@@ -87,10 +96,12 @@ def test_demo_layer_inspector_changes_policy_and_pads_through_public_api(qapp) -
 
 def test_demo_layer_inspector_preserves_manual_bounds_until_applied(qapp) -> None:
     """Scene refreshes and async submission must not discard edited bounds."""
-    viewer = QPane(features=("mask",))
+    viewer = CuteCanvas(features=("mask",))
     image_id = uuid.uuid4()
     image = QImage(40, 30, QImage.Format_RGB32)
-    viewer.setImagesByID(QPane.imageMapFromLists([image], ids=[image_id]), image_id)
+    viewer.setImagesByID(
+        CuteCanvas.imageMapFromLists([image], ids=[image_id]), image_id
+    )
     mask_id = viewer.createBlankMask(image.size())
     assert mask_id is not None
     assert viewer.setActiveMaskID(mask_id)
@@ -213,12 +224,12 @@ def test_demo_transform_controls_apply_to_non_destructive_placed_layer(qapp) -> 
         background = QImage(400, 300, QImage.Format_ARGB32_Premultiplied)
         background.fill(QColor("black"))
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([background], ids=[image_id]),
+            CuteCanvas.imageMapFromLists([background], ids=[image_id]),
             image_id,
         )
         placed = QImage(80, 60, QImage.Format_ARGB32_Premultiplied)
         placed.fill(QColor("magenta"))
-        window._place_decoded_embedded_asset(Path("placed.png"), placed)
+        window.workspace.place_decoded_embedded_asset(Path("placed.png"), placed)
         scene = window.qpane.currentScene()
         selected = window.qpane.selectedLayer()
         assert scene is not None and selected is not None
@@ -302,7 +313,7 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
         background = QImage(240, 180, QImage.Format_ARGB32_Premultiplied)
         background.fill(QColor("black"))
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([background], ids=[image_id]),
+            CuteCanvas.imageMapFromLists([background], ids=[image_id]),
             image_id,
         )
         placed = QImage(64, 48, QImage.Format_ARGB32_Premultiplied)
@@ -345,7 +356,7 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
         inspector = PlacedAssetControls(
             window.qpane,
             window,
-            show_status=window._set_status,
+            show_status=window.status_ui.show_message,
         )
         inspector.set_target(scene.scene_id, layer_id)
         inspector.show()
@@ -413,7 +424,7 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
         restored = window.qpane.editableRasterLayerImage(scene.scene_id, layer_id)
         assert restored is not None and restored.pixelColor(8, 6).alpha() == 255
 
-        window._set_control_mode(QPane.CONTROL_MODE_MOVE)
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_MOVE)
         internal_scene = window.qpane.view().current_scene_descriptor()
         assert internal_scene is not None
         start = window.qpane.view().layer_source_to_panel_point(
@@ -466,7 +477,7 @@ def test_demo_rasterized_vector_layer_is_immediately_pixel_editable(qapp) -> Non
         background = QImage(240, 180, QImage.Format_ARGB32_Premultiplied)
         background.fill(QColor("black"))
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([background], ids=[image_id]),
+            CuteCanvas.imageMapFromLists([background], ids=[image_id]),
             image_id,
         )
         scene = window.qpane.currentScene()

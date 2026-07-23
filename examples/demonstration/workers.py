@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,12 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Background workers for the QPane demonstration.
-
-This module illustrates how to offload I/O tasks (like image loading) to
-background threads to keep the UI responsive, adhering to the QPane
-"Zero Blocking" principle.
-"""
+"""Teach background image loading without blocking the editor window."""
 
 from __future__ import annotations
 

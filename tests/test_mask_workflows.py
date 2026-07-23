@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -23,31 +23,31 @@ from types import MethodType
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QCoreApplication, QPoint, QPointF, QRect, QSize
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, Qt, QTransform
-
-from qpane import Config, QPane
-from qpane.catalog import NavigationEvent
-from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.autosave import AutosaveManager
-from qpane.masks.edit_service import MaskEditService
-from qpane.masks.mask import MaskAssetStore
-from qpane.masks.mask_controller import MaskController
-from qpane.masks.mask_service import MaskService
-from qpane.masks.render_coordination import MaskRenderWorkCoordinator
-from qpane.masks.stroke_models import (
+from cutecanvas import Config, CuteCanvas
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks.autosave import AutosaveManager
+from cutecanvas.masks.edit_service import MaskEditService
+from cutecanvas.masks.mask import MaskAssetStore
+from cutecanvas.masks.mask_controller import MaskController
+from cutecanvas.masks.mask_service import MaskService
+from cutecanvas.masks.render_coordination import MaskRenderWorkCoordinator
+from cutecanvas.masks.stroke_models import (
     MaskStrokeJobResult,
     MaskStrokePayload,
 )
-from qpane.masks.stroke_preview import DecimatedStrokePreview
-from qpane.masks.stroke_worker import MaskStrokeWorker
-from qpane.masks.workers import MaskSnippetWorker, PrefetchedOverlay
-from qpane.painting import BrushStrokeSegment
-from qpane.painting.rendering import render_coverage_stroke
+from cutecanvas.masks.stroke_preview import DecimatedStrokePreview
+from cutecanvas.masks.stroke_worker import MaskStrokeWorker
+from cutecanvas.masks.workers import MaskSnippetWorker, PrefetchedOverlay
+from cutecanvas.painting import BrushStrokeSegment
+from cutecanvas.painting.rendering import render_coverage_stroke
+from PySide6.QtCore import QCoreApplication, QPoint, QPointF, QRect, QSize
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, Qt, QTransform
+from qpane.catalog import NavigationEvent
 from qpane.raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_view_grayscale8,
 )
+
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
@@ -72,7 +72,7 @@ def _current_image_size(qpane):
 
 def _make_test_qpane(qapp):
     executor = StubExecutor(auto_finish=True)
-    qpane = QPane(task_executor=executor, features=())
+    qpane = CuteCanvas(task_executor=executor, features=())
     qpane.resize(128, 128)
     base_config = Config()
     mask_config = MaskConfigSlice()
@@ -135,13 +135,13 @@ class _RecordingMaskPainter:
         self.calls.append(("draw", (x, y, pixmap)))
 
 
-def _masks(qpane: QPane):
+def _masks(qpane: CuteCanvas):
     masks = qpane._masks_controller
     assert masks is not None
     return masks
 
 
-def _mask_service(qpane: QPane):
+def _mask_service(qpane: CuteCanvas):
     service = _masks(qpane).mask_service()
     assert service is not None
     return service
@@ -280,7 +280,7 @@ def test_mask_cycle_reorders_composition_instances(qpane_with_mask):
 
 
 def test_qpane_brush_wrapper_delegates(monkeypatch, qapp):
-    qpane = QPane(config=fixed_cache_config(), features=("mask",))
+    qpane = CuteCanvas(config=fixed_cache_config(), features=("mask",))
     qpane.resize(16, 16)
     calls: list[int] = []
     masks = _masks(qpane)
@@ -294,7 +294,7 @@ def test_qpane_brush_wrapper_delegates(monkeypatch, qapp):
 
 @pytest.fixture
 def qpane_with_mask(qapp, monkeypatch):
-    from qpane.masks import install as mask
+    from cutecanvas.masks import install as mask
 
     manager_box: dict[str, MaskAssetStore] = {}
 
@@ -317,13 +317,13 @@ def qpane_with_mask(qapp, monkeypatch):
         qpane.refreshMaskAutosavePolicy()
 
     monkeypatch.setattr(mask, "install_mask_feature", install_mask_feature)
-    qpane = QPane(config=fixed_cache_config(), features=("mask",))
+    qpane = CuteCanvas(config=fixed_cache_config(), features=("mask",))
     qpane.resize(32, 32)
     qpane.applySettings(mask_autosave_enabled=True)
     image = QImage(8, 8, QImage.Format_ARGB32)
     image.fill(Qt.white)
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         [image],
         paths=[None],
         ids=[image_id],
@@ -398,7 +398,7 @@ def test_load_and_update_mask_workflow(monkeypatch, qpane_with_mask, tmp_path):
 def test_mask_autosave_coordinator_disconnects_when_disabled(
     qapp, tmp_path, monkeypatch
 ):
-    from qpane.masks import install as mask
+    from cutecanvas.masks import install as mask
 
     class TrackingAutosaveManager(AutosaveManager):
         def __init__(
@@ -453,7 +453,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
         qpane.refreshMaskAutosavePolicy()
 
     monkeypatch.setattr(mask, "install_mask_feature", install_mask_feature)
-    qpane = QPane(features=("mask",))
+    qpane = CuteCanvas(features=("mask",))
     qpane.resize(32, 32)
     qpane.applySettings(mask_autosave_enabled=True)
     catalog = qpane.catalog()
@@ -463,7 +463,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
         image = QImage(8, 8, QImage.Format_ARGB32)
         image.fill(Qt.white)
         image_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [image],
             paths=[None],
             ids=[image_id],
@@ -533,7 +533,7 @@ def test_mask_region_update_triggers_autosave(qpane_with_mask, monkeypatch):
     qpane.hooks.attachAutosaveManager(manager)
     qpane.refreshMaskAutosavePolicy()
     rect = QRect(0, 0, 2, 2)
-    mask_layer.surface.fill(Qt.black)
+    mask_layer.coverage.raster.fill(Qt.black)
     qpane.updateMaskRegion(rect, mask_layer)
     assert manager.calls
     assert manager.calls[-1][0] == mask_id
@@ -554,7 +554,7 @@ def test_mask_autosave_uses_template_when_no_listener(qpane_with_mask, tmp_path,
     assert qpane.setActiveMaskID(mask_id)
     mask_layer = mask_manager.get_layer(mask_id)
     assert mask_layer is not None
-    mask_layer.surface.fill(Qt.white)
+    mask_layer.coverage.raster.fill(Qt.white)
     qpane.updateMaskRegion(QRect(0, 0, 2, 2), mask_layer)
     expected_path = tmp_path / f"{mask_id}.png"
     deadline = time.time() + 2
@@ -837,9 +837,9 @@ def test_remove_last_mask_clears_active(qpane_with_mask):
 def test_mask_install_invokes_autosave_refresh_once(monkeypatch, qapp):
     import types
 
-    from qpane.masks import install as mask
+    from cutecanvas.masks import install as mask
 
-    qpane = QPane(features=("mask",))
+    qpane = CuteCanvas(features=("mask",))
     qpane.resize(32, 32)
     qpane.detachMaskService()
     original_refresh = qpane.refreshMaskAutosavePolicy
@@ -865,18 +865,18 @@ def _prepare_qpane_with_mask_feature(
     features: tuple[str, ...] | None = None,
     image_size_px: int = 64,
 ):
-    """Build a QPane seeded with an image and ready-to-use mask tooling."""
+    """Build a CuteCanvas seeded with an image and ready-to-use mask tooling."""
     if executor is None:
         executor = StubExecutor(auto_finish=True)
     active_features = features if features is not None else ("mask",)
-    qpane = QPane(task_executor=executor, features=active_features)
+    qpane = CuteCanvas(task_executor=executor, features=active_features)
     qpane.resize(max(32, image_size_px * 2), max(32, image_size_px * 2))
     qpane.applySettings(mask_autosave_enabled=True)
     catalog = qpane.catalog()
     image = QImage(image_size_px, image_size_px, QImage.Format_ARGB32)
     image.fill(Qt.white)
     image_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists([image], paths=[None], ids=[image_id])
+    image_map = CuteCanvas.imageMapFromLists([image], paths=[None], ids=[image_id])
     catalog.setImagesByID(image_map, image_id)
     return qpane, image
 
@@ -908,8 +908,8 @@ def test_brush_mode_persists_when_mask_available(qapp):
         assert service is not None
         mask_id = service.createBlankMask(image.size())
         assert mask_id is not None
-        qpane.setControlMode(QPane.CONTROL_MODE_DRAW_BRUSH)
-        assert qpane.getControlMode() == QPane.CONTROL_MODE_DRAW_BRUSH
+        qpane.setControlMode(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_DRAW_BRUSH
     finally:
         _cleanup_qpane(qpane, qapp)
     app = QCoreApplication.instance()
@@ -1081,7 +1081,7 @@ def test_mask_stroke_finalize_clears_preview_and_pending_jobs(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(0)
+    layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 6
     try:
         _emit_brush_stroke(qpane, QPoint(3, 3))
@@ -1112,7 +1112,7 @@ def test_mask_stroke_records_history_without_reapplying_completed_pixels(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    generation_before = layer.surface.generation
+    generation_before = layer.coverage.raster.generation
     qpane.interaction.brush_size = 6
     try:
         _queue_pending_stroke(qpane, QPoint(8, 8))
@@ -1120,7 +1120,7 @@ def test_mask_stroke_records_history_without_reapplying_completed_pixels(qapp):
         executor.run_category("mask_stroke_main")
         qapp.processEvents()
 
-        assert layer.surface.generation == generation_before + 1
+        assert layer.coverage.raster.generation == generation_before + 1
         assert layer.mask_image.pixelColor(8, 8).value() == 255
         state = service.getUndoState(mask_id)
         assert state is not None
@@ -1151,7 +1151,7 @@ def test_mask_stroke_finalize_drops_stale_generation(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(0)
+    layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     try:
         _emit_brush_stroke(qpane, QPoint(4, 4))
@@ -1182,7 +1182,7 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(0)
+    layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     tools = qpane._tools_manager
     try:
@@ -1250,7 +1250,7 @@ def test_mask_stroke_finalize_uses_qtimer_when_dispatch_missing(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(0)
+    layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 4
     try:
         _emit_brush_stroke(qpane, QPoint(5, 5))
@@ -1284,7 +1284,7 @@ def test_mask_feature_paints_via_tool_manager(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.black)
+    layer.coverage.raster.fill(Qt.black)
     assert not layer.mask_image.isNull()
     qpane.interaction.brush_size = 4
     _emit_brush_stroke(qpane, QPoint(2, 2))
@@ -1293,14 +1293,14 @@ def test_mask_feature_paints_via_tool_manager(qapp):
 
 
 def test_mask_feature_reinstall_preserves_stroke_binding(qapp):
-    from qpane.masks import install as mask
+    from cutecanvas.masks import install as mask
 
     qpane, image = _prepare_qpane_with_mask_feature()
     # Simulate uninstall
     if qpane.mask_service is not None:
         qpane.detachMaskService()
-    qpane.hooks.unregisterTool(QPane.CONTROL_MODE_DRAW_BRUSH)
-    qpane.hooks.unregisterCursorProvider(QPane.CONTROL_MODE_DRAW_BRUSH)
+    qpane.hooks.unregisterTool(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
+    qpane.hooks.unregisterCursorProvider(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
     qpane.hooks.unregisterOverlay("mask")
     mask.install_mask_feature(qpane)
     service = _mask_service(qpane)
@@ -1310,7 +1310,7 @@ def test_mask_feature_reinstall_preserves_stroke_binding(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.black)
+    layer.coverage.raster.fill(Qt.black)
     assert not layer.mask_image.isNull()
     qpane.interaction.brush_size = 4
     _emit_brush_stroke(qpane, QPoint(1, 1))
@@ -1627,7 +1627,7 @@ def test_brush_stroke_commit_groups_segments(qpane_with_mask, qapp, monkeypatch)
     assert qpane.setActiveMaskID(mask_id)
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.black)
+    layer.coverage.raster.fill(Qt.black)
     assert not layer.mask_image.isNull()
     service.pushActiveMaskState()
 
@@ -1704,7 +1704,7 @@ def test_mask_tool_manager_stroke_undo_sequences(qapp, monkeypatch):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.black)
+    layer.coverage.raster.fill(Qt.black)
     assert not layer.mask_image.isNull()
     qpane.interaction.brush_size = 6
     paint_start = QPoint(3, 3)
@@ -1745,7 +1745,7 @@ def test_brush_single_click_undo(qpane_with_mask, qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.black)
+    layer.coverage.raster.fill(Qt.black)
     assert not layer.mask_image.isNull()
     service.pushActiveMaskState()
     working_image = layer.mask_image.copy()
@@ -1797,14 +1797,14 @@ def test_set_image_preserves_mask_cache(qpane_with_mask):
     assert mask_id is not None
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.white)
+    layer.coverage.raster.fill(Qt.white)
     pixmap = service.getColorizedMask(layer)
     assert pixmap is not None
     usage_before = service.controller.renders.cache_usage_bytes
     assert usage_before > 0
     new_image = qpane.original_image.copy()
     new_id = uuid.uuid4()
-    new_map = QPane.imageMapFromLists([new_image], [None], [new_id])
+    new_map = CuteCanvas.imageMapFromLists([new_image], [None], [new_id])
     qpane.setImagesByID(new_map, new_id)
     usage_after = service.controller.renders.cache_usage_bytes
     assert usage_after == usage_before
@@ -1819,7 +1819,7 @@ def test_invalidate_mask_caches_for_image(qpane_with_mask):
     assert mask_id is not None
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.white)
+    layer.coverage.raster.fill(Qt.white)
     assert service.getColorizedMask(layer) is not None
     assert service.controller.renders.cache_usage_bytes > 0
     service.invalidateMaskCachesForImage(image_id)
@@ -1840,7 +1840,7 @@ def test_mask_patch_undo_updates_overlay_cache_in_place(
     controller = service.controller
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(0)
+    layer.coverage.raster.fill(0)
     assert controller.edits.begin_stroke()
     working = layer.mask_image.copy()
     working.setPixel(0, 0, 255)
@@ -2148,7 +2148,7 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
 
 def test_mask_prefetch_warms_masks(qapp):
     executor = StubExecutor(auto_finish=True)
-    qpane = QPane(
+    qpane = CuteCanvas(
         config=fixed_cache_config(), features=("mask",), task_executor=executor
     )
     qpane.resize(32, 32)
@@ -2163,7 +2163,7 @@ def test_mask_prefetch_warms_masks(qapp):
         mask_id = manager.create_mask(image)
         layer = manager.get_layer(mask_id)
         assert layer is not None
-        layer.surface.fill(128)
+        layer.coverage.raster.fill(128)
         _attach_test_mask(service, manager, mask_id, image_id)
         source_image = QImage(8, 8, QImage.Format_ARGB32)
         source_image.fill(Qt.white)
@@ -2196,7 +2196,7 @@ def test_mask_prefetch_warms_masks(qapp):
 
 def test_mask_prefetch_respects_deferral_ratio(qapp):
     executor = StubExecutor(auto_finish=True)
-    qpane = QPane(features=("mask",), task_executor=executor)
+    qpane = CuteCanvas(features=("mask",), task_executor=executor)
     qpane.resize(32, 32)
     try:
         service = qpane.mask_service
@@ -2222,7 +2222,7 @@ def test_mask_prefetch_respects_deferral_ratio(qapp):
 
 def test_mask_prefetch_diagnostics_available_by_default(qapp):
     executor = StubExecutor(auto_finish=True)
-    qpane = QPane(features=("mask",), task_executor=executor)
+    qpane = CuteCanvas(features=("mask",), task_executor=executor)
     qpane.resize(16, 16)
     try:
         service = qpane.mask_service
@@ -2236,7 +2236,7 @@ def test_mask_prefetch_diagnostics_available_by_default(qapp):
 
 
 def test_mask_prefetch_flag_follows_config(qapp):
-    qpane = QPane(features=("mask",))
+    qpane = CuteCanvas(features=("mask",))
     qpane.resize(16, 16)
     try:
         service = qpane.mask_service
@@ -2251,7 +2251,7 @@ def test_mask_prefetch_flag_follows_config(qapp):
 
 
 def test_mask_colorize_metrics_and_logging(qapp, monkeypatch, caplog):
-    qpane = QPane(features=("mask",))
+    qpane = CuteCanvas(features=("mask",))
     qpane.resize(32, 32)
     try:
         service = qpane.mask_service
@@ -2622,7 +2622,7 @@ def test_swap_defers_update_until_mask_ready(qapp, monkeypatch):
         second_image.fill(Qt.black)
         first_id = uuid.uuid4()
         second_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             [first_image, second_image],
             paths=[None, None],
             ids=[first_id, second_id],
@@ -2692,7 +2692,7 @@ def test_activation_pending_flag_toggles(qapp, monkeypatch):
         image = QImage(96, 96, QImage.Format_ARGB32)
         image.fill(Qt.white)
         image_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists([image], paths=[None], ids=[image_id])
+        image_map = CuteCanvas.imageMapFromLists([image], paths=[None], ids=[image_id])
         catalog.setImagesByID(image_map, image_id)
         mask_image = QImage(96, 96, QImage.Format_Grayscale8)
         mask_image.fill(220)
@@ -2751,7 +2751,7 @@ def test_prefetched_masks_avoid_colorize_on_activation(qapp):
         image = QImage(64, 64, QImage.Format_ARGB32)
         image.fill(Qt.white)
         image_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists([image], paths=[None], ids=[image_id])
+        image_map = CuteCanvas.imageMapFromLists([image], paths=[None], ids=[image_id])
         catalog.setImagesByID(image_map, image_id)
         catalog.setCurrentImageID(image_id)
         mask_image = QImage(64, 64, QImage.Format_Grayscale8)
@@ -2931,7 +2931,7 @@ def test_mask_detach_cancels_pending_strokes(qapp):
     assert qpane.setActiveMaskID(mask_id)
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(0)
+    layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     try:
         _queue_pending_stroke(qpane, QPoint(4, 4))
@@ -2967,8 +2967,8 @@ def test_mask_switch_releases_pending_jobs(qapp):
     layer_a = service.assets.get_layer(mask_a)
     layer_b = service.assets.get_layer(mask_b)
     assert layer_a is not None and layer_b is not None
-    layer_a.surface.fill(0)
-    layer_b.surface.fill(0)
+    layer_a.coverage.raster.fill(0)
+    layer_b.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     try:
         _queue_pending_stroke(qpane, QPoint(3, 3))
@@ -3005,8 +3005,8 @@ def test_cycle_masks_invalidates_pending_jobs(qapp):
     layer_a = service.assets.get_layer(mask_a)
     layer_b = service.assets.get_layer(mask_b)
     assert layer_a is not None and layer_b is not None
-    layer_a.surface.fill(0)
-    layer_b.surface.fill(0)
+    layer_a.coverage.raster.fill(0)
+    layer_b.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     image_id = qpane.catalog().currentImageID()
     assert image_id is not None
@@ -3042,8 +3042,8 @@ def test_remove_mask_cancels_pending_jobs(qapp):
     layer_a = service.assets.get_layer(mask_a)
     layer_b = service.assets.get_layer(mask_b)
     assert layer_a is not None and layer_b is not None
-    layer_a.surface.fill(0)
-    layer_b.surface.fill(0)
+    layer_a.coverage.raster.fill(0)
+    layer_b.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     image_id = qpane.catalog().currentImageID()
     assert image_id is not None
@@ -3082,8 +3082,8 @@ def test_concurrent_strokes_survive_mask_reorder(qapp):
     layer_a = service.assets.get_layer(mask_a)
     layer_b = service.assets.get_layer(mask_b)
     assert layer_a is not None and layer_b is not None
-    layer_a.surface.fill(0)
-    layer_b.surface.fill(0)
+    layer_a.coverage.raster.fill(0)
+    layer_b.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     try:
         assert qpane.setActiveMaskID(mask_a)
@@ -3129,7 +3129,7 @@ def test_worker_job_matches_render_result(qapp, monkeypatch, brush_size, erase):
     layer = service.assets.get_layer(mask_id)
     assert layer is not None
     fill_value = 255 if erase else 0
-    layer.surface.fill(fill_value)
+    layer.coverage.raster.fill(fill_value)
     controller = service.controller
     rect = QRect(0, 0, 8, 8)
     segment = BrushStrokeSegment.fixed(

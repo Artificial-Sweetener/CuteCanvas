@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,28 +14,30 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Builders that translate QPane catalog snapshots into demo presentation models."""
+"""Builders that translate CuteCanvas catalog snapshots into demo presentation models."""
 
 from __future__ import annotations
 
 import uuid
 from pathlib import Path
 
+from cutecanvas import CatalogSnapshot, CuteCanvas, LinkedGroup
+
 from examples.demonstration.catalog.models import (
     CatalogGroup,
     CatalogImage,
     CatalogMask,
-    CatalogSnapshot,
 )
-from qpane import CatalogSnapshot as QPaneCatalogSnapshot
-from qpane import LinkedGroup, QPane
+from examples.demonstration.catalog.models import (
+    CatalogSnapshot as CatalogTreeSnapshot,
+)
 
 
-def build_catalog_snapshot(qpane: QPane) -> CatalogSnapshot:
-    """Assemble grouped catalog data from the QPane facade snapshot helper."""
-    snapshot: QPaneCatalogSnapshot = qpane.getCatalogSnapshot()
+def build_catalog_snapshot(qpane: CuteCanvas) -> CatalogTreeSnapshot:
+    """Assemble grouped catalog data from the CuteCanvas facade snapshot helper."""
+    snapshot: CatalogSnapshot = qpane.getCatalogSnapshot()
     if not snapshot.order:
-        return CatalogSnapshot(
+        return CatalogTreeSnapshot(
             groups=[],
             current_image_id=snapshot.current_image_id,
             active_mask_id=snapshot.active_mask_id,
@@ -97,7 +99,7 @@ def build_catalog_snapshot(qpane: QPane) -> CatalogSnapshot:
                 is_link_group=False,
             )
         )
-    return CatalogSnapshot(
+    return CatalogTreeSnapshot(
         groups=groups,
         current_image_id=snapshot.current_image_id,
         active_mask_id=snapshot.active_mask_id,
@@ -108,7 +110,7 @@ def build_catalog_snapshot(qpane: QPane) -> CatalogSnapshot:
 
 def _build_catalog_image(
     *,
-    qpane: QPane,
+    qpane: CuteCanvas,
     image_id: uuid.UUID,
     index: int,
     active_mask_id: uuid.UUID | None,
@@ -130,7 +132,7 @@ def _build_catalog_image(
 
 
 def _collect_mask_entries(
-    qpane: QPane, image_id: uuid.UUID, active_mask_id: uuid.UUID | None
+    qpane: CuteCanvas, image_id: uuid.UUID, active_mask_id: uuid.UUID | None
 ) -> list[CatalogMask]:
     """Return mask presentation data for ``image_id``."""
     if not qpane.maskFeatureAvailable():

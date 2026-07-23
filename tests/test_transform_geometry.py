@@ -1,12 +1,19 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
-"""Exact geometry tests for Photoshop-style affine transform gestures."""
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""Exact geometry tests for affine transform gestures."""
 
 from __future__ import annotations
 
@@ -14,7 +21,6 @@ import math
 
 import pytest
 from PySide6.QtCore import QPointF
-
 from qpane.scene.affine import LayerTransform
 from qpane.scene.transform_geometry import (
     AffineTransformGeometry,
@@ -113,7 +119,7 @@ def test_alt_corner_scale_preserves_center_reference() -> None:
 
 
 def test_rotation_shift_snaps_delta_to_fifteen_degrees() -> None:
-    """Shift rotation must snap the gesture delta to Photoshop's 15-degree grid."""
+    """Shift rotation must snap the gesture delta to a 15-degree grid."""
     geometry = AffineTransformGeometry(
         TransformLocalBounds(0.0, 0.0, 100.0, 100.0),
         LayerTransform(),
@@ -138,7 +144,7 @@ def test_rotation_shift_snaps_delta_to_fifteen_degrees() -> None:
 
 
 def test_side_skew_preserves_opposite_edge() -> None:
-    """A Photoshop side-skew gesture must keep its opposite edge fixed."""
+    """A side-skew gesture must keep its opposite edge fixed."""
     geometry = AffineTransformGeometry(
         TransformLocalBounds(0.0, 0.0, 120.0, 80.0),
         LayerTransform(dx=50.0, dy=30.0),

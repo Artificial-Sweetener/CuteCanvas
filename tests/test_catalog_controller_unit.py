@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -24,7 +24,6 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage
-
 from qpane.catalog.controller import CatalogController
 from qpane.rendering import NormalizedViewState, ViewportZoomMode
 from qpane.scene.identity import (
@@ -204,6 +203,16 @@ def _make_controller(
         windowHandle=lambda: None,
         samManager=lambda: sam_manager,
         mask_service=mask_service,
+        catalog_images_will_remove=[],
+        catalog_resource_invalidations=[],
+    )
+    qpane._catalog_image_will_remove = (
+        lambda removed_id: qpane.catalog_images_will_remove.append(removed_id)
+    )
+    qpane._catalog_image_resources_removed = (
+        lambda removed_ids: qpane.catalog_resource_invalidations.append(
+            tuple(removed_ids)
+        )
     )
     controller = CatalogController(
         qpane=qpane,
@@ -307,30 +316,20 @@ def test_set_current_image_delegates_to_swap_delegate() -> None:
 
 
 def test_remove_images_evicts_mask_and_sam_caches() -> None:
-    """Removing images should invalidate mask caches and SAM entries."""
+    """Removing images should publish source-neutral lifecycle callbacks."""
     image_id = uuid.uuid4()
     other_id = uuid.uuid4()
-    mask_calls: list[uuid.UUID] = []
-    sam_calls: list[uuid.UUID] = []
-    mask_service = SimpleNamespace(
-        invalidateMaskCachesForImage=lambda mid: mask_calls.append(mid)
-    )
-    sam_manager = SimpleNamespace(
-        removeFromCache=lambda image_id: sam_calls.append(image_id)
-    )
     controller, catalog, tile_manager, link_manager = _make_controller(
         image=QImage(5, 5, QImage.Format_ARGB32),
         image_id=image_id,
-        mask_service=mask_service,
-        sam_manager=sam_manager,
     )
     catalog._paths[image_id] = "first.png"
     catalog._paths[other_id] = "second.png"
     catalog._image_ids = [image_id, other_id]
     removed = controller.removeImagesByID((image_id,))
     assert removed == (image_id,)
-    assert mask_calls == [image_id]
+    assert controller._qpane.catalog_images_will_remove == [image_id]
     assert [key.source_id for key in tile_manager.removed] == [image_id]
-    assert sam_calls == [image_id]
+    assert controller._qpane.catalog_resource_invalidations == [(image_id,)]
     assert link_manager.removed == [image_id]
     assert controller._swap_delegate.display_calls == 1

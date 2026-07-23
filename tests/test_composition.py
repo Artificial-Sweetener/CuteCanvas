@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,17 +22,16 @@ import uuid
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QColor, QImage
-
-from qpane import (
+from cutecanvas import (
+    CatalogLayerRequest,
     ComparisonOrientation,
     CompositionLayerEntry,
+    CompositionRequest,
     CompositionSnapshot,
-    QPane,
-    QPaneCatalogImageLayerRequest,
-    QPaneSceneRequest,
+    CuteCanvas,
 )
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QColor, QImage
 
 
 def _image(color: QColor) -> QImage:
@@ -42,12 +41,12 @@ def _image(color: QColor) -> QImage:
     return image
 
 
-def _seed_two_images(qpane: QPane) -> tuple[uuid.UUID, uuid.UUID]:
+def _seed_two_images(qpane: CuteCanvas) -> tuple[uuid.UUID, uuid.UUID]:
     """Load two catalog images and return their IDs."""
     first = uuid.uuid4()
     second = uuid.uuid4()
     qpane.setImagesByID(
-        QPane.imageMapFromLists(
+        CuteCanvas.imageMapFromLists(
             [_image(QColor("red")), _image(QColor("blue"))],
             paths=[Path("first.png"), Path("second.png")],
             ids=[first, second],
@@ -59,7 +58,7 @@ def _seed_two_images(qpane: QPane) -> tuple[uuid.UUID, uuid.UUID]:
 
 def test_catalog_load_creates_default_compositions(qapp) -> None:
     """setImagesByID creates stable default compositions without changing catalog APIs."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         first, second = _seed_two_images(viewer)
         snapshot = viewer.getCompositionSnapshot()
@@ -81,7 +80,7 @@ def test_catalog_load_creates_default_compositions(qapp) -> None:
         assert base_layer.source_id == first
         assert base_layer.role == "base-image"
         viewer.setImagesByID(
-            QPane.imageMapFromLists(
+            CuteCanvas.imageMapFromLists(
                 [_image(QColor("red")), _image(QColor("blue"))],
                 paths=[Path("first.png"), Path("second.png")],
                 ids=[first, second],
@@ -96,7 +95,7 @@ def test_catalog_load_creates_default_compositions(qapp) -> None:
 
 def test_compose_creates_and_opens_explicit_composition(qapp) -> None:
     """compose creates a persistent public composition and opens it."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         first, second = _seed_two_images(viewer)
         composition_id = viewer.compose(images=[first, second], title="A/B Review")
@@ -118,23 +117,23 @@ def test_snapshot_inspects_inactive_layered_composition_without_activating_it(
     qapp,
 ) -> None:
     """Snapshot metadata must not activate the layered composition it inspects."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         first, second = _seed_two_images(viewer)
         bottom_layer_id = uuid.uuid4()
         top_layer_id = uuid.uuid4()
         layered_id = viewer.composeScene(
-            QPaneSceneRequest(
+            CompositionRequest(
                 composition_id=uuid.uuid4(),
                 title="Inactive Layers",
                 bounds=QRectF(0.0, 0.0, 32.0, 16.0),
                 layers=(
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=bottom_layer_id,
                         image_id=first,
                         placement=QRectF(0.0, 0.0, 16.0, 16.0),
                     ),
-                    QPaneCatalogImageLayerRequest(
+                    CatalogLayerRequest(
                         layer_id=top_layer_id,
                         image_id=second,
                         placement=QRectF(16.0, 0.0, 16.0, 16.0),
@@ -169,7 +168,7 @@ def test_snapshot_inspects_inactive_layered_composition_without_activating_it(
 
 def test_set_current_image_opens_default_composition_and_clears_compare(qapp) -> None:
     """Catalog navigation opens default compositions and does not leak comparison."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         first, second = _seed_two_images(viewer)
         viewer.setComparisonImageID(second)
@@ -190,7 +189,7 @@ def test_set_current_image_opens_default_composition_and_clears_compare(qapp) ->
 
 def test_comparison_split_is_composition_scoped(qapp) -> None:
     """Comparison split and orientation are restored with their composition."""
-    viewer = QPane(features=())
+    viewer = CuteCanvas(features=())
     try:
         first, second = _seed_two_images(viewer)
         composition_id = viewer.compose(images=[first, second], title=None)

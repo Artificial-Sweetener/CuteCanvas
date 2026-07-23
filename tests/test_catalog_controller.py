@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,7 +21,6 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, Qt
-
 from qpane.rendering import ViewportZoomMode
 from qpane.types import CatalogEntry
 
@@ -50,7 +49,7 @@ def test_remove_images_by_id_batches_evictions_and_display(monkeypatch, qpane_vi
         lambda *, fit_view=True: display_calls.append(fit_view),
     )
     evictions: list[tuple[uuid.UUID, ...]] = []
-    sam_evictions: list[tuple[uuid.UUID, ...]] = []
+    resource_invalidations: list[tuple[uuid.UUID, ...]] = []
     monkeypatch.setattr(
         controller,
         "_evict_catalog_assets",
@@ -59,17 +58,17 @@ def test_remove_images_by_id_batches_evictions_and_display(monkeypatch, qpane_vi
         ),
     )
     monkeypatch.setattr(
-        controller,
-        "_evict_sam_images",
-        lambda image_ids: sam_evictions.append(tuple(image_ids)),
+        controller._qpane,
+        "_catalog_image_resources_removed",
+        lambda image_ids: resource_invalidations.append(tuple(image_ids)),
     )
     removed = controller.removeImagesByID([second, first, second])
     assert removed == (second, first)
     assert display_calls == [True]
     assert len(evictions) == 1
     assert set(evictions[0]) == {first, second}
-    assert len(sam_evictions) == 1
-    assert set(sam_evictions[0]) == {first, second}
+    assert len(resource_invalidations) == 1
+    assert set(resource_invalidations[0]) == {first, second}
     assert controller.catalog.getImageIds() == [third]
 
 
@@ -88,7 +87,7 @@ def test_set_images_by_id_evicts_removed_and_changed_ids(monkeypatch, qpane_view
         display=False,
     )
     asset_evictions: list[tuple[uuid.UUID, ...]] = []
-    sam_evictions: list[tuple[uuid.UUID, ...]] = []
+    resource_invalidations: list[tuple[uuid.UUID, ...]] = []
     monkeypatch.setattr(
         controller,
         "_evict_catalog_assets",
@@ -97,9 +96,9 @@ def test_set_images_by_id_evicts_removed_and_changed_ids(monkeypatch, qpane_view
         ),
     )
     monkeypatch.setattr(
-        controller,
-        "_evict_sam_images",
-        lambda image_ids: sam_evictions.append(tuple(image_ids)),
+        controller._qpane,
+        "_catalog_image_resources_removed",
+        lambda image_ids: resource_invalidations.append(tuple(image_ids)),
     )
     controller.setImagesByID(
         {
@@ -111,8 +110,8 @@ def test_set_images_by_id_evicts_removed_and_changed_ids(monkeypatch, qpane_view
     )
     assert len(asset_evictions) == 1
     assert set(asset_evictions[0]) == {unchanged, changed, removed}
-    assert len(sam_evictions) == 1
-    assert set(sam_evictions[0]) == {changed, removed}
+    assert len(resource_invalidations) == 1
+    assert set(resource_invalidations[0]) == {changed, removed}
 
 
 def test_restore_view_state_preserves_pan_in_1to1_mode(qpane_view):

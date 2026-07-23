@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,10 +14,10 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QImage
 
-from qpane import QPane
 from tests.helpers.render_plan import make_render_plan
 
 
@@ -27,7 +27,7 @@ def _cleanup_qpane(qpane, qapp):
 
 
 def test_renderer_paint_duration_updates(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(32, 32)
     try:
         renderer = qpane.view().renderer

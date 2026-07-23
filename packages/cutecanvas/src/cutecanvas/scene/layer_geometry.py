@@ -1,0 +1,78 @@
+#    CuteCanvas - High-performance layered image editor
+#    Copyright (C) 2025  Artificial Sweetener and contributors
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""Layer manipulation geometry policy and authoritative bounds resolution."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from PySide6.QtCore import QRectF
+from qpane.sdk.scene import LayerDescriptor, RasterBounds
+
+from ..composition.geometry_policy import LayerGeometryMode, LayerGeometryPolicy
+from .source_capabilities import EditorSourceCapabilities
+
+
+class LayerGeometryResolver:
+    """Resolve one layer's manipulation bounds through explicit host policy."""
+
+    def __init__(
+        self,
+        sources: EditorSourceCapabilities,
+        policy_for: Callable[[LayerDescriptor], LayerGeometryPolicy],
+    ) -> None:
+        """Bind source geometry capabilities and host policy lookup."""
+        self._sources = sources
+        self._policy_for = policy_for
+
+    def local_bounds(self, layer: LayerDescriptor) -> QRectF | None:
+        """Return source-local manipulation bounds for ``layer``."""
+        policy = self._policy_for(layer)
+        mode = policy.mode
+        if mode is LayerGeometryMode.CONTENT:
+            return self._sources.content_bounds.content_bounds(layer.source)
+        if mode is LayerGeometryMode.STORAGE:
+            return self._sources.storage_bounds.storage_bounds(layer.source)
+        if mode is LayerGeometryMode.AUTHORED:
+            return self._sources.authored_bounds.authored_bounds(layer.source)
+        if mode is LayerGeometryMode.CLIP:
+            clip = layer.clip
+            return (
+                None
+                if clip is None
+                else QRectF(clip.x, clip.y, clip.width, clip.height)
+            )
+        if mode is LayerGeometryMode.CUSTOM:
+            return _rectf(policy.custom_bounds)
+        return _rectf(layer.raster_bounds)
+
+    def resolved_local_bounds(self, layer: LayerDescriptor) -> QRectF | None:
+        """Return policy bounds with intrinsic source geometry as fallback."""
+        return self.local_bounds(layer) or _rectf(layer.raster_bounds)
+
+
+def _rectf(bounds: RasterBounds | None) -> QRectF | None:
+    """Detach integer raster geometry into the continuous editor domain."""
+    return (
+        None
+        if bounds is None
+        else QRectF(
+            float(bounds.x),
+            float(bounds.y),
+            float(bounds.width),
+            float(bounds.height),
+        )
+    )

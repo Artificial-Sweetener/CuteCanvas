@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Polished public-API editor actions for the demonstration host."""
 
 from __future__ import annotations
@@ -13,6 +20,12 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from cutecanvas import (
+    CuteCanvas,
+    EditorIntent,
+    LayerPolicy,
+    RasterExtentPolicy,
+)
 from PySide6.QtCore import QObject, QRect, QSize, Qt
 from PySide6.QtGui import (
     QAction,
@@ -31,13 +44,6 @@ from PySide6.QtWidgets import (
     QToolBar,
     QToolButton,
     QWidget,
-)
-
-from qpane import (
-    EditorIntent,
-    QPane,
-    QPaneLayerInteractionPolicy,
-    RasterExtentPolicy,
 )
 
 from .layer_policy import DemoLayerPolicyController
@@ -89,7 +95,7 @@ class EditorControls(QObject):
 
     def __init__(
         self,
-        qpane: QPane,
+        qpane: CuteCanvas,
         *,
         set_mode: Callable[[str], None],
         show_status: Callable[[str], None],
@@ -103,6 +109,12 @@ class EditorControls(QObject):
         self._paint_layer_count = 0
         self.layer_policy = DemoLayerPolicyController(qpane, self)
         self._selection_actions = self._build_selection_actions()
+        self._mask_shape_actions = self._build_mask_shape_actions()
+        self.paint_bucket_action = self._tool_action(
+            "Paint Bucket",
+            CuteCanvas.CONTROL_MODE_PAINT_BUCKET,
+            "G",
+        )
         self.undo_action = self._action(
             "Undo",
             self._undo,
@@ -127,6 +139,15 @@ class EditorControls(QObject):
             "Invert Selection",
             self._invert,
             QKeySequence("Ctrl+Shift+I"),
+        )
+        self.fill_selection_action = self._action(
+            "Fill Selection",
+            self._fill_selection,
+            QKeySequence("Shift+Backspace"),
+        )
+        self.rasterize_mask_action = self._action(
+            "Rasterize Mask Shapes",
+            self._rasterize_mask,
         )
         self.delete_pixels_action = self._action(
             "Clear Selected Pixels",
@@ -169,7 +190,11 @@ class EditorControls(QObject):
     def add_selection_button(self, toolbar: QToolBar) -> QToolButton:
         """Add one compact last-used selection tool to ``toolbar``."""
         menu = QMenu(toolbar)
+        menu.addSection("Selection")
         for action in self._selection_actions:
+            menu.addAction(action)
+        menu.addSection("Mask")
+        for action in self._mask_shape_actions:
             menu.addAction(action)
         container = QWidget(toolbar)
         layout = QHBoxLayout(container)
@@ -181,7 +206,7 @@ class EditorControls(QObject):
         button.setDefaultAction(self._selection_actions[0])
         button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         layout.addWidget(button)
-        for action in self._selection_actions:
+        for action in (*self._selection_actions, *self._mask_shape_actions):
             action.triggered.connect(
                 lambda _checked=False, selected=action: button.setDefaultAction(
                     selected
@@ -201,6 +226,7 @@ class EditorControls(QObject):
         menu.addAction(self.select_all_action)
         menu.addAction(self.deselect_action)
         menu.addAction(self.invert_action)
+        menu.addAction(self.fill_selection_action)
         menu.addSeparator()
         menu.addAction(self.delete_pixels_action)
         menu.addSeparator()
@@ -214,6 +240,7 @@ class EditorControls(QObject):
     def populate_layer_menu(self, menu: QMenu) -> None:
         """Add ordinary editable-layer creation to the demo's Layer menu."""
         menu.addAction(self.add_paint_layer_action)
+        menu.addAction(self.rasterize_mask_action)
 
     def add_floating_toolbar(self, window: QMainWindow) -> QToolBar:
         """Add a compact contextual bar shown only for unresolved pixels."""
@@ -238,8 +265,11 @@ class EditorControls(QObject):
 
     def sync_mode(self, mode: str) -> None:
         """Keep check state aligned with the active public tool mode."""
-        for action in self._selection_actions:
+        for action in (*self._selection_actions, *self._mask_shape_actions):
             action.setChecked(action.data() == mode)
+        self.paint_bucket_action.setChecked(
+            mode == CuteCanvas.CONTROL_MODE_PAINT_BUCKET
+        )
 
     def refresh(self, *_args: object) -> None:
         """Refresh action availability from detached public snapshots."""
@@ -254,6 +284,8 @@ class EditorControls(QObject):
         self.select_all_action.setEnabled(selection_state.allowed)
         self.deselect_action.setEnabled(has_selection)
         self.invert_action.setEnabled(selection_state.allowed)
+        self.fill_selection_action.setEnabled(has_selection)
+        self.rasterize_mask_action.setEnabled(self._qpane.activeMaskID() is not None)
         self.delete_pixels_action.setEnabled(
             has_selection and (delete_state.allowed or bool(delete_state.alternatives))
         )
@@ -269,6 +301,8 @@ class EditorControls(QObject):
             self._floating_toolbar.setVisible(has_floating)
         for action in self._selection_actions:
             action.setEnabled(selection_state.allowed)
+        for action in self._mask_shape_actions:
+            action.setEnabled(self._qpane.activeMaskID() is not None)
 
     def _build_selection_actions(self) -> tuple[QAction, ...]:
         """Create mutually exclusive shape tools with discoverable shortcuts."""
@@ -277,18 +311,43 @@ class EditorControls(QObject):
         actions = (
             self._tool_action(
                 "Rectangle Select",
-                QPane.CONTROL_MODE_SELECT_RECTANGLE,
+                CuteCanvas.CONTROL_MODE_SELECT_RECTANGLE,
                 "R",
             ),
             self._tool_action(
                 "Ellipse Select",
-                QPane.CONTROL_MODE_SELECT_ELLIPSE,
+                CuteCanvas.CONTROL_MODE_SELECT_ELLIPSE,
                 "E",
             ),
             self._tool_action(
                 "Lasso Select",
-                QPane.CONTROL_MODE_SELECT_LASSO,
+                CuteCanvas.CONTROL_MODE_SELECT_LASSO,
                 "L",
+            ),
+        )
+        for action in actions:
+            group.addAction(action)
+        return actions
+
+    def _build_mask_shape_actions(self) -> tuple[QAction, ...]:
+        """Create retained mask-shape tools sharing the selection implementation."""
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        actions = (
+            self._tool_action(
+                "Rectangle Mask",
+                CuteCanvas.CONTROL_MODE_MASK_RECTANGLE,
+                "",
+            ),
+            self._tool_action(
+                "Ellipse Mask",
+                CuteCanvas.CONTROL_MODE_MASK_ELLIPSE,
+                "",
+            ),
+            self._tool_action(
+                "Lasso Mask",
+                CuteCanvas.CONTROL_MODE_MASK_LASSO,
+                "",
             ),
         )
         for action in actions:
@@ -340,6 +399,21 @@ class EditorControls(QObject):
         """Invert selection within composition bounds."""
         if self._qpane.invertPixelSelection():
             self._show_status("Selection inverted.")
+
+    def _fill_selection(self) -> None:
+        """Fill the active selection into the current editable target."""
+        if self._qpane.fillSelection():
+            self._show_status("Filled the active selection.")
+        else:
+            self._show_status("Select pixels and an editable layer first.")
+
+    def _rasterize_mask(self) -> None:
+        """Explicitly flatten retained geometry in the active mask."""
+        mask_id = self._qpane.activeMaskID()
+        if mask_id is not None and self._qpane.rasterizeMaskCoverage(mask_id):
+            self._show_status("Rasterized retained mask shapes.")
+        else:
+            self._show_status("The active mask has no retained shapes to rasterize.")
 
     def _delete_pixels(self) -> None:
         """Clear selected pixels from the selected editable layer."""
@@ -423,10 +497,10 @@ class EditorControls(QObject):
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         label: str | None,
-        interaction: QPaneLayerInteractionPolicy,
+        interaction: LayerPolicy,
     ) -> None:
         """Resolve floating pixels into a chosen compatible layer."""
-        destination_policy = QPaneLayerInteractionPolicy(
+        destination_policy = LayerPolicy(
             selectable=interaction.selectable,
             movable=interaction.movable,
             pixel_editable=True,
@@ -451,5 +525,5 @@ class EditorControls(QObject):
             extent_policy=RasterExtentPolicy.UNBOUNDED,
         )
         if layer_id is not None:
-            self._set_mode(QPane.CONTROL_MODE_DRAW_BRUSH)
+            self._set_mode(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
             self._show_status("Added an empty paint layer and armed the brush.")

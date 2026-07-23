@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -30,11 +30,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QPainter, QRegion
 from PySide6.QtWidgets import QApplication
-
-from qpane import QPane
 
 if TYPE_CHECKING:
     from qpane.scene.render_plan import SceneRenderPlan
@@ -156,7 +155,7 @@ class HeadlessPanHarness:
         zoom: float = 1.0,
         channel_tolerance: int = 0,
         artifact_root: Path = Path("pan-harness-artifacts"),
-        configure_qpane: Callable[[QPane], None] | None = None,
+        configure_qpane: Callable[[CuteCanvas], None] | None = None,
         features: Sequence[str] = (),
     ) -> None:
         """Mount the offscreen widgets and initialize their identical scenes."""
@@ -235,7 +234,7 @@ class HeadlessPanHarness:
         self._application.processEvents()
 
     @staticmethod
-    def capture_visible_frame(qpane: QPane) -> QImage:
+    def capture_visible_frame(qpane: CuteCanvas) -> QImage:
         """Return the exact viewport crop presented from a QPane render buffer."""
         renderer = qpane.view().renderer
         base_buffer = renderer.get_base_buffer()
@@ -272,16 +271,16 @@ class HeadlessPanHarness:
             painter.end()
         return frame
 
-    def _create_qpane(self, image: QImage, viewport_size: QSize) -> QPane:
+    def _create_qpane(self, image: QImage, viewport_size: QSize) -> CuteCanvas:
         """Create one configured QPane used by the differential harness."""
-        qpane = QPane(features=self._features)
+        qpane = CuteCanvas(features=self._features)
         try:
             device_pixel_ratio = self._device_pixel_ratio
             qpane.devicePixelRatioF = lambda: device_pixel_ratio  # type: ignore[method-assign]
             qpane.resize(viewport_size)
             image_id = uuid.uuid4()
             qpane.setImagesByID(
-                QPane.imageMapFromLists([QImage(image)], [None], [image_id]),
+                CuteCanvas.imageMapFromLists([QImage(image)], [None], [image_id]),
                 image_id,
             )
             qpane.setZoom1To1()

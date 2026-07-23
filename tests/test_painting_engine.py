@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Deterministic shared-brush and editable-color target contracts."""
 
 from __future__ import annotations
@@ -13,21 +20,18 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRect, QRectF
-from PySide6.QtGui import QColor, QImage
-
-from qpane import (
+from cutecanvas import (
     BrushDynamics as PublicBrushDynamics,
 )
-from qpane import (
+from cutecanvas import (
     BrushPreset as PublicBrushPreset,
 )
-from qpane import (
+from cutecanvas import (
+    LayerPolicy,
     PaintTargetKind,
-    QPaneLayerInteractionPolicy,
     RasterExtentPolicy,
 )
-from qpane.painting import (
+from cutecanvas.painting import (
     BrushDabEngine,
     BrushOperation,
     BrushPreset,
@@ -36,7 +40,9 @@ from qpane.painting import (
     BrushStrokeSession,
     BrushTipCache,
 )
-from qpane.painting.rendering import render_color_stroke, render_coverage_stroke
+from cutecanvas.painting.rendering import render_color_stroke, render_coverage_stroke
+from PySide6.QtCore import QPointF, QRect, QRectF
+from PySide6.QtGui import QColor, QImage
 
 pytest_plugins = ("tests.test_mask_workflows",)
 
@@ -263,7 +269,7 @@ def test_editable_raster_paint_target_commits_one_undoable_stroke(
     layer_id = qpane.addEditableRasterLayer(
         _transparent_image(128, 96),
         placement=QRectF(0.0, 0.0, 128.0, 96.0),
-        interaction=QPaneLayerInteractionPolicy(
+        interaction=LayerPolicy(
             selectable=True,
             movable=True,
             pixel_editable=True,
@@ -315,7 +321,7 @@ def test_editable_raster_paint_honors_selection_and_expand_policy(
     assert public_scene is not None
     layer_id = qpane.addEditableRasterLayer(
         _transparent_image(32, 32),
-        interaction=QPaneLayerInteractionPolicy(pixel_editable=True),
+        interaction=LayerPolicy(pixel_editable=True),
         extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
     )
     assert layer_id is not None
@@ -436,7 +442,7 @@ def test_stale_layer_target_rolls_back_captured_transaction(qpane_with_mask) -> 
     qpane, _manager, _image_id = qpane_with_mask
     layer_id = qpane.addEditableRasterLayer(
         _transparent_image(32, 32),
-        interaction=QPaneLayerInteractionPolicy(pixel_editable=True),
+        interaction=LayerPolicy(pixel_editable=True),
     )
     assert layer_id is not None
     scene = qpane.sceneMutationCoordinator().active_scene()

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,18 +21,18 @@ from __future__ import annotations
 import logging
 
 import pytest
+from cutecanvas import Config
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks.mask import MaskAssetStore
+from cutecanvas.masks.mask_controller import MaskController
 from PySide6.QtGui import QImage, Qt
-
-from qpane import Config
-from qpane.cache.consumers import MaskOverlayCacheConsumer
+from qpane.cache.consumers import EvictableCacheConsumer
 from qpane.cache.coordinator import (
     CacheConsumerCallbacks,
     CacheCoordinator,
     CachePriority,
 )
-from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.mask import MaskAssetStore
-from qpane.masks.mask_controller import MaskController
+
 from tests.helpers.config import fixed_cache_config
 
 MB = 1024 * 1024
@@ -67,12 +67,12 @@ def test_coordinator_enforces_priority_order():
     pyramids = FakeConsumer(usage=20)
     coordinator.register_consumer(
         "predictors",
-        priority=CachePriority.PREDICTORS,
+        priority=CachePriority.BACKGROUND_MODELS,
         callbacks=predictors.callbacks(),
     )
     coordinator.register_consumer(
         "masks",
-        priority=CachePriority.MASK_OVERLAYS,
+        priority=CachePriority.DERIVED_OVERLAYS,
         callbacks=masks.callbacks(),
     )
     coordinator.register_consumer(
@@ -166,7 +166,7 @@ def test_trim_emits_structured_payload(monkeypatch):
     secondary = FakeConsumer(usage=40)
     coordinator.register_consumer(
         "heavy",
-        priority=CachePriority.PREDICTORS,
+        priority=CachePriority.BACKGROUND_MODELS,
         callbacks=heavy.callbacks(),
     )
     assert not captured
@@ -201,13 +201,13 @@ def test_weighted_contention_orders_by_overage_then_priority(monkeypatch):
     light_weight = FakeConsumer(usage=60)
     coordinator.register_consumer(
         "heavy",
-        priority=CachePriority.PREDICTORS,
+        priority=CachePriority.BACKGROUND_MODELS,
         callbacks=heavy_weight.callbacks(),
         weight=3.0,
     )
     coordinator.register_consumer(
         "mid",
-        priority=CachePriority.MASK_OVERLAYS,
+        priority=CachePriority.DERIVED_OVERLAYS,
         callbacks=mid_weight.callbacks(),
         weight=1.0,
     )
@@ -242,13 +242,13 @@ def test_allows_borrowing_when_within_budget():
     secondary = FakeConsumer(usage=5)
     coordinator.register_consumer(
         "primary",
-        priority=CachePriority.PREDICTORS,
+        priority=CachePriority.BACKGROUND_MODELS,
         callbacks=primary.callbacks(),
         weight=3.0,
     )
     coordinator.register_consumer(
         "secondary",
-        priority=CachePriority.MASK_OVERLAYS,
+        priority=CachePriority.DERIVED_OVERLAYS,
         callbacks=secondary.callbacks(),
         weight=1.0,
     )
@@ -292,7 +292,7 @@ def test_trim_handles_reentrant_usage_updates():
     consumer = ReentrantConsumer()
     coordinator.register_consumer(
         "reentrant",
-        priority=CachePriority.PREDICTORS,
+        priority=CachePriority.BACKGROUND_MODELS,
         callbacks=consumer.callbacks(),
     )
     snapshot = coordinator.snapshot()
@@ -312,14 +312,19 @@ def test_mask_overlay_consumer_uses_controller_callback():
         mask_config=MaskConfigSlice(),
     )
     coordinator = CacheCoordinator(active_budget_bytes=8 * 1024 * 1024)
-    consumer = MaskOverlayCacheConsumer(controller.renders, coordinator)
+    consumer = EvictableCacheConsumer(
+        controller.renders,
+        coordinator,
+        consumer_id="mask_overlays",
+        priority=CachePriority.DERIVED_OVERLAYS,
+    )
     assert getattr(controller.renders._get, "__name__", "") == "_get"
     mask_image = QImage(8, 8, QImage.Format_Grayscale8)
     mask_image.fill(Qt.white)
     mask_id = manager.create_mask(mask_image)
     layer = manager.get_layer(mask_id)
     assert layer is not None
-    layer.surface.fill(Qt.white)
+    layer.coverage.raster.fill(Qt.white)
     assert controller.renders.get(layer) is not None
     snapshot = coordinator.snapshot()
     usage = snapshot["consumers"]["mask_overlays"]["usage_bytes"]
@@ -343,7 +348,11 @@ def test_mask_guard_rejects_oversized_item(
             cache={
                 "mode": "hard",
                 "budget_mb": 1,
-                "weights": {"masks": 1, "tiles": 0, "pyramids": 0, "predictors": 0},
+                "weights": {
+                    "tiles": 0,
+                    "pyramids": 0,
+                    "extensions": {"mask_overlays": 1, "models": 0},
+                },
             }
         ),
         mask_config=MaskConfigSlice(),

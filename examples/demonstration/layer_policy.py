@@ -1,24 +1,30 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Capability-aware interaction policy for the demonstration host."""
 
 from __future__ import annotations
 
+from cutecanvas import CuteCanvas, LayerPolicy, PaintTargetKind
 from PySide6.QtCore import QObject
-
-from qpane import PaintTargetKind, QPane, QPaneLayerInteractionPolicy
 
 
 class DemoLayerPolicyController(QObject):
     """Keep the selected authoring layer editable while catalog images stay frozen."""
 
-    def __init__(self, qpane: QPane, parent: QObject | None = None) -> None:
+    def __init__(self, qpane: CuteCanvas, parent: QObject | None = None) -> None:
         """Observe every public transition that can change layer capabilities."""
         super().__init__(parent)
         self._qpane = qpane
@@ -59,14 +65,14 @@ class DemoLayerPolicyController(QObject):
         scene = self._qpane.currentScene()
         if scene is None:
             return
-        frozen = QPaneLayerInteractionPolicy(selectable=True)
-        selectable = QPaneLayerInteractionPolicy(selectable=True)
-        editable = QPaneLayerInteractionPolicy(
+        frozen = LayerPolicy(selectable=True)
+        selectable = LayerPolicy(selectable=True)
+        editable = LayerPolicy(
             selectable=True,
             movable=True,
             pixel_editable=True,
         )
-        movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+        movable = LayerPolicy(selectable=True, movable=True)
         selected = self._qpane.selectedLayer()
         selected_layer_id = None if selected is None else selected.layer_id
         active_mask_id = self._qpane.activeMaskID()

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,6 +20,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPainter
+from qpane import LayerPresentationStyle
 
 from tools.pan_render_harness import (
     FrameArtifactDetector,
@@ -135,6 +136,37 @@ def test_headless_pan_harness_handles_fractionally_aligned_odd_viewport(
     )
     try:
         failures = harness.run(random_walk_pans(steps=150, seed=23, max_step=29))
+    finally:
+        harness.close()
+
+    assert failures == []
+
+
+def test_headless_pan_harness_keeps_layer_effect_redraws_exact(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    """Effect strip repairs must equal full redraws through abusive viewport motion."""
+
+    def add_effect(canvas) -> None:
+        scene = canvas.view().current_scene_descriptor()
+        assert scene is not None
+        canvas.addLayerPresentationEffect(
+            scene.scene_id,
+            scene.layers[0].layer_id,
+            LayerPresentationStyle.outline(QColor(40, 220, 255), width=2.0),
+        )
+
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(1024, 1024)),
+        viewport_size=QSize(320, 240),
+        zoom=1.0,
+        artifact_root=tmp_path,
+        configure_qpane=add_effect,
+    )
+    try:
+        failures = harness.run(random_walk_pans(steps=211, seed=991, max_step=37))
     finally:
         harness.close()
 

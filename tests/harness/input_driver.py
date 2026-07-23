@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Drive real Qt mouse, touch, and tablet paths against a mounted QPane."""
+"""Drive real Qt mouse, touch, and tablet paths against a mounted CuteCanvas."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ class QtStrokeDriver:
         self._harness = harness
         self._touch_device = QTest.createTouchDevice()
         self._pen_device = QPointingDevice(
-            "QPane abuse pen",
+            "CuteCanvas abuse pen",
             8801,
             QInputDevice.DeviceType.Stylus,
             QPointingDevice.PointerType.Pen,
@@ -194,7 +194,7 @@ class QtStrokeDriver:
         """Send mouse motion through the mounted host window's hit-test path."""
         window = self._harness.host.windowHandle()
         if window is None:
-            raise RuntimeError("Mounted QPane host has no window handle")
+            raise RuntimeError("Mounted CuteCanvas host has no window handle")
         viewer_point = action.point.to_qpoint()
         host_point = self._harness.viewer.mapTo(self._harness.host, viewer_point)
         if not action.stale_touchscreen_metadata:

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -19,19 +19,19 @@
 from __future__ import annotations
 
 import pytest
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QInputDevice, QMouseEvent, QPointingDevice, QTabletEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from qpane import QPane
 from tests.harness import MountedQPaneHarness
 from tests.harness.abuse_model import HarnessPoint, PointerKind, StrokeAction
 from tests.harness.input_driver import QtStrokeDriver
 
 
 class MountedMaskFeedbackProbe(MountedQPaneHarness):
-    """Mount a real offscreen QPane and sample its composited widget pixels."""
+    """Mount a real offscreen CuteCanvas and sample its composited widget pixels."""
 
     def __init__(
         self,
@@ -376,7 +376,7 @@ def _tablet_event(
     )
 
 
-def _assert_high_contrast_brush_cursor(viewer: QPane) -> None:
+def _assert_high_contrast_brush_cursor(viewer: CuteCanvas) -> None:
     """Assert that ``viewer`` exposes a non-empty cursor with dark and light pixels."""
     cursor_pixmap = viewer.cursor().pixmap()
     assert not cursor_pixmap.isNull()

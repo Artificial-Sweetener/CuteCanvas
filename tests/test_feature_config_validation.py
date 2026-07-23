@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,9 +21,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from qpane.core.config import Config, FeatureAwareConfig
-from qpane.core.config_features import iter_descriptors
+from cutecanvas.core.config import Config
+from cutecanvas.core.config_features import iter_descriptors
+from qpane.core.config import FeatureAwareConfig
 
 
 def test_non_strict_validation_warns_and_uses_defaults(
@@ -90,7 +90,7 @@ def test_input_validation_rejects_invalid_pressure_curve() -> None:
     descriptors = iter_descriptors()
 
     with pytest.raises(
-        ValueError, match="Feature 'input' configuration failed validation"
+        ValueError, match="Feature 'brush' configuration failed validation"
     ):
         FeatureAwareConfig(
             config,
@@ -113,7 +113,7 @@ def test_sam_device_cuda_unavailable_falls_back(
         mps = None
 
     monkeypatch.setattr(
-        "qpane.core.config_features._import_torch",
+        "cutecanvas.core.config_features._import_torch",
         lambda: _Torch(),
     )
     config = Config(sam_device="cuda")
@@ -136,7 +136,7 @@ def test_sam_device_strict_rejects_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "qpane.core.config_features._import_torch",
+        "cutecanvas.core.config_features._import_torch",
         lambda: None,
     )
     config = Config(sam_device="quantum")

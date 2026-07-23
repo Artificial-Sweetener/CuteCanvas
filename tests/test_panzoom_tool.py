@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,10 +22,8 @@ import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
-
+from qpane import NavigationInteractionPort, PanZoomTool
 from qpane.rendering import ViewportZoomMode
-from qpane.tools import PanZoomTool
-from qpane.tools.ports import NavigationInteractionPort
 
 
 class _PositioningMouseEvent:
@@ -103,8 +101,8 @@ def test_panzoom_respects_lock(qapp):
     tool = PanZoomTool()
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: True,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: True,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: 1.0,
         )
@@ -128,8 +126,8 @@ def test_panzoom_emits_pan_when_dragging(qapp):
     tool.signals.pan_requested.connect(lambda pan: emissions.append(pan))
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: False,
             can_pan=lambda: True,
             get_pan=lambda: current_pan,
@@ -152,8 +150,8 @@ def test_panzoom_does_not_emit_cursor_update_for_steady_pan_move(qapp):
     tool.signals.cursor_update_requested.connect(lambda: cursor_emissions.append(None))
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: False,
             can_pan=lambda: True,
             get_pan=lambda: current_pan,
@@ -181,8 +179,8 @@ def test_panzoom_scales_drag_delta_by_dpr(qapp):
     dpr = 1.25
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: False,
             can_pan=lambda: True,
             get_pan=lambda: current_pan,
@@ -204,8 +202,8 @@ def test_panzoom_drag_out_threshold(qapp):
     tool = PanZoomTool()
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: True,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: 1.0,
@@ -220,7 +218,7 @@ def test_panzoom_drag_out_threshold(qapp):
         buttons=Qt.MouseButton.LeftButton,
     )
     tool.mouseMoveEvent(close_move)
-    assert tool.drag_start_pos is not None
+    assert tool._drag_start_position is not None
     far_move = _make_mouse_event(
         QEvent.Type.MouseMove,
         QPointF(11, 5),
@@ -228,15 +226,15 @@ def test_panzoom_drag_out_threshold(qapp):
         buttons=Qt.MouseButton.LeftButton,
     )
     tool.mouseMoveEvent(far_move)
-    assert tool.drag_start_pos is None
+    assert tool._drag_start_position is None
 
 
 def test_panzoom_cursor_transitions(qapp):
     tool = PanZoomTool()
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: False,
             can_pan=lambda: True,
             get_pan=lambda: QPointF(0, 0),
@@ -252,8 +250,8 @@ def test_panzoom_cursor_transitions(qapp):
     assert tool.getCursor().shape() == Qt.CursorShape.OpenHandCursor
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: True,
             can_pan=lambda: True,
             get_pan=lambda: QPointF(0, 0),
@@ -267,8 +265,8 @@ def test_panzoom_cursor_stays_arrow_when_pan_locked(qapp):
     tool = PanZoomTool()
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: True,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: True,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: False,
             can_pan=lambda: False,
             get_pan=lambda: QPointF(0, 0),
@@ -282,8 +280,8 @@ def test_panzoom_cursor_arrow_when_pan_not_possible(qapp):
     tool = PanZoomTool()
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: False,
             can_pan=lambda: False,
             get_pan=lambda: QPointF(0, 0),
@@ -299,8 +297,8 @@ def test_panzoom_does_not_enter_panning_when_pan_impossible(qapp):
     tool.signals.pan_requested.connect(lambda pan: emissions.append(pan))
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             is_drag_out_allowed=lambda: False,
             can_pan=lambda: False,
             get_pan=lambda: QPointF(0, 0),
@@ -331,8 +329,8 @@ def test_panzoom_wheel_emits_zoom(qapp):
     tool.signals.zoom_requested.connect(on_zoom)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,
@@ -360,8 +358,8 @@ def test_panzoom_wheel_uses_delta_magnitude(qapp):
     tool.signals.zoom_requested.connect(on_zoom)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: 1.0,
@@ -391,8 +389,8 @@ def test_panzoom_wheel_snaps_to_native_zoom_on_crossing(qapp):
     tool.signals.zoom_snap_requested.connect(on_snap)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,
@@ -416,8 +414,8 @@ def test_panzoom_wheel_snaps_to_native_zoom_on_reverse_crossing(qapp):
     tool.signals.zoom_snap_requested.connect(on_snap)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,
@@ -441,8 +439,8 @@ def test_panzoom_wheel_snaps_to_hidpi_native_zoom(qapp):
     tool.signals.zoom_snap_requested.connect(on_snap)
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
             get_native_zoom=lambda: native_zoom,
@@ -457,8 +455,8 @@ def test_panzoom_double_click_sets_zoom_fit_when_not_fit(qapp):
     calls = []
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: 1.0,
             get_zoom_mode=lambda: ViewportZoomMode.CUSTOM,
@@ -480,8 +478,8 @@ def test_panzoom_double_click_sets_zoom_one_to_one_when_fit(qapp):
 
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: False,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: 1.0,
             get_zoom_mode=lambda: ViewportZoomMode.FIT,
@@ -498,8 +496,8 @@ def test_panzoom_double_click_ignored_when_inactive_conditions(qapp):
     tool = PanZoomTool()
     calls = []
     deps = NavigationInteractionPort(
-        is_pan_zoom_locked=lambda: True,
-        is_image_null=lambda: False,
+        is_navigation_locked=lambda: True,
+        is_content_empty=lambda: False,
         get_pan=lambda: QPointF(0, 0),
         get_zoom=lambda: 1.0,
         get_zoom_mode=lambda: ViewportZoomMode.CUSTOM,
@@ -512,8 +510,8 @@ def test_panzoom_double_click_ignored_when_inactive_conditions(qapp):
     assert calls == []
     tool.activate(
         NavigationInteractionPort(
-            is_pan_zoom_locked=lambda: False,
-            is_image_null=lambda: True,
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: True,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: 1.0,
             get_zoom_mode=lambda: ViewportZoomMode.CUSTOM,

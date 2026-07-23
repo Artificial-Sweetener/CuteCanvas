@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -24,9 +24,9 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient
 
 
 def draw_overlay(painter, state):
-    """Paint a gradient frame registered via QPane.registerOverlay.
+    """Paint a gradient frame registered via CuteCanvas.registerOverlay.
 
-    QPane calls this hook during overlay repaints with an OverlayState snapshot.
+    CuteCanvas calls this hook during overlay repaints with an OverlayState snapshot.
     """
     painter.save()
     margin = 12

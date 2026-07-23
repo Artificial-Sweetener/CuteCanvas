@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -16,13 +16,13 @@
 
 """Cursor + overlay lens example that magnifies under the pointer.
 
-NOTE: This file is designed for the QPane Interactive Demo playground.
+NOTE: This file is designed for the CuteCanvas Interactive Demo playground.
 It uses standalone functions to allow hot-reloading of logic without
 re-registering the tool class itself.
 
 For a production implementation, prefer the class-based approach
-described in `docs/extensibility.md`, where `draw_overlay` and
-`getCursor` are methods of your `ExtensionTool` subclass.
+described in `packages/cutecanvas/docs/extensibility.md`, where `draw_overlay` and
+`getCursor` are methods of your `ViewerTool` subclass.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from PySide6.QtGui import QColor, QCursor, QImage, QPainterPath, QPen, QPixmap
 
 # Provided by the demo host at execution time:
 # - CUSTOM_MODE: str (the tool mode this lens belongs to)
-# - qpane: QPane (host widget)
+# - qpane: CuteCanvas (host widget)
 CUSTOM_MODE = globals().get("CUSTOM_MODE")
 qpane = globals().get("qpane")
 
@@ -74,9 +74,9 @@ if not globals().get("_LENS_VIEWPORT_CONNECTED"):
 
 
 def cursor(qpane):
-    """Return a transparent cursor registered via QPane.registerCursorProvider.
+    """Return a transparent cursor registered via CuteCanvas.registerCursorProvider.
 
-    QPane calls this hook for cursor updates; return None when the tool is inactive.
+    CuteCanvas calls this hook for cursor updates; return None when the tool is inactive.
     """
     if qpane.getControlMode() != CUSTOM_MODE:
         return None
@@ -91,9 +91,9 @@ def cursor(qpane):
 
 
 def draw_overlay(painter, state):
-    """Paint the lens overlay registered via QPane.registerOverlay.
+    """Paint the lens overlay registered via CuteCanvas.registerOverlay.
 
-    QPane calls this hook during overlay repaints; exit early when inactive.
+    CuteCanvas calls this hook during overlay repaints; exit early when inactive.
     """
     image = state.source_image
     if qpane.getControlMode() != CUSTOM_MODE or image.isNull():

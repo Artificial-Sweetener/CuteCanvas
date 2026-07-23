@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -19,11 +19,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from cutecanvas import CuteCanvas
+from cutecanvas.core import config
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
-
-from qpane import QPane
-from qpane.core import config
 
 
 @pytest.fixture(scope="session")
@@ -44,9 +43,9 @@ def _flush_deferred_qt_deletions(qapp: QApplication) -> Iterator[None]:
 
 
 @pytest.fixture()
-def qpane_core(qapp: QApplication) -> Iterator[QPane]:
-    """Provision a bare QPane instance and ensure it is cleaned up."""
-    qpane = QPane(features=())
+def qpane_core(qapp: QApplication) -> Iterator[CuteCanvas]:
+    """Provision a bare CuteCanvas instance and ensure it is cleaned up."""
+    qpane = CuteCanvas(features=())
     try:
         yield qpane
     finally:
@@ -54,7 +53,7 @@ def qpane_core(qapp: QApplication) -> Iterator[QPane]:
 
 
 @pytest.fixture()
-def qpane_view(qpane_core: QPane):
+def qpane_view(qpane_core: CuteCanvas):
     """Expose the view collaborator for rendering-focused tests."""
     return qpane_core.view()
 
@@ -78,13 +77,13 @@ def qpane_renderer(qpane_view):
 
 
 @pytest.fixture()
-def catalog(qpane_core: QPane):
+def catalog(qpane_core: CuteCanvas):
     """Expose the Catalog attached to the shared qpane."""
     return qpane_core.catalog()
 
 
 @pytest.fixture()
-def mask_workflow(qpane_core: QPane):
+def mask_workflow(qpane_core: CuteCanvas):
     """Expose the Masks workflow to encourage workflow-centric tests."""
     return qpane_core._masks_controller
 
@@ -101,7 +100,7 @@ def _redirect_mask_autosave_paths(tmp_path_factory):
     """Keep mask autosave outputs inside a temporary directory during tests."""
     autosave_dir = tmp_path_factory.mktemp("mask-autosave")
     template = str(Path(autosave_dir) / "{image_name}-{mask_id}.png")
-    defaults = config._DEFAULTS
+    defaults = config._EDITOR_DEFAULTS
     original_default = defaults["mask_autosave_path_template"]
     defaults["mask_autosave_path_template"] = template
     try:

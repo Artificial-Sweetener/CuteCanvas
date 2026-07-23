@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,10 +20,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, Qt
-
-from qpane import Config, QPane
 from qpane.scene import PlaceholderImageReference
 
 
@@ -45,7 +44,7 @@ def test_placeholder_panzoom_allows_navigation_and_drag(qapp, tmp_path: Path) ->
             "drag_out_enabled": True,
         }
     )
-    qpane = QPane(config=config, features=())
+    qpane = CuteCanvas(config=config, features=())
     try:
         catalog = qpane.catalog()
         assert catalog.placeholderActive()
@@ -69,7 +68,7 @@ def test_placeholder_all_tools_retains_control_mode(qapp, tmp_path: Path) -> Non
             "drag_out_enabled": True,
         }
     )
-    qpane = QPane(config=config, features=())
+    qpane = CuteCanvas(config=config, features=())
     try:
         default_mode = qpane.getControlMode()
         assert qpane.catalog().placeholderActive()
@@ -84,7 +83,7 @@ def test_placeholder_all_tools_retains_control_mode(qapp, tmp_path: Path) -> Non
 def test_placeholder_resolves_to_scene_render_plan(qapp, tmp_path: Path) -> None:
     """Active placeholders should render without becoming catalog images."""
     path = _placeholder_path(tmp_path)
-    qpane = QPane(config=Config(placeholder={"source": str(path)}), features=())
+    qpane = CuteCanvas(config=Config(placeholder={"source": str(path)}), features=())
     qpane.resize(32, 32)
     try:
         assert qpane.placeholderActive()
@@ -124,7 +123,7 @@ def test_placeholder_resolves_to_scene_render_plan(qapp, tmp_path: Path) -> None
 def test_placeholder_scene_plan_is_painted(qapp, tmp_path: Path) -> None:
     """Presenter painting should dispatch configured placeholders to the renderer."""
     path = _placeholder_path(tmp_path)
-    qpane = QPane(config=Config(placeholder={"source": str(path)}), features=())
+    qpane = CuteCanvas(config=Config(placeholder={"source": str(path)}), features=())
     qpane.resize(32, 32)
 
     class RecordingRenderer:

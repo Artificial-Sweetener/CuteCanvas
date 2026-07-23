@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,12 +22,12 @@ import logging
 import uuid
 from pathlib import Path
 
+from cutecanvas import Config
+from cutecanvas.sam.manager import SamManager
 from PySide6.QtGui import QColor, QImage
 
-from examples.demo import ExampleOptions, ExampleWindow
+from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
 from examples.demonstration.workers import ImageLoaderWorker
-from qpane import Config
-from qpane.sam.manager import SamManager
 
 
 def test_demo_loads_image_with_pending_sam_and_zero_cache_budget(
@@ -73,14 +73,17 @@ def test_demo_loads_image_with_pending_sam_and_zero_cache_budget(
     caplog.set_level(logging.WARNING)
     window = ExampleWindow(ExampleOptions(feature_set="masksam"), config=config)
     try:
+        initial_image_ids = set(window.qpane.imageIDs())
+        window.workspace.prepare_image_batch(1)
         worker = ImageLoaderWorker([image_path])
-        worker.signals.image_loaded.connect(window._handle_async_image_loaded)
-        worker.signals.finished.connect(window._handle_async_load_finished)
+        worker.signals.image_loaded.connect(window.workspace.accept_decoded_image)
+        worker.signals.finished.connect(window.workspace.finish_image_batch)
 
         worker.run()
         qapp.processEvents()
 
-        assert len(window.qpane.imageIDs()) == 1
+        loaded_image_ids = set(window.qpane.imageIDs()) - initial_image_ids
+        assert len(loaded_image_ids) == 1
         assert window.qpane.currentImage.size() == source.size()
         assert "Finished loading 1 images" in window.statusBar().currentMessage()
         assert predictor_id_queries == 0

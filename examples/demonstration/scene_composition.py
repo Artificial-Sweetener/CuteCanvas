@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,23 +21,22 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 
+from cutecanvas import (
+    CatalogLayerRequest,
+    CompositionRequest,
+    CompositionTemplate,
+    CuteCanvas,
+    SceneSnapshot,
+    SceneSnapshotOverlayState,
+    TemplateBindings,
+    TemplateLayer,
+)
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QImage, QPainter
 
-from qpane import (
-    QPane,
-    QPaneCatalogImageLayerRequest,
-    QPaneScene,
-    QPaneSceneOverlayState,
-    QPaneSceneRequest,
-    QPaneSceneTemplate,
-    QPaneSceneTemplateBindings,
-    QPaneTemplateLayer,
-)
-
 
 def load_contact_sheet_scene(
-    viewer: QPane,
+    viewer: CuteCanvas,
     images: Iterable[QImage],
     *,
     columns: int = 3,
@@ -45,10 +44,10 @@ def load_contact_sheet_scene(
     cell_height: float = 240.0,
     gap: float = 16.0,
 ) -> uuid.UUID:
-    """Load images into QPane and display them as a stored contact-sheet scene."""
+    """Load images into CuteCanvas and display them as a stored contact-sheet scene."""
     image_list = tuple(images)
     image_ids = tuple(uuid.uuid4() for _image in image_list)
-    image_map = QPane.imageMapFromLists(image_list, ids=image_ids)
+    image_map = CuteCanvas.imageMapFromLists(image_list, ids=image_ids)
     viewer.setImagesByID(image_map, image_ids[0])
     request = build_contact_sheet_request(
         image_ids,
@@ -72,7 +71,7 @@ def build_contact_sheet_request(
     cell_width: float,
     cell_height: float,
     gap: float,
-) -> QPaneSceneRequest:
+) -> CompositionRequest:
     """Build a scene request that packs catalog images in thumbnail rows."""
     if columns <= 0:
         raise ValueError("columns must be positive")
@@ -90,14 +89,14 @@ def build_contact_sheet_request(
         x = 0.0
         row_height = 0.0
         for image_id in image_ids[row_start : row_start + columns]:
-            fitted = QPane.fitSceneRect(
+            fitted = CuteCanvas.fitSceneRect(
                 image_sizes[image_id],
                 QRectF(0.0, 0.0, cell_width, cell_height),
             )
             placement = QRectF(fitted)
             placement.moveTo(x, y)
             layers.append(
-                QPaneCatalogImageLayerRequest(
+                CatalogLayerRequest(
                     layer_id=uuid.uuid4(),
                     image_id=image_id,
                     placement=placement,
@@ -110,7 +109,7 @@ def build_contact_sheet_request(
             index += 1
         max_row_width = max(max_row_width, max(0.0, x - gap))
         y += row_height + gap
-    return QPaneSceneRequest(
+    return CompositionRequest(
         composition_id=None,
         title="Contact sheet",
         bounds=QRectF(
@@ -123,19 +122,19 @@ def build_contact_sheet_request(
     )
 
 
-def build_two_up_template() -> QPaneSceneTemplate:
+def build_two_up_template() -> CompositionTemplate:
     """Build a reusable two-image template owned by the host application."""
-    return QPaneSceneTemplate(
+    return CompositionTemplate(
         template_id=uuid.uuid4(),
         title="Two-up",
         bounds=QRectF(0.0, 0.0, 640.0, 320.0),
         layers=(
-            QPaneTemplateLayer(
+            TemplateLayer(
                 layer_id=uuid.uuid4(),
                 source_slot="left",
                 placement=QRectF(0.0, 0.0, 320.0, 320.0),
             ),
-            QPaneTemplateLayer(
+            TemplateLayer(
                 layer_id=uuid.uuid4(),
                 source_slot="right",
                 placement=QRectF(320.0, 0.0, 320.0, 320.0),
@@ -145,15 +144,15 @@ def build_two_up_template() -> QPaneSceneTemplate:
 
 
 def compose_two_up_from_template(
-    viewer: QPane,
-    template: QPaneSceneTemplate,
+    viewer: CuteCanvas,
+    template: CompositionTemplate,
     left_image_id: uuid.UUID,
     right_image_id: uuid.UUID,
 ) -> uuid.UUID:
     """Compose and store a two-up scene from a reusable host template."""
     return viewer.composeSceneFromTemplate(
         template,
-        QPaneSceneTemplateBindings(
+        TemplateBindings(
             composition_id=None,
             title="Selected pair",
             catalog_images={"left": left_image_id, "right": right_image_id},
@@ -161,35 +160,37 @@ def compose_two_up_from_template(
     )
 
 
-def reopen_scene(viewer: QPane, composition_id: uuid.UUID) -> QPaneScene | None:
-    """Open a stored scene composition and return QPane's normalized snapshot."""
+def reopen_scene(viewer: CuteCanvas, composition_id: uuid.UUID) -> SceneSnapshot | None:
+    """Open a stored scene composition and return CuteCanvas's normalized snapshot."""
     viewer.openComposition(composition_id)
     return viewer.currentScene()
 
 
 def draw_contact_sheet_labels(
     painter: QPainter,
-    state: QPaneSceneOverlayState,
+    state: SceneSnapshotOverlayState,
 ) -> None:
     """Draw simple labels over active layered scene composition layers."""
     painter.setPen(Qt.white)
     for layer in state.layers:
-        label = f"{layer.role} {layer.metadata.get('index', '')}".strip()
+        label = layer.label or f"{layer.role} {layer.metadata.get('index', '')}".strip()
         painter.drawText(layer.panel_bounds.adjusted(8, 8, -8, -8), label)
 
 
-def install_contact_sheet_overlay(viewer: QPane) -> None:
+def install_contact_sheet_overlay(viewer: CuteCanvas) -> None:
     """Register the tutorial contact-sheet scene overlay."""
     viewer.unregisterSceneOverlay("contact_sheet_labels")
     viewer.registerSceneOverlay("contact_sheet_labels", draw_contact_sheet_labels)
 
 
-def remove_contact_sheet_overlay(viewer: QPane) -> None:
+def remove_contact_sheet_overlay(viewer: CuteCanvas) -> None:
     """Remove the tutorial contact-sheet scene overlay."""
     viewer.unregisterSceneOverlay("contact_sheet_labels")
 
 
-def navigate_contact_sheet_hit(viewer: QPane, panel_pos: QPoint) -> uuid.UUID | None:
+def navigate_contact_sheet_hit(
+    viewer: CuteCanvas, panel_pos: QPoint
+) -> uuid.UUID | None:
     """Navigate to the catalog image under ``panel_pos`` when a scene layer is hit."""
     hit = viewer.sceneHitTest(panel_pos)
     if hit is None:

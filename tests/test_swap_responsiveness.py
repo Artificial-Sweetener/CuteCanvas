@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -25,18 +25,17 @@ from pathlib import Path
 from types import MethodType
 
 import pytest
+from cutecanvas import Config, CuteCanvas, sam
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks.mask import MaskAssetStore
+from cutecanvas.masks.mask_controller import MaskController
+from cutecanvas.masks.mask_service import MaskService
+from cutecanvas.sam.manager import SamManager
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
-
-from qpane import Config, QPane, sam
-from qpane.core.config_features import MaskConfigSlice
 from qpane.features import FeatureInstallError
-from qpane.masks.mask import MaskAssetStore
-from qpane.masks.mask_controller import MaskController
-from qpane.masks.mask_service import MaskService
 from qpane.rendering import TileGeneratorWorker
-from qpane.sam.manager import SamManager
 from qpane.swap.diagnostics import swap_progress_provider
 
 _WORKER_DELAY_SECONDS = 0.0005  # keep contention observable without long sleeps
@@ -49,7 +48,7 @@ _IMAGE_SIZE = 64  # compact canvases keep colorization+prefetch work fast
 class SwapEnvironment:
     """Bundle swap orchestration dependencies for stress testing."""
 
-    qpane: QPane
+    qpane: CuteCanvas
     mask_manager: MaskAssetStore
     mask_controller: MaskController
     mask_service: MaskService
@@ -65,7 +64,7 @@ def _make_image(color: Qt.GlobalColor) -> QImage:
 
 
 def _wait_for_executor(
-    qpane: QPane,
+    qpane: CuteCanvas,
     qapp: QApplication,
     *,
     timeout: float = 5.0,
@@ -83,7 +82,7 @@ def _wait_for_executor(
     raise AssertionError("Executor did not drain within the allotted timeout")
 
 
-def _first_prefetch_row(qpane: QPane) -> str:
+def _first_prefetch_row(qpane: CuteCanvas) -> str:
     """Return the swap diagnostics prefetch row value when available."""
     for record in swap_progress_provider(qpane):
         if record.label == "Swap|Prefetch":
@@ -103,9 +102,9 @@ def _parse_prefetch_counts(value: str) -> tuple[int | None, int | None]:
             count = int(raw)
         except ValueError:
             continue
-        if key == "mask_prefetch":
+        if key == "scene_sources":
             mask_count = count
-        elif key == "predictors":
+        elif key == "source_warmups":
             predictor_count = count
     return mask_count, predictor_count
 
@@ -115,7 +114,7 @@ def swap_env(
     qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> SwapEnvironment:
     """Provision a qpane with live mask and SAM services backed by the real executor."""
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(_QPANE_EDGE_PX, _QPANE_EDGE_PX)
     base_config = Config()
     mask_config = MaskConfigSlice()
@@ -270,7 +269,7 @@ def test_swap_responsiveness_under_contention(
         path.touch()  # placeholder file avoids expensive PNG writes during setup
         images.append(image)
         paths.append(path)
-    image_map = QPane.imageMapFromLists(images=images, paths=paths, ids=image_ids)
+    image_map = CuteCanvas.imageMapFromLists(images=images, paths=paths, ids=image_ids)
     qpane.setImagesByID(image_map, image_ids[0])
     qapp.processEvents()
     mask_ids: list[uuid.UUID] = []
@@ -278,7 +277,7 @@ def test_swap_responsiveness_under_contention(
         mask_id = mask_manager.create_mask(image)
         layer = mask_manager.get_layer(mask_id)
         assert layer is not None
-        layer.surface.fill(64 + len(mask_ids) * 32)
+        layer.coverage.raster.fill(64 + len(mask_ids) * 32)
         assert mask_service.layers.attach(
             mask_id,
             image_id,
@@ -314,8 +313,8 @@ def test_swap_responsiveness_under_contention(
         if last_source:
             colorize_sources_seen.add(last_source)
     intermediate_metrics = qpane.view().swap_delegate.snapshot_metrics()
-    assert intermediate_metrics.pending_mask_prefetch >= 0
-    assert intermediate_metrics.pending_predictors >= 0
+    assert intermediate_metrics.pending_scene_prefetch >= 0
+    assert intermediate_metrics.pending_source_warmups >= 0
     assert observed_prefetch_rows, "Expected diagnostics rows during stress"
     assert (
         observed_pending_during_stress
@@ -329,8 +328,8 @@ def test_swap_responsiveness_under_contention(
         colorize_sources_seen.add(last_source_after)
     mask_metrics = snapshot_after
     sam_metrics = sam_manager.snapshot_metrics()
-    assert final_metrics.pending_mask_prefetch <= len(image_ids)
-    assert final_metrics.pending_predictors <= len(image_ids)
+    assert final_metrics.pending_scene_prefetch <= len(image_ids)
+    assert final_metrics.pending_source_warmups <= len(image_ids)
     assert colorize_sources_seen, "Expected mask colorize activity during swaps"
     assert "prefetch" in colorize_sources_seen
     if "snippet_provisional" in colorize_sources_seen:
@@ -344,8 +343,8 @@ def test_swap_responsiveness_under_contention(
     assert sam_metrics.pending_retries == 0
     prefetch_after = _first_prefetch_row(qpane)
     masks_after, predictors_after = _parse_prefetch_counts(prefetch_after)
-    assert masks_after == final_metrics.pending_mask_prefetch
-    assert predictors_after == final_metrics.pending_predictors
+    assert masks_after == final_metrics.pending_scene_prefetch
+    assert predictors_after == final_metrics.pending_source_warmups
     assert mask_prefetch_calls, "Mask prefetch should be scheduled during stress"
     assert any(image_id is not None for image_id, _, _ in mask_prefetch_calls)
     assert any(image_id is not None for image_id in mask_cancelled)
@@ -354,9 +353,9 @@ def test_swap_responsiveness_under_contention(
 
 def test_parse_prefetch_counts_handles_missing_fields() -> None:
     """Ensure diagnostics parsing tolerates absent counters."""
-    masks, predictors = _parse_prefetch_counts("mask_prefetch=2 | tiles=4")
+    masks, predictors = _parse_prefetch_counts("scene_sources=2 | tiles=4")
     assert masks == 2
     assert predictors is None
-    masks, predictors = _parse_prefetch_counts("predictors=3")
+    masks, predictors = _parse_prefetch_counts("source_warmups=3")
     assert masks is None
     assert predictors == 3

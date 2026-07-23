@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -25,10 +25,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
-
-from qpane import Config, QPane
 from qpane.concurrency import (
     ExecutorSnapshot,
     TaskExecutorProtocol,
@@ -42,6 +41,7 @@ from qpane.scene.identity import (
     SceneLayerTileKey,
     catalog_source_asset_key,
 )
+
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 from tests.helpers.render_plan import make_tile_key
 
@@ -137,7 +137,7 @@ def test_tile_guard_rejects_oversized_item(caplog: pytest.LogCaptureFixture) -> 
         cache={
             "mode": "hard",
             "budget_mb": 1,
-            "weights": {"tiles": 1, "pyramids": 0, "masks": 0, "predictors": 0},
+            "weights": {"tiles": 1, "pyramids": 0},
         },
     )
     executor = StubExecutor()
@@ -158,13 +158,13 @@ def test_tile_guard_blocks_when_hard_cap_already_over_budget(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Admission guard should reject tiles that would push the hard cap over budget."""
-    qpane_widget = QPane(features=())
+    qpane_widget = CuteCanvas(features=())
     try:
         qpane_widget.applySettings(
             cache={
                 "mode": "hard",
                 "budget_mb": 1,
-                "weights": {"tiles": 1, "pyramids": 0, "masks": 0, "predictors": 0},
+                "weights": {"tiles": 1, "pyramids": 0},
             }
         )
         coordinator = qpane_widget.cacheCoordinator

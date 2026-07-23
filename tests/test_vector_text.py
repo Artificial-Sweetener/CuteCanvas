@@ -1,21 +1,25 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Semantic text shaping, editing, rendering, and persistence contracts."""
 
 from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QColor
-
-from qpane import (
+from cutecanvas import (
     VectorParagraphStyle,
     VectorTextAlignment,
     VectorTextContent,
@@ -23,6 +27,8 @@ from qpane import (
     VectorTextSpan,
     VectorTextStyle,
 )
+from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QColor
 from qpane.vector.text_layout import SemanticTextLayoutCache
 
 pytest_plugins = ("tests.test_mask_workflows",)
@@ -68,14 +74,14 @@ def test_unicode_text_shapes_exact_outlines_carets_and_bounded_cache(qapp) -> No
         .product(
             VectorTextContent(
                 "Fallback",
-                VectorTextStyle(("Definitely Missing QPane Font", "Arial"), 20.0),
+                VectorTextStyle(("Definitely Missing CuteCanvas Font", "Arial"), 20.0),
             ),
             QRectF(0.0, 0.0, 160.0, 60.0),
         )
         .font_resolutions[0]
     )
     assert missing.requested_families == (
-        "Definitely Missing QPane Font",
+        "Definitely Missing CuteCanvas Font",
         "Arial",
     )
     assert missing.resolved_family

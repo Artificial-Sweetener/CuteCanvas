@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -19,12 +19,11 @@
 from __future__ import annotations
 
 import pytest
+from cutecanvas.tools.move import MoveTool
+from cutecanvas.tools.ports import MoveInteractionPort
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
-
-from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
-from qpane.tools.move import MoveTool
-from qpane.tools.ports import MoveInteractionPort
+from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 
 def _sample(
@@ -78,8 +77,10 @@ def test_move_tool_routes_normalized_sequence_through_generic_operations(
     tool.activate(
         MoveInteractionPort(
             begin_move=lambda point, _copy: calls.append(("begin", point)) or True,
-            update_move=lambda point: calls.append(("update", point)) or True,
-            finish_move=lambda point: calls.append(("finish", point)) or True,
+            update_move=lambda point, _suppress: calls.append(("update", point))
+            or True,
+            finish_move=lambda point, _suppress: calls.append(("finish", point))
+            or True,
             cancel_move=lambda: calls.append(("cancel", None)) or True,
         )
     )
@@ -148,8 +149,8 @@ def test_move_tool_routes_mouse_drag_through_same_operations() -> None:
     tool.activate(
         MoveInteractionPort(
             begin_move=lambda _point, _copy: calls.append("begin") or True,
-            update_move=lambda _point: calls.append("update") or True,
-            finish_move=lambda _point: calls.append("finish") or True,
+            update_move=lambda _point, _suppress: calls.append("update") or True,
+            finish_move=lambda _point, _suppress: calls.append("finish") or True,
         )
     )
     press = _mouse_event(
@@ -229,7 +230,7 @@ def test_move_tool_constrains_shift_drag_to_nearest_45_degree_axis() -> None:
     tool.activate(
         MoveInteractionPort(
             begin_move=lambda _point, _copy: True,
-            update_move=lambda point: updates.append(point) or True,
+            update_move=lambda point, _suppress: updates.append(point) or True,
         )
     )
 

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -18,15 +18,14 @@
 
 import uuid
 
-from PySide6.QtGui import QColor
-
-from qpane.catalog.source_reference import CatalogImageReference
-from qpane.composition.layers import (
+from cutecanvas.composition.layers import (
     CompositionLayerInstance,
     CompositionLayerStore,
 )
-from qpane.composition.resource_lifetime import CompositionResourceLifetime
-from qpane.masks.source_reference import MaskAssetReference
+from cutecanvas.composition.resource_lifetime import CompositionResourceLifetime
+from cutecanvas.masks.source_reference import MaskAssetReference
+from PySide6.QtGui import QColor
+from qpane.catalog.source_reference import CatalogImageReference
 from qpane.scene.affine import LayerTransform
 from qpane.scene.identity import base_image_layer_id
 from qpane.scene.model import (

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,19 +22,19 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication
-
-from qpane import Config, QPane, QPaneLayerInteractionPolicy
-from qpane.features import FeatureInstallError
-from qpane.masks import sam_feature
-from qpane.masks.sam_feature import (
+from cutecanvas import Config, CuteCanvas, LayerPolicy
+from cutecanvas.masks import sam_feature
+from cutecanvas.masks.sam_feature import (
     _sam_detail_diagnostics_provider,
     _sam_summary_diagnostics_provider,
 )
-from qpane.sam import service
+from cutecanvas.sam import service
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QApplication
+from qpane.features import FeatureInstallError
 from qpane.types import DiagnosticRecord
+
 from tests.helpers.executor_stubs import StubExecutor
 
 
@@ -63,7 +63,7 @@ def _stub_sam_service(monkeypatch):
     monkeypatch.setattr(service, "SamDependencyError", RuntimeError)
 
 
-def _detachSamManager_keep_delegate(qpane: QPane) -> None:
+def _detachSamManager_keep_delegate(qpane: CuteCanvas) -> None:
     """Detach the active SAM manager while preserving the delegate reference."""
     masks = qpane._masks_controller
     delegate = masks.sam_delegate()
@@ -72,7 +72,7 @@ def _detachSamManager_keep_delegate(qpane: QPane) -> None:
         masks._sam_delegate = delegate  # type: ignore[attr-defined]
 
 
-def _seed_mask_service(qpane: QPane) -> None:
+def _seed_mask_service(qpane: CuteCanvas) -> None:
     """Seed the mask service and catalog for SAM feature tests."""
     qpane.mask_service = types.SimpleNamespace(
         adjust_mask_component=lambda mask_id, point, *, grow: True,
@@ -90,7 +90,7 @@ def _seed_mask_service(qpane: QPane) -> None:
 def qpane_with_sam(monkeypatch, qapp):
     _stub_sam_service(monkeypatch)
     executor = StubExecutor()
-    qpane = QPane(features=("mask", "sam"), task_executor=executor)
+    qpane = CuteCanvas(features=("mask", "sam"), task_executor=executor)
     qpane.resize(64, 64)
     catalog = qpane.catalog()
     qpane.mask_service = types.SimpleNamespace(
@@ -140,7 +140,7 @@ def test_sam_feature_ignores_empty_bbox(monkeypatch, qpane_with_sam, caplog):
 
 
 def test_sam_feature_component_adjusts_mask_from_fractional_coordinates(
-    qpane_with_sam: QPane,
+    qpane_with_sam: CuteCanvas,
 ) -> None:
     qpane = qpane_with_sam
     adjustments = []
@@ -166,7 +166,7 @@ def test_sam_component_adjustment_accepts_real_transformed_mask_coordinates(
 ) -> None:
     """The factory adjustment hook must accept the mapper's QPointF contract."""
     _stub_sam_service(monkeypatch)
-    qpane = QPane(features=("mask", "sam"), task_executor=StubExecutor())
+    qpane = CuteCanvas(features=("mask", "sam"), task_executor=StubExecutor())
     try:
         image_id = uuid.uuid4()
         image = QImage(QSize(64, 64), QImage.Format_ARGB32)
@@ -184,7 +184,7 @@ def test_sam_component_adjustment_accepts_real_transformed_mask_coordinates(
         assert qpane.setLayerInteractionPolicy(
             mask.scene_id,
             mask.layer_id,
-            QPaneLayerInteractionPolicy(selectable=True, movable=True),
+            LayerPolicy(selectable=True, movable=True),
         )
         assert qpane.setLayerPlacement(
             mask.scene_id,
@@ -267,7 +267,7 @@ def test_sam_providers_report_additional_metrics():
 def test_install_sam_feature_respects_config(monkeypatch, qapp):
     _stub_sam_service(monkeypatch)
     executor = StubExecutor()
-    qpane = QPane(features=("mask", "sam"), task_executor=executor)
+    qpane = CuteCanvas(features=("mask", "sam"), task_executor=executor)
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(sam_device="cuda", sam_cache_limit=1)
@@ -315,7 +315,7 @@ def test_sam_feature_install_defers_predictor_dependency_imports(
         sam_download_mode="disabled",
         sam_model_path=str(checkpoint),
     )
-    qpane = QPane(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
     qpane.resize(64, 64)
     try:
         assert qpane.samFeatureAvailable()
@@ -333,7 +333,7 @@ def test_install_sam_feature_disabled_missing_checkpoint(monkeypatch, qapp):
 
     monkeypatch.setattr(service, "ensure_checkpoint", _raise_missing)
     executor = StubExecutor()
-    qpane = QPane(features=("mask", "sam"), task_executor=executor)
+    qpane = CuteCanvas(features=("mask", "sam"), task_executor=executor)
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(sam_download_mode="disabled")
@@ -381,7 +381,7 @@ def test_install_sam_feature_background_download_signals(monkeypatch, qapp, tmp_
         sam_download_mode="background",
         sam_model_path=str(initial_checkpoint),
     )
-    qpane = QPane(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(
@@ -426,7 +426,7 @@ def test_install_sam_feature_background_noop_when_ready(monkeypatch, qapp, tmp_p
         sam_download_mode="background",
         sam_model_path=str(checkpoint),
     )
-    qpane = QPane(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(
@@ -463,7 +463,7 @@ def test_install_sam_feature_disabled_mode_skips_executor(monkeypatch, qapp, tmp
         sam_download_mode="background",
         sam_model_path=str(initial_checkpoint),
     )
-    qpane = QPane(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(

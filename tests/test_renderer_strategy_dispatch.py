@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,12 +20,12 @@ import types
 import uuid
 
 import pytest
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QRegion, Qt, QTransform
-
-from qpane import QPane
 from qpane.rendering import Renderer
 from qpane.scene.render_plan import RenderStrategy
+
 from tests.helpers.render_plan import make_render_plan
 
 
@@ -95,13 +95,13 @@ def test_redraw_base_image_buffer_respects_strategy(
 
 
 def test_calculate_render_plan_prefers_direct_when_image_fits(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.resize(256, 256)
         image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.black)
         image_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists([image], [None], [image_id])
+        image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
         qpane.setImagesByID(image_map, image_id)
         # Ensure fit_view=False behavior by manually resetting zoom if needed,
         # but setImagesByID might fit view by default.
@@ -125,13 +125,13 @@ def test_calculate_render_plan_prefers_direct_when_image_fits(qapp):
 
 
 def test_calculate_render_plan_switches_to_tile_for_large_zoom(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.resize(128, 128)
         image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.black)
         image_id = uuid.uuid4()
-        image_map = QPane.imageMapFromLists([image], [None], [image_id])
+        image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
         qpane.setImagesByID(image_map, image_id)
         viewport = qpane.view().viewport
         viewport.setZoomFit()

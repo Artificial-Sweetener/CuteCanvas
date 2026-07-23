@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -16,12 +16,11 @@
 
 import numpy as np
 import pytest
+from cutecanvas.masks.tools.smart_select import SmartSelectTool
+from cutecanvas.tools.ports import SmartSelectionInteractionPort
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor
-
-from qpane.masks.tools.smart_select import SmartSelectTool
-from qpane.tools.input import PointerDeviceKind, PointerPhase, PointerSample
-from qpane.tools.ports import SmartSelectionInteractionPort
+from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 
 class _PointWrapper:

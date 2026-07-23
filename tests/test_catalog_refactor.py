@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,13 +20,13 @@ import uuid
 from pathlib import Path
 
 import pytest
+from cutecanvas import Config
 from PySide6.QtGui import QImage
-
-from qpane import Config
-from qpane.catalog import ImageCatalog
+from qpane.catalog import ImageCatalog, ViewerCatalog
 from qpane.rendering import PyramidManager
 from qpane.scene.identity import SceneLayerAssetKey
 from qpane.types import CatalogEntry
+
 from tests.helpers.executor_stubs import StubExecutor
 
 
@@ -60,7 +60,10 @@ def _make_image(fmt: QImage.Format, fill: int = 0) -> QImage:
 
 def _catalog() -> ImageCatalog:
     """Return a catalog with a deterministic derived-product owner."""
-    return ImageCatalog(pyramid_manager=StubPyramidManager())
+    return ImageCatalog(
+        catalog=ViewerCatalog(),
+        pyramid_manager=StubPyramidManager(),
+    )
 
 
 def test_set_images_normalizes_and_uses_consistent_format(qapp):
@@ -236,7 +239,9 @@ def test_update_current_entry_path_change_invalidates_current_pyramid(qapp):
     mutation = catalog.updateCurrentEntry(path=Path("new.png"))
     assert mutation.path_changed_ids == (image_id,)
     assert mutation.content_changed_ids == ()
-    assert catalog.getCurrentImage() is initial_image
+    current_image = catalog.getCurrentImage()
+    assert current_image is not None
+    assert current_image.cacheKey() == initial_image.cacheKey()
     assert catalog.getCurrentPath() == Path("new.png")
     assert [key.source_id for key in stub.removed] == [image_id]
     assert [
@@ -339,6 +344,6 @@ def test_catalog_uses_injected_render_product_owner() -> None:
     """ImageCatalog should collaborate with, not construct, the raster renderer."""
     executor = StubExecutor()
     pyramids = PyramidManager(Config(), executor=executor)
-    catalog = ImageCatalog(pyramid_manager=pyramids)
+    catalog = ImageCatalog(catalog=ViewerCatalog(), pyramid_manager=pyramids)
     assert catalog.pyramid_manager is pyramids
     assert pyramids._executor is executor

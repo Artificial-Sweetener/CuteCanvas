@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,15 +14,14 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Ensure QPane exposes catalog-backed catalog state via the public API."""
+"""Ensure CuteCanvas exposes catalog-backed catalog state via the public API."""
 
 import logging
 import uuid
 
 import pytest
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage, Qt
-
-from qpane import Config, QPane
 
 
 def _cleanup_qpane(qpane, qapp):
@@ -37,7 +36,7 @@ def _make_image(width: int, height: int, color=Qt.white) -> QImage:
 
 
 def test_current_image_path_tracks_catalog_selection(qapp, tmp_path):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(32, 32)
     try:
         catalog = qpane.catalog()
@@ -45,7 +44,7 @@ def test_current_image_path_tracks_catalog_selection(qapp, tmp_path):
         second_id = uuid.uuid4()
         first_path = tmp_path / "first.png"
         second_path = tmp_path / "second.png"
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             images=[_make_image(12, 8, Qt.black), _make_image(16, 10, Qt.red)],
             paths=[first_path, second_path],
             ids=[first_id, second_id],
@@ -61,13 +60,13 @@ def test_current_image_path_tracks_catalog_selection(qapp, tmp_path):
 
 
 def test_current_image_path_resets_with_catalog_clear(qapp, tmp_path):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(32, 32)
     try:
         catalog = qpane.catalog()
         image_id = uuid.uuid4()
         image_path = tmp_path / "only.png"
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             images=[_make_image(10, 10, Qt.green)],
             paths=[image_path],
             ids=[image_id],
@@ -83,13 +82,13 @@ def test_current_image_path_resets_with_catalog_clear(qapp, tmp_path):
 
 
 def test_set_image_updates_catalog_and_path(qapp, tmp_path):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.resize(32, 32)
     try:
         catalog = qpane.catalog()
         image_id = uuid.uuid4()
         original_path = tmp_path / "original.png"
-        image_map = QPane.imageMapFromLists(
+        image_map = CuteCanvas.imageMapFromLists(
             images=[_make_image(12, 12, Qt.white)],
             paths=[original_path],
             ids=[image_id],
@@ -97,7 +96,7 @@ def test_set_image_updates_catalog_and_path(qapp, tmp_path):
         qpane.setImagesByID(image_map, image_id)
         replacement = _make_image(14, 14, Qt.black)
         # Update using the public API (setImagesByID)
-        image_map_update = QPane.imageMapFromLists(
+        image_map_update = CuteCanvas.imageMapFromLists(
             images=[replacement],
             paths=[original_path],
             ids=[image_id],
@@ -109,7 +108,7 @@ def test_set_image_updates_catalog_and_path(qapp, tmp_path):
         assert stored is not None
         assert stored.size() == replacement.size()
         updated_path = tmp_path / "updated.png"
-        image_map_path_update = QPane.imageMapFromLists(
+        image_map_path_update = CuteCanvas.imageMapFromLists(
             images=[replacement],
             paths=[updated_path],
             ids=[image_id],
@@ -125,7 +124,7 @@ def test_core_mode_logs_unused_mask_overrides(qapp, caplog):
     caplog.set_level(logging.WARNING)
     config = Config()
     config.mask_border_enabled = True
-    qpane = QPane(config=config, features=(), config_strict=False)
+    qpane = CuteCanvas(config=config, features=(), config_strict=False)
     try:
         messages = [
             record.getMessage()
@@ -147,4 +146,4 @@ def test_strict_mode_blocks_inactive_overrides(qapp):
     config = Config()
     config.mask_border_enabled = True
     with pytest.raises(ValueError):
-        QPane(config=config, features=(), config_strict=True)
+        CuteCanvas(config=config, features=(), config_strict=True)

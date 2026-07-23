@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    CuteCanvas - High-performance layered image editor
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -15,7 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-"""Narrative copy and quick-reference hints for the QPane example demo."""
+"""Narrative copy and quick-reference hints for the CuteCanvas example demo."""
 
 from __future__ import annotations
 
@@ -24,17 +24,17 @@ CATALOG_HINT = (
     "link groups, and masks; use Ctrl or Shift there to multi-select images."
 )
 
-EXIT_MESSAGE = "Thanks for trying the QPane example."
+EXIT_MESSAGE = "Thanks for trying the CuteCanvas example."
 
 CORE_CHAPTER = (
-    "Core: launch QPane(config=...) with no optional features by default (add features=('mask', 'sam') "
+    "Core: launch CuteCanvas(config=...) with no optional features by default (add features=('mask', 'sam') "
     "as needed), load images, navigate renderable views with compositionIDs()/openComposition(), and link panes "
     "with setLinkedGroups(). Catalog helpers like imageIDs()/currentImageID() "
     "remain available for source inventory. The demo occasionally reads Config.as_dict for "
     "small UI toggles; most hosts should treat config as set-and-forget. The status bar's zoom % label is "
-    "wired directly to QPane.zoomChanged so you can copy that pattern into your own hosts. The View menu's "
-    "comparison actions use QPane.compose(), QPane.setComparisonImageID(), QPane.setComparisonSplit(), "
-    "QPane.clearComparisonImage(), QPane.comparisonState(), and QPane.comparisonDividerState() to build "
+    "wired directly to CuteCanvas.zoomChanged so you can copy that pattern into your own hosts. The View menu's "
+    "comparison actions use CuteCanvas.compose(), CuteCanvas.setComparisonImageID(), CuteCanvas.setComparisonSplit(), "
+    "CuteCanvas.clearComparisonImage(), CuteCanvas.comparisonState(), and CuteCanvas.comparisonDividerState() to build "
     "split-view inspection without moving the current catalog selection."
 )
 
@@ -42,21 +42,21 @@ MASK_CHAPTER = (
     "Mask: when features include 'mask', create/import/export masks, rotate mask order, "
     "and observe mask-driven catalog rows via qpane mask signals. Masks render with the image "
     "content while host overlay hooks remain available for separate annotations. The status bar's "
-    "undo/redo counter listens to QPane.maskUndoStackChanged so you can mirror stack depth "
+    "undo/redo counter listens to CuteCanvas.maskUndoStackChanged so you can mirror stack depth "
     "affordances in your own hosts."
 )
 
 SAM_CHAPTER = (
     "SAM: when features include 'sam', trigger smart select with drag, tune predictor/cache controls, "
     "and surface installer guidance if extras are missing. When downloads are enabled, "
-    "QPane preflights the checkpoint and fetches it on demand; connect to "
+    "CuteCanvas preflights the checkpoint and fetches it on demand; connect to "
     "samCheckpointStatusChanged/samCheckpointProgress to mirror readiness and progress in host UI. "
     "Use sam_download_mode to pick blocking/background/disabled behavior, sam_model_path to point at "
     "a local checkpoint, sam_model_url to change the download source, and sam_model_hash to verify "
     "checkpoint integrity (use 'default' for the built-in MobileSAM hash). The launcher lets you "
     "override all three so you can simulate host-provided checkpoints. The status bar mirrors checkpoint "
     "readiness and download progress. Predictor caches are keyed "
-    "by device and checkpoint path, and QPane.samCheckpointReady() can gate predictor requests. "
+    "by device and checkpoint path, and CuteCanvas.samCheckpointReady() can gate predictor requests. "
     "The demo launcher exposes the same download-mode switch so you can feel the trade-offs live. "
     "The config dialog has a SAM tab; background updates apply live while blocking/disabled "
     "changes require a restart. "
@@ -65,18 +65,18 @@ SAM_CHAPTER = (
 )
 
 DIAGNOSTICS_CHAPTER = (
-    "Diagnostics/Config: toggle diagnosticsOverlayEnabled()/setDiagnosticsDomainEnabled, apply settings via QPane.applySettings, "
+    "Diagnostics/Config: toggle diagnosticsOverlayEnabled()/setDiagnosticsDomainEnabled, apply settings via CuteCanvas.applySettings, "
     "pick cache/mask/executor domains in the dialog, and adjust concurrency/cache spec fields grouped by domain. "
-    "Cache rows report the raster work QPane prepares for rendered content while catalog signals stay UUID-based."
+    "Cache rows report the raster work CuteCanvas prepares for rendered content while catalog signals stay UUID-based."
 )
 
 OVERLAY_HOOK_CHAPTER = (
-    "Hooks: register overlays, cursors, and tools with QPane.registerOverlay, "
-    "QPane.registerCursorProvider, and QPane.registerTool."
+    "Hooks: register overlays, cursors, and tools with CuteCanvas.registerOverlay, "
+    "CuteCanvas.registerCursorProvider, and CuteCanvas.registerTool."
 )
 
 CUSTOM_TOOL_ENABLED = (
-    "Custom tool enabled via QPane.registerTool and registerCursorProvider."
+    "Custom tool enabled via CuteCanvas.registerTool and registerCursorProvider."
 )
 
 CUSTOM_TOOL_DISABLED = "Custom tool removed; toolbar restored."
@@ -89,9 +89,7 @@ CUSTOM_CURSOR_EDITOR_HINT = (
     "Define cursor(qpane) -> QCursor|None and click Apply to refresh the tool."
 )
 
-CUSTOM_OVERLAY_ENABLED = (
-    "Custom overlay enabled via QPane.registerOverlay; tweak the code and click Apply."
-)
+CUSTOM_OVERLAY_ENABLED = "Custom overlay enabled via CuteCanvas.registerOverlay; tweak the code and click Apply."
 
 CUSTOM_OVERLAY_DISABLED = "Custom overlay removed."
 
@@ -117,13 +115,13 @@ LENS_EDITOR_HINT = (
 
 EXTENSION_CHECKLIST = (
     "Extend the demo by adding actions, catalog snapshot rows, config fields, "
-    "or hook examples that use QPane.registerTool, QPane.registerOverlay, and "
-    "QPane.registerCursorProvider."
+    "or hook examples that use CuteCanvas.registerTool, CuteCanvas.registerOverlay, and "
+    "CuteCanvas.registerCursorProvider."
 )
 
 PARITY_MAP = (
     "The main demo window is ExampleWindow, with catalog, config, and hook "
-    "helpers split into small modules. Launch it with examples/demo.py or the "
+    "helpers split into small modules. Launch it with examples/cutecanvas_demo.py or the "
     "provided launch scripts."
 )
 

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -18,9 +18,8 @@
 
 from __future__ import annotations
 
+from cutecanvas import Config, CuteCanvas
 from PySide6.QtCore import QSize, QSizeF
-
-from qpane import Config, QPane
 from qpane.rendering import ViewportZoomMode
 from qpane.ui import dragdrop
 from qpane.ui.dragdrop import drag_out_image, is_drag_out_allowed
@@ -113,7 +112,7 @@ def test_drag_out_image_respects_config(monkeypatch, qapp):
     monkeypatch.setattr(dragdrop, "maybeStartDrag", fake_start)
     config = Config()
     config.drag_out_enabled = False
-    qpane = QPane(config=config, features=())
+    qpane = CuteCanvas(config=config, features=())
     try:
         drag_out_image(qpane, None)
         assert calls == []

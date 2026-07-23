@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -24,13 +24,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cutecanvas.core.config_features import SamConfigSlice
+from cutecanvas.masks.workflow import MaskActivationSyncResult
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
-
 from qpane.catalog.image_catalog import CatalogMutationResult
 from qpane.core import CacheSettings
-from qpane.core.config_features import SamConfigSlice
-from qpane.masks.workflow import MaskActivationSyncResult
 from qpane.rendering import ViewportZoomMode
 from qpane.scene.identity import (
     SceneLayerAssetKey,
@@ -113,13 +112,24 @@ class RecordingSamManager:
     def removeFromCache(self, image_id: uuid.UUID) -> None:
         self.removed.append(image_id)
 
+    def request(
+        self, image: QImage, image_id: uuid.UUID, *, source_path: Path | None
+    ) -> None:
+        self.requestPredictor(image, image_id, source_path=source_path)
+
+    def cancel(self, image_id: uuid.UUID) -> bool:
+        return self.cancelPendingPredictor(image_id)
+
+    def invalidate(self, image_id: uuid.UUID) -> None:
+        self.removeFromCache(image_id)
+
 
 class _SamAwareConfig:
     """Minimal settings stub exposing cache and SAM slices."""
 
     def __init__(self, *, predictor_depth: int, sam_depth: int | None) -> None:
         self.cache = CacheSettings()
-        self.cache.prefetch.predictors = predictor_depth
+        self.cache.prefetch.extensions["source_warmup"] = predictor_depth
         sam_slice = SamConfigSlice()
         sam_slice.sam_prefetch_depth = sam_depth
         self._sam_slice = sam_slice
@@ -227,7 +237,7 @@ class StubViewport:
 
 
 class StubView:
-    """QPane view stub providing tile manager and viewport accessors."""
+    """CuteCanvas view stub providing tile manager and viewport accessors."""
 
     def __init__(self, viewport: StubViewport, tile_manager: StubTileManager) -> None:
         self.viewport = viewport
@@ -244,7 +254,7 @@ class StubView:
 
 
 class StubCatalogFacade:
-    """Facade mimicking QPane.catalog() semantics."""
+    """Facade mimicking CuteCanvas.catalog() semantics."""
 
     def __init__(self, catalog: StubCatalog) -> None:
         self._catalog = catalog
@@ -388,7 +398,7 @@ class StubCatalog:
 
 
 class StubQPane:
-    """QPane stub exposing only the surface touched by SwapCoordinator."""
+    """CuteCanvas stub exposing only the surface touched by SwapCoordinator."""
 
     def __init__(
         self,
@@ -421,6 +431,18 @@ class StubQPane:
         pending = getattr(result, "activation_pending", False)
         self.interaction.overlays_resume_pending = bool(pending)
         return result
+
+    def _catalog_activation_started(self, image_id: uuid.UUID):
+        return self._sync_mask_activation_for_image(image_id)
+
+    def _catalog_activation_finished(self, image_id: uuid.UUID, result) -> None:
+        self._masks_controller.on_swap_applied(
+            image_id,
+            activation_pending=bool(getattr(result, "activation_pending", False)),
+        )
+
+    def _catalog_source_warmup_reset(self) -> None:
+        self.resetActiveSamPredictor()
 
     def blank(self) -> None:
         self._is_blank = True
@@ -515,17 +537,17 @@ def test_set_current_image_prefetches_neighbors(harness):
     assert scheduled_ids == {first_id}
     assert all(reason == "neighbor" for _, reason in recent_prefetch_calls)
     metrics = harness.coordinator.snapshot_metrics()
-    assert metrics.pending_mask_prefetch == len(recent_prefetch_calls)
-    assert metrics.pending_predictors >= 0
+    assert metrics.pending_scene_prefetch == len(recent_prefetch_calls)
+    assert metrics.pending_source_warmups >= 0
 
 
 def test_set_current_image_cancels_only_irrelevant_work(harness):
     mask_service = RecordingScenePrefetcher()
     harness.coordinator.on_scene_prefetcher_attached(mask_service)
     sam_manager = RecordingSamManager()
-    harness.coordinator.on_sam_manager_attached(sam_manager)
+    harness.coordinator.on_source_warmup_attached(sam_manager)
     cache_settings = CacheSettings()
-    cache_settings.prefetch.predictors = -1
+    cache_settings.prefetch.extensions["source_warmup"] = -1
     harness.coordinator.apply_config(SimpleNamespace(cache=cache_settings))
     path1, path2, path3 = (
         Path("first.png"),
@@ -537,17 +559,17 @@ def test_set_current_image_cancels_only_irrelevant_work(harness):
     third_id = harness.add_image(color=Qt.green, path=path3)
     harness.set_current_image(third_id)
     assert third_id in sam_manager.requested
-    assert third_id in harness.coordinator._pending_predictor_ids
+    assert third_id in harness.coordinator._pending_source_warmup_ids
     extra_mask_id = uuid.uuid4()
     extra_id = uuid.uuid4()
-    harness.coordinator._pending_mask_prefetch_ids.add(extra_mask_id)
-    harness.coordinator._pending_predictor_ids.add(extra_id)
+    harness.coordinator._pending_scene_prefetch_ids.add(extra_mask_id)
+    harness.coordinator._pending_source_warmup_ids.add(extra_id)
     harness.set_current_image(first_id)
     assert extra_mask_id in mask_service.cancel_calls
     assert third_id not in mask_service.cancel_calls
     assert extra_id in sam_manager.cancelled
     assert third_id in sam_manager.cancelled
-    assert third_id in harness.coordinator._pending_predictor_ids
+    assert third_id in harness.coordinator._pending_source_warmup_ids
     harness.set_current_image(third_id)
     assert third_id in sam_manager.requested
     assert sam_manager.requested.count(third_id) >= 2
@@ -602,7 +624,7 @@ def test_apply_image_evicts_tile_and_sam_cache_for_changed_current_image(harness
     image_id = harness.add_image(color=Qt.red, path=Path("first.png"))
     harness.catalog.setCurrentImageID(image_id)
     sam_manager = RecordingSamManager()
-    harness.coordinator.on_sam_manager_attached(sam_manager)
+    harness.coordinator.on_source_warmup_attached(sam_manager)
     replacement = _solid_image(Qt.blue)
     harness.coordinator.apply_image(
         replacement,
@@ -797,11 +819,13 @@ def test_prefetch_pyramids_skips_recent_duplicates(harness, monkeypatch):
     assert len(scheduled_tiles) <= 1
 
 
-def test_sam_prefetch_depth_overrides_cache_when_configured(harness):
+def test_source_warmup_prefetch_depth_supports_domain_override(harness):
     coordinator = harness.coordinator
     coordinator.apply_config(_SamAwareConfig(predictor_depth=3, sam_depth=None))
-    assert coordinator._predictor_prefetch_depth == 3
+    assert coordinator._source_warmup_depth == 3
     coordinator.apply_config(_SamAwareConfig(predictor_depth=3, sam_depth=1))
-    assert coordinator._predictor_prefetch_depth == 1
+    coordinator.set_source_warmup_prefetch_depth(1)
+    assert coordinator._source_warmup_depth == 1
     coordinator.apply_config(_SamAwareConfig(predictor_depth=0, sam_depth=-1))
-    assert coordinator._predictor_prefetch_depth == -1
+    coordinator.set_source_warmup_prefetch_depth(-1)
+    assert coordinator._source_warmup_depth == -1

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -225,7 +225,7 @@ class MaskAbuseRunner:
             self._require_brush_cursor(
                 phase="touch-release-cursor",
                 missing_message=(
-                    "Touch release left QPane's owned cursor blank before mouse input"
+                    "Touch release left CuteCanvas's owned cursor blank before mouse input"
                 ),
             )
         history_after = self._harness.viewer.getMaskUndoState(mask_id)
@@ -265,7 +265,7 @@ class MaskAbuseRunner:
             self._fail("undo", f"Mask {action.mask_index} has no undo history")
         with self._harness.observe_presented_frames() as frame_probe:
             if not self._harness.viewer.undoMaskEdit():
-                self._fail("undo", "QPane rejected an undo with available history")
+                self._fail("undo", "CuteCanvas rejected an undo with available history")
             removed = self._oracle.undo(action.mask_index)
             if not self._wait_for_history_state(
                 mask_id,
@@ -299,7 +299,7 @@ class MaskAbuseRunner:
             self._fail("redo", f"Mask {action.mask_index} has no redo history")
         with self._harness.observe_presented_frames() as frame_probe:
             if not self._harness.viewer.redoMaskEdit():
-                self._fail("redo", "QPane rejected a redo with available history")
+                self._fail("redo", "CuteCanvas rejected a redo with available history")
             self._oracle.redo(action.mask_index)
             if not self._wait_for_history_state(
                 mask_id,
@@ -326,7 +326,7 @@ class MaskAbuseRunner:
         self._harness.drain_events(wait_ms=action.wait_ms)
         after = self._harness.capture()
         if before != after:
-            self._fail("idle", "Mounted QPane pixels changed without new input")
+            self._fail("idle", "Mounted CuteCanvas pixels changed without new input")
         self._require_expected_tint(
             self._oracle.expected_tinted_points(),
             phase="idle-preservation",
@@ -384,7 +384,7 @@ class MaskAbuseRunner:
         self._driver.end_touch_navigation(action)
         self._require_brush_cursor(
             phase="touch-navigation-release-cursor",
-            missing_message="Touch navigation left QPane's owned cursor blank",
+            missing_message="Touch navigation left CuteCanvas's owned cursor blank",
         )
 
         history_after = self._harness.viewer.getMaskUndoState(mask_id)
@@ -466,7 +466,7 @@ class MaskAbuseRunner:
         """Require matching brush feedback at QWidget and effective QWindow levels."""
         window = self._harness.host.windowHandle()
         if window is None:
-            self._fail(phase, "Mounted QPane host has no effective Qt window")
+            self._fail(phase, "Mounted CuteCanvas host has no effective Qt window")
         self._validate_brush_cursor(
             self._harness.viewer.cursor(),
             phase=phase,

@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -20,11 +20,9 @@ import logging
 import uuid
 from types import SimpleNamespace
 
-from qpane import QPane
-from qpane.cache import cache_detail_provider, cache_diagnostics_provider
-from qpane.concurrency.retry import RetryCategorySnapshot, RetrySnapshot
-from qpane.core.config_features import MaskConfigSlice
-from qpane.masks.mask_diagnostics import (
+from cutecanvas import CuteCanvas
+from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks.mask_diagnostics import (
     MaskStrokeDiagnosticsSnapshot,
     MaskStrokeJobSnapshot,
     MaskStrokeResultSnapshot,
@@ -32,16 +30,18 @@ from qpane.masks.mask_diagnostics import (
     mask_job_detail_provider,
     mask_summary_provider,
 )
-from qpane.masks.sam_feature import (
+from cutecanvas.masks.sam_feature import (
     _sam_summary_diagnostics_provider,
 )
+from qpane.cache import cache_detail_provider, cache_diagnostics_provider
+from qpane.concurrency.retry import RetryCategorySnapshot, RetrySnapshot
 from qpane.swap.coordinator import SwapCoordinatorMetrics
 from qpane.swap.diagnostics import swap_progress_provider
 from qpane.types import DiagnosticRecord
 
 
 def test_diagnostics_cached_snapshot_reuses_provider(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         calls = {"count": 0}
 
@@ -66,7 +66,7 @@ def test_diagnostics_cached_snapshot_reuses_provider(qapp):
 
 
 def test_qpane_core_diagnostics_contains_baseline(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         snapshot = qpane.gatherDiagnostics()
         rendered = snapshot.renderStrings()
@@ -78,7 +78,7 @@ def test_qpane_core_diagnostics_contains_baseline(qapp):
 
 
 def test_hooks_can_register_custom_diagnostics(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.hooks.register_diagnostics_provider(
             lambda p: (DiagnosticRecord("Custom", "42"),)
@@ -91,7 +91,7 @@ def test_hooks_can_register_custom_diagnostics(qapp):
 
 
 def test_registry_logs_provider_failures_once(qapp, caplog):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
 
         def flaky_provider(_):
@@ -251,7 +251,7 @@ def test_sam_summary_provider_reports_cache():
 
 
 def test_status_overlay_toggle(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     qpane.show()
     qapp.processEvents()
     try:
@@ -271,7 +271,7 @@ def test_status_overlay_toggle(qapp):
 
 def test_cache_diagnostics_provider_reports_usage(qapp):
     mb = 1024 * 1024
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         coordinator = qpane.cacheCoordinator
         assert coordinator is not None
@@ -293,7 +293,7 @@ def test_cache_diagnostics_provider_reports_usage(qapp):
 
 
 def test_cache_diagnostics_orders_aggregate_and_marks_hard_mode(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.applySettings(cache={"mode": "hard", "budget_mb": 2})
         rendered = qpane.gatherDiagnostics().renderStrings()
@@ -306,7 +306,7 @@ def test_cache_diagnostics_orders_aggregate_and_marks_hard_mode(qapp):
 
 
 def test_cache_diagnostics_provider_handles_snapshot_failure(qapp, caplog):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
 
         def _boom():
@@ -331,13 +331,13 @@ def test_cache_diagnostics_provider_handles_snapshot_failure(qapp, caplog):
 
 def test_swap_progress_provider_compact(qapp):
     mb = 1024 * 1024
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         view = qpane.view()
         delegate = view.swap_delegate
         delegate.snapshot_metrics = lambda: SwapCoordinatorMetrics(
-            pending_mask_prefetch=2,
-            pending_predictors=1,
+            pending_scene_prefetch=2,
+            pending_source_warmups=1,
             pending_pyramid_prefetch=0,
             pending_tile_prefetch=0,
             last_navigation_ms=42.0,
@@ -386,7 +386,7 @@ def test_swap_progress_provider_compact(qapp):
 
 
 def test_rendering_retry_provider_emits_rows(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         tile_snapshot = RetrySnapshot(
             categories={
@@ -421,7 +421,7 @@ def test_rendering_retry_provider_emits_rows(qapp):
 
 
 def test_overlay_formats_grouped_swap_rows(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     overlay = qpane.createStatusOverlay()
     try:
         rows = (
@@ -442,7 +442,7 @@ def test_overlay_formats_grouped_swap_rows(qapp):
 
 
 def test_detail_provider_gated_until_enabled(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.hooks.register_diagnostics_provider(
             lambda _: (DiagnosticRecord("Detail", "enabled"),),
@@ -460,7 +460,7 @@ def test_detail_provider_gated_until_enabled(qapp):
 
 
 def test_overlay_controller_reports_domains(qapp):
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     try:
         qpane.hooks.register_diagnostics_provider(
             lambda _: (DiagnosticRecord("Toggled", "1"),),

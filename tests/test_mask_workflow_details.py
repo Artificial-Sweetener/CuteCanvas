@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -22,10 +22,9 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from cutecanvas import LayerPolicy
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage
-
-from qpane import QPaneLayerInteractionPolicy
 
 pytest_plugins = ("tests.test_mask_workflows",)
 
@@ -75,8 +74,8 @@ def test_mask_info_normalizes_label_and_reads_layer_opacity(qpane_with_mask):
     assert image_id in info.image_ids
     assert info.scene_id is not None
     assert info.layer_id == instance.layer_id
-    assert info.interaction == QPaneLayerInteractionPolicy()
-    movable = QPaneLayerInteractionPolicy(selectable=True, movable=True)
+    assert info.interaction == LayerPolicy()
+    movable = LayerPolicy(selectable=True, movable=True)
     assert qpane.setLayerInteractionPolicy(
         info.scene_id,
         info.layer_id,
@@ -127,7 +126,7 @@ def test_moved_mask_uses_layer_transform_for_edit_coordinates(
     assert qpane.setLayerInteractionPolicy(
         info.scene_id,
         info.layer_id,
-        QPaneLayerInteractionPolicy(selectable=True, movable=True),
+        LayerPolicy(selectable=True, movable=True),
     )
     assert qpane.setLayerPlacement(
         info.scene_id,

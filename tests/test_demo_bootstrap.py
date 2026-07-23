@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,9 @@
 
 from argparse import Namespace
 
-from examples import demo
+from examples import cutecanvas_demo as demo
+from examples import qpane_demo
+from examples.demo_environment import DEMO_TIERS
 
 
 class _DifferentTierEnvironment:
@@ -41,6 +43,13 @@ class _DifferentTierEnvironment:
         """Record process handoff."""
         self.actions.append(("launch", tier))
         return 23
+
+
+def test_editor_demo_tiers_match_cutecanvas_dependency_ownership() -> None:
+    """Masks ship normally while only SAM requires an optional dependency."""
+    assert DEMO_TIERS["core"].extra is None
+    assert DEMO_TIERS["mask"].extra is None
+    assert DEMO_TIERS["masksam"].extra == "sam"
 
 
 def test_main_bootstraps_before_importing_demo_window(monkeypatch) -> None:
@@ -71,4 +80,19 @@ def test_main_bootstraps_before_importing_demo_window(monkeypatch) -> None:
         ("inspect", "core"),
         ("ensure", "core"),
         ("launch", "core"),
+    ]
+
+
+def test_qpane_main_bootstraps_its_viewer_only_environment(monkeypatch) -> None:
+    """The QPane entry point provisions QPane without requiring CuteCanvas."""
+    environment = _DifferentTierEnvironment()
+    monkeypatch.setattr(qpane_demo, "_DEMO_ENVIRONMENTS", environment)
+
+    result = qpane_demo.main([])
+
+    assert result == 23
+    assert environment.actions == [
+        ("inspect", "qpane"),
+        ("ensure", "qpane"),
+        ("launch", "qpane"),
     ]

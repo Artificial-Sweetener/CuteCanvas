@@ -1,28 +1,38 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Tests for exact generic composition-layer lifecycle edits."""
 
 from __future__ import annotations
 
 import uuid
 
-from qpane.catalog.source_reference import CatalogImageReference
-from qpane.composition.edit_controller import CompositionEditController
-from qpane.composition.edit_history import CompositionEditHistory
-from qpane.composition.layer_edits import (
+from cutecanvas.composition.edit_controller import CompositionEditController
+from cutecanvas.composition.edit_history import CompositionEditHistory
+from cutecanvas.composition.layer_edits import (
     CompositionLayerEditService,
     CompositionLayerTransition,
     CompositionLayerTransitionOwner,
 )
-from qpane.composition.layers import CompositionLayerInstance, CompositionLayerStore
-from qpane.composition.resource_lifetime import CompositionResourceLifetime
-from qpane.masks.source_reference import MaskAssetReference
+from cutecanvas.composition.layers import (
+    CompositionLayerInstance,
+    CompositionLayerStore,
+)
+from cutecanvas.composition.resource_lifetime import CompositionResourceLifetime
+from cutecanvas.masks.source_reference import MaskAssetReference
+from qpane.catalog.source_reference import CatalogImageReference
 from qpane.scene.identity import base_image_layer_id
 
 

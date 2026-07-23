@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -21,54 +21,62 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QImage
-
-from qpane import (
+from cutecanvas import (
     CacheMode,
     CatalogEntry,
+    CatalogLayerRequest,
+    CompositionRequest,
+    CompositionTemplate,
     ControlMode,
     DiagnosticsDomain,
+    LayerSnapshot,
     LinkedGroup,
     PlaceholderScaleMode,
-    QPaneCatalogImageLayerRequest,
-    QPaneScene,
-    QPaneSceneLayer,
-    QPaneSceneRequest,
-    QPaneSceneTemplate,
-    QPaneSceneTemplateBindings,
-    QPaneTemplateLayer,
+    SceneSnapshot,
+    TemplateBindings,
+    TemplateLayer,
     ZoomMode,
 )
+from cutecanvas.types import __all__ as exported_editor_types
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QColor, QImage
 from qpane.types import DiagnosticRecord
-from qpane.types import __all__ as exported_types
+from qpane.types import __all__ as exported_viewer_types
 
 
-def test_type_exports_are_listed() -> None:
+def test_viewer_type_exports_are_listed() -> None:
     expected = {
         "CacheMode",
         "PlaceholderScaleMode",
         "ZoomMode",
         "DiagnosticsDomain",
-        "ControlMode",
         "CatalogEntry",
         "LinkedGroup",
         "DiagnosticRecord",
-        "MaskInfo",
-        "MaskSavedPayload",
-        "QPaneScene",
-        "QPaneSceneLayer",
-        "QPaneSceneRequest",
-        "QPaneCatalogImageLayerRequest",
-        "QPaneSceneTemplate",
-        "QPaneTemplateLayer",
-        "QPaneSceneTemplateBindings",
-        "QPaneSceneClip",
-        "QPaneSceneHit",
-        "QPaneSceneOverlayState",
-        "QPaneSceneOverlayLayer",
+        "ComparisonOrientation",
+        "ComparisonState",
+        "ComparisonDividerState",
+        "OverlayState",
+        "SceneSnapshotOverlayState",
+        "SceneSnapshotOverlayLayer",
     }
-    assert expected.issubset(set(exported_types))
+    assert expected == set(exported_viewer_types)
+
+
+def test_editor_type_exports_are_listed() -> None:
+    expected = {
+        "ControlMode",
+        "SceneSnapshot",
+        "LayerSnapshot",
+        "CompositionRequest",
+        "CatalogLayerRequest",
+        "CompositionTemplate",
+        "TemplateLayer",
+        "TemplateBindings",
+        "CompositionLayerClip",
+        "LayerHit",
+    }
+    assert expected.issubset(set(exported_editor_types))
 
 
 def test_enum_values_match_facade_contract() -> None:
@@ -83,6 +91,7 @@ def test_enum_values_match_facade_contract() -> None:
     assert {mode.value for mode in DiagnosticsDomain} == {
         "cache",
         "swap",
+        "render",
         "mask",
         "executor",
         "retry",
@@ -140,26 +149,28 @@ def test_scene_layer_copies_metadata_and_geometry() -> None:
     layer_id = uuid.uuid4()
     placement = QRectF(0, 0, 10, 10)
     metadata = {"record": {"id": 1}}
+    tint = QColor(20, 140, 220, 180)
 
-    layer = QPaneSceneLayer(
+    layer = LayerSnapshot(
         layer_id=layer_id,
         image_id=image_id,
         placement=placement,
         metadata=metadata,
+        tint=tint,
     )
-    scene = QPaneScene(
+    scene = SceneSnapshot(
         composition_id=uuid.uuid4(),
         scene_id=uuid.uuid4(),
         title="Scene",
         bounds=QRectF(0, 0, 10, 10),
         layers=(layer,),
     )
-    request = QPaneSceneRequest(
+    request = CompositionRequest(
         composition_id=None,
         title=None,
         bounds=QRectF(0, 0, 10, 10),
         layers=(
-            QPaneCatalogImageLayerRequest(
+            CatalogLayerRequest(
                 layer_id=layer_id,
                 image_id=image_id,
                 placement=placement,
@@ -167,11 +178,11 @@ def test_scene_layer_copies_metadata_and_geometry() -> None:
             ),
         ),
     )
-    template = QPaneSceneTemplate(
+    template = CompositionTemplate(
         template_id=uuid.uuid4(),
         bounds=QRectF(0, 0, 10, 10),
         layers=(
-            QPaneTemplateLayer(
+            TemplateLayer(
                 layer_id=uuid.uuid4(),
                 source_slot="image",
                 placement=placement,
@@ -179,15 +190,17 @@ def test_scene_layer_copies_metadata_and_geometry() -> None:
             ),
         ),
     )
-    bindings = QPaneSceneTemplateBindings(
+    bindings = TemplateBindings(
         composition_id=None,
         catalog_images={"image": image_id},
         metadata={"image": metadata},
     )
     placement.setWidth(50)
+    tint.setRed(255)
     metadata["other"] = True
 
     assert layer.placement.width() == 10
+    assert layer.tint == QColor(20, 140, 220, 180)
     assert "other" not in layer.metadata
     assert scene.layers == (layer,)
     assert request.layers[0].placement.width() == 10

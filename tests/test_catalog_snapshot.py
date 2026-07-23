@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,16 +14,15 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Ensure QPane exposes a structured catalog snapshot helper."""
+"""Ensure CuteCanvas exposes a structured catalog snapshot helper."""
 
 from __future__ import annotations
 
 import uuid
 from pathlib import Path
 
+from cutecanvas import CatalogSnapshot, CuteCanvas, LinkedGroup
 from PySide6.QtGui import QImage
-
-from qpane import CatalogSnapshot, LinkedGroup, QPane
 
 
 def _solid_image() -> QImage:
@@ -34,10 +33,10 @@ def _solid_image() -> QImage:
 
 
 def test_catalog_snapshot_reports_order_and_links(qapp) -> None:
-    qpane = QPane(features=())
+    qpane = CuteCanvas(features=())
     first_id = uuid.uuid4()
     second_id = uuid.uuid4()
-    image_map = QPane.imageMapFromLists(
+    image_map = CuteCanvas.imageMapFromLists(
         images=[_solid_image(), _solid_image()],
         paths=[Path("first.png"), Path("second.png")],
         ids=[first_id, second_id],

@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Mounted demo checks for window-scoped editor shortcuts."""
 
 from __future__ import annotations
@@ -14,15 +21,15 @@ import time
 import uuid
 
 import numpy as np
+from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionToolButton, QWidget
-
-from examples.demo import ExampleOptions, ExampleWindow
-from examples.demonstration.editor_controls import _CenteredMenuToolButton
-from qpane import QPane
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
+
+from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
+from examples.demonstration.editor_controls import _CenteredMenuToolButton
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
@@ -45,7 +52,8 @@ def test_demo_selection_split_button_centers_label_across_toolbar(
         window.resize(900, 600)
         window.show()
         qapp.processEvents()
-        button = window._tools_toolbar.findChild(_CenteredMenuToolButton)
+        assert window.commands.toolbar is not None
+        button = window.commands.toolbar.findChild(_CenteredMenuToolButton)
         assert button is not None
         option = QStyleOptionToolButton()
         button.initStyleOption(option)
@@ -56,14 +64,14 @@ def test_demo_selection_split_button_centers_label_across_toolbar(
             button,
         )
         button_center = button.mapTo(
-            window._tools_toolbar,
+            window.commands.toolbar,
             button.rect().center(),
         ).x()
 
         assert button._label_rect() == button.rect()
         assert button._label_rect().center() == button.rect().center()
         assert button.sizeHint().width() == native_hint.width() + indicator_width
-        assert abs(button_center - window._tools_toolbar.rect().center().x()) <= 1
+        assert abs(button_center - window.commands.toolbar.rect().center().x()) <= 1
     finally:
         window.close()
         window.deleteLater()
@@ -133,13 +141,13 @@ def test_demo_delete_shortcut_clears_selected_pixels_from_moved_mask(
     try:
         image_id = uuid.uuid4()
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([_white_image(size)], [None], [image_id]),
+            CuteCanvas.imageMapFromLists([_white_image(size)], [None], [image_id]),
             image_id,
         )
         mask_id = window.qpane.createBlankMask(window.qpane.currentImage.size())
         assert mask_id is not None
         assert window.qpane.setActiveMaskID(mask_id)
-        window.editor_controls.layer_policy.reconcile()
+        window.tools.editor_controls.layer_policy.reconcile()
         info = window.qpane.listMasksForImage()[0]
         assert info.scene_id is not None
         assert info.layer_id is not None
@@ -150,7 +158,7 @@ def test_demo_delete_shortcut_clears_selected_pixels_from_moved_mask(
             """Paint deterministic content across selected and unselected regions."""
             pixels[180:220, 20:360] = 255
 
-        layer.surface.mutate(paint_band)
+        layer.coverage.raster.mutate(paint_band)
         window.qpane.invalidateActiveMaskCache()
         window.qpane.markDirty()
         assert window.qpane.setLayerPlacement(
@@ -158,7 +166,7 @@ def test_demo_delete_shortcut_clears_selected_pixels_from_moved_mask(
             info.layer_id,
             QRectF(80.0, 0.0, float(size), float(size)),
         )
-        before = layer.surface.snapshot_array()
+        before = layer.coverage.raster.snapshot_array()
         selection = QImage(180, 100, QImage.Format_Grayscale8)
         selection.fill(255)
         assert window.qpane.setPixelSelection(selection, QRect(100, 150, 180, 100))
@@ -171,7 +179,7 @@ def test_demo_delete_shortcut_clears_selected_pixels_from_moved_mask(
         QTest.keyClick(window.qpane, Qt.Key_Delete)
         qapp.processEvents()
 
-        after = layer.surface.snapshot_array()
+        after = layer.coverage.raster.snapshot_array()
         assert not np.any(after[180:220, 20:200])
         assert np.array_equal(after[:, 201:], before[:, 201:])
         assert window.qpane.sceneEditUndoAvailable()
@@ -192,22 +200,22 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
         image = QImage(QSize(3440, 1440), QImage.Format_ARGB32)
         image.fill(QColor(35, 55, 80))
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([image], [None], [image_id]),
+            CuteCanvas.imageMapFromLists([image], [None], [image_id]),
             image_id,
         )
         window.resize(2048, 900)
         window.show()
         window.activateWindow()
         qapp.processEvents()
-        mask_id = window._create_mask_for_current_image()
+        mask_id = window.workspace.create_mask_for_current_image()
         assert mask_id is not None
-        window._set_control_mode(QPane.CONTROL_MODE_DRAW_BRUSH)
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
         window.qpane.setBrushSize(120)
         window.qpane.setFocus(Qt.FocusReason.OtherFocusReason)
         qapp.processEvents()
         layer = window.qpane.mask_service.assets.get_layer(mask_id)
         assert layer is not None
-        assert not layer.surface.snapshot_array().any()
+        assert not layer.coverage.raster.snapshot_array().any()
         center = window.qpane.rect().center()
         end = center + QPoint(180, 0)
 
@@ -277,8 +285,8 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
             assert max(feedback_ms) < 100.0
             assert max(dispatch_ms) < 100.0
             assert commit_ms < 100.0
-        assert layer.surface.snapshot_array().any()
-        assert window.editor_controls.undo_action.isEnabled()
+        assert layer.coverage.raster.snapshot_array().any()
+        assert window.tools.editor_controls.undo_action.isEnabled()
         assert (
             _rgb_distance(
                 window.qpane.grab().toImage().pixelColor(center),
@@ -289,10 +297,13 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
 
         QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
         deadline = time.perf_counter() + 3.0
-        while time.perf_counter() < deadline and layer.surface.snapshot_array().any():
+        while (
+            time.perf_counter() < deadline
+            and layer.coverage.raster.snapshot_array().any()
+        ):
             qapp.processEvents()
             QTest.qWait(1)
-        assert not layer.surface.snapshot_array().any()
+        assert not layer.coverage.raster.snapshot_array().any()
         deadline = time.perf_counter() + 0.1
         while time.perf_counter() < deadline:
             qapp.processEvents()
@@ -301,8 +312,8 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
                 break
             QTest.qWait(1)
         assert _rgb_distance(restored, before_contact) <= 5
-        assert not window.editor_controls.undo_action.isEnabled()
-        assert window.editor_controls.redo_action.isEnabled()
+        assert not window.tools.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.redo_action.isEnabled()
         assert "Undid the last editor change" in window.status.currentMessage()
     finally:
         window.close()
@@ -313,12 +324,12 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
 def test_demo_ctrl_d_deselects_while_escape_preserves_committed_selection(
     qapp: QApplication,
 ) -> None:
-    """Photoshop-style deselect must not conflate durable state with cancellation."""
+    """Deselect must not conflate durable state with cancellation."""
     window = ExampleWindow(ExampleOptions(feature_set="mask"))
     try:
         image_id = uuid.uuid4()
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([_white_image(200)], [None], [image_id]),
+            CuteCanvas.imageMapFromLists([_white_image(200)], [None], [image_id]),
             image_id,
         )
         selection = QImage(80, 60, QImage.Format_Grayscale8)
@@ -351,7 +362,7 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
     try:
         image_id = uuid.uuid4()
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([_white_image(400)], [None], [image_id]),
+            CuteCanvas.imageMapFromLists([_white_image(400)], [None], [image_id]),
             image_id,
         )
         image = QImage(200, 200, QImage.Format_ARGB32_Premultiplied)
@@ -375,7 +386,7 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
         window.activateWindow()
         window.qpane.setFocus(Qt.FocusReason.OtherFocusReason)
         qapp.processEvents()
-        window._set_control_mode(QPane.CONTROL_MODE_MOVE)
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_MOVE)
         qapp.processEvents()
         resolved_scene_id = window.qpane._resolve_public_scene_id(scene.scene_id)
         source = window.qpane.view().layer_source_to_panel_point(
@@ -407,12 +418,12 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
         moved_x = 60 + floating_state.offset.x()
         moved_y = 60 + floating_state.offset.y()
         assert moved_x != 60
-        assert window.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.undo_action.isEnabled()
         QTest.keyClick(window.qpane, Qt.Key_D, Qt.ControlModifier)
         qapp.processEvents()
         assert window.qpane.floatingPixelEditState() is None
         assert not window.qpane.pixelSelectionState().has_selection
-        assert window.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.undo_action.isEnabled()
         asset_ids = window.qpane._editable_raster_assets.ids()
         assert len(asset_ids) == 1
         asset = window.qpane._editable_raster_assets.get(asset_ids[0])
@@ -447,8 +458,8 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
             40,
             255,
         )
-        assert window.editor_controls.undo_action.isEnabled()
-        assert window.editor_controls.redo_action.isEnabled()
+        assert window.tools.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.redo_action.isEnabled()
 
         QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
         qapp.processEvents()
@@ -466,14 +477,14 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
         QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
         qapp.processEvents()
         assert not window.qpane.pixelSelectionState().has_selection
-        assert not window.editor_controls.undo_action.isEnabled()
-        assert window.editor_controls.redo_action.isEnabled()
+        assert not window.tools.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.redo_action.isEnabled()
         assert any(
             layer.layer_id == layer_id for layer in window.qpane.currentScene().layers
         )
 
         for _step in range(3):
-            window.editor_controls.redo_action.trigger()
+            window.tools.editor_controls.redo_action.trigger()
             qapp.processEvents()
 
         assert any(
@@ -489,7 +500,7 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
             40,
             255,
         )
-        assert not window.editor_controls.redo_action.isEnabled()
+        assert not window.tools.editor_controls.redo_action.isEnabled()
     finally:
         window.close()
         window.deleteLater()
@@ -506,13 +517,13 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
     try:
         image_id = uuid.uuid4()
         window.qpane.setImagesByID(
-            QPane.imageMapFromLists([_white_image(size)], [None], [image_id]),
+            CuteCanvas.imageMapFromLists([_white_image(size)], [None], [image_id]),
             image_id,
         )
         mask_id = window.qpane.createBlankMask(window.qpane.currentImage.size())
         assert mask_id is not None
         assert window.qpane.setActiveMaskID(mask_id)
-        window.editor_controls.layer_policy.reconcile()
+        window.tools.editor_controls.layer_policy.reconcile()
         layer = window.qpane.mask_service.assets.get_layer(mask_id)
         assert layer is not None
 
@@ -520,7 +531,7 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
             """Create content under the tested selection."""
             pixels[60:100, 60:100] = 255
 
-        layer.surface.mutate(paint_square)
+        layer.coverage.raster.mutate(paint_square)
         window.qpane.invalidateActiveMaskCache()
         selection = QImage(40, 40, QImage.Format_Grayscale8)
         selection.fill(255)
@@ -529,13 +540,14 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
         window.show()
         window.activateWindow()
         qapp.processEvents()
-        assert not window._floating_pixels_toolbar.isVisible()
+        assert window.commands._floating_pixels_toolbar is not None
+        assert not window.commands._floating_pixels_toolbar.isVisible()
         coordinates = window.qpane.activeMaskLayerCoordinates()
         start = coordinates.source_to_panel(QPoint(80, 80))
         finish = coordinates.source_to_panel(QPoint(125, 105))
         assert start is not None
         assert finish is not None
-        window._set_control_mode(QPane.CONTROL_MODE_MOVE)
+        window.tools.set_mode(CuteCanvas.CONTROL_MODE_MOVE)
 
         QTest.mousePress(
             window.qpane,
@@ -553,11 +565,15 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
         qapp.processEvents()
 
         assert window.qpane.floatingPixelEditState() is not None
-        assert window._floating_pixels_toolbar.isVisible()
-        assert window.editor_controls.anchor_floating_action.isEnabled()
-        assert window.editor_controls.promote_floating_action.isEnabled()
+        assert window.commands._floating_pixels_toolbar.isVisible()
+        assert window.tools.editor_controls.anchor_floating_action.isEnabled()
+        assert window.tools.editor_controls.promote_floating_action.isEnabled()
         floating_before_space = window.qpane.floatingPixelEditState()
-        monkeypatch.setattr(window, "_qpane_under_cursor", lambda _pane: True)
+        monkeypatch.setattr(
+            window.application_input,
+            "canvas_under_cursor",
+            lambda _pane: True,
+        )
         space_press = QKeyEvent(
             QEvent.KeyPress,
             Qt.Key_Space,
@@ -568,16 +584,22 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
             Qt.Key_Space,
             Qt.NoModifier,
         )
-        assert window._handle_spacebar_event(window._tools_toolbar, space_press)
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_PANZOOM
+        assert window.application_input.handle_spacebar_event(
+            window.commands.toolbar,
+            space_press,
+        )
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
         assert window.qpane.floatingPixelEditState() == floating_before_space
-        assert window._handle_spacebar_event(window._tools_toolbar, space_release)
-        assert window.qpane.getControlMode() == QPane.CONTROL_MODE_MOVE
+        assert window.application_input.handle_spacebar_event(
+            window.commands.toolbar,
+            space_release,
+        )
+        assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_MOVE
         assert window.qpane.floatingPixelEditState() == floating_before_space
-        window.editor_controls.cancel_floating_action.trigger()
+        window.tools.editor_controls.cancel_floating_action.trigger()
         qapp.processEvents()
         assert window.qpane.floatingPixelEditState() is None
-        assert not window._floating_pixels_toolbar.isVisible()
+        assert not window.commands._floating_pixels_toolbar.isVisible()
     finally:
         window.close()
         window.deleteLater()

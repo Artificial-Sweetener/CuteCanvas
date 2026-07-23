@@ -1,11 +1,18 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Public editing contract tests for color raster scene layers."""
 
 from __future__ import annotations
@@ -13,10 +20,14 @@ from __future__ import annotations
 import time
 import uuid
 
-from PySide6.QtCore import QRect, QRectF
+from cutecanvas import (
+    LayerGeometryMode,
+    LayerGeometryPolicy,
+    LayerPolicy,
+)
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QImage
-
-from qpane import QPaneLayerInteractionPolicy
+from qpane.scene.raster import RasterBounds
 from qpane.scene.render_plan import RasterLayerRenderItem
 
 pytest_plugins = ("tests.test_mask_workflows",)
@@ -27,6 +38,43 @@ def _opaque_image(width: int, height: int) -> QImage:
     image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(40, 120, 220, 255))
     return image
+
+
+def test_layer_geometry_defaults_to_visible_alpha_and_preserves_host_modes(
+    qpane_with_mask,
+) -> None:
+    """Manipulation bounds should be content-tight without erasing host policies."""
+    qpane, _manager, _image_id = qpane_with_mask
+    scene = qpane.currentScene()
+    assert scene is not None
+    image = QImage(100, 80, QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    for y in range(30, 42):
+        for x in range(20, 30):
+            image.setPixelColor(x, y, QColor(20, 40, 60, 255))
+    layer_id = qpane.addEditableRasterLayer(image)
+    assert layer_id is not None
+
+    assert qpane.layerLocalBounds(scene.scene_id, layer_id) == QRectF(
+        20.0, 30.0, 10.0, 12.0
+    )
+    assert qpane.setLayerGeometryPolicy(
+        scene.scene_id,
+        layer_id,
+        LayerGeometryPolicy(LayerGeometryMode.STORAGE),
+    )
+    assert qpane.layerLocalBounds(scene.scene_id, layer_id) == QRectF(
+        0.0, 0.0, 100.0, 80.0
+    )
+    custom = RasterBounds(-10, -20, 300, 400)
+    assert qpane.setLayerGeometryPolicy(
+        scene.scene_id,
+        layer_id,
+        LayerGeometryPolicy(LayerGeometryMode.CUSTOM, custom),
+    )
+    assert qpane.layerLocalBounds(scene.scene_id, layer_id) == QRectF(
+        -10.0, -20.0, 300.0, 400.0
+    )
 
 
 def test_editable_raster_deletes_soft_selection_and_undoes_chronologically(
@@ -82,7 +130,7 @@ def test_editable_raster_delete_projects_through_scaled_offset_bounds(
     assert scene is not None
     layer_id = qpane.addEditableRasterLayer(
         _opaque_image(8, 8),
-        interaction=QPaneLayerInteractionPolicy(
+        interaction=LayerPolicy(
             selectable=True,
             movable=True,
             pixel_editable=True,
@@ -145,7 +193,7 @@ def test_catalog_image_remains_frozen_without_editable_capability(
     assert qpane.setLayerInteractionPolicy(
         scene.scene_id,
         base.layer_id,
-        QPaneLayerInteractionPolicy(selectable=True, pixel_editable=True),
+        LayerPolicy(selectable=True, pixel_editable=True),
     )
     assert qpane.setSelectedLayer(scene.scene_id, base.layer_id)
     assert qpane.selectAllPixels()
@@ -236,7 +284,7 @@ def test_shared_editable_raster_instances_edit_together_but_place_independently(
     original_id = qpane.addEditableRasterLayer(
         _opaque_image(8, 8),
         placement=QRectF(0.0, 0.0, 8.0, 8.0),
-        interaction=QPaneLayerInteractionPolicy(
+        interaction=LayerPolicy(
             selectable=True,
             movable=True,
             pixel_editable=True,

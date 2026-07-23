@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -25,7 +25,6 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
-
 from qpane.scene.default_scene import build_default_catalog_scene
 from qpane.scene.identity import SceneLayerAssetKey, SourceRenderAssetKey
 from qpane.scene.render_plan import (

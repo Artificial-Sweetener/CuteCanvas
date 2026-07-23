@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -27,7 +27,7 @@ from .abuse_model import HarnessPoint, StrokeAction
 
 
 class StrokeVisualOracle:
-    """Track expected stroke interiors without using QPane's rasterizer."""
+    """Track expected stroke interiors without using CuteCanvas's rasterizer."""
 
     def __init__(self, *, sample_spacing: float = 8.0) -> None:
         """Initialize independent committed and redo histories."""

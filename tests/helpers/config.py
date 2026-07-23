@@ -1,4 +1,4 @@
-#    QPane - High-performance PySide6 image viewer
+#    QPane + CuteCanvas - High-performance PySide6 rendering and editing
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
 
 """Deterministic configuration builders shared by cache-sensitive tests."""
 
-from qpane import Config
+from cutecanvas import Config
 
 
 def fixed_cache_config() -> Config:
