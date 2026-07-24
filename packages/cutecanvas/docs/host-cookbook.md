@@ -1,5 +1,29 @@
 # Host Cookbook
 
+## Let a Project Own the Document
+
+Keep `CanvasDocument` beside the host project or workflow state, then mount it
+in whichever canvas surface the current application mode needs:
+
+```python
+from cutecanvas import CanvasDocument, CanvasWorkspace, CuteCanvas
+
+document = CanvasDocument()
+editor = CuteCanvas(document=document, features=("mask",))
+inspection = CanvasWorkspace(document=document)
+```
+
+The editor and inspection workspace share resources and history. Their active
+composition, viewport, and tools remain independent. Use
+`setTabbedPresentation(..., linked=True)` for native-size review,
+`setGridPresentation()` for a responsive overview, and
+`setComparisonPresentation()` for a draggable independent-target reveal.
+
+Install one `OutboundMimeProvider` on the workspace when the host needs drag
+targets to resolve to a preferred file variant or custom MIME payload. The
+provider receives a stable content reference and remains the sole owner of
+storage and materialization policy.
+
 This guide connects CuteCanvas's focused tutorials into the flow of a complete
 editor host. It shows which commands belong together and which signals should
 drive the surrounding Qt interface.
@@ -14,20 +38,20 @@ features active in this widget, while `CuteCanvas.maskFeatureAvailable()` and
 questions.
 
 `CuteCanvas.editor` returns the focused `EditorFacade`. Its
-`DocumentCollection` handles documents, `ToolFacade` handles tool activation,
+`CompositionCollection` handles compositions, `ToolFacade` handles tool activation,
 `SelectionFacade` handles pixel selection, `CoverageFacade` authors coverage,
 `EffectsFacade` adds temporary treatments, `HistoryFacade` controls undo and
-redo, and `DocumentPersistenceFacade` saves complete editable documents.
+redo, and `CompositionPersistenceFacade` saves complete composition archives.
 
 `CuteCanvas.setEditorPolicy()` replaces the host's enabled capabilities,
 `CuteCanvas.editorPolicy()` returns the current policy, and
 `CuteCanvas.editorPolicyChanged` tells toolbars to resolve their enabled state
 again. `CuteCanvas.editorOperationState()` explains whether a particular intent
-is allowed for the selected document, layer, and pointer position.
+is allowed for the selected composition, layer, and pointer position.
 
 ## Control the View
 
-`CuteCanvas.setZoomFit()` frames the document, and `CuteCanvas.setZoom1To1()`
+`CuteCanvas.setZoomFit()` frames the composition, and `CuteCanvas.setZoom1To1()`
 shows native physical pixels. `CuteCanvas.applyZoom()` changes scale around an
 optional anchor, while `CuteCanvas.currentZoom` and `CuteCanvas.zoomChanged`
 keep a status control current. `CuteCanvas.currentViewportRect()` returns the
@@ -36,81 +60,61 @@ display-density changes.
 
 `CuteCanvas.panelHitTest()` maps a widget point into image coordinates for
 simple image tools. `CuteCanvas.sceneHitTest()` returns the topmost eligible
-document layer with panel, document, and source coordinates. Use the latter
+composition layer with panel, scene, and source coordinates. Use the latter
 when layer identity matters.
 
-`CuteCanvas.placeholderActive()` reports whether no real content is mounted.
-The normal viewer navigation behavior remains available through
+The normal navigation behavior remains available through
 `CuteCanvas.CONTROL_MODE_PANZOOM`, while `CuteCanvas.CONTROL_MODE_CURSOR`
 provides non-navigating pointer inspection.
 
-## Manage Source Images
-
-`CuteCanvas.setImagesByID()` installs an ordered image map. `CuteCanvas.hasImages`
-reports whether it contains entries, and `CuteCanvas.imageIDs()` returns their
-stable order. `CuteCanvas.allImages` and `CuteCanvas.allImagePaths` provide the
-decoded images and paths, while `CuteCanvas.imagePath()` looks up one source.
-
-`CuteCanvas.setCurrentImageID()` opens a catalog image's generated document.
-`CuteCanvas.currentImageID`, `CuteCanvas.currentImage`, and
-`CuteCanvas.currentImagePath` report the selected source. `CuteCanvas.imageLoaded`
-announces completed activation, and `CuteCanvas.currentImageChanged` plus
-`CuteCanvas.catalogSelectionChanged` keep host selection UI current.
-
-`CuteCanvas.getCatalogSnapshot()` returns a stable browser snapshot.
-`CuteCanvas.catalogChanged` reports structural changes. Use
-`CuteCanvas.removeImageByID()` or `CuteCanvas.removeImagesByID()` for selected
-sources, and `CuteCanvas.clearImages()` to empty the catalog.
-
-`CuteCanvas.setLinkedGroups()` installs synchronized pan-and-zoom groups, and
-`CuteCanvas.linkedGroups()` returns them. `CuteCanvas.setAllImagesLinked()` is
-the convenient all-images command. `CuteCanvas.linkGroupsChanged` lets the host
-refresh link indicators, and `CuteCanvas.prefetchMaskOverlays()` explicitly
-warms masks when a catalog workflow needs them ready before activation.
-
 ## Compare Sources
 
-`CuteCanvas.setComparisonImageID()` chooses a catalog source for split reveal,
-while `CuteCanvas.clearComparisonImage()` ends it. `CuteCanvas.setComparisonSplit()`
-changes position and orientation, `CuteCanvas.comparisonState()` describes the
-result, and `CuteCanvas.comparisonChanged` drives host controls.
+Use `CanvasWorkspace.setComparisonPresentation()` when two compositions need
+an independent-target reveal. Each target keeps its own renderer, native
+dimensions, and local zoom while linked inspection preserves the normalized
+region under review. The narrow divider owns pointer input only around its
+visible line; navigation remains available across the rest of both canvases.
 
-`CuteCanvas.setComparisonDividerInteractive()` enables or disables built-in
-dragging. `CuteCanvas.comparisonDividerInteractive()` reports that policy, and
-`CuteCanvas.comparisonDividerState()` supplies projected divider geometry for
-a host-drawn treatment.
+`CanvasWorkspace.setSinglePresentation()`,
+`CanvasWorkspace.setTabbedPresentation()`, and
+`CanvasWorkspace.setGridPresentation()` use the same retained target canvases.
+Switching presentations changes view-session state and never enters document
+history.
 
-## Create and Browse Documents
+## Create and Browse Compositions
 
-`CuteCanvas.createComposition()` creates an empty document, and
+`CuteCanvas.createComposition()` creates an empty composition, and
 `CuteCanvas.createCompositionFromImage()` seeds one with an ordinary image
-layer. `CuteCanvas.composeScene()` stores a complete catalog-backed layout,
-while `CuteCanvas.composeSceneFromTemplate()` binds new images into a reusable
-arrangement. `CuteCanvas.compose()` is a concise builder for one- or two-source
-review documents.
+layer. The image becomes a project resource referenced by that layer.
 
 `CuteCanvas.fitSceneRect()` computes a contained placement and
 `CuteCanvas.fillSceneRect()` computes a covering placement. They share the same
-scene coordinate rules as document layers.
+scene coordinate rules as composition layers.
 
 `CuteCanvas.compositionIDs()` returns browser order,
-`CuteCanvas.currentCompositionID()` identifies the open document, and
+`CuteCanvas.currentCompositionID()` identifies the open composition, and
 `CuteCanvas.openComposition()` activates one. `CuteCanvas.removeComposition()`
-removes a permitted document, while `CuteCanvas.setCompositionPolicy()` changes
+removes a permitted composition, while `CuteCanvas.setCompositionPolicy()` changes
 its host-controlled structural policy.
 
-`CuteCanvas.getCompositionSnapshot()` supplies the complete document-and-layer
+`CuteCanvas.getCompositionSnapshot()` supplies the complete composition-and-layer
 tree. `CuteCanvas.compositionChanged` reports structural updates, and
 `CuteCanvas.compositionSelectionChanged` reports activation. `CuteCanvas.currentScene()`
-returns the open document's render snapshot; `CuteCanvas.sceneChanged` reports
+returns the open composition's render snapshot; `CuteCanvas.sceneChanged` reports
 when that presentation changes.
 
 ## Add and Arrange Layers
 
-`CuteCanvas.addCatalogImageLayer()` adds a shared catalog source to the open
-document. `CuteCanvas.addEditableRasterLayer()` adds directly editable pixels,
+`CuteCanvas.addEditableRasterLayer()` adds directly editable pixels,
 `CuteCanvas.createPaintLayer()` creates an empty sparse raster, and
 `CuteCanvas.createVectorLayer()` creates retained vector content.
+`CuteCanvas.placeEmbeddedAsset()` and `CuteCanvas.placeLinkedAsset()` add
+non-destructive image resources. `CuteCanvas.placeComposition()` adds another
+open composition as a live nested resource.
+
+`CuteCanvas.duplicateLayer()` creates another layer instance sharing the same
+resource. `CuteCanvas.forkLayerResource()` redirects one instance to an
+independent copy before an edit that should not affect its siblings.
 
 `CuteCanvas.setSelectedLayer()` selects one layer and
 `CuteCanvas.clearSelectedLayer()` clears the selection.
@@ -118,7 +122,7 @@ document. `CuteCanvas.addEditableRasterLayer()` adds directly editable pixels,
 `CuteCanvas.selectedLayerChanged` updates the tree and contextual controls.
 
 `CuteCanvas.translateLayer()` moves a layer by an offset,
-`CuteCanvas.centerLayer()` aligns it with the document, and
+`CuteCanvas.centerLayer()` aligns it with the composition, and
 `CuteCanvas.setLayerPlacement()` sets its scene rectangle. Use
 `CuteCanvas.setLayerTransform()` for an exact affine transform,
 `CuteCanvas.setLayerIndex()` for stack order, `CuteCanvas.setLayerVisible()`
@@ -139,7 +143,7 @@ editing, reordering, and removal permission.
 gestures. `CuteCanvas.pixelSelectionState()` reports current coverage, and
 `CuteCanvas.pixelSelectionChanged` keeps selection actions synchronized.
 
-`CuteCanvas.selectAllPixels()` covers the document, while
+`CuteCanvas.selectAllPixels()` covers the composition, while
 `CuteCanvas.selectLayerCoverage()` follows nontransparent content.
 `CuteCanvas.invertPixelSelection()` reverses coverage, and
 `CuteCanvas.clearPixelSelection()` deselects after resolving floating pixels.
@@ -186,9 +190,9 @@ window. `CuteCanvas.rasterBoundsRequestCompleted` reports its terminal result.
 
 `CuteCanvas.createBlankMask()` creates a mask layer, and
 `CuteCanvas.loadMaskFromFile()` imports grayscale coverage.
-`CuteCanvas.listMasksForImage()` returns the masks for one catalog source;
-`CuteCanvas.maskIDsForImage()` returns only their IDs.
-`CuteCanvas.removeMaskFromImage()` removes one permitted mask.
+`CuteCanvas.listMasksForComposition()` returns the masks for one composition;
+`CuteCanvas.maskIDsForComposition()` returns only their IDs.
+`CuteCanvas.removeMaskFromComposition()` removes one permitted mask instance.
 
 `CuteCanvas.setActiveMaskID()` selects the paint and shape destination,
 `CuteCanvas.activeMaskID()` reports it, and `CuteCanvas.cycleMasksForward()` or
@@ -239,10 +243,10 @@ model and embedding work remains off the GUI thread.
 `CuteCanvas.refreshPlacedAsset()` reloads the current path,
 `CuteCanvas.relinkPlacedAsset()` chooses another path, and
 `CuteCanvas.embedPlacedAsset()` makes a linked source self-contained.
-`CuteCanvas.duplicatePlacedAsset()` creates another layer instance without
+`CuteCanvas.duplicateLayer()` creates another layer instance without
 resampling the immutable asset.
 
-`CuteCanvas.rasterizePlacedAsset()` replaces a placed source with editable
+`CuteCanvas.rasterizeLayer()` replaces a renderable resource with editable
 pixels at a chosen resolution. `CuteCanvas.placedAssetRequestCompleted`
 reports the terminal result of accepted asynchronous link, refresh, relink, or
 rasterization work.
@@ -292,7 +296,7 @@ and `CuteCanvas.vectorTextFontResolutions()` reports actual font resolution.
 mask. `CuteCanvas.vectorMaskState()` reports the attachment, and
 `CuteCanvas.clearVectorMask()` removes it. `CuteCanvas.convertVectorToPixelSelection()`
 samples chosen objects into selection coverage, while
-`CuteCanvas.rasterizeVectorLayer()` replaces the vector layer with editable
+`CuteCanvas.rasterizeLayer()` replaces the vector layer with editable
 pixels. `CuteCanvas.vectorRequestCompleted` reports terminal conversion work.
 
 ## Move, Transform, and Snap
@@ -350,7 +354,7 @@ waiting resume. `CuteCanvas.resumeOverlays()` resumes without forcing a paint,
 
 * [Getting Started](getting-started.md): Build a small editor from the beginning.
 * [Host State](host-state.md): Read the snapshots and enums used by host UI.
-* [Documents and Layers](scenes.md): Work with documents and layer handles.
+* [Compositions and Layers](scenes.md): Work with compositions and layer handles.
 * [Interaction and Tools](interaction-modes.md): Understand direct gestures and
   temporary editing state.
 

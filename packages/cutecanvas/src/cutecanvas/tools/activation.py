@@ -25,7 +25,9 @@ from qpane import CursorInteractionPort, NavigationInteractionPort
 from qpane.sdk.vector import VectorShapeKind
 
 from ..editor import EditorOperation
+from ..painting.tools.clone_feedback import CloneStampFeedbackProjector
 from .ports import (
+    CloneStampInteractionPort,
     MoveInteractionPort,
     PaintBucketInteractionPort,
     PaintingInteractionPort,
@@ -109,6 +111,7 @@ def build_editor_tool_ports(
         suspend_transform=transform.suspend,
     )
     painting = qpane.paintingCoordinator()
+    paint_destination = qpane.interactivePaintDestination()
     selection_port = PixelSelectionInteractionPort(
         panel_to_scene_point=qpane.view().panel_to_scene_point,
         can_select=lambda: qpane.editorOperationResolver()
@@ -131,9 +134,8 @@ def build_editor_tool_ports(
     painting_port = PaintingInteractionPort(
         is_alt_held=is_alt_held,
         is_shift_held=is_shift_held,
-        can_paint=lambda: qpane.editorOperationResolver()
-        .resolve(EditorOperation.PAINT)
-        .allowed,
+        can_paint=paint_destination.can_prepare,
+        prepare_paint=paint_destination.prepare,
         get_brush_size=get_brush_size,
         get_preview_pens=get_preview_pens,
         panel_hit_test=qpane.panelHitTest,
@@ -154,6 +156,17 @@ def build_editor_tool_ports(
         get_dpr=qpane.devicePixelRatioF,
         get_preview_color=painting.preview_color,
         request_overlay_update=qpane.update,
+    )
+    clone_stamp = qpane.cloneStampOperation()
+    clone_feedback = CloneStampFeedbackProjector(
+        operation=clone_stamp,
+        coordinates=qpane.coordinateSystem(),
+    )
+    clone_stamp_port = CloneStampInteractionPort(
+        painting=painting_port,
+        set_source_from_panel=clone_stamp.set_source_from_panel,
+        source_footprint=clone_feedback.footprint,
+        source_set=clone_stamp.source_is_available,
     )
     bucket = qpane.paintBucketCoordinator()
     bucket_port = PaintBucketInteractionPort(
@@ -214,6 +227,7 @@ def build_editor_tool_ports(
         pixel_selection=selection_port,
         coverage_shapes=coverage_shape_port,
         painting=painting_port,
+        clone_stamp=clone_stamp_port,
         paint_bucket=bucket_port,
         smart_selection=smart_selection_port,
         domain_ports={

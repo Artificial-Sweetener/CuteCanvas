@@ -27,6 +27,12 @@ from ..raster.image_conversion import (
 )
 from ..raster.image_conversion import qimage_to_numpy_argb32 as qimage_to_numpy_argb32
 from ..raster.image_conversion import (
+    qimage_to_numpy_const_view_argb32 as qimage_to_numpy_const_view_argb32,
+)
+from ..raster.image_conversion import (
+    qimage_to_numpy_const_view_bgra32 as qimage_to_numpy_const_view_bgra32,
+)
+from ..raster.image_conversion import (
     qimage_to_numpy_grayscale8 as qimage_to_numpy_grayscale8,
 )
 from ..raster.image_conversion import (

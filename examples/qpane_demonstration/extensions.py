@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen
-from qpane import QPane, ViewerTool
+from qpane import PanelPoint, QPane, ViewerTool
 
 
 class InspectionTool(ViewerTool):
@@ -48,10 +48,11 @@ class InspectionTool(ViewerTool):
         position = self._position
         if position is None:
             return
-        hit = self._pane.panelHitTest(position)
-        if hit is None:
+        scene_point = self._pane.coordinateSystem().panel_to_scene(
+            PanelPoint.from_qt(position)
+        )
+        if scene_point is None:
             return
-        scene_point = hit.raw_point
         painter.save()
         painter.setPen(QPen(QColor(112, 204, 255, 220), 1.0))
         painter.drawEllipse(position, 8.0, 8.0)
@@ -65,7 +66,7 @@ class InspectionTool(ViewerTool):
         )
         painter.drawText(
             position + QPointF(16.0, -10.0),
-            f"{scene_point.x():.0f}, {scene_point.y():.0f}",
+            f"{scene_point.x:.0f}, {scene_point.y:.0f}",
         )
         painter.restore()
 

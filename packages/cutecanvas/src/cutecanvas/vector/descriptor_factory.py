@@ -29,8 +29,8 @@ from qpane.sdk.scene import (
 )
 
 from ..composition.layers import CompositionLayerInstance
+from ..resources import ProjectResourceRecord, ProjectResourceReference
 from .projection import VectorDocumentProjection
-from .source_reference import VectorDocumentReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +38,7 @@ class VectorLayerDescriptorFactory:
     """Resolve vector instances without owning composition order."""
 
     projection: VectorDocumentProjection
-    source_type = VectorDocumentReference
+    source_type = ProjectResourceReference
 
     def revision(self) -> object:
         """Return the aggregate document revision for scene invalidation."""
@@ -48,9 +48,11 @@ class VectorLayerDescriptorFactory:
         self,
         scene: SceneDescriptor,
         instance: CompositionLayerInstance,
+        resource: ProjectResourceRecord,
     ) -> LayerDescriptor | None:
         """Resolve one vector document instance."""
-        if not isinstance(instance.source, VectorDocumentReference):
+        del resource
+        if not isinstance(instance.source, ProjectResourceReference):
             return None
         snapshot = self.projection.snapshot(instance.source)
         if snapshot is None:

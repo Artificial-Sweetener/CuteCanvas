@@ -153,6 +153,12 @@ class MaskHistory:
         completed: Callable[[MaskHistoryChange], None],
     ) -> None:
         """Bind the sole chronological edit owner and mask-to-scene resolver."""
+        if self._edits is not None:
+            if self._edits is not edits:
+                raise RuntimeError(
+                    "mask history is already bound to another edit controller"
+                )
+            return
         self._edits = edits
         self._scope_for_mask = scope_for_mask
         self._completed = completed

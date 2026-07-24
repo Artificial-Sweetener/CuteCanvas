@@ -37,8 +37,8 @@ from ..painting import (
     FloodFillSource,
     PaintTargetContext,
 )
+from ..resources import ProjectResourceReference
 from .mask_service import MaskService
-from .source_reference import MaskAssetReference
 
 
 class MaskCoveragePaintTargetOwner:
@@ -53,22 +53,28 @@ class MaskCoveragePaintTargetOwner:
 
     def supports(self, target: PaintTargetContext) -> bool:
         """Return whether ``target`` references mask coverage."""
-        return target.layer is not None and isinstance(
-            target.layer.source, MaskAssetReference
+        return (
+            target.layer is not None
+            and isinstance(target.layer.source, ProjectResourceReference)
+            and self._service.assets.get_layer(target.layer.source.resource_id)
+            is not None
         )
 
     def begin(self, target: PaintTargetContext) -> bool:
         """Activate the exact mask and begin its atomic stroke history."""
         layer = target.layer
         source = None if layer is None else layer.source
-        if not isinstance(source, MaskAssetReference):
+        if (
+            not isinstance(source, ProjectResourceReference)
+            or self._service.assets.get_layer(source.resource_id) is None
+        ):
             return False
         if self._active_mask_id is not None:
             self._service.resetStrokePipeline(self._active_mask_id)
-        self._service.activateMask(source.mask_id)
+        self._service.activateMask(source.resource_id)
         self._service.pushActiveMaskState()
-        self._active_mask_id = source.mask_id
-        mask = self._service.assets.get_layer(source.mask_id)
+        self._active_mask_id = source.resource_id
+        mask = self._service.assets.get_layer(source.resource_id)
         bounds = None if mask is None else mask.coverage.raster.bounds
         if bounds is None:
             self._active_mask_id = None
@@ -89,11 +95,11 @@ class MaskCoveragePaintTargetOwner:
         layer = target.layer
         source = None if layer is None else layer.source
         if (
-            not isinstance(source, MaskAssetReference)
-            or source.mask_id != self._active_mask_id
+            not isinstance(source, ProjectResourceReference)
+            or source.resource_id != self._active_mask_id
         ):
             return False
-        mask = self._service.assets.get_layer(source.mask_id)
+        mask = self._service.assets.get_layer(source.resource_id)
         coordinates = self._coordinates
         if mask is None or coordinates is None:
             return False
@@ -114,8 +120,8 @@ class MaskCoveragePaintTargetOwner:
         """Commit accumulated mask patches through the existing mask owner."""
         source = None if target.layer is None else target.layer.source
         if (
-            not isinstance(source, MaskAssetReference)
-            or source.mask_id != self._active_mask_id
+            not isinstance(source, ProjectResourceReference)
+            or source.resource_id != self._active_mask_id
         ):
             return False
         self._service.commitStroke()
@@ -137,9 +143,12 @@ class MaskCoveragePaintTargetOwner:
         """Return the mask's configured overlay color for brush feedback."""
         layer = target.layer
         source = None if layer is None else layer.source
-        if not isinstance(source, MaskAssetReference):
+        if (
+            not isinstance(source, ProjectResourceReference)
+            or self._service.assets.get_layer(source.resource_id) is None
+        ):
             return QColor(fallback)
-        color = self._service.mask_color(source.mask_id)
+        color = self._service.mask_color(source.resource_id)
         return QColor(fallback) if color is None else QColor(color)
 
     def idle_preview_color(self, fallback: QColor) -> QColor:
@@ -155,16 +164,17 @@ class MaskCoveragePaintTargetOwner:
         """Commit target-local retained geometry into one mask asset."""
         source = None if target.layer is None else target.layer.source
         return bool(
-            isinstance(source, MaskAssetReference)
-            and self._service.applyMaskCoverageItem(source.mask_id, item)
+            isinstance(source, ProjectResourceReference)
+            and self._service.assets.get_layer(source.resource_id) is not None
+            and self._service.applyMaskCoverageItem(source.resource_id, item)
         )
 
     def flood_fill_source(self, target: PaintTargetContext) -> FloodFillSource | None:
         """Return detached evaluated mask coverage for paint-bucket sampling."""
         source = None if target.layer is None else target.layer.source
-        if not isinstance(source, MaskAssetReference):
+        if not isinstance(source, ProjectResourceReference):
             return None
-        layer = self._service.assets.get_layer(source.mask_id)
+        layer = self._service.assets.get_layer(source.resource_id)
         if layer is None:
             return None
         source_pixels = HybridCoverageFillPixelSource(layer.coverage.state_snapshot())
@@ -184,14 +194,14 @@ class MaskCoveragePaintTargetOwner:
     ) -> bool:
         """Commit current bucket coverage as retained raster authorship."""
         source = None if target.layer is None else target.layer.source
-        if not isinstance(source, MaskAssetReference):
+        if not isinstance(source, ProjectResourceReference):
             return False
-        layer = self._service.assets.get_layer(source.mask_id)
+        layer = self._service.assets.get_layer(source.resource_id)
         return bool(
             layer is not None
             and layer.coverage.revision == expected_revision
             and self._service.applyMaskCoverageItem(
-                source.mask_id,
+                source.resource_id,
                 RasterCoverageItem(uuid.uuid4(), coverage, mode),
             )
         )
@@ -206,9 +216,10 @@ class MaskCoveragePaintTargetOwner:
         """Commit bounded fill coverage as retained mask authorship."""
         source = None if target.layer is None else target.layer.source
         return bool(
-            isinstance(source, MaskAssetReference)
+            isinstance(source, ProjectResourceReference)
+            and self._service.assets.get_layer(source.resource_id) is not None
             and self._service.applyMaskCoverageItem(
-                source.mask_id,
+                source.resource_id,
                 RasterCoverageItem(uuid.uuid4(), coverage, mode),
             )
         )

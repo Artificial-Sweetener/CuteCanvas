@@ -25,9 +25,9 @@ import pytest
 from cutecanvas import Config
 from PySide6.QtGui import QImage
 from qpane.rendering.pyramid import ImagePyramid, PyramidManager
-from qpane.scene.identity import catalog_source_asset_key
 
 from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.render_plan import make_source_key
 
 
 @pytest.mark.usefixtures("qapp")
@@ -36,7 +36,7 @@ def test_pyramid_allow_cache_insert_guard(caplog):
     manager = PyramidManager(config=Config(), executor=StubExecutor())
     manager.cache_limit_bytes = 100
     manager.set_admission_guard(lambda _size: False)
-    key = catalog_source_asset_key(uuid.uuid4(), revision=0, source_path=None)
+    key = make_source_key(uuid.uuid4())
     caplog.set_level("WARNING")
     assert manager._allow_cache_insert(50, key) is False
     assert manager._allow_cache_insert(50, key) is False
@@ -54,7 +54,7 @@ def test_pyramid_eviction_batch_drops_entries():
     manager = PyramidManager(config=Config(), executor=StubExecutor())
     manager.cache_limit_bytes = 0
     image_id = uuid.uuid4()
-    key = catalog_source_asset_key(image_id, revision=0, source_path=None)
+    key = make_source_key(image_id)
     pyramid = ImagePyramid(
         asset_key=key,
         full_resolution_image=QImage(4, 4, QImage.Format_ARGB32),

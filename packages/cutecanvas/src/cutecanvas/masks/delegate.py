@@ -26,13 +26,13 @@ import numpy as np
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QCursor, QImage
 from qpane.sdk.cache import CachePriority, EvictableCacheConsumer
+from qpane.sdk.scene import RasterBounds
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..canvas import CuteCanvas
     from .mask import MaskLayer
     from .mask_service import MaskService
     from .mask_undo import MaskUndoState
-    from .prefetch_adapter import MaskScenePrefetcher
 logger = logging.getLogger(__name__)
 
 
@@ -42,17 +42,7 @@ class MaskDelegate:
     def __init__(self, qpane: CuteCanvas) -> None:
         """Capture the owning CuteCanvas so mask helpers can reach shared state."""
         self._qpane = qpane
-        self._catalog_cache = None
         self._mask_undo_slot = None
-        self._scene_prefetcher: MaskScenePrefetcher | None = None
-
-    def _catalog(self):
-        """Return the cached catalog, fetching it from the CuteCanvas on first use."""
-        catalog = self._catalog_cache
-        if catalog is None:
-            catalog = self._qpane.catalog()
-            self._catalog_cache = catalog
-        return catalog
 
     def _fallbacks(self):
         """Return the feature fallback tracker owned by the CuteCanvas."""
@@ -63,20 +53,23 @@ class MaskDelegate:
         """Return True when the mask feature service is wired up."""
         return self._mask_service is not None
 
-    def sync_mask_activation_for_image(self, image_id: uuid.UUID | None) -> bool:
-        """Ensure a mask is active for ``image_id`` before brush usage."""
+    def sync_mask_activation_for_composition(
+        self,
+        composition_id: uuid.UUID | None,
+    ) -> bool:
+        """Ensure a mask is active for one document before brush usage."""
         service = self._mask_service
         if service is None:
             return False
-        mask_ready = service.ensureTopMaskActiveForImage(image_id)
+        mask_ready = service.ensureTopMaskActiveForComposition(composition_id)
         tools = self._qpane._tools_manager
         if (
             not mask_ready
             and tools.get_control_mode() == self._qpane.CONTROL_MODE_DRAW_BRUSH
         ):
             logger.info(
-                "Switching to pan/zoom because image %s has no active mask for brush.",
-                image_id,
+                "Switching to pan/zoom because document %s has no active mask.",
+                composition_id,
             )
             self._qpane.setControlMode(self._qpane.CONTROL_MODE_PANZOOM)
             return False
@@ -99,11 +92,6 @@ class MaskDelegate:
             service, "setSceneMutationCoordinator"
         ):
             service.setSceneMutationCoordinator(scene_mutations())
-        from .prefetch_adapter import MaskScenePrefetcher
-
-        prefetcher = MaskScenePrefetcher(service)
-        qpane.swapDelegate.on_scene_prefetcher_attached(prefetcher)
-        self._scene_prefetcher = prefetcher
         workflow = qpane._masks_controller
         undo_slot = workflow.on_mask_undo_stack_changed
         service.connectUndoStackChanged(undo_slot)
@@ -131,9 +119,6 @@ class MaskDelegate:
             return
         if hasattr(service, "setSceneMutationCoordinator"):
             service.setSceneMutationCoordinator(None)
-        if self._scene_prefetcher is not None:
-            qpane.swapDelegate.on_scene_prefetcher_detached(self._scene_prefetcher)
-            self._scene_prefetcher = None
         try:
             if self._mask_undo_slot is not None:
                 service.disconnectUndoStackChanged(self._mask_undo_slot)
@@ -244,15 +229,18 @@ class MaskDelegate:
         return True
 
     def prefetch_mask_overlays(
-        self, image_id: uuid.UUID | None, *, reason: str = "navigation"
+        self,
+        composition_id: uuid.UUID | None,
+        *,
+        reason: str = "navigation",
     ) -> bool:
-        """Warm mask renders for ``image_id`` for the given ``reason``."""
+        """Warm mask renders for one document."""
         if not self.mask_feature_available():
             return False
         service = self._mask_service
         if service is None:
             return False
-        return service.prefetchColorizedMasks(image_id, reason=reason)
+        return service.prefetchColorizedMasks(composition_id, reason=reason)
 
     def set_mask_properties(
         self, mask_id, color: QColor | None = None, opacity: float | None = None
@@ -271,23 +259,32 @@ class MaskDelegate:
             return False
         return service.setMaskProperties(mask_id, color=color, opacity=opacity)
 
-    def remove_mask_from_image(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> bool:
-        """Detach ``mask_id`` from ``image_id`` via the mask service."""
+    def remove_mask_from_composition(
+        self,
+        composition_id: uuid.UUID,
+        mask_id: uuid.UUID,
+    ) -> bool:
+        """Detach ``mask_id`` from one document via the mask service."""
         if not self.mask_feature_available():
             return bool(
-                self._fallbacks().get("mask", "removeMaskFromImage", default=False)
+                self._fallbacks().get(
+                    "mask",
+                    "removeMaskFromComposition",
+                    default=False,
+                )
             )
         service = self._mask_service
         if service is None:
             logger.error(
-                "removeMaskFromImage aborted: mask service is unavailable (image_id=%s, mask_id=%s).",
-                image_id,
+                "removeMaskFromComposition aborted: service unavailable "
+                "(composition_id=%s, mask_id=%s).",
+                composition_id,
                 mask_id,
             )
             return False
-        removed = service.removeMaskFromImage(image_id, mask_id)
-        if removed and self._catalog().currentImageID() == image_id:
-            self.sync_mask_activation_for_image(image_id)
+        removed = service.removeMaskFromComposition(composition_id, mask_id)
+        if removed and self._qpane.currentCompositionID() == composition_id:
+            self.sync_mask_activation_for_composition(composition_id)
         return removed
 
     def cycle_masks_forward(self) -> bool:
@@ -297,7 +294,7 @@ class MaskDelegate:
                 self._fallbacks().get("mask", "cycleMasksForward", default=False)
             )
         service = self._mask_service
-        current_id = self._catalog().currentImageID()
+        current_id = self._qpane.currentCompositionID()
         if service is None:
             logger.error("cycleMasksForward aborted: mask service is unavailable.")
             return False
@@ -305,13 +302,13 @@ class MaskDelegate:
         return True
 
     def cycle_masks_backward(self) -> bool:
-        """Cycle the mask stack backward for the current image."""
+        """Cycle the mask stack backward for the current document."""
         if not self.mask_feature_available():
             return bool(
                 self._fallbacks().get("mask", "cycleMasksBackward", default=False)
             )
         service = self._mask_service
-        current_id = self._catalog().currentImageID()
+        current_id = self._qpane.currentCompositionID()
         if service is None:
             logger.error("cycleMasksBackward aborted: mask service is unavailable.")
             return False
@@ -363,6 +360,24 @@ class MaskDelegate:
             )
             return False
         service.invalidateActiveMaskCache()
+        return True
+
+    def refresh_mask_resource(
+        self,
+        mask_id: uuid.UUID,
+        dirty_bounds: RasterBounds,
+    ) -> bool:
+        """Patch derived presentation products from authoritative pixels."""
+        service = self._mask_service
+        if service is None:
+            return False
+        layer = self._qpane.document().masks.get_layer(mask_id)
+        if layer is None:
+            return False
+        storage = layer.coverage.raster.storage_rect(dirty_bounds)
+        if storage is None:
+            return False
+        service.updateMaskRegion(storage.to_qrect(), layer)
         return True
 
     def update_mask_region(

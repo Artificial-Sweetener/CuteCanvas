@@ -24,14 +24,11 @@ from qpane.sdk.vector import VectorDocument
 from ..composition.service import CompositionService
 from ..coverage import CoverageAssetSnapshot
 from ..masks.mask import MaskAssetStore
-from ..masks.source_reference import MaskAssetReference
 from ..placed.model import PlacedAssetSnapshot
-from ..placed.source_reference import PlacedAssetReference
 from ..placed.store import PlacedAssetStore
 from ..raster.assets import EditableRasterAssetStore
-from ..raster.source_reference import EditableRasterReference
 from ..raster.sparse_grid import SparseRasterSnapshot
-from ..vector.source_reference import VectorDocumentReference
+from ..resources import ProjectResourceKind
 from ..vector.store import VectorAssetStore
 from .model import CompositionArchiveSnapshot
 
@@ -55,6 +52,9 @@ class CompositionArchiveRestorer:
         self._rasters = rasters
         self._placed_assets = placed_assets
         self._vectors = vectors
+        if rasters.resources is not placed_assets.resources:
+            raise ValueError("persistence owners must share one project resource store")
+        self._resources = rasters.resources
 
     def restore(self, archive: CompositionArchiveSnapshot) -> None:
         """Apply ``archive`` atomically from the caller's perspective."""
@@ -76,20 +76,26 @@ class CompositionArchiveRestorer:
         previous_vectors: dict[uuid.UUID, VectorDocument | None] = {
             vector_id: self._vectors.get(vector_id) for vector_id in vector_ids
         }
+        previous_resources = self._resources.records()
         try:
+            self._resources.install(archive.resources.values())
             for mask_id, snapshot in archive.masks.items():
                 assert self._masks is not None
                 self._masks.restore_mask(mask_id, snapshot)
             for raster_id, snapshot in archive.rasters.items():
-                self._rasters.restore(raster_id, snapshot)
+                self._rasters.restore_payload(raster_id, snapshot)
             for asset_id, snapshot in archive.placed_assets.items():
-                self._placed_assets.restore(asset_id, snapshot)
+                self._placed_assets.restore_payload(asset_id, snapshot)
             for vector_id, document in archive.vectors.items():
                 if vector_id != document.vector_id:
                     raise ValueError("vector archive key must match document identity")
                 self._vectors.restore(document)
-            self._compositions.restore_document(archive.document, archive.layers)
+            self._compositions.restore_documents(
+                dict(archive.documents),
+                dict(archive.layer_stacks),
+            )
         except Exception:
+            self._resources.restore_state(previous_resources)
             for mask_id, snapshot in previous_masks.items():
                 assert self._masks is not None
                 if snapshot is None:
@@ -98,14 +104,14 @@ class CompositionArchiveRestorer:
                     self._masks.restore_mask(mask_id, snapshot)
             for raster_id, snapshot in previous_rasters.items():
                 if snapshot is None:
-                    self._rasters.remove(raster_id)
+                    self._rasters.discard_payload(raster_id)
                 else:
-                    self._rasters.restore(raster_id, snapshot)
+                    self._rasters.restore_payload(raster_id, snapshot)
             for asset_id, snapshot in previous_placed.items():
                 if snapshot is None:
-                    self._placed_assets.remove(asset_id)
+                    self._placed_assets.discard_payload(asset_id)
                 else:
-                    self._placed_assets.restore(asset_id, snapshot)
+                    self._placed_assets.restore_payload(asset_id, snapshot)
             for vector_id, document in previous_vectors.items():
                 if document is None:
                     self._vectors.remove(vector_id)
@@ -129,34 +135,38 @@ class CompositionArchiveRestorer:
     def _mask_ids(archive: CompositionArchiveSnapshot) -> set[uuid.UUID]:
         """Return all mask source identifiers referenced by an archive."""
         return {
-            layer.source.mask_id
-            for layer in archive.layers
-            if isinstance(layer.source, MaskAssetReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind is ProjectResourceKind.COVERAGE
         }
 
     @staticmethod
     def _raster_ids(archive: CompositionArchiveSnapshot) -> set[uuid.UUID]:
         """Return all editable raster identifiers referenced by an archive."""
         return {
-            layer.source.raster_id
-            for layer in archive.layers
-            if isinstance(layer.source, EditableRasterReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind is ProjectResourceKind.RASTER
         }
 
     @staticmethod
     def _placed_ids(archive: CompositionArchiveSnapshot) -> set[uuid.UUID]:
         """Return all placed identifiers referenced by an archive."""
         return {
-            layer.source.asset_id
-            for layer in archive.layers
-            if isinstance(layer.source, PlacedAssetReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind
+            in {
+                ProjectResourceKind.IMPORTED_RASTER,
+                ProjectResourceKind.LINKED_RASTER,
+            }
         }
 
     @staticmethod
     def _vector_ids(archive: CompositionArchiveSnapshot) -> set[uuid.UUID]:
         """Return all vector identifiers referenced by an archive."""
         return {
-            layer.source.vector_id
-            for layer in archive.layers
-            if isinstance(layer.source, VectorDocumentReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind is ProjectResourceKind.VECTOR
         }

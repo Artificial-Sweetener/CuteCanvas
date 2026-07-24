@@ -48,7 +48,6 @@ class VectorInteractionController:
         layer_selection: SceneLayerSelectionController,
         object_selection: VectorObjectSelectionController,
         current_scene: Callable[[], SceneDescriptor | None],
-        panel_to_source: Callable[[uuid.UUID, uuid.UUID, QPointF], QPointF | None],
         options_changed: Callable[[], None],
         targets: VectorAuthoringTargetResolver,
     ) -> None:
@@ -58,7 +57,6 @@ class VectorInteractionController:
         self._layer_selection = layer_selection
         self._object_selection = object_selection
         self._current_scene = current_scene
-        self._panel_to_source = panel_to_source
         self._options_changed = options_changed
         self._targets = targets
         self._shape = VectorShapeKind.RECTANGLE

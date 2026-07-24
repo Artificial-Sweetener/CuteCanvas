@@ -37,6 +37,15 @@ from .hybrid import HybridPresentationStyle as HybridPresentationStyle
 from .hybrid import HybridRasterPrimitive as HybridRasterPrimitive
 from .hybrid import HybridRasterSampler as HybridRasterSampler
 from .hybrid import HybridVectorPrimitive as HybridVectorPrimitive
+from .inspection import InspectionRegion as InspectionRegion
+from .inspection import InspectionStateStore as InspectionStateStore
+from .inspection import InspectionTarget as InspectionTarget
+from .inspection import InspectionUpdate as InspectionUpdate
+from .inspection import InspectionViewState as InspectionViewState
+from .inspection import InspectionZoomMode as InspectionZoomMode
+from .inspection import ProjectedViewport as ProjectedViewport
+from .inspection import capture_inspection as capture_inspection
+from .inspection import project_inspection as project_inspection
 from .interaction import CursorInteractionPort as CursorInteractionPort
 from .interaction import CursorTool as CursorTool
 from .interaction import NavigationInteractionPort as NavigationInteractionPort
@@ -56,6 +65,11 @@ from .interaction import TouchNavigationSession as TouchNavigationSession
 from .interaction import ViewerTool as ViewerTool
 from .interaction import ViewerToolSignals as ViewerToolSignals
 from .rendering.coordinates import PanelHitTest as PanelHitTest
+from .rendering.scene_coordinates import LayerLocalPoint as LayerLocalPoint
+from .rendering.scene_coordinates import LayerSourcePoint as LayerSourcePoint
+from .rendering.scene_coordinates import PanelPoint as PanelPoint
+from .rendering.scene_coordinates import SceneCoordinateSystem as SceneCoordinateSystem
+from .rendering.scene_coordinates import ScenePoint as ScenePoint
 from .rendering.sdk import (
     HybridSource as HybridSource,
 )
@@ -108,6 +122,8 @@ from .scene.source_capabilities import (
 from .scene.source_capabilities import (
     RasterSourcePatch as RasterSourcePatch,
 )
+from .sdk.ui import OutboundDragPayload as OutboundDragPayload
+from .sdk.ui import OutboundMimeItem as OutboundMimeItem
 from .types import CacheMode as CacheMode
 from .types import ComparisonDividerState as ComparisonDividerState
 from .types import ComparisonOrientation as ComparisonOrientation
@@ -313,4 +329,5 @@ class QPane(QWidget):
     ) -> SceneRenderPlan | None: ...
     def physicalViewportRect(self) -> QRectF: ...
     def panelHitTest(self, point: QPoint | QPointF) -> PanelHitTest | None: ...
+    def coordinateSystem(self) -> SceneCoordinateSystem: ...
     def minimumSizeHint(self) -> QSize: ...

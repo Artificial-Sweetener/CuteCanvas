@@ -23,7 +23,6 @@ import uuid
 from collections.abc import Callable
 
 from PySide6.QtCore import QTimer
-from qpane.sdk.catalog import Catalog
 
 from .mask import MaskAssetStore
 from .mask_controller import MaskController
@@ -41,8 +40,7 @@ class MaskActivationController:
         *,
         controller: MaskController,
         assets: MaskAssetStore,
-        catalog: Catalog,
-        mask_ids_for_image: Callable[[uuid.UUID], list[uuid.UUID]],
+        mask_ids_for_composition: Callable[[uuid.UUID], list[uuid.UUID]],
         invalidate_jobs: Callable[..., None],
         promote_to_top: Callable[[uuid.UUID], bool],
         scene_stack_end: Callable[..., int | None],
@@ -57,8 +55,7 @@ class MaskActivationController:
         """Initialize activation with explicit workflow collaborators."""
         self._controller = controller
         self._assets = assets
-        self._catalog = catalog
-        self._mask_ids_for_image = mask_ids_for_image
+        self._mask_ids_for_composition = mask_ids_for_composition
         self._invalidate_jobs = invalidate_jobs
         self._promote_to_top = promote_to_top
         self._scene_stack_end = scene_stack_end
@@ -67,7 +64,7 @@ class MaskActivationController:
         self._prefetch = prefetch
         self._prefetch_pending = prefetch_pending
         self._publish_status = publish_status
-        self._pending_activation_images: set[uuid.UUID] = set()
+        self._pending_compositions: set[uuid.UUID] = set()
         self._default_resume_cb = resume
         self._default_resume_update_cb = resume_and_update
         self._default_activation_pending_cb = lambda _image_id=None: None
@@ -75,29 +72,6 @@ class MaskActivationController:
         self._resume_overlays_and_update_cb = resume_and_update
         self._activation_pending_cb = self._default_activation_pending_cb
         self._last_status: tuple[str, str] | None = None
-
-    def handle_navigation_started(self, event) -> None:
-        """Track activation pending state when navigation begins."""
-        target_id = getattr(event, "target_id", None)
-        if target_id is None:
-            logger.warning(
-                "Catalog navigation started event missing target_id; skipping activation pending tracking"
-            )
-            return
-        was_pending = target_id in self._pending_activation_images
-        self._pending_activation_images.add(target_id)
-        if not was_pending:
-            logger.info(
-                "Marked image %s as activation pending due to navigation start",
-                target_id,
-            )
-        try:
-            self._activation_pending_cb(target_id)
-        except Exception:
-            logger.exception(
-                "Activation pending callback failed for navigation start (image=%s)",
-                target_id,
-            )
 
     def set_resume_hooks(
         self,
@@ -139,8 +113,8 @@ class MaskActivationController:
         self._controller.setActiveMaskID(mask_id)
         return was_moved
 
-    def ensure_top_active(self, image_id: uuid.UUID | None) -> bool:
-        """Ensure the active mask aligns with image_id's stack before brush use."""
+    def ensure_top_active(self, composition_id: uuid.UUID | None) -> bool:
+        """Ensure the active mask aligns with the current document before brush use."""
 
         def record_once(message: str, *, label: str) -> None:
             """Emit a status message unless it matches the last entry."""
@@ -151,17 +125,17 @@ class MaskActivationController:
             self._publish_status(message, label=label)
 
         active_mask_id = self._controller.get_active_mask_id()
-        if image_id is None:
+        if composition_id is None:
             self._invalidate_jobs(
                 active_mask_id, reason="mask_switch", request_redraw=False
             )
             self._controller.setActiveMaskID(None)
             record_once(
-                "Brush tool unavailable: no image selected.",
+                "Brush tool unavailable: no document selected.",
                 label="Mask Error",
             )
             return False
-        mask_ids = self._mask_ids_for_image(image_id)
+        mask_ids = self._mask_ids_for_composition(composition_id)
         if not mask_ids:
             should_defer = self.should_defer(active_mask_id, None)
             self._invalidate_jobs(
@@ -170,29 +144,24 @@ class MaskActivationController:
             self._controller.setActiveMaskID(
                 None, warm_cache=False, emit_signals=not should_defer
             )
-            if image_id is not None:
-                pending = image_id in self._pending_activation_images
-                if pending:
-                    self._schedule_signals(
-                        None,
-                        image_id=image_id,
+            pending = composition_id in self._pending_compositions
+            if pending:
+                self._schedule_signals(None, composition_id=composition_id)
+            else:
+                self._pending_compositions.discard(composition_id)
+                try:
+                    self._resume_overlays_cb(composition_id)
+                except Exception:  # pragma: no cover - defensive guard
+                    logger.exception(
+                        "Failed to resume overlays after maskless activation"
                     )
-                else:
-                    self._pending_activation_images.discard(image_id)
-                    try:
-                        self._resume_overlays_cb(image_id)
-                    except Exception:  # pragma: no cover - defensive guard
-                        logger.exception(
-                            "Failed to resume overlays after maskless activation"
-                        )
             record_once(
-                f"Brush tool unavailable: image {image_id} has no masks.",
+                f"Brush tool unavailable: document {composition_id} has no masks.",
                 label="Mask Error",
             )
             return False
-        prefetch_pending = self._prefetch_pending(image_id)
-        if image_id is not None:
-            self._pending_activation_images.discard(image_id)
+        prefetch_pending = self._prefetch_pending(composition_id)
+        self._pending_compositions.discard(composition_id)
         if active_mask_id in mask_ids:
             if active_mask_id != mask_ids[-1]:
                 top_scene_index = self._scene_stack_end(forward=True)
@@ -206,7 +175,7 @@ class MaskActivationController:
                 )
                 if moved is None:
                     moved = self._reorder(
-                        image_id,
+                        composition_id,
                         active_mask_id,
                         len(mask_ids) - 1,
                     )
@@ -225,7 +194,7 @@ class MaskActivationController:
         )
         if moved is None:
             moved = self._reorder(
-                image_id,
+                composition_id,
                 top_mask_id,
                 len(mask_ids) - 1,
             )
@@ -235,11 +204,14 @@ class MaskActivationController:
         scheduled_prefetch = False
         if size_defer:
             try:
-                scheduled_prefetch = self._prefetch(image_id, reason="activation")
+                scheduled_prefetch = self._prefetch(
+                    composition_id,
+                    reason="activation",
+                )
             except Exception:
                 logger.exception(
                     "Failed to prefetch mask renders for %s during activation",
-                    image_id,
+                    composition_id,
                 )
             else:
                 if scheduled_prefetch:
@@ -249,24 +221,23 @@ class MaskActivationController:
             top_mask_id, warm_cache=not should_defer, emit_signals=not should_defer
         )
         if should_defer:
-            if image_id is not None:
-                self._pending_activation_images.add(image_id)
+            self._pending_compositions.add(composition_id)
             self._schedule_signals(
                 top_mask_id,
                 warm_cache=not prefetch_pending,
-                image_id=image_id,
+                composition_id=composition_id,
             )
         record_once(
-            f"Activated mask {top_mask_id} for image {image_id} before brush use.",
+            f"Activated mask {top_mask_id} for document {composition_id} before brush use.",
             label="Mask",
         )
         return True
 
-    def is_pending(self, image_id: uuid.UUID | None) -> bool:
+    def is_pending(self, composition_id: uuid.UUID | None) -> bool:
         """Return True while we are waiting on deferred mask activation."""
-        if image_id is None:
+        if composition_id is None:
             return False
-        return image_id in self._pending_activation_images
+        return composition_id in self._pending_compositions
 
     def should_defer(
         self,
@@ -319,46 +290,43 @@ class MaskActivationController:
         mask_id: uuid.UUID | None,
         *,
         warm_cache: bool = False,
-        image_id: uuid.UUID | None = None,
+        composition_id: uuid.UUID | None = None,
     ) -> None:
         """Emit activation signals once the mask data is ready."""
         controller = self._controller
 
         def emit_later(
-            mid: uuid.UUID | None = mask_id, *, target_image_id=image_id
+            mid: uuid.UUID | None = mask_id,
+            *,
+            target_composition_id: uuid.UUID | None = composition_id,
         ) -> None:
             """Emit activation signals after optional cache warmup."""
-            resolved_image_id = target_image_id
-            if resolved_image_id is None:
-                catalog = self._catalog
-                if catalog is not None:
-                    try:
-                        resolved_image_id = catalog.currentImageID()
-                    except RuntimeError:
-                        resolved_image_id = None
             try:
                 if warm_cache and mid is not None:
-                    controller.renders.warm(mid)
+                    controller.warm_mask(mid)
                 controller.emit_activation_signals(mid)
             finally:
                 was_pending = (
-                    resolved_image_id is not None
-                    and resolved_image_id in self._pending_activation_images
+                    target_composition_id is not None
+                    and target_composition_id in self._pending_compositions
                 )
-                if resolved_image_id is not None:
-                    self._pending_activation_images.discard(resolved_image_id)
+                if target_composition_id is not None:
+                    self._pending_compositions.discard(target_composition_id)
                 try:
                     callback = (
                         self._resume_overlays_and_update_cb
                         if was_pending
                         else self._resume_overlays_cb
                     )
-                    callback(resolved_image_id)
+                    callback(target_composition_id)
                 except Exception:
                     logger.exception("Activation resume callback failed")
 
         try:
-            self._activation_pending_cb(image_id)
+            self._activation_pending_cb(composition_id)
         except Exception:
             logger.exception("Activation pending callback failed during scheduling")
-        QTimer.singleShot(0, lambda: emit_later(target_image_id=image_id))
+        QTimer.singleShot(
+            0,
+            lambda: emit_later(target_composition_id=composition_id),
+        )

@@ -167,15 +167,27 @@ class CoverageDocumentEvaluator:
         cached = self._raster_cache.get(key)
         if cached is not None:
             return cached
-        bounds = self.content_bounds(document)
-        if bounds is None:
+        candidate = self._candidate_bounds(document.items)
+        if candidate is None:
             snapshot = CoverageSnapshot(
                 None,
                 RasterExtentPolicy.EXPAND_ON_WRITE,
                 np.zeros((0, 0), dtype=np.uint8),
             )
         else:
-            snapshot = self.evaluate(document, bounds)
+            evaluated = self.evaluate(document, candidate)
+            occupied = occupied_coverage_bounds(evaluated)
+            snapshot = (
+                CoverageSnapshot(
+                    None,
+                    RasterExtentPolicy.EXPAND_ON_WRITE,
+                    np.zeros((0, 0), dtype=np.uint8),
+                )
+                if occupied is None
+                else evaluated.clipped_to(occupied)
+            )
+            assert snapshot is not None
+        self._remember_bounds(key, snapshot.bounds)
         if len(self._raster_cache) >= 64:
             self._raster_cache.pop(next(iter(self._raster_cache)))
         self._raster_cache[key] = snapshot

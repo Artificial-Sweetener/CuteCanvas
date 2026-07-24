@@ -15,6 +15,13 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Shared painting interaction tools."""
 
-from .brush import BrushTool, connect_brush_signals, disconnect_brush_signals
+from .brush import BrushTool
+from .brush_signals import connect_brush_signals, disconnect_brush_signals
+from .clone_stamp import CloneStampTool
 
-__all__ = ("BrushTool", "connect_brush_signals", "disconnect_brush_signals")
+__all__ = (
+    "BrushTool",
+    "CloneStampTool",
+    "connect_brush_signals",
+    "disconnect_brush_signals",
+)

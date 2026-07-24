@@ -18,16 +18,24 @@
 from __future__ import annotations
 
 import pytest
-from cutecanvas import CuteCanvas
-from PySide6.QtCore import QRectF
+from cutecanvas import (
+    CloneStampAlignment,
+    CloneStampSampleMode,
+    CloneStampTransform,
+    CuteCanvas,
+)
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QImage, QTransform
+from qpane.sdk.rendering import PanelPoint, ScenePoint
+
+from tests.harness.timing import interaction_clock
 
 
 def test_typed_handles_route_document_layer_tool_and_history_workflows(qapp) -> None:
     """Common editing should not require callers to pass scene/layer ID pairs."""
     canvas = CuteCanvas(features=())
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 640.0, 480.0),
             title="Handle document",
         )
@@ -49,17 +57,57 @@ def test_typed_handles_route_document_layer_tool_and_history_workflows(qapp) -> 
         assert canvas.editor.tools.active == canvas.CONTROL_MODE_MOVE
         assert canvas.editor.selection.state is not None
 
-        other = canvas.editor.documents.create(
+        other = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 320.0, 240.0),
             title="Other",
         )
         assert other.is_open
-        with pytest.raises(RuntimeError, match="open the layer's document"):
+        with pytest.raises(RuntimeError, match="open the layer's composition"):
             layer.select()
         document.open()
         assert layer.select()
     finally:
         canvas.deleteLater()
+
+
+def test_reopening_active_composition_is_a_fast_viewport_preserving_noop(qapp) -> None:
+    """Repeated active-row actions must not refit or republish the composition."""
+    canvas = CuteCanvas(features=())
+    canvas.resize(900, 700)
+    canvas.show()
+    try:
+        document = canvas.editor.compositions.create(
+            QRectF(0.0, 0.0, 1600.0, 1200.0),
+            title="Active composition",
+        )
+        image = QImage(1600, 1200, QImage.Format_ARGB32_Premultiplied)
+        image.fill(0xFF336699)
+        assert canvas.addEditableRasterLayer(image, label="Background") is not None
+        qapp.processEvents()
+        canvas.applyZoom(2.25)
+        canvas.setPan(QPointF(185.0, 130.0))
+        qapp.processEvents()
+        zoom_before = canvas.currentZoom()
+        pan_before = QPointF(canvas.view().viewport.pan)
+        scene_events: list[object] = []
+        selection_events: list[object] = []
+        canvas.sceneChanged.connect(scene_events.append)
+        canvas.compositionSelectionChanged.connect(selection_events.append)
+
+        started = interaction_clock()
+        for _index in range(500):
+            document.open()
+        elapsed = interaction_clock() - started
+
+        assert elapsed < 0.25
+        assert canvas.currentZoom() == zoom_before
+        assert canvas.view().viewport.pan == pan_before
+        assert scene_events == []
+        assert selection_events == []
+    finally:
+        canvas.close()
+        canvas.deleteLater()
+        qapp.processEvents()
 
 
 def test_persistence_facade_round_trips_complete_raster_document(
@@ -68,7 +116,7 @@ def test_persistence_facade_round_trips_complete_raster_document(
     """The focused facade should preserve document and resource identity."""
     canvas = CuteCanvas(features=())
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 640.0, 480.0),
             title="Archive document",
         )
@@ -80,7 +128,7 @@ def test_persistence_facade_round_trips_complete_raster_document(
 
         canvas.editor.persistence.save(document, archive_path)
         document.remove()
-        assert canvas.editor.documents.get(document.id) is None
+        assert canvas.editor.compositions.get(document.id) is None
 
         restored = canvas.editor.persistence.load(archive_path)
         assert restored.id == document.id
@@ -90,4 +138,106 @@ def test_persistence_facade_round_trips_complete_raster_document(
         assert restored_layer is not None
         assert restored_layer.select()
     finally:
+        canvas.deleteLater()
+
+
+def test_clone_stamp_facade_configures_and_activates_the_shared_brush_tool(
+    qapp,
+) -> None:
+    """Hosts can configure the complete Clone Stamp workflow through one subfacade."""
+    canvas = CuteCanvas(features=())
+    try:
+        document = canvas.editor.compositions.create(
+            QRectF(0.0, 0.0, 64.0, 48.0),
+            title="Clone document",
+        )
+        image = QImage(64, 48, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(0xFF336699)
+        layer_id = canvas.addEditableRasterLayer(image, label="Clone target")
+        assert layer_id is not None
+        assert canvas.setPaintTarget(document.id, layer_id)
+
+        clone_stamp = canvas.editor.clone_stamp
+        assert clone_stamp.set_alignment(CloneStampAlignment.UNALIGNED)
+        assert clone_stamp.set_sample_mode(CloneStampSampleMode.VISIBLE_COMPOSITE)
+        transform = CloneStampTransform(
+            rotation_degrees=22.5,
+            scale_x=1.25,
+            scale_y=0.75,
+            mirror_vertical=True,
+        )
+        assert clone_stamp.set_transform(transform)
+        assert clone_stamp.set_source(QPointF(12.0, 18.0))
+        clone_stamp.activate()
+
+        assert clone_stamp.state.alignment is CloneStampAlignment.UNALIGNED
+        assert clone_stamp.state.sample_mode is CloneStampSampleMode.VISIBLE_COMPOSITE
+        assert clone_stamp.state.transform == transform
+        assert clone_stamp.state.source is not None
+        assert clone_stamp.state.source.scene_point() == QPointF(12.0, 18.0)
+        assert canvas.editor.tools.active == canvas.CONTROL_MODE_CLONE_STAMP
+        other = canvas.editor.compositions.create(
+            QRectF(0.0, 0.0, 32.0, 32.0),
+            title="Other document",
+        )
+        assert other.is_open
+        assert not canvas.cloneStampOperation().source_is_available()
+        assert canvas.cloneStampOperation().source_scene_point() is None
+        document.open()
+        assert canvas.setPaintTarget(document.id, layer_id)
+        assert canvas.cloneStampOperation().source_is_available()
+        assert clone_stamp.clear_source()
+        assert not clone_stamp.state.source_set
+    finally:
+        canvas.deleteLater()
+
+
+def test_coordinate_system_tracks_the_active_editor_scene(qapp) -> None:
+    """The inherited QPane facade must project only CuteCanvas's active scene."""
+    canvas = CuteCanvas(features=())
+    canvas.resize(480, 360)
+    canvas.show()
+    try:
+        first = canvas.editor.compositions.create(
+            QRectF(-40.0, 15.0, 320.0, 240.0),
+            title="First coordinate scene",
+        )
+        qapp.processEvents()
+        coordinates = canvas.coordinateSystem()
+        assert coordinates is canvas.view().coordinates
+        first_render_scene = canvas.sceneMutationCoordinator().active_scene()
+        assert first_render_scene is not None
+        first_point = coordinates.panel_to_scene(PanelPoint(240.0, 180.0))
+        assert first_point is not None
+        assert first_point.scene_id == first_render_scene.scene_id
+
+        second = canvas.editor.compositions.create(
+            QRectF(120.0, -60.0, 160.0, 120.0),
+            title="Second coordinate scene",
+        )
+        qapp.processEvents()
+        second_render_scene = canvas.sceneMutationCoordinator().active_scene()
+        assert second_render_scene is not None
+        assert second_render_scene.scene_id != first_render_scene.scene_id
+        second_point = coordinates.panel_to_scene(PanelPoint(240.0, 180.0))
+        assert second_point is not None
+        assert second_point.scene_id == second_render_scene.scene_id
+        assert (
+            coordinates.scene_to_panel(
+                ScenePoint(first_render_scene.scene_id, 0.0, 0.0)
+            )
+            is None
+        )
+
+        first.open()
+        qapp.processEvents()
+        reopened_scene = canvas.sceneMutationCoordinator().active_scene()
+        assert reopened_scene is not None
+        assert reopened_scene.scene_id == first_render_scene.scene_id
+        assert coordinates.panel_to_scene(PanelPoint(240.0, 180.0)).scene_id == (
+            reopened_scene.scene_id
+        )
+        assert second.is_open is False
+    finally:
+        canvas.close()
         canvas.deleteLater()

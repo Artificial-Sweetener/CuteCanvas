@@ -20,8 +20,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QMimeData, Qt, QUrl
-from PySide6.QtGui import QDrag, QGuiApplication, QImage, QMouseEvent, QPixmap
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QGuiApplication, QImage, QMouseEvent
+
+from .outbound_drag import OutboundDragPayload, execute_outbound_drag
 
 if TYPE_CHECKING:
     from ..viewer import QPane
@@ -77,19 +79,10 @@ def maybeStartDrag(
             "maybeStartDrag aborted: no screen available to size the drag preview."
         )
         return
-    screen_size = screen.availableGeometry().size()
-    max_drag_width = int(screen_size.width() * 0.15)
-    max_drag_height = int(screen_size.height() * 0.15)
-    preview_pixmap = QPixmap.fromImage(preview_image).scaled(
-        max_drag_width,
-        max_drag_height,
-        Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
+    execute_outbound_drag(
+        qpane,
+        OutboundDragPayload(
+            urls=(QUrl.fromLocalFile(str(current_path)),),
+            preview=preview_image,
+        ),
     )
-    drag = QDrag(qpane)
-    mime_data = QMimeData()
-    file_url = QUrl.fromLocalFile(str(current_path))
-    mime_data.setUrls([file_url])
-    drag.setMimeData(mime_data)
-    drag.setPixmap(preview_pixmap)
-    drag.exec(Qt.DropAction.CopyAction)

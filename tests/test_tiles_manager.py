@@ -39,11 +39,10 @@ from qpane.rendering.tiles import _SourceTilePayloadKey
 from qpane.scene.identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
-    catalog_source_asset_key,
 )
 
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
-from tests.helpers.render_plan import make_tile_key
+from tests.helpers.render_plan import make_source_key, make_tile_key
 
 MB = 1024 * 1024
 
@@ -291,7 +290,7 @@ def test_get_tile_reuses_source_payload_across_layer_keys(qapp) -> None:
     source_image = QImage(128, 128, QImage.Format_ARGB32)
     source_image.fill(0)
     source_id = uuid.uuid4()
-    source_key = catalog_source_asset_key(
+    source_key = make_source_key(
         source_id,
         revision=0,
         source_path=Path("shared.png"),
@@ -301,7 +300,7 @@ def test_get_tile_reuses_source_payload_across_layer_keys(qapp) -> None:
         scene_id=uuid.uuid4(),
         layer_id=uuid.uuid4(),
         source_id=source_id,
-        source_kind="catalog-image",
+        source_kind="test-raster",
         source_revision=0,
         source_path=Path("shared.png"),
     )
@@ -338,7 +337,7 @@ def test_remove_tiles_for_asset_keeps_shared_source_worker(qapp) -> None:
     source_image = QImage(128, 128, QImage.Format_ARGB32)
     source_image.fill(0)
     source_id = uuid.uuid4()
-    source_key = catalog_source_asset_key(
+    source_key = make_source_key(
         source_id,
         revision=0,
         source_path=Path("shared-worker.png"),
@@ -348,7 +347,7 @@ def test_remove_tiles_for_asset_keeps_shared_source_worker(qapp) -> None:
         scene_id=uuid.uuid4(),
         layer_id=uuid.uuid4(),
         source_id=source_id,
-        source_kind="catalog-image",
+        source_kind="test-raster",
         source_revision=0,
         source_path=Path("shared-worker.png"),
     )
@@ -575,7 +574,7 @@ def test_remove_tiles_for_source_asset_purges_derived_layer_tiles(qapp):
     source_id = uuid.uuid4()
     first_layer_id = uuid.uuid4()
     second_layer_id = uuid.uuid4()
-    source_key = catalog_source_asset_key(
+    source_key = make_source_key(
         source_id,
         revision=1,
         source_path=Path("source.png"),
@@ -584,7 +583,7 @@ def test_remove_tiles_for_source_asset_purges_derived_layer_tiles(qapp):
         scene_id=uuid.uuid4(),
         layer_id=first_layer_id,
         source_id=source_id,
-        source_kind="catalog-image",
+        source_kind="test-raster",
         source_revision=1,
         source_path=Path("source.png"),
     )
@@ -592,7 +591,7 @@ def test_remove_tiles_for_source_asset_purges_derived_layer_tiles(qapp):
         scene_id=uuid.uuid4(),
         layer_id=second_layer_id,
         source_id=source_id,
-        source_kind="catalog-image",
+        source_kind="test-raster",
         source_revision=1,
         source_path=Path("source.png"),
     )

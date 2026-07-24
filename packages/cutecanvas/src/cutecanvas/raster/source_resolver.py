@@ -36,9 +36,9 @@ from qpane.sdk.scene import (
 
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat
 
+from ..resources import ProjectResourceReference
 from .assets import EditableRasterAssetStore
 from .presentation_state import EditableRasterPresentationState
-from .source_reference import EditableRasterReference
 
 _MAX_VISIBLE_PATCH_PRODUCTS = 4
 _MAX_DENSE_SAMPLE_DIMENSION = 32_768
@@ -56,17 +56,23 @@ class EditableRasterSourceCapabilities:
         self._assets = assets
         self._presentation_state = presentation_state
 
-    @property
-    def presentation(self) -> RasterPresentation:
-        """Return ordinary image-raster presentation."""
-        return RasterPresentation.IMAGE
+    def presentation_for(
+        self,
+        source: LayerSourceReference,
+    ) -> RasterPresentation | None:
+        """Return ordinary image-raster presentation for editable pixels."""
+        return (
+            RasterPresentation.IMAGE
+            if isinstance(source, ProjectResourceReference)
+            else None
+        )
 
     def product_policy(self, source: LayerSourceReference) -> RasterProductPolicy:
         """Return the stable shared-product policy for editable pixels."""
         return (
             RasterProductPolicy.VOLATILE
-            if isinstance(source, EditableRasterReference)
-            and self._presentation_state.is_live(source.raster_id)
+            if isinstance(source, ProjectResourceReference)
+            and self._presentation_state.is_live(source.resource_id)
             else RasterProductPolicy.CACHEABLE
         )
 
@@ -160,7 +166,7 @@ class EditableRasterSourceCapabilities:
     ) -> QImage | None:
         """Adapt canonical premultiplied pixels into a detached Qt image."""
         if (
-            not isinstance(source, EditableRasterReference)
+            not isinstance(source, ProjectResourceReference)
             or pixel_format is not RasterPixelFormat.PREMULTIPLIED_ARGB32
         ):
             return None
@@ -174,8 +180,8 @@ class EditableRasterSourceCapabilities:
         """Resolve an editable asset from a typed layer source."""
         return (
             None
-            if not isinstance(source, EditableRasterReference)
-            else self._assets.get(source.raster_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._assets.get(source.resource_id)
         )
 
 

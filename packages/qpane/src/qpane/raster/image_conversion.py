@@ -111,6 +111,34 @@ def qimage_to_numpy_const_view_argb32(image: QImage) -> tuple[np.ndarray, QImage
     return array, normalized
 
 
+def qimage_to_numpy_const_view_bgra32(image: QImage) -> tuple[np.ndarray, QImage]:
+    """Return a read-only BGRA storage view without converting compatible images."""
+    if image.isNull():
+        raise ValueError("QImage must not be null")
+    compatible_formats = {
+        QImage.Format_ARGB32,
+        QImage.Format_ARGB32_Premultiplied,
+        QImage.Format_RGB32,
+    }
+    normalized = (
+        image
+        if image.format() in compatible_formats
+        else image.convertToFormat(QImage.Format_ARGB32_Premultiplied)
+    )
+    pointer = normalized.constBits()
+    set_size = getattr(pointer, "setsize", None)
+    if callable(set_size):
+        set_size(normalized.sizeInBytes())
+    array = np.ndarray(
+        (normalized.height(), normalized.width(), 4),
+        dtype=np.uint8,
+        buffer=pointer,
+        strides=(normalized.bytesPerLine(), 4, 1),
+    )
+    array.flags.writeable = False
+    return array, normalized
+
+
 def numpy_to_qimage_grayscale8(array: np.ndarray) -> QImage:
     """Return a detached grayscale QImage copied from a uint8 2-D array."""
     if array.ndim != 2:

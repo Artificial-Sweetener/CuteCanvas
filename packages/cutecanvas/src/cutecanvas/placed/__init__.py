@@ -16,12 +16,10 @@
 """Non-destructive placed raster sources and external provenance."""
 
 from .model import PlacedAssetMode, PlacedAssetSnapshot, PlacedAssetStatus
-from .source_reference import PlacedAssetReference
 from .store import PlacedAssetStore
 
 __all__ = [
     "PlacedAssetMode",
-    "PlacedAssetReference",
     "PlacedAssetSnapshot",
     "PlacedAssetStatus",
     "PlacedAssetStore",

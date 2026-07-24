@@ -56,7 +56,7 @@ def test_mounted_move_centers_layer_on_both_canvas_axes(qapp) -> None:
     canvas.resize(1200, 1200)
     canvas.show()
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 1000.0, 1000.0), title="Center snapping"
         )
         layer_id = canvas.addEditableRasterLayer(_opaque_image(), label="Moving")
@@ -92,7 +92,7 @@ def test_mounted_move_aligns_adjacent_layer_corners_on_both_axes(qapp) -> None:
     canvas.resize(1200, 1200)
     canvas.show()
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 1000.0, 1000.0), title="Edge snapping"
         )
         moving_id = canvas.addEditableRasterLayer(_opaque_image(), label="Moving")
@@ -129,7 +129,7 @@ def test_mounted_asymmetric_edges_do_not_lock_to_shape_centers(qapp) -> None:
     canvas.resize(1200, 1200)
     canvas.show()
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 1000.0, 1000.0), title="Relationship snapping"
         )
         moving_id = canvas.addEditableRasterLayer(
@@ -184,7 +184,7 @@ def test_mounted_source_neutral_layers_share_adjacent_corner_snapping(
     canvas.resize(1200, 1200)
     canvas.show()
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 1000.0, 1000.0), title="Source-neutral snapping"
         )
         target_id = canvas.addEditableRasterLayer(_opaque_image(), label="Target")
@@ -247,7 +247,7 @@ def test_fractional_rotated_vector_bounds_snap_without_quantization(qapp) -> Non
     canvas.resize(1200, 1200)
     canvas.show()
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 1000.0, 1000.0), title="Affine snapping"
         )
         moving_id = canvas.addEditableRasterLayer(_opaque_image(40, 30), label="Moving")
@@ -306,7 +306,7 @@ def test_mounted_floating_selection_uses_same_two_axis_layer_candidates(qapp) ->
     canvas.resize(1200, 1200)
     canvas.show()
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 1000.0, 1000.0), title="Selection snapping"
         )
         moving_id = canvas.addEditableRasterLayer(
@@ -350,7 +350,7 @@ def test_scene_switch_clears_active_snap_session_and_guides(qapp) -> None:
     canvas.resize(1200, 1200)
     canvas.show()
     try:
-        document = canvas.editor.documents.create(
+        document = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 1000.0, 1000.0), title="Old"
         )
         moving_id = canvas.addEditableRasterLayer(_opaque_image(), label="Moving")
@@ -368,7 +368,7 @@ def test_scene_switch_clears_active_snap_session_and_guides(qapp) -> None:
         assert movement.update(near_corner)
         assert movement.snap_guides
 
-        replacement = canvas.editor.documents.create(
+        replacement = canvas.editor.compositions.create(
             QRectF(0.0, 0.0, 500.0, 500.0), title="New"
         )
         qapp.processEvents()

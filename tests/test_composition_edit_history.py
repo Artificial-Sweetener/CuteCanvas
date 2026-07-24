@@ -26,7 +26,7 @@ from cutecanvas.composition.resource_lifetime import (
     CompositionResourceLifetime,
     ResourceLeaseKind,
 )
-from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.scene.transform_edit import LayerTransformEdit
 from qpane.scene.affine import LayerTransform
 
@@ -48,7 +48,7 @@ class _ResourceCommand:
 
     scope_id: uuid.UUID
     retained_bytes: int
-    retained_resources: tuple[MaskAssetReference, ...]
+    retained_resources: tuple[ProjectResourceReference, ...]
 
 
 def _placement_edit(scope_id: uuid.UUID, x: float) -> LayerTransformEdit:
@@ -170,8 +170,8 @@ def test_history_releases_resource_leases_on_branch_discard_and_eviction() -> No
         released=released.append,
     )
     scope_id = uuid.uuid4()
-    first_source = MaskAssetReference(uuid.uuid4())
-    second_source = MaskAssetReference(uuid.uuid4())
+    first_source = ProjectResourceReference(uuid.uuid4())
+    second_source = ProjectResourceReference(uuid.uuid4())
     first = _ResourceCommand(scope_id, 1, (first_source,))
     second = _ResourceCommand(scope_id, 1, (second_source,))
 

@@ -18,10 +18,10 @@
 from __future__ import annotations
 
 import time
-import uuid
 
 import numpy as np
 from cutecanvas import CuteCanvas
+from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent
 from PySide6.QtTest import QTest
@@ -139,16 +139,15 @@ def test_demo_delete_shortcut_clears_selected_pixels_from_moved_mask(
     size = 400
     window = ExampleWindow(ExampleOptions(feature_set="mask"))
     try:
-        image_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([_white_image(size)], [None], [image_id]),
-            image_id,
+        composition_id = window.qpane.createCompositionFromImage(
+            _white_image(size),
+            title="Delete workflow",
         )
-        mask_id = window.qpane.createBlankMask(window.qpane.currentImage.size())
+        mask_id = window.qpane.createBlankMask(QSize(size, size))
         assert mask_id is not None
         assert window.qpane.setActiveMaskID(mask_id)
         window.tools.editor_controls.layer_policy.reconcile()
-        info = window.qpane.listMasksForImage()[0]
+        info = window.qpane.listMasksForComposition(composition_id)[0]
         assert info.scene_id is not None
         assert info.layer_id is not None
         layer = window.qpane.mask_service.assets.get_layer(mask_id)
@@ -196,12 +195,11 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
     """The literal first-stroke demo workflow must enable and execute Ctrl+Z."""
     window = ExampleWindow(ExampleOptions(feature_set="mask"))
     try:
-        image_id = uuid.uuid4()
         image = QImage(QSize(3440, 1440), QImage.Format_ARGB32)
         image.fill(QColor(35, 55, 80))
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([image], [None], [image_id]),
-            image_id,
+        window.qpane.createCompositionFromImage(
+            image,
+            title="First stroke",
         )
         window.resize(2048, 900)
         window.show()
@@ -312,7 +310,7 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
                 break
             QTest.qWait(1)
         assert _rgb_distance(restored, before_contact) <= 5
-        assert not window.tools.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.undo_action.isEnabled()
         assert window.tools.editor_controls.redo_action.isEnabled()
         assert "Undid the last editor change" in window.status.currentMessage()
     finally:
@@ -327,10 +325,9 @@ def test_demo_ctrl_d_deselects_while_escape_preserves_committed_selection(
     """Deselect must not conflate durable state with cancellation."""
     window = ExampleWindow(ExampleOptions(feature_set="mask"))
     try:
-        image_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([_white_image(200)], [None], [image_id]),
-            image_id,
+        window.qpane.createCompositionFromImage(
+            _white_image(200),
+            title="Selection dismissal",
         )
         selection = QImage(80, 60, QImage.Format_Grayscale8)
         selection.fill(255)
@@ -360,10 +357,9 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
     """Repeated Undo must traverse deselection, movement, and prior selection."""
     window = ExampleWindow(ExampleOptions(feature_set="mask"))
     try:
-        image_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([_white_image(400)], [None], [image_id]),
-            image_id,
+        window.qpane.createCompositionFromImage(
+            _white_image(400),
+            title="Raster movement",
         )
         image = QImage(200, 200, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
@@ -378,6 +374,13 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
         scene = window.qpane.currentScene()
         assert scene is not None
         assert window.qpane.setSelectedLayer(scene.scene_id, layer_id)
+        composition_id = window.qpane.currentCompositionID()
+        assert composition_id is not None
+        initial_history_depth = len(
+            window.qpane.compositionService().edit_controller.undo_commands(
+                composition_id
+            )
+        )
         selection = QImage(40, 40, QImage.Format_Grayscale8)
         selection.fill(255)
         assert window.qpane.setPixelSelection(selection, QRect(160, 160, 40, 40))
@@ -424,9 +427,15 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
         assert window.qpane.floatingPixelEditState() is None
         assert not window.qpane.pixelSelectionState().has_selection
         assert window.tools.editor_controls.undo_action.isEnabled()
-        asset_ids = window.qpane._editable_raster_assets.ids()
-        assert len(asset_ids) == 1
-        asset = window.qpane._editable_raster_assets.get(asset_ids[0])
+        layer_instance = window.qpane.compositionService().layers.layer(
+            composition_id,
+            layer_id,
+        )
+        assert layer_instance is not None
+        assert isinstance(layer_instance.source, ProjectResourceReference)
+        asset = window.qpane._editable_raster_assets.get(
+            layer_instance.source.resource_id
+        )
         assert asset is not None
         committed_pixels = qimage_to_numpy_argb32(asset.surface.presentation_qimage())
         committed_rows, committed_columns = np.nonzero(committed_pixels[:, :, 3])
@@ -477,7 +486,15 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
         QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
         qapp.processEvents()
         assert not window.qpane.pixelSelectionState().has_selection
-        assert not window.tools.editor_controls.undo_action.isEnabled()
+        assert (
+            len(
+                window.qpane.compositionService().edit_controller.undo_commands(
+                    composition_id
+                )
+            )
+            == initial_history_depth
+        )
+        assert window.tools.editor_controls.undo_action.isEnabled()
         assert window.tools.editor_controls.redo_action.isEnabled()
         assert any(
             layer.layer_id == layer_id for layer in window.qpane.currentScene().layers
@@ -515,12 +532,11 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
     size = 240
     window = ExampleWindow(ExampleOptions(feature_set="mask"))
     try:
-        image_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([_white_image(size)], [None], [image_id]),
-            image_id,
+        window.qpane.createCompositionFromImage(
+            _white_image(size),
+            title="Floating pixels",
         )
-        mask_id = window.qpane.createBlankMask(window.qpane.currentImage.size())
+        mask_id = window.qpane.createBlankMask(QSize(size, size))
         assert mask_id is not None
         assert window.qpane.setActiveMaskID(mask_id)
         window.tools.editor_controls.layer_policy.reconcile()

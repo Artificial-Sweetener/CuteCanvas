@@ -22,7 +22,6 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QRectF,
-    QSize,
 )
 from PySide6.QtGui import (
     QImage,
@@ -31,7 +30,7 @@ from PySide6.QtGui import (
 from cutecanvas.composition.public_policy import (
     internal_layer_policy,
 )
-from cutecanvas.placed.source_reference import PlacedAssetReference
+from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.types import (
     LayerPolicy,
     PlacedAssetSnapshot,
@@ -123,20 +122,6 @@ class PlacedAssetApiMixin:
             keep_fallback=keep_fallback,
         )
 
-    def duplicatePlacedAsset(
-        self, scene_id: uuid.UUID, layer_id: uuid.UUID
-    ) -> uuid.UUID | None:
-        """Duplicate a placed layer while sharing its non-destructive source."""
-        scope_id = self._placed_scope(scene_id, layer_id)
-        workflow = self._placed_asset_workflow
-        if scope_id is None or workflow is None:
-            return None
-        return workflow.duplicate(
-            scope_id,
-            layer_id,
-            history_scope_id=self._resolve_public_scene_id(scene_id),
-        )
-
     def placedAssetState(
         self, scene_id: uuid.UUID, layer_id: uuid.UUID
     ) -> PlacedAssetSnapshot | None:
@@ -148,12 +133,12 @@ class PlacedAssetApiMixin:
         snapshot = workflow.snapshot_for_layer(scope_id, layer_id)
         instance = self.compositionService().layers.layer(scope_id, layer_id)
         source = None if instance is None else instance.source
-        if snapshot is None or not isinstance(source, PlacedAssetReference):
+        if snapshot is None or not isinstance(source, ProjectResourceReference):
             return None
         return PlacedAssetSnapshot(
             scene_id=scene_id,
             layer_id=layer_id,
-            asset_id=source.asset_id,
+            asset_id=source.resource_id,
             mode=snapshot.mode,
             status=snapshot.status,
             source_path=snapshot.source_path,
@@ -200,42 +185,6 @@ class PlacedAssetApiMixin:
             scope_id is not None
             and workflow is not None
             and workflow.embed(scope_id, layer_id)
-        )
-
-    def rasterizePlacedAsset(
-        self,
-        scene_id: uuid.UUID,
-        layer_id: uuid.UUID,
-        pixel_size: QSize | None = None,
-    ) -> uuid.UUID | None:
-        """Begin conversion of a placed source to an editable raster layer.
-
-        Args:
-            scene_id: Public identifier of the active scene.
-            layer_id: Placed layer to replace atomically.
-            pixel_size: Explicit output dimensions; source dimensions are the default.
-
-        Returns:
-            A request UUID, or ``None`` when the layer is not a current placed asset.
-
-        Raises:
-            TypeError: If identifiers or pixel size use unsupported types.
-            ValueError: If output dimensions are empty or exceed the memory limit.
-
-        Side effects:
-            Emits ``placedAssetRequestCompleted`` exactly once for accepted work.
-        """
-        if pixel_size is not None and not isinstance(pixel_size, QSize):
-            raise TypeError("pixel_size must be a QSize or None")
-        scope_id = self._placed_scope(scene_id, layer_id)
-        service = self._placed_asset_rasterization
-        if scope_id is None or service is None:
-            return None
-        return service.request(
-            scope_id,
-            self._resolve_public_scene_id(scene_id),
-            layer_id,
-            pixel_size,
         )
 
     def rasterSurfaceState(

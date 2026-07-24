@@ -13,68 +13,108 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Capture authoritative composition and raster-source state for persistence."""
+"""Capture one document's complete transitive project-resource closure."""
 
 from __future__ import annotations
 
-from ..composition.layers import CompositionLayerStore, instance_resources
-from ..composition.model import CompositionRecord
+import uuid
+
+from ..composition.layers import instance_resources
+from ..composition.service import CompositionService
 from ..masks.mask import MaskAssetStore
-from ..masks.source_reference import MaskAssetReference
-from ..placed.source_reference import PlacedAssetReference
 from ..placed.store import PlacedAssetStore
 from ..raster.assets import EditableRasterAssetStore
-from ..raster.source_reference import EditableRasterReference
-from ..vector.source_reference import VectorDocumentReference
+from ..resources import ProjectResourceKind, ProjectResourceReference
 from ..vector.store import VectorAssetStore
 from .model import CompositionArchiveSnapshot
 
 
 def capture_composition(
-    document: CompositionRecord,
-    layers: CompositionLayerStore,
+    root_document_id: uuid.UUID,
+    compositions: CompositionService,
     masks: MaskAssetStore | None,
     rasters: EditableRasterAssetStore,
     placed_assets: PlacedAssetStore,
     vectors: VectorAssetStore,
 ) -> CompositionArchiveSnapshot:
-    """Return a detached durable snapshot for one composition document."""
-    instances = layers.layers_for_composition(document.composition_id)
+    """Return a detached archive for a document and every nested dependency."""
+    resources = rasters.resources
+    documents = {}
+    layer_stacks = {}
+    resource_records = {}
     mask_surfaces = {}
     color_surfaces = {}
-    placed_snapshots = {}
+    imported_snapshots = {}
     vector_documents = {}
-    for instance in instances:
-        for source in instance_resources(instance):
-            if isinstance(source, MaskAssetReference):
+    pending_documents = [root_document_id]
+    pending_resources: list[uuid.UUID] = []
+    visited_documents: set[uuid.UUID] = set()
+    visited_resources: set[uuid.UUID] = set()
+
+    while pending_documents:
+        document_id = pending_documents.pop()
+        if document_id in visited_documents:
+            continue
+        document = compositions.record(document_id)
+        layers = compositions.layers.layers_for_composition(document_id)
+        visited_documents.add(document_id)
+        documents[document_id] = document
+        layer_stacks[document_id] = layers
+        pending_resources.extend(
+            source.resource_id
+            for layer in layers
+            for source in instance_resources(layer)
+            if isinstance(source, ProjectResourceReference)
+        )
+        pending_resources.append(document_id)
+
+        while pending_resources:
+            resource_id = pending_resources.pop()
+            if resource_id in visited_resources:
+                continue
+            resource = resources.get(resource_id)
+            if resource is None:
+                raise KeyError(f"project resource {resource_id} does not exist")
+            visited_resources.add(resource_id)
+            resource_records[resource_id] = resource
+            pending_resources.extend(resource.dependencies)
+            if resource.kind is ProjectResourceKind.COMPOSITION:
+                pending_documents.append(resource_id)
+            elif resource.kind is ProjectResourceKind.COVERAGE:
                 if masks is None:
-                    raise RuntimeError(
-                        "mask persistence requires the CuteCanvas mask feature"
-                    )
-                layer = masks.get_layer(source.mask_id)
+                    raise RuntimeError("coverage persistence requires the mask feature")
+                layer = masks.get_layer(resource_id)
                 if layer is None:
-                    raise KeyError(f"mask source {source.mask_id} does not exist")
-                mask_surfaces[source.mask_id] = layer.coverage.state_snapshot()
-            elif isinstance(source, EditableRasterReference):
-                asset = rasters.get(source.raster_id)
+                    raise KeyError(f"coverage resource {resource_id} has no payload")
+                mask_surfaces[resource_id] = layer.coverage.state_snapshot()
+            elif resource.kind is ProjectResourceKind.RASTER:
+                asset = rasters.get(resource_id)
                 if asset is None:
-                    raise KeyError(f"raster source {source.raster_id} does not exist")
-                color_surfaces[source.raster_id] = asset.surface.sparse_snapshot()
-            elif isinstance(source, PlacedAssetReference):
-                snapshot = placed_assets.get(source.asset_id)
+                    raise KeyError(f"raster resource {resource_id} has no payload")
+                color_surfaces[resource_id] = asset.surface.sparse_snapshot()
+            elif resource.kind in {
+                ProjectResourceKind.IMPORTED_RASTER,
+                ProjectResourceKind.LINKED_RASTER,
+            }:
+                snapshot = placed_assets.get(resource_id)
                 if snapshot is None:
-                    raise KeyError(f"placed source {source.asset_id} does not exist")
-                placed_snapshots[source.asset_id] = snapshot
-            elif isinstance(source, VectorDocumentReference):
-                vector_document = vectors.get(source.vector_id)
-                if vector_document is None:
-                    raise KeyError(f"vector source {source.vector_id} does not exist")
-                vector_documents[source.vector_id] = vector_document
+                    raise KeyError(
+                        f"imported raster resource {resource_id} has no payload"
+                    )
+                imported_snapshots[resource_id] = snapshot
+            elif resource.kind is ProjectResourceKind.VECTOR:
+                document = vectors.get(resource_id)
+                if document is None:
+                    raise KeyError(f"vector resource {resource_id} has no payload")
+                vector_documents[resource_id] = document
+
     return CompositionArchiveSnapshot(
-        document=document,
-        layers=instances,
+        root_document_id=root_document_id,
+        documents=documents,
+        layer_stacks=layer_stacks,
+        resources=resource_records,
         masks=mask_surfaces,
         rasters=color_surfaces,
-        placed_assets=placed_snapshots,
+        placed_assets=imported_snapshots,
         vectors=vector_documents,
     )

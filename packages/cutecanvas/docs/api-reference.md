@@ -2,25 +2,87 @@
 
 # API Reference
 
+## Document and presentation ownership
+
+### `CanvasDocument`
+
+Headless owner of reusable resources, compositions, selections, and
+chronological history. Use `create_composition()`,
+`create_composition_from_image()`, `composition_ids()`, `snapshot()`,
+`content_reference()`, `resource_reference()`, `resolve_content()`, and
+`close()`.
+
+### `CanvasViewSession`
+
+Detachable owner of active composition, presentation, linked inspection, and
+view-local revision. `CanvasPresentation` selects `SINGLE`, `TABBED`, `GRID`,
+`COMPARISON`, or `CUSTOM` arrangement without entering document history.
+`CanvasSessionSnapshot` is the immutable revisioned observation published to
+session subscribers. `CanvasComparison` records the two target identities,
+split position, and orientation used by a comparison presentation.
+`CanvasPresentationKind` names every built-in and host-provided arrangement.
+
+### `CanvasWorkspace`
+
+QWidget for one document across independent target views.
+`setSinglePresentation()`, `setTabbedPresentation()`,
+`setGridPresentation()`, and `setComparisonPresentation()` install built-in
+arrangements. `registerPresentationProvider()` and `setCustomPresentation()`
+host an application-defined arrangement through
+`CanvasPresentationProvider`.
+`CanvasPresentationContext` gives a provider validated target identities and
+the supported function for creating each target view.
+
+`CanvasInteractionMode` supplies `READ_ONLY`, `MASK_AUTHORING`, and
+`FULL_EDITOR` profiles through the ordinary capability policy.
+`CuteCanvas.interactionMode` reports the current profile and
+`CuteCanvas.setInteractionMode` replaces it. `CuteCanvas.document` returns the
+mounted headless owner, while `CuteCanvas.viewSession` returns the detachable
+view-local state.
+
+`CuteCanvas.setOutboundMimeProvider` applies a host MIME provider to one view.
+`CuteCanvas.clearOutboundMimeProvider` cancels pending materialization and
+disables drag-out for that view.
+
+### Content references
+
+`CanvasContentReference` identifies a composition, layer, or resource and
+records the observed instance and resource revisions.
+`CanvasDocument.resolve_content()` returns `ResolvedCanvasContent`; its
+`stale` property reports whether the content changed while preserving stable
+identity.
+`CanvasContentKind` distinguishes composition, placed layer, and reusable
+resource references.
+
+### Projection
+
+`CanvasProjectionRequest` records stable content identity, source bounds, and
+output resolution. `CuteCanvas.requestProjection` begins cancellable rendering,
+and `CuteCanvas.projectionCompleted` publishes exactly one
+`CanvasProjectionResult`. `CanvasProjectionStatus` distinguishes completed,
+cancelled, rejected, stale, and failed terminal outcomes.
+
 ## Editor Helpers
 
 `CuteCanvas` is the widget and complete public API. `canvas.editor` groups the
 most common application workflows into smaller typed helpers:
 
 The `EditorFacade` collects these helpers without owning a second copy of
-document state. `DocumentCollection` creates and resolves typed handles.
+document state. `CompositionCollection` creates and resolves typed handles.
 `ToolFacade` activates tools, `SelectionFacade` exposes pixel selection,
 `CoverageFacade` authors coverage, `HistoryFacade` controls chronological undo
-and redo, and `DocumentPersistenceFacade` saves and restores documents.
+and redo, `CloneStampFacade` configures retouching, and
+`CompositionPersistenceFacade` saves and restores composition archives.
 
-* `documents` creates and finds documents through `DocumentHandle` values.
+* `compositions` creates and finds compositions through `CompositionHandle` values.
 * `tools` lists and activates tools.
+* `clone_stamp` activates Clone Stamp and manages its source and sampling.
 * `selection` inspects or clears the pixel selection.
 * `coverage` adds rectangles, ellipses, polygons, or grayscale coverage to the
   active mask or selection.
 * `effects` highlights rendered layer content without editing it.
-* `history` provides undo and redo for the open document.
-* `persistence` saves and restores editable documents.
+* `history` provides undo and redo for the open composition.
+* `persistence` saves and restores editable composition archives.
 
 Handles keep stable IDs and read current state from the canvas. They do not
 cache a second mutable document model.
@@ -57,10 +119,10 @@ change composition archives, alter exports, or copy layer pixels.
 * [CuteCanvas Setup and Settings](#qpane-setup-and-settings)
 * [Config](#config)
 * [Types](#types)
-* [Catalog and Navigation](#catalog-and-navigation)
+* [Project Resources](#project-resources)
 * [Scene Composition](#scene-composition)
 * [Compositions](#compositions)
-* [Comparison](#comparison)
+* [Presentations and Projection](#presentations-and-projection)
 * [Diagnostics](#diagnostics)
 * [Masks and SAM](#masks-and-sam)
 * [Extensibility](#extensibility)
@@ -71,7 +133,7 @@ change composition archives, alter exports, or copy layer pixels.
 * [Getting Started](getting-started.md)
 * [Configuration](configuration.md)
 * [Configuration Reference](configuration-reference.md)
-* [Catalog and Navigation](catalog-and-navigation.md)
+* [Project Resources](project-resources.md)
 * [Scene Composition](scenes.md)
 * [Interaction Modes](interaction-modes.md)
 * [Masks and SAM](masks-and-sam.md)
@@ -89,6 +151,7 @@ change composition archives, alter exports, or copy layer pixels.
 - CuteCanvas.CONTROL_MODE_PANZOOM — Built-in pan/zoom mode for navigation.
 - CuteCanvas.CONTROL_MODE_MOVE — Built-in selection-aware mode that moves selected editable pixels first, or a selectable movable layer when no pixel selection exists.
 - CuteCanvas.CONTROL_MODE_TRANSFORM — Built-in affine transform mode with eight direct-manipulation handles for the selected movable layer.
+- CuteCanvas.CONTROL_MODE_CLONE_STAMP — Built-in revision-stable Clone Stamp mode for editable RGBA layers.
 - CuteCanvas.CONTROL_MODE_MASK_RECTANGLE — Retained rectangle authoring for the active mask target.
 - CuteCanvas.CONTROL_MODE_MASK_ELLIPSE — Retained ellipse authoring for the active mask target.
 - CuteCanvas.CONTROL_MODE_MASK_LASSO — Retained freeform authoring for the active mask target.
@@ -132,6 +195,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- ControlMode.PANZOOM — Pan/zoom mode (`panzoom`).
 	- ControlMode.MOVE — Direct layer movement mode (`move`).
 	- ControlMode.DRAW_BRUSH — Mask painting mode (`draw-brush`).
+	- ControlMode.CLONE_STAMP — Clone Stamp retouching mode (`clone-stamp`).
 	- ControlMode.SMART_SELECT — SAM-based selection mode (`smart-select`).
 	- ControlMode.SELECT_RECTANGLE — Rectangular pixel-selection mode (`select-rectangle`).
 	- ControlMode.SELECT_ELLIPSE — Elliptical pixel-selection mode (`select-ellipse`).
@@ -152,40 +216,16 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- ComparisonOrientation.HORIZONTAL — Reveal the comparison image below a horizontal divider.
 
 ### Data Structures
-- cutecanvas.CatalogEntry — Structured catalog value containing source image data and an optional path.
-	- CatalogEntry.image — Original catalog `QImage` used by CuteCanvas rendering and host snapshots.
-	- CatalogEntry.path — Optional source path used for labels, persistence, or host lookup.
-- cutecanvas.LinkedGroup — Linked-view group descriptor with a stable UUID and members.
-- cutecanvas.ComparisonState — Snapshot returned by `CuteCanvas.comparisonState`.
-	- ComparisonState.enabled — Whether comparison rendering is active.
-	- ComparisonState.source_id — Catalog image UUID for the comparison source.
-	- ComparisonState.source_path — Optional path associated with the comparison image.
-	- ComparisonState.source_kind — `"catalog"` when enabled, or None.
-	- ComparisonState.split_position — Normalized split position from `0.0` to `1.0`.
-	- ComparisonState.orientation — Active `ComparisonOrientation` used for vertical or horizontal split rendering.
 - cutecanvas.CompositionPolicy — Host-controlled structural policy for one composition document.
 	- CompositionPolicy.removable — Allow the composition to be removed through `CuteCanvas.removeComposition`.
-	- CompositionPolicy.comparison_enabled — Allow the composition to own an active comparison source.
-- cutecanvas.ComparisonDividerState — Host-facing comparison divider interaction and geometry snapshot.
-	- ComparisonDividerState.enabled — Whether authoritative divider geometry is available.
-	- ComparisonDividerState.interactive — Whether built-in divider dragging is enabled.
-	- ComparisonDividerState.hovered — Whether the pointer is currently over the divider hit target.
-	- ComparisonDividerState.dragging — Whether a divider drag is active.
-	- ComparisonDividerState.orientation — Current comparison split orientation.
-	- ComparisonDividerState.hit_width — Invisible grab tolerance around the rendered boundary.
-	- ComparisonDividerState.full_segment — Full projected boundary in widget coordinates, or None.
-	- ComparisonDividerState.visible_segment — Portion of the boundary visible inside the widget, or None.
 - cutecanvas.CompositionEntry — Snapshot row for one renderable composition.
 	- CompositionEntry.composition_id — Stable UUID used with `CuteCanvas.openComposition`.
-	- CompositionEntry.kind — Descriptive creation-origin metadata such as `"composition"`, `"default-image"`, `"explicit"`, or `"layered-scene"`; it does not control behavior.
+	- CompositionEntry.kind — Descriptive document-kind metadata; it does not control behavior.
 	- CompositionEntry.title — Host-facing browser title.
-	- CompositionEntry.source_image_ids — Catalog image UUIDs used by the composition.
-	- CompositionEntry.current_image_id — Catalog image ID for a document seeded from one source, or `None` for an independent document.
-	- CompositionEntry.comparison — Composition-scoped `ComparisonState` restored when the row reopens.
 	- CompositionEntry.scene_layer_count — Number of ordered layer instances in the composition.
 	- CompositionEntry.scene_bounds — Authoritative scene-coordinate canvas bounds for the composition.
 	- CompositionEntry.layers — Bottom-to-top detached `CompositionLayerEntry` values for building nested layer browsers without activating the composition.
-	- CompositionEntry.policy — Current host-controlled `CompositionPolicy` for the document.
+	- CompositionEntry.policy — Current host-controlled `CompositionPolicy`.
 - cutecanvas.CompositionLayerEntry — Detached browser metadata for one ordered layer instance.
 	- CompositionLayerEntry.layer_id — Stable layer-instance UUID.
 	- CompositionLayerEntry.source_kind — Presentation name for the layer source domain.
@@ -202,31 +242,13 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- CompositionSnapshot.current_composition_id — Active composition UUID, or None.
 - cutecanvas.MaskInfo — Mask metadata returned by mask helpers, including stable `scene_id`, `layer_id`, and `interaction` policy for generic scene-layer operations.
 - cutecanvas.DiagnosticRecord — Label/value diagnostic entry used in overlays.
-- cutecanvas.CatalogMutationEvent — Catalog mutation payload emitted on catalog changes.
-- cutecanvas.CatalogSnapshot — Structured catalog state (catalog entries, linked groups, ordering, active IDs).
 - cutecanvas.OverlayState — Stable public-overlay snapshot passed to `draw_fn`.
 	- OverlayState.zoom — Current zoom factor.
 	- OverlayState.qpane_rect — Widget-space bounds of the viewer.
 	- OverlayState.physical_viewport_rect — Device-pixel viewport bounds.
 	- OverlayState.transform — Image-to-widget transform for coordinate anchoring.
 	- OverlayState.current_pan — Current pan offset in widget space.
-	- OverlayState.source_image — Base catalog raster resolved for the current overlay pass, not flattened rendered content.
-- cutecanvas.CompositionRequest — Host request used to create or replace a stored scene composition.
-	- CompositionRequest.composition_id — Optional composition UUID to create or replace; None generates a new UUID.
-	- CompositionRequest.title — Optional host-facing composition title.
-	- CompositionRequest.bounds — Host-defined scene-coordinate bounds.
-	- CompositionRequest.layers — Ordered `CatalogLayerRequest` entries.
-- cutecanvas.CatalogLayerRequest — Catalog-backed image layer in a scene composition request.
-	- CatalogLayerRequest.layer_id — Stable layer UUID supplied by the host.
-	- CatalogLayerRequest.image_id — Catalog image UUID rendered for this layer.
-	- CatalogLayerRequest.placement — Scene-coordinate rectangle for this layer.
-	- CatalogLayerRequest.visible — Whether the layer renders and hit-tests.
-	- CatalogLayerRequest.opacity — Layer opacity from `0.0` to `1.0`.
-	- CatalogLayerRequest.clip — Optional `CompositionLayerClip` limiting rendered or hit-tested layer area.
-	- CatalogLayerRequest.hit_test — Whether `CuteCanvas.sceneHitTest` can return this layer.
-	- CatalogLayerRequest.role — Host label carried into hits and overlays.
-	- CatalogLayerRequest.metadata — Opaque host metadata carried into hits and overlays.
-	- CatalogLayerRequest.interaction — `LayerPolicy` controlling selection and movement.
+	- OverlayState.source_image — Available source raster for image-oriented overlay helpers.
 - cutecanvas.LayerPolicy — Host policy for direct and structural layer interaction.
 	- LayerPolicy.selectable — Allow direct tools to select the layer through covered source pixels.
 	- LayerPolicy.movable — Allow generic placement mutation and Move-tool dragging for the layer.
@@ -246,6 +268,9 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- EditorCapability.PAINT — Paint through the active source-owned target.
 	- EditorCapability.MOVE_LAYERS — Move complete policy-enabled layers.
 	- EditorCapability.TRANSFORM_LAYERS — Apply interactive affine layer transforms.
+	- EditorCapability.EDIT_VECTORS — Modify semantic vector objects and their retained geometry.
+	- EditorCapability.MANAGE_LAYERS — Create, remove, reorder, and configure composition layers.
+	- EditorCapability.EDIT_RESOURCES — Perform explicit destructive edits on reusable resources.
 - cutecanvas.EditorIntent — Public operation identifier accepted by `CuteCanvas.editorOperationState`.
 	- EditorIntent.SELECT_PIXELS — Inspect pixel-selection creation and modification.
 	- EditorIntent.DELETE_PIXELS — Inspect selection-constrained pixel clearing.
@@ -254,6 +279,10 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- EditorIntent.TRANSFORM — Inspect selected-pixel or complete-layer transform.
 - cutecanvas.EditorPolicy — Immutable set of editor capabilities enabled by the host; the default contains every capability.
 	- EditorPolicy.capabilities — Complete immutable `EditorCapability` set.
+	- EditorPolicy.noneditable_paint — Interactive brush behavior for a selected layer that cannot store pixels.
+- cutecanvas.NonEditablePaintPolicy — Paint-destination provisioning behavior.
+	- NonEditablePaintPolicy.CREATE_RASTER_LAYER — Create and select a real unbounded raster layer above the selection.
+	- NonEditablePaintPolicy.REJECT — Reject the stroke without changing selection or content.
 - cutecanvas.EditorOperationState — Detached operation decision containing availability, denial, explicit alternatives, and resolved scene/layer identity.
 	- EditorOperationState.intent — Operation identifier used for this query.
 	- EditorOperationState.allowed — Whether the operation can execute now.
@@ -288,27 +317,6 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- PlacedAssetSnapshot.keep_fallback — Whether private composition archives retain last-known linked pixels.
 	- PlacedAssetSnapshot.content_revision — Revision of the current decoded source product.
 	- PlacedAssetSnapshot.generation — Generation used to reject stale asynchronous link work.
-- cutecanvas.CompositionTemplate — Host-owned reusable template for building scene composition requests.
-	- CompositionTemplate.template_id — Stable template UUID owned by the host.
-	- CompositionTemplate.bounds — Host-defined scene-coordinate bounds.
-	- CompositionTemplate.layers — Ordered `TemplateLayer` entries.
-	- CompositionTemplate.title — Optional default title used by template composition.
-- cutecanvas.TemplateLayer — Template layer bound by source slot at composition time.
-	- TemplateLayer.layer_id — Stable layer UUID supplied by the host.
-	- TemplateLayer.source_slot — Binding key resolved by `TemplateBindings.catalog_images`.
-	- TemplateLayer.placement — Scene-coordinate rectangle for this layer.
-	- TemplateLayer.visible — Whether the layer renders and hit-tests.
-	- TemplateLayer.opacity — Layer opacity from `0.0` to `1.0`.
-	- TemplateLayer.clip — Optional `CompositionLayerClip` applied when the template becomes a stored scene.
-	- TemplateLayer.hit_test — Whether `CuteCanvas.sceneHitTest` can return this layer.
-	- TemplateLayer.role — Host label carried into hits and overlays.
-	- TemplateLayer.metadata — Opaque host metadata merged into composed layers.
-	- TemplateLayer.interaction — Direct-interaction policy copied into each composed layer.
-- cutecanvas.TemplateBindings — Concrete catalog image bindings for a scene template.
-	- TemplateBindings.composition_id — Optional composition UUID to create or replace.
-	- TemplateBindings.title — Optional title overriding the template title.
-	- TemplateBindings.catalog_images — Mapping of template source slots to catalog image UUIDs.
-	- TemplateBindings.metadata — Optional source-slot metadata merged into composed layers.
 - cutecanvas.SceneSnapshot — Public scene snapshot for an active generated or host-authored composition.
 	- SceneSnapshot.composition_id — Stored composition UUID.
 	- SceneSnapshot.scene_id — Render scene UUID; layered scene compositions use the composition UUID.
@@ -317,7 +325,8 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- SceneSnapshot.layers — Ordered `LayerSnapshot` entries.
 - cutecanvas.LayerSnapshot — Source-backed layer in a composed scene.
 	- LayerSnapshot.layer_id — Stable layer UUID supplied by the host.
-	- LayerSnapshot.image_id — Catalog image UUID for image layers, or `None` for masks and editable rasters.
+	- LayerSnapshot.source_kind — Project resource domain such as `imported-raster`, `linked-raster`, `raster`, `coverage`, `vector`, or `composition`.
+	- LayerSnapshot.source_id — Stable project resource UUID independent of the layer UUID.
 	- LayerSnapshot.placement — Conservative axis-aligned scene bound derived from the exact transform.
 	- LayerSnapshot.transform — Detached affine local-to-scene `QTransform` for the layer instance.
 	- LayerSnapshot.visible — Whether the layer renders and hit-tests.
@@ -328,8 +337,6 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- LayerSnapshot.role — Host label carried into hits and overlays.
 	- LayerSnapshot.metadata — Opaque host metadata carried into hits and overlays.
 	- LayerSnapshot.interaction — Current selection and movement policy for the layer.
-	- LayerSnapshot.source_kind — Source domain: `catalog-image`, `mask`, `raster`, or `placeholder-image`.
-	- LayerSnapshot.source_id — Stable source asset UUID independent of the scene-layer UUID.
 	- LayerSnapshot.label — Optional host-facing authoring-layer label.
 - cutecanvas.CompositionLayerClip — Optional layer clip rectangle.
 	- CompositionLayerClip.coordinate_space — Coordinate system for `rect`: `"scene"`, `"normalized-scene"`, `"viewport"`, or `"normalized-viewport"`.
@@ -338,7 +345,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- LayerHit.composition_id — Active composition UUID.
 	- LayerHit.scene_id — Scene UUID.
 	- LayerHit.layer_id — Hit layer UUID.
-	- LayerHit.image_id — Catalog image UUID for the hit layer.
+	- LayerHit.source_id — Project resource UUID backing the hit layer.
 	- LayerHit.role — Host role copied from the layer.
 	- LayerHit.metadata — Opaque metadata copied from the layer.
 	- LayerHit.panel_point — Tested widget coordinate.
@@ -368,40 +375,24 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- PanelHitTest.clamped_point — Image-space coordinate clamped to image bounds.
 	- PanelHitTest.inside_image — True when the raw point lies inside the image.
 
-## Catalog and Navigation
+## Project Resources
 
-### Catalog Management
-- CuteCanvas.imageMapFromLists — Build an ordered catalog mapping from images plus optional paths/IDs; values are `CatalogEntry` objects; length mismatches raise `ValueError`.
-- CuteCanvas.setImagesByID — Replace the catalog and set the current image in one call.
-- CuteCanvas.clearImages — Drop the entire catalog and show the placeholder/blank view.
-- CuteCanvas.removeImageByID — Remove a single catalog entry without rebuilding.
-- CuteCanvas.removeImagesByID — Remove multiple entries without rebuilding.
+- CuteCanvas.createCompositionFromImage — Import detached pixels as a project
+  resource and create a composition containing one ordinary layer instance.
+- CuteCanvas.duplicateLayer — Duplicate an instance while sharing its resource.
+- CuteCanvas.forkLayerResource — Clone a resource and redirect only the selected
+  instance.
+- CuteCanvas.placeComposition — Place another composition as a live nested resource;
+  dependency cycles are rejected atomically.
 
-### Navigation & Current State
-- CuteCanvas.setCurrentImageID — Navigate to a specific UUID (or `None` to clear); unknown IDs no-op.
-- CuteCanvas.currentImageID — Return the current catalog UUID (or None when empty).
-- CuteCanvas.currentImage — Return the current `QImage`, or None when no image is selected.
-- CuteCanvas.currentImagePath — Return the current image path (or None when missing).
-- CuteCanvas.placeholderActive — Return True when the placeholder policy is active.
+Project resources own shared content identity, kind, revision, editability, and
+dependencies. Layer instances own presentation and host interaction policy.
+Saving a root composition follows its transitive resource graph and writes every
+nested composition and payload exactly once.
 
-### Catalog Queries
-- CuteCanvas.imageIDs — List all catalog UUIDs in order.
-- CuteCanvas.hasImages — Quick guard to see if any images are loaded.
-- CuteCanvas.allImages — Return all catalog images in order.
-- CuteCanvas.allImagePaths — Return all catalog paths in order.
-- CuteCanvas.imagePath — Return the path for a specific ID (or None when missing).
-- CuteCanvas.getCatalogSnapshot — Return structured catalog state (entries, order, linked groups, active IDs, mask capability) for host consumption.
-
-### Linked Views
-- CuteCanvas.setAllImagesLinked — Link every image into one pan/zoom group (requires 2+ entries).
-- CuteCanvas.setLinkedGroups — Define custom linked groups with `LinkedGroup` objects; invalid/overlapping groups are ignored.
-- CuteCanvas.linkedGroups — Read current linked groups as `LinkedGroup` instances.
-
-See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction Modes](interaction-modes.md) for how linking interacts with tools.
+See also: [Project Resources](project-resources.md).
 
 ## Scene Composition
-- CuteCanvas.composeScene — Store a host-authored `CompositionRequest` whose raster layers reference catalog image IDs and optionally open it.
-- CuteCanvas.composeSceneFromTemplate — Expand a host-owned scene template and bindings into a stored scene composition.
 - CuteCanvas.fitSceneRect — Return the largest centered aspect-preserving scene rectangle inside a target rectangle.
 - CuteCanvas.fillSceneRect — Return the smallest centered aspect-preserving scene rectangle covering a target rectangle; the result may extend outside the target.
 - CuteCanvas.currentScene — Return CuteCanvas's normalized public scene snapshot, or None.
@@ -424,12 +415,12 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - CuteCanvas.addEditableRasterLayer — Copy a color image into a composition-owned editable RGBA layer.
 - CuteCanvas.placeEmbeddedAsset — Copy a `QImage` into a non-destructive embedded source and add an independently transformable layer instance.
 - CuteCanvas.placeLinkedAsset — Begin non-blocking file decode and add a linked layer only after decoding succeeds.
-- CuteCanvas.duplicatePlacedAsset — Add an independent layer instance that shares the selected placed source and future source refreshes.
+- CuteCanvas.duplicateLayer — Add an independent layer instance that shares the selected project resource and future resource edits.
 - CuteCanvas.placedAssetState — Return detached provenance, status, and generation state for a placed layer.
 - CuteCanvas.refreshPlacedAsset — Reload the current linked locator without adding an editor-history command.
 - CuteCanvas.relinkPlacedAsset — Decode a replacement locator and record the resulting provenance transition in scene history.
 - CuteCanvas.embedPlacedAsset — Detach a linked source from its locator while retaining identical pixels; undo restores the exact link state.
-- CuteCanvas.rasterizePlacedAsset — Render a placed source at explicit or natural pixel dimensions and atomically replace it with an editable RGBA source.
+- CuteCanvas.rasterizeLayer — Render an imported, linked, vector, or nested-document resource at explicit or natural pixel dimensions and atomically replace that layer instance with an editable RGBA resource.
 - CuteCanvas.editableRasterLayerImage — Return a detached image snapshot for an editable RGBA layer.
 - CuteCanvas.selectLayerCoverage — Project a mask or other coverage-source layer into pixel selection.
 - CuteCanvas.deleteSelectedPixels — Clear selected coverage from the selected policy-enabled mask or RGBA layer.
@@ -446,41 +437,59 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - CuteCanvas.editorOperationState — Query the same source, state, and policy decision used by built-in tools and editor commands.
 - CuteCanvas.editorPolicyChanged — Emitted with the complete immutable policy after a real replacement.
 
-Layered compositions can combine catalog images, editable rasters, masks, placed assets, and vectors. Each source retains its own editing contract while participating in the same ordered scene, transform, hit-test, and render behavior. Hit testing is passive; calling `CuteCanvas.setCurrentImageID` after a catalog-image scene hit opens that image's generated default composition.
+Layered compositions combine imported and editable rasters, coverage, vectors,
+and nested compositions. Each layer references one project resource while keeping
+its own transform, visibility, opacity, effects, and interaction policy.
 
 See also: [Scene Composition](scenes.md) and [Extensibility](extensibility.md).
 
 ## Compositions
-- CuteCanvas.createComposition — Create and open an independent empty document with positive scene-space canvas bounds.
-- CuteCanvas.createCompositionFromImage — Create and open an independent document whose canvas is seeded from a catalog image and whose first image is an ordinary layer instance.
-- CuteCanvas.addCatalogImageLayer — Place an existing catalog resource as a new independent layer instance in the active composition.
-- CuteCanvas.setCompositionPolicy — Replace host-controlled document removal and comparison permissions.
-- CuteCanvas.compose — Create and open a persistent composition from one or two catalog image IDs.
+- CuteCanvas.createComposition — Create and open an independent empty composition with positive scene-space canvas bounds.
+- CuteCanvas.createCompositionFromImage — Import detached pixels and create an independent composition whose first image is an ordinary resource-backed layer.
+- CuteCanvas.duplicateLayer — Duplicate one layer instance while sharing its project resource.
+- CuteCanvas.forkLayerResource — Redirect one layer to an independent copy of its current resource.
+- CuteCanvas.rasterizeLayer — Convert one imported, linked, vector, or nested-document resource into editable pixels while preserving the layer instance.
+- CuteCanvas.layerRasterizationCompleted — Report the terminal result of each accepted generic rasterization request.
+- CuteCanvas.placeComposition — Place another composition as a live nested resource.
+- CuteCanvas.setCompositionPolicy — Replace host-controlled composition-removal permission.
 - CuteCanvas.openComposition — Open an existing composition UUID.
 - CuteCanvas.currentCompositionID — Return the active composition UUID, or None.
 - CuteCanvas.compositionIDs — Return composition UUIDs in browser order.
 - CuteCanvas.getCompositionSnapshot — Return composition rows for host browsers.
-- CuteCanvas.removeComposition — Remove a composition when its document policy permits it.
+- CuteCanvas.removeComposition — Remove a composition when its policy permits it.
 - CuteCanvas.removeLayer — Remove a layer instance when its layer policy permits it and record the change in composition history.
 
-Every composition owns its canvas and ordered layer stack independently of the catalog. `createCompositionFromImage` uses the source dimensions only to establish the initial canvas and adds a normal catalog-backed instance; placing the same catalog image elsewhere shares source render products while keeping transform, order, effects, and policy independent. Loading catalog images also creates generated one-image compositions so `setCurrentImageID(image_id)` remains supported. `currentImageID`, `currentImage`, `currentImagePath`, and `imageIDs` remain catalog/source APIs.
+Every composition owns an independent canvas and ordered layer stack.
+`createCompositionFromImage` copies the supplied pixels into one imported
+resource and uses its dimensions for the initial canvas. Shared resources reuse
+QPane render products while layer instances retain independent presentation.
 
-See also: [Catalog and Navigation](catalog-and-navigation.md).
+See also: [Project Resources](project-resources.md).
 
-## Comparison
-- CuteCanvas.setComparisonImageID — Use an existing catalog image as the comparison reveal source.
-- CuteCanvas.clearComparisonImage — Disable comparison rendering.
-- CuteCanvas.setComparisonSplit — Set the normalized split position and optional `ComparisonOrientation`.
-- CuteCanvas.comparisonState — Return the active `ComparisonState` snapshot.
-- CuteCanvas.comparisonDividerInteractive — Return whether built-in comparison-divider dragging is enabled.
-- CuteCanvas.setComparisonDividerInteractive — Enable or disable built-in split-boundary dragging.
-- CuteCanvas.comparisonDividerState — Return `ComparisonDividerState` for host-owned divider drawing.
+`LayerHandle.duplicate()` returns another handle sharing the same project
+resource. `LayerHandle.fork_resource()` redirects one instance to an
+independent resource. `LayerHandle.rasterize()` converts any supported
+renderable resource into editable pixels, and `LayerHandle.resource_id`
+reports its current resource identity. `CompositionHandle.place_composition()`
+places another composition as a live nested layer in the open destination.
 
-Comparison state belongs to the active composition. Opening another composition reports that composition's comparison state, and returning to a compared composition restores its source, split, and orientation.
+## Presentations and Projection
 
-While comparison is active, Fit, 1:1 zoom, pan limits, and minimum zoom use the larger compared image as the authority. Comparison is intended for same-shaped or closely matching images.
+- CanvasWorkspace.setSinglePresentation — Mount one composition target.
+- CanvasWorkspace.setTabbedPresentation — Mount switchable targets with optional linked inspection.
+- CanvasWorkspace.setGridPresentation — Arrange targets in a responsive physical-pixel grid.
+- CanvasWorkspace.setComparisonPresentation — Reveal two independent targets across a draggable divider.
+- CanvasWorkspace.setCustomPresentation — Build a registered host arrangement over validated targets.
+- CanvasWorkspace.setInteractionMode — Apply read-only, mask-authoring, or full-editor policy to current and future views.
+- CanvasWorkspace.setOutboundMimeProvider — Apply host MIME materialization to every presentation target.
+- CuteCanvas.requestProjection — Render a stable composition or layer reference at explicit source bounds and output resolution.
+- CuteCanvas.projectionCompleted — Emit one terminal `CanvasProjectionResult`.
+- CanvasProjectionHandle.cancel — Cancel pending work and suppress late publication.
+- CanvasProjectionResult.status — Report `COMPLETED`, `CANCELLED`, `REJECTED`, `STALE`, or `FAILED`.
 
-See also: [Catalog and Navigation](catalog-and-navigation.md).
+Presentations belong to `CanvasViewSession`, not document history. Projection
+uses the mounted QPane scene renderer and publishes pixels only while the
+captured `CanvasContentReference` revision remains current.
 
 ## Diagnostics
 - CuteCanvas.diagnosticsOverlayEnabled — Read whether the diagnostics HUD is visible.
@@ -495,18 +504,18 @@ See also: [Diagnostics](diagnostics.md).
 ### Masks
 - CuteCanvas.maskFeatureAvailable — Check whether the mask feature is installed.
 - CuteCanvas.activeMaskID — Read the active mask UUID (or None).
-- CuteCanvas.maskIDsForImage — List mask UUIDs for the given/current image.
-- CuteCanvas.listMasksForImage — Return mask metadata as a tuple (ID, color, label, opacity, membership, active).
-- CuteCanvas.createBlankMask — Create a transparent mask layer for the current image.
+- CuteCanvas.maskIDsForComposition — List mask UUIDs for the given or active document.
+- CuteCanvas.listMasksForComposition — Return document mask metadata.
+- CuteCanvas.createBlankMask — Create a transparent mask layer in the active document.
 - CuteCanvas.loadMaskFromFile — Import a mask file and return its UUID on success.
-- CuteCanvas.removeMaskFromImage — Detach a mask from an image and clean up caches.
+- CuteCanvas.removeMaskFromComposition — Remove a mask instance from a document.
 - CuteCanvas.setActiveMaskID — Select a mask for editing (or clear with None).
 - CuteCanvas.getActiveMaskImage — Snapshot the active mask as a grayscale image.
 - CuteCanvas.getMaskUndoState — Return a `cutecanvas.MaskUndoState` snapshot with undo/redo depth for a mask ID.
 - CuteCanvas.setMaskProperties — Update mask color and/or opacity for an existing mask.
-- CuteCanvas.prefetchMaskOverlays — Queue background colorization for a specific image's mask renders.
-- CuteCanvas.cycleMasksForward — Rotate the mask stack forward for the current image.
-- CuteCanvas.cycleMasksBackward — Rotate the mask stack backward for the current image.
+- CuteCanvas.prefetchMaskOverlays — Queue background presentation work for one document's masks.
+- CuteCanvas.cycleMasksForward — Rotate the active document's mask stack forward.
+- CuteCanvas.cycleMasksBackward — Rotate the active document's mask stack backward.
 - CuteCanvas.undoMaskEdit — Undo the last mask edit when a mask is active.
 - CuteCanvas.redoMaskEdit — Redo the last reverted mask edit when a mask is active.
 - CuteCanvas.CONTROL_MODE_DRAW_BRUSH — Built-in brush mode for mask painting.
@@ -561,17 +570,11 @@ See also: [Extensibility](extensibility.md) and [Interaction Modes](interaction-
 - CuteCanvas.panelHitTest — Facade helper returning the DPR-aware `PanelHitTest` metadata (raw/clamped coordinates plus inside-image flag) for a panel-space `QPoint`.
 - CuteCanvas.sceneHitTest — Return scene-layer hit metadata for a panel-space `QPoint` when a layered scene composition is active.
 
-See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction Modes](interaction-modes.md).
+See also: [Documents and Layers](scenes.md) and [Interaction Modes](interaction-modes.md).
 
 ## Signals and Events
 
-### Navigation & Catalog
-- CuteCanvas.imageLoaded — Path payload (empty when unknown) emitted after a swap applies.
-- CuteCanvas.currentImageChanged — Image UUID payload emitted after navigation completes.
-- CuteCanvas.catalogChanged — `CatalogMutationEvent` payload emitted after catalog mutations.
-- CuteCanvas.catalogSelectionChanged — Image UUID or `None` payload emitted when selection changes.
-- CuteCanvas.linkGroupsChanged — Emit with no payload when link definitions change.
-- CuteCanvas.comparisonChanged — `ComparisonState` payload emitted after comparison source, split, or orientation changes.
+### Documents and Interaction
 - CuteCanvas.compositionChanged — `CompositionSnapshot` payload emitted after composition records change.
 - CuteCanvas.compositionSelectionChanged — Composition UUID or `None` payload emitted when selection changes.
 - CuteCanvas.sceneChanged — `SceneSnapshot` or `None` payload emitted when the normalized active render scene changes.
@@ -618,7 +621,7 @@ See also: [Catalog and Navigation](catalog-and-navigation.md) and [Interaction M
 - CuteCanvas.samCheckpointStatusChanged — `(status: str, path: Path)` payload emitted during SAM checkpoint readiness changes (`downloading`, `ready`, `failed`, `missing`); `"downloading"` also covers integrity verification when a hash is required.
 - CuteCanvas.samCheckpointProgress — `(downloaded: int, total: int | None)` payload emitted during SAM checkpoint downloads.
 
-See also: [Catalog and Navigation](catalog-and-navigation.md), [Diagnostics](diagnostics.md), and [Masks and SAM](masks-and-sam.md).
+See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and [Masks and SAM](masks-and-sam.md).
 
 ## Painting
 
@@ -655,6 +658,71 @@ See also: [Catalog and Navigation](catalog-and-navigation.md), [Diagnostics](dia
 - `CuteCanvas.paintTargetChanged` emits `PaintTargetSnapshot` or `None` after target changes.
 - `CuteCanvas.brushPresetChanged` emits the new `BrushPreset` after preset or size changes.
 - `CuteCanvas.paintColorChanged` emits a detached `QColor` after color changes.
+- `cutecanvas.CloneStampAlignment` selects source-offset behavior.
+  - `CloneStampAlignment.ALIGNED` retains the source-to-destination offset
+    across separate strokes.
+  - `CloneStampAlignment.UNALIGNED` begins every stroke from the chosen source.
+- `cutecanvas.CloneStampSampleMode` selects the source product.
+  - `CloneStampSampleMode.ANCHORED_LAYER` samples only the layer on which the
+    source was chosen.
+  - `CloneStampSampleMode.ANCHORED_LAYER_AND_BELOW` samples that layer and
+    visible layers below it.
+  - `CloneStampSampleMode.VISIBLE_COMPOSITE` samples every visible layer.
+- `cutecanvas.CloneStampTransform` describes the sampled content's affine
+  result around its source anchor.
+  - `CloneStampTransform.rotation_degrees` rotates the visible result.
+  - `CloneStampTransform.scale_x` scales the visible horizontal result and
+    must be finite and positive.
+  - `CloneStampTransform.scale_y` scales the visible vertical result and must
+    be finite and positive.
+  - `CloneStampTransform.mirror_horizontal` reflects the horizontal source
+    axis.
+  - `CloneStampTransform.mirror_vertical` reflects the vertical source axis.
+- `cutecanvas.CloneStampSource` retains one source anchor.
+  - `CloneStampSource.scene_id` identifies the source composition.
+  - `CloneStampSource.scene_position` stores the scene-space coordinate pair.
+  - `CloneStampSource.scene_point` returns a detached scene `QPointF`.
+  - `CloneStampSource.layer_id` identifies an anchored source layer when
+    applicable.
+  - `CloneStampSource.layer_position` stores the zero-origin layer-source
+    coordinate pair.
+  - `CloneStampSource.layer_point` returns a detached layer-source `QPointF`
+    or `None`.
+- `cutecanvas.CloneStampState` is the complete immutable Clone Stamp snapshot.
+  - `CloneStampState.alignment` is the current `CloneStampAlignment`.
+  - `CloneStampState.sample_mode` is the current `CloneStampSampleMode`.
+  - `CloneStampState.transform` is the current `CloneStampTransform`.
+  - `CloneStampState.source` is the current `CloneStampSource` or `None`.
+  - `CloneStampState.source_set` reports whether a source is configured.
+- `CuteCanvas.cloneStampState` returns the complete immutable Clone Stamp
+  snapshot.
+- `CuteCanvas.setCloneStampSource` sets a source in active-composition scene
+  coordinates.
+- `CuteCanvas.clearCloneStampSource` clears the source and retained aligned
+  offset.
+- `CuteCanvas.setCloneStampAlignment` changes source-offset behavior.
+- `CuteCanvas.setCloneStampSampleMode` changes the source product.
+- `CuteCanvas.setCloneStampTransform` changes rotation, output scale, and
+  reflection for subsequent strokes.
+- `CuteCanvas.cloneStampChanged` publishes the complete state after any source
+  or configuration change.
+- `cutecanvas.CloneStampFacade` provides focused activation and configuration.
+- `EditorFacade.clone_stamp` is the focused `CloneStampFacade` configuration
+  entry point on every editor facade.
+- `CloneStampFacade.state` returns the current immutable state.
+- `CloneStampFacade.activate` activates Clone Stamp.
+- `CloneStampFacade.set_source` sets a scene-space source.
+- `CloneStampFacade.clear_source` clears the current source.
+- `CloneStampFacade.set_alignment` changes source-offset behavior.
+- `CloneStampFacade.set_sample_mode` changes the source product.
+- `CloneStampFacade.set_transform` changes the sampled-content transform.
+- `cutecanvas.NonEditablePaintPolicy.CREATE_RASTER_LAYER` creates and visibly
+  selects an unbounded raster layer above a non-editable selection before an
+  interactive brush stroke.
+- `NonEditablePaintPolicy.REJECT` rejects that stroke without changing the
+  selected layer.
+- `EditorPolicy.noneditable_paint` selects this behavior. Automatic creation
+  also requires `EditorCapability.MANAGE_LAYERS`.
 - `cutecanvas.CoverageShapeOptions` reports the feather radius applied to future retained mask and selection shapes. `CuteCanvas.coverageShapeOptions` reads it and `CuteCanvas.configureCoverageShapes` replaces supplied values.
 - `cutecanvas.CoverageCoordinateSpace.TARGET` interprets authored geometry in the active layer's local coordinates or in scene coordinates for the pixel-selection target. `CoverageCoordinateSpace.NORMALIZED_TARGET` maps normalized fractions through that target's finite bounds, so `QRectF(0, 0, 0.5, 1)` describes its exact left half.
 - `CuteCanvas.addCoverageShape`, `CuteCanvas.addCoveragePolygon`, and `CuteCanvas.addCoverageImage` commit retained vector or arbitrary 8-bit raster coverage directly to the active mask or pixel-selection target. They return stable authored-item IDs and do not use or replace the user's current pixel selection. `CuteCanvas.editor.coverage.rectangle`, `.ellipse`, `.polygon`, and `.image` provide the concise focused facade over the same owner.
@@ -698,7 +766,7 @@ See also: [Catalog and Navigation](catalog-and-navigation.md), [Diagnostics](dia
 - `CuteCanvas.vectorToolShape` and `CuteCanvas.setVectorToolShape` query and change the last-used parametric shape kind. `CuteCanvas.vectorToolStyle` and `CuteCanvas.setVectorToolStyle` query and change the shared immutable creation style.
 - `CuteCanvas.vectorToolOptionsChanged` emits the active `VectorShapeKind` and `VectorStyle` so contextual controls remain synchronized.
 - `CuteCanvas.convertVectorToPixelSelection` asynchronously derives soft scene-space coverage from exact vector fill, stroke, object opacity, object transforms, and the layer transform. Passing object IDs chooses them explicitly; otherwise an object selection on the layer takes precedence over the whole document. The resulting edit uses `PixelSelectionMode` and the existing pixel-selection history.
-- `CuteCanvas.rasterizeVectorLayer` asynchronously renders an explicit pixel size, creates an editable premultiplied RGBA source, and atomically replaces only that vector instance while preserving its displayed affine geometry. Undo restores the semantic vector source.
+- `CuteCanvas.rasterizeLayer` asynchronously renders an explicit pixel size, creates an editable premultiplied RGBA resource, and atomically replaces only that layer instance while preserving its displayed affine geometry. Undo restores the original resource.
 - `CuteCanvas.vectorRequestCompleted` emits request UUID, public scene UUID, layer UUID, the `pixel-selection`, `editable-raster`, or `text-paths` operation string, success, and a terminal message exactly once for accepted work.
 - `CuteCanvas.setVectorMask` atomically removes a visible vector layer instance and retains its semantic document as a target layer effect. It can use every object or an explicit object subset and can invert reveal geometry. `CuteCanvas.vectorMaskState` inspects the effect, while `CuteCanvas.clearVectorMask` removes it chronologically. `CuteCanvas.vectorDocumentState` and vector object edits accept the masked target layer so the same paths remain editable without a parallel mask document.
 ## Semantic vector text

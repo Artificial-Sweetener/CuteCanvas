@@ -29,21 +29,15 @@ from PySide6.QtGui import (
     QImage,
 )
 from qpane.sdk.cache import CacheCoordinator
-from qpane.sdk.catalog import Catalog, LinkManager
-from qpane.sdk.compare import (
-    CompareDividerInteraction,
-    CompareService,
-)
 from qpane.sdk.concurrency import TaskExecutorProtocol
 from qpane.sdk.diagnostics import Diagnostics
-from qpane.sdk.rendering import RenderingPresenter, View
+from qpane.sdk.rendering import RenderingPresenter, SceneCoordinateSystem, View
 from qpane.sdk.scene import (
     LayerPlacement,
     LayerSourceCapabilities,
     SceneLayerHitTestResult,
     SceneProviderRegistry,
 )
-from qpane.sdk.swap import SwapDelegate
 from qpane.sdk.ui import DiagnosticsOverlayController
 
 from cutecanvas.composition import CompositionService
@@ -51,17 +45,22 @@ from cutecanvas.core import (
     CuteCanvasHooks,
 )
 from cutecanvas.coverage import CoverageShapeConfiguration
+from cutecanvas.document import CanvasDocument, CanvasViewSession
 from cutecanvas.editor import (
     EditorInteractionCoordinator,
     EditorMovementInteraction,
     EditorOperationResolver,
+    InteractivePaintDestinationCoordinator,
 )
 from cutecanvas.editor.transform_interaction import EditorTransformInteraction
 from cutecanvas.fill import PaintBucketCoordinator, SelectionFillCoordinator
 from cutecanvas.masks.coordinates import ActiveMaskLayerCoordinates
-from cutecanvas.masks.workflow import MaskActivationSyncResult, Masks
+from cutecanvas.masks.workflow import Masks
 from cutecanvas.painting import PaintingCoordinator
-from cutecanvas.placed.source_reference import PlacedAssetReference
+from cutecanvas.painting.clone_operation import CloneStampOperation
+from cutecanvas.raster.layers import EditableRasterLayerController
+from cutecanvas.resources import ProjectResourceReference
+from cutecanvas.resources.active_raster import ActiveRasterResolver
 from cutecanvas.scene.geometry import aspect_scene_rect
 from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from cutecanvas.scene.movement_interaction import SceneLayerMovementInteraction
@@ -84,109 +83,25 @@ logger = logging.getLogger(__name__)
 class CanvasAccessorsMixin:
     """Group canvasaccessors facade behavior."""
 
-    def _catalog_placeholder_entered(self, panzoom_enabled: bool) -> None:
-        """Apply editor interaction policy for a catalog placeholder."""
-        self._catalog_placeholder_previous_mode = self.interaction.get_control_mode()
-        mask_modes = {
-            Tools.CONTROL_MODE_DRAW_BRUSH,
-            Tools.CONTROL_MODE_PAINT_BUCKET,
-            Tools.CONTROL_MODE_MASK_RECTANGLE,
-            Tools.CONTROL_MODE_MASK_ELLIPSE,
-            Tools.CONTROL_MODE_MASK_LASSO,
-            Tools.CONTROL_MODE_SMART_SELECT,
-        }
-        self.setPanZoomLocked(not panzoom_enabled)
-        target_mode = (
-            Tools.CONTROL_MODE_PANZOOM if panzoom_enabled else Tools.CONTROL_MODE_CURSOR
-        )
-        self.setControlMode(target_mode)
-        if self.getControlMode() in mask_modes:
-            self.setControlMode(Tools.CONTROL_MODE_PANZOOM)
-        self.refreshCursor()
-
-    def _catalog_placeholder_exited(self) -> None:
-        """Restore editor interaction policy after placeholder display."""
-        previous_mode = self._catalog_placeholder_previous_mode
-        self._catalog_placeholder_previous_mode = None
-        self.setPanZoomLocked(False)
-        if previous_mode:
-            try:
-                self.setControlMode(previous_mode)
-            except Exception:
-                logger.exception(
-                    "Failed to restore control mode after placeholder exit"
-                )
-        self.refreshCursor()
-
-    def _catalog_image_will_remove(self, image_id: uuid.UUID) -> None:
-        """Invalidate editor-owned mask products before catalog removal."""
-        service = getattr(self, "mask_service", None)
-        if service is not None:
-            service.invalidateMaskCachesForImage(image_id)
-
-    def _catalog_image_resources_removed(
-        self,
-        image_ids: tuple[uuid.UUID, ...],
-    ) -> None:
-        """Discard editor products derived from invalidated catalog resources."""
-        manager = self.samManager()
-        if manager is None:
-            return
-        for image_id in image_ids:
-            manager.removeFromCache(image_id)
-
-    def _catalog_resources_cleared(self) -> None:
-        """Clear all editor products tied to catalog resources."""
-        service = getattr(self, "mask_service", None)
-        if service is not None:
-            service.clearRenderCache()
-        manager = self.samManager()
-        if manager is not None:
-            manager.clearCache()
-
-    def _catalog_activation_started(
-        self,
-        image_id: uuid.UUID,
-    ) -> MaskActivationSyncResult:
-        """Begin editor-owned mask activation for catalog navigation."""
-        return self._sync_mask_activation_for_image(image_id)
-
-    def _catalog_activation_finished(
-        self,
-        image_id: uuid.UUID,
-        activation_result: object | None,
-    ) -> None:
-        """Settle editor overlays after catalog navigation completes."""
-        activation_pending = bool(
-            getattr(activation_result, "activation_pending", False)
-        )
-        self._masks_controller.on_swap_applied(
-            image_id,
-            activation_pending=activation_pending,
-        )
-
-    def _catalog_source_warmup_reset(self) -> None:
-        """Reset editor-owned source warmup state before image replacement."""
-        self.resetActiveSamPredictor()
+    def activeRasterResolver(self) -> ActiveRasterResolver:
+        """Return the active document raster-input resolver."""
+        resolver = self._active_raster
+        if resolver is None:
+            raise RuntimeError("active raster resolver is not initialized")
+        return resolver
 
     def _cache_metric_source(self, consumer_id: str) -> object | None:
         """Resolve cache metrics without teaching QPane about editor domains."""
         if consumer_id == "tiles":
             return self.view().presenter.tile_manager
         if consumer_id == "pyramids":
-            return self.catalog().pyramidManager()
+            return self.view().pyramid_manager
         if consumer_id == "mask_overlays":
             controller = self.mask_controller
             return None if controller is None else controller.renders
         if consumer_id == "models":
             return self.samManager()
         return None
-
-    def catalog(self) -> Catalog:
-        """Expose the catalog facade managing catalog state and navigation hooks."""
-        if self._catalog is None:
-            raise AttributeError("Catalog accessed before initialization")
-        return self._catalog
 
     def compositionService(self) -> CompositionService:
         """Expose the internal composition owner."""
@@ -203,6 +118,10 @@ class CanvasAccessorsMixin:
     def presenter(self) -> RenderingPresenter:
         """Expose the RenderingPresenter managed by the rendering stack."""
         return self.view().presenter
+
+    def coordinateSystem(self) -> SceneCoordinateSystem:
+        """Return the coordinate system for the active editor rendering stack."""
+        return self.view().coordinates
 
     def sceneMutationCoordinator(self) -> SceneMutationCoordinator:
         """Expose internal scene mutation routing for feature workflows."""
@@ -259,6 +178,24 @@ class CanvasAccessorsMixin:
             )
         return resolver
 
+    def interactivePaintDestination(self) -> InteractivePaintDestinationCoordinator:
+        """Expose private selected-layer paint preparation."""
+        destination = self._paint_destination
+        if destination is None:
+            raise AttributeError(
+                "Interactive paint destination accessed before initialization"
+            )
+        return destination
+
+    def editableRasterLayers(self) -> EditableRasterLayerController:
+        """Expose private editable-raster instance lifecycle."""
+        layers = self._editable_raster_layers
+        if layers is None:
+            raise AttributeError(
+                "Editable raster layers accessed before initialization"
+            )
+        return layers
+
     def activeMaskLayerCoordinates(self) -> ActiveMaskLayerCoordinates:
         """Expose private active-mask layer coordinate mapping."""
         coordinates = self._active_mask_coordinates
@@ -270,9 +207,9 @@ class CanvasAccessorsMixin:
 
     def _active_resolved_scene_id(self) -> uuid.UUID | None:
         """Return the active internal scene identifier used for mutation routing."""
-        record = self.compositionService().active_record()
-        if record is not None:
-            return record.composition_id
+        composition_id = self.viewSession().active_composition_id
+        if composition_id is not None:
+            return composition_id
         scene = self.sceneMutationCoordinator().active_scene()
         return None if scene is None else scene.scene_id
 
@@ -314,12 +251,10 @@ class CanvasAccessorsMixin:
     def _resolve_public_scene_id(self, scene_id: uuid.UUID) -> uuid.UUID:
         """Map a public default-composition ID to its resolved scene ID."""
         active_scene = self.sceneMutationCoordinator().active_scene()
-        public_scene = self.currentScene()
         if (
             active_scene is not None
             and active_scene.scene_id != scene_id
-            and public_scene is not None
-            and public_scene.scene_id == scene_id
+            and self.viewSession().active_composition_id == scene_id
         ):
             return active_scene.scene_id
         return scene_id
@@ -328,23 +263,36 @@ class CanvasAccessorsMixin:
         self, scene_id: uuid.UUID, layer_id: uuid.UUID
     ) -> uuid.UUID | None:
         """Resolve an active public layer identity to its composition scope."""
+        scope_id = self._layer_scope(scene_id, layer_id)
+        if scope_id is None:
+            return None
+        instance = self.compositionService().layers.layer(scope_id, layer_id)
+        assets = self._placed_assets
+        return (
+            scope_id
+            if instance is not None
+            and isinstance(instance.source, ProjectResourceReference)
+            and assets is not None
+            and assets.get(instance.source.resource_id) is not None
+            else None
+        )
+
+    def _layer_scope(
+        self, scene_id: uuid.UUID, layer_id: uuid.UUID
+    ) -> uuid.UUID | None:
+        """Resolve one active public layer identity to its composition scope."""
         if not isinstance(scene_id, uuid.UUID):
             raise TypeError("scene_id must be a UUID")
         if not isinstance(layer_id, uuid.UUID):
             raise TypeError("layer_id must be a UUID")
         public_scene = self.currentScene()
-        scope_id = self.compositionService().current_composition_id()
+        scope_id = self.viewSession().active_composition_id
         if public_scene is None or scope_id is None:
             return None
         if scene_id not in {public_scene.scene_id, public_scene.composition_id}:
             return None
         instance = self.compositionService().layers.layer(scope_id, layer_id)
-        return (
-            scope_id
-            if instance is not None
-            and isinstance(instance.source, PlacedAssetReference)
-            else None
-        )
+        return scope_id if instance is not None else None
 
     @staticmethod
     def _validate_placed_inputs(
@@ -459,6 +407,13 @@ class CanvasAccessorsMixin:
             raise AttributeError("painting coordinator accessed before initialization")
         return coordinator
 
+    def cloneStampOperation(self) -> CloneStampOperation:
+        """Expose the internal Clone Stamp state and stroke operation."""
+        operation = self._clone_stamp
+        if operation is None:
+            raise AttributeError("Clone Stamp accessed before initialization")
+        return operation
+
     def layerGeometryResolver(self) -> LayerGeometryResolver:
         """Expose the authoritative manipulation-geometry resolver."""
         resolver = self._layer_geometry
@@ -496,19 +451,6 @@ class CanvasAccessorsMixin:
             )
         return configuration
 
-    def comparisonDividerInteraction(self) -> CompareDividerInteraction:
-        """Expose the internal comparison divider interaction owner."""
-        interaction = self._compare_interaction
-        if interaction is None:
-            raise AttributeError(
-                "Comparison divider interaction accessed before initialization"
-            )
-        return interaction
-
-    def linkManager(self) -> LinkManager:
-        """Expose the link manager coordinating linked-view groups."""
-        return self.view().link_manager
-
     def diagnostics(self) -> Diagnostics:
         """Expose the diagnostics coordinator for this CuteCanvas."""
         return self._diagnostics_manager
@@ -520,13 +462,6 @@ class CanvasAccessorsMixin:
             controller = DiagnosticsOverlayController(self)
             self._diagnostics_overlay_controller = controller
         return controller
-
-    def _comparison_service(self) -> CompareService:
-        """Return the internal compare service."""
-        service = self.compare_service
-        if service is None:
-            raise AttributeError("Compare service accessed before initialization")
-        return service
 
     @staticmethod
     def _aspect_scene_rect(
@@ -553,11 +488,6 @@ class CanvasAccessorsMixin:
         return self._state.cache_coordinator
 
     @property
-    def swapDelegate(self) -> SwapDelegate:
-        """Expose the swap delegate orchestrating catalog navigation."""
-        return self.view().swap_delegate
-
-    @property
     def _masks_controller(self) -> Masks:
         """Return the masks workflow controller."""
         if self._masks is None:
@@ -578,3 +508,18 @@ class CanvasAccessorsMixin:
         Hosts must use the CuteCanvas.register* facade methods instead of calling this property directly.
         """
         return self._hooks
+
+    def viewSession(self) -> CanvasViewSession:
+        """Return the detachable activation and presentation state."""
+        return self._session
+
+    def document(self) -> CanvasDocument:
+        """Return the headless content aggregate mounted by this widget."""
+        return self._document
+
+    def _inspection_target_bounds(self, target_id: uuid.UUID) -> QRectF | None:
+        """Return one composition's native coordinate bounds."""
+        try:
+            return QRectF(self.compositionService().record(target_id).canvas_bounds)
+        except KeyError:
+            return None

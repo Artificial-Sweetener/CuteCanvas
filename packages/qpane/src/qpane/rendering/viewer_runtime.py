@@ -77,6 +77,7 @@ class ViewerRenderingRuntime(QObject):
             source_hit_tests=self._sources.hit_tests,
             vector_sources=self._sources.vectors,
             hybrid_sources=self._sources.hybrids,
+            sampled_sources=self._sources.sampled,
             layer_effects=LayerEffectRenderRegistry(),
         )
         self._blank = True

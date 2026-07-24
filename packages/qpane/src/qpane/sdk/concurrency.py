@@ -17,6 +17,7 @@
 
 from ..concurrency import (
     BaseWorker,
+    PersistentWorkerPool,
     RetryContext,
     RetryEntriesView,
     TaskExecutorProtocol,
@@ -33,6 +34,7 @@ from ..concurrency.thread_policy import build_thread_policy
 __all__ = (
     "BaseWorker",
     "LiveTunableExecutorProtocol",
+    "PersistentWorkerPool",
     "QThreadPoolExecutor",
     "RetryContext",
     "RetryEntriesView",

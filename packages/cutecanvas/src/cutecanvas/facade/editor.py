@@ -27,15 +27,16 @@ from PySide6.QtGui import QImage
 from qpane.sdk.vector import VectorShapeKind
 
 from ..types import CoverageCoordinateSpace, PixelSelectionMode, PixelSelectionSnapshot
+from .clone_stamp import CloneStampFacade, CloneStampHost
 from .effects import EffectsFacade
-from .handles import DocumentCollection, EditorHandleHost
-from .persistence import DocumentPersistenceFacade
+from .handles import CompositionCollection, EditorHandleHost
+from .persistence import CompositionPersistenceFacade
 
 if TYPE_CHECKING:
     from ..persistence import CompositionPersistenceService
 
 
-class EditorCommandHost(EditorHandleHost, Protocol):
+class EditorCommandHost(EditorHandleHost, CloneStampHost, Protocol):
     """Describe focused tool, selection, and history commands."""
 
     def availableControlModes(self) -> tuple[str, ...]:
@@ -243,13 +244,14 @@ class CoverageFacade:
 class EditorFacade:
     """Collect focused public editor APIs around one CuteCanvas widget."""
 
-    documents: DocumentCollection
+    compositions: CompositionCollection
     tools: ToolFacade
+    clone_stamp: CloneStampFacade
     selection: SelectionFacade
     coverage: CoverageFacade
     effects: EffectsFacade
     history: HistoryFacade
-    persistence: DocumentPersistenceFacade
+    persistence: CompositionPersistenceFacade
 
     @classmethod
     def create(
@@ -259,11 +261,12 @@ class EditorFacade:
     ) -> EditorFacade:
         """Build focused APIs that all delegate to existing state owners."""
         return cls(
-            DocumentCollection(host),
+            CompositionCollection(host),
             ToolFacade(host),
+            CloneStampFacade(host),
             SelectionFacade(host),
             CoverageFacade(host),
             EffectsFacade(host),
             HistoryFacade(host),
-            DocumentPersistenceFacade(host, persistence),
+            CompositionPersistenceFacade(host, persistence),
         )

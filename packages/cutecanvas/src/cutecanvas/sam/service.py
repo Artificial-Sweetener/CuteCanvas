@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import hashlib
 import sys
+import threading
 import urllib.request
 import warnings
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from functools import cache, lru_cache
 from pathlib import Path
 from types import ModuleType
@@ -34,6 +36,10 @@ from PySide6.QtCore import QStandardPaths
 if TYPE_CHECKING:
     import torch
     from mobile_sam import SamPredictor
+
+_MODEL_LOCKS_GUARD = threading.Lock()
+_MODEL_EXECUTION_LOCKS: dict[tuple[str, Path], AbstractContextManager[None]] = {}
+_PREDICTOR_LOCK_ATTRIBUTE = "_cutecanvas_model_execution_lock"
 
 
 class SamDependencyError(RuntimeError):
@@ -149,8 +155,18 @@ def load_predictor(checkpoint_path: Path, *, device: str = "cpu") -> SamPredicto
             "Use resolve_checkpoint_path or ensure_checkpoint."
         )
     _, SamPredictor, _ = _import_dependencies()
-    model = _load_model(device=device, checkpoint_path=checkpoint_path)
-    return SamPredictor(model)
+    execution_lock = _model_execution_lock(device, checkpoint_path)
+    with execution_lock:
+        model = _load_model(device=device, checkpoint_path=checkpoint_path)
+        predictor = SamPredictor(model)
+    setattr(predictor, _PREDICTOR_LOCK_ATTRIBUTE, execution_lock)
+    return predictor
+
+
+def set_predictor_image(predictor: SamPredictor, image: np.ndarray) -> None:
+    """Prepare one predictor while serializing access to its shared model."""
+    with _predictor_execution_lock(predictor):
+        predictor.set_image(image)
 
 
 def predict_mask_from_box(
@@ -169,9 +185,10 @@ def predict_mask_from_box(
         ValueError: If bbox does not have shape (4,) or (1, 4).
     """
     normalized_bbox = _normalize_bbox(bbox)
-    masks, _scores, _logits = predictor.predict(
-        box=normalized_bbox, multimask_output=False
-    )
+    with _predictor_execution_lock(predictor):
+        masks, _scores, _logits = predictor.predict(
+            box=normalized_bbox, multimask_output=False
+        )
     if masks.size == 0:
         return None
     return masks[0]
@@ -197,6 +214,28 @@ def _normalize_bbox(bbox: np.ndarray) -> np.ndarray:
             f"{bbox_array.shape}."
         )
     return bbox_array.astype(np.float32, copy=False)
+
+
+def _model_execution_lock(
+    device: str,
+    checkpoint_path: Path,
+) -> AbstractContextManager[None]:
+    """Return the sole inference lock for one cached model identity."""
+    key = (device, checkpoint_path)
+    with _MODEL_LOCKS_GUARD:
+        lock = _MODEL_EXECUTION_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _MODEL_EXECUTION_LOCKS[key] = lock
+        return lock
+
+
+def _predictor_execution_lock(
+    predictor: SamPredictor,
+) -> AbstractContextManager[None]:
+    """Return a predictor's shared-model lock or a no-op for host fakes."""
+    lock = getattr(predictor, _PREDICTOR_LOCK_ATTRIBUTE, None)
+    return lock if lock is not None else nullcontext()
 
 
 @lru_cache(maxsize=1)

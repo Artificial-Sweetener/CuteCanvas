@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import ClassVar
 
 from cutecanvas import Config
@@ -226,7 +225,7 @@ class ConcurrencyAdvancedWidget(QWidget):
 
 
 class LockedSizeWidget(QWidget):
-    """Editor for width/height pairs used by placeholder locked_size."""
+    """Editor for optional width and height configuration pairs."""
 
     valueChanged = Signal()
 
@@ -417,11 +416,6 @@ class ConfigDialog(QDialog):
         self._cache_headroom_cap: QWidget | None = None
         self._cache_budget: QWidget | None = None
         self._sam_download_mode: QComboBox | None = None
-        self._placeholder_zoom_mode: QComboBox | None = None
-        self._placeholder_locked_zoom: QWidget | None = None
-        self._placeholder_locked_size: QWidget | None = None
-        self._placeholder_scale_mode: QComboBox | None = None
-        self._placeholder_scale_factor: QDoubleSpinBox | None = None
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(16, 16, 16, 16)
         root_layout.setSpacing(16)
@@ -460,7 +454,6 @@ class ConfigDialog(QDialog):
             button_box,
             alignment=Qt.AlignmentFlag.AlignRight,
         )
-        self._sync_placeholder_mode_fields()
         self._apply_filter(self._filter_input.text())
         self._update_preview()
 
@@ -650,16 +643,6 @@ class ConfigDialog(QDialog):
             if spec.path == "cache.mode":
                 widget.currentTextChanged.connect(self._handle_cache_mode_changed)
                 self._cache_mode = widget
-            if spec.path == "placeholder.zoom_mode":
-                widget.currentTextChanged.connect(
-                    self._handle_placeholder_zoom_mode_changed
-                )
-                self._placeholder_zoom_mode = widget
-            if spec.path == "placeholder.scale_mode":
-                widget.currentTextChanged.connect(
-                    self._handle_placeholder_scale_mode_changed
-                )
-                self._placeholder_scale_mode = widget
             if spec.path == "sam_download_mode":
                 self._sam_download_mode = widget
             self._wire_widget_signals(widget)
@@ -689,8 +672,6 @@ class ConfigDialog(QDialog):
                 widget.setSpecialValueText(spec.special_value_text)
             if spec.path == "cache.headroom_percent":
                 self._cache_headroom_percent = widget
-            if spec.path == "placeholder.scale_factor":
-                self._placeholder_scale_factor = widget
         elif spec.kind == "size":
             if spec.minimum is None or spec.maximum is None:
                 raise ValueError(f"Size fields require bounds: {spec.path}")
@@ -718,7 +699,12 @@ class ConfigDialog(QDialog):
             if spec.placeholder:
                 line_edit.setPlaceholderText(spec.placeholder)
             browse = QPushButton("Browse", self)
-            browse.clicked.connect(lambda *_: self._browse_for_path(line_edit))
+            browse.clicked.connect(
+                lambda *_, current=spec, target=line_edit: self._browse_for_path(
+                    current,
+                    target,
+                )
+            )
             container = QWidget(self)
             layout = QHBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
@@ -749,32 +735,29 @@ class ConfigDialog(QDialog):
             widget.setSuffix(spec.suffix)
         if spec.tooltip:
             widget.setToolTip(spec.tooltip)
-        if spec.path == "placeholder.locked_zoom":
-            self._placeholder_locked_zoom = widget
-        if spec.path == "placeholder.locked_size":
-            self._placeholder_locked_size = widget
         self._wire_widget_signals(widget)
         return widget
 
-    def _browse_for_path(self, line_edit: QLineEdit) -> None:
-        """Open a file picker and populate ``line_edit`` with the selected path."""
-        default_dir = self._default_placeholder_dir()
+    def _browse_for_path(self, spec: FieldSpec, line_edit: QLineEdit) -> None:
+        """Choose one file suitable for a path-valued setting."""
+        title = (
+            "Select Model Checkpoint"
+            if spec.path == "sam_model_path"
+            else "Select File"
+        )
+        file_filter = (
+            "Model checkpoints (*.pt *.pth);;All files (*)"
+            if spec.path == "sam_model_path"
+            else "All files (*)"
+        )
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Placeholder Image",
-            default_dir,
-            "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp)",
+            title,
+            "",
+            file_filter,
         )
         if file_path:
             line_edit.setText(file_path)
-
-    def _default_placeholder_dir(self) -> str:
-        """Return the demo logo directory when it exists on disk."""
-        root = Path(__file__).resolve()
-        assets_dir = root.parents[3] / "assets" / "logos"
-        if assets_dir.is_dir():
-            return str(assets_dir)
-        return ""
 
     def _label_for(self, name: str, override: str | None = None) -> str:
         """Render a human-friendly label for a config path."""
@@ -919,50 +902,6 @@ class ConfigDialog(QDialog):
         self._sync_cache_mode_fields()
         self._trigger_preview_update()
 
-    def _handle_placeholder_zoom_mode_changed(self, *_args) -> None:
-        """Toggle placeholder lock controls when zoom mode changes."""
-        self._sync_placeholder_mode_fields()
-        self._trigger_preview_update()
-
-    def _handle_placeholder_scale_mode_changed(self, *_args) -> None:
-        """Toggle placeholder sizing controls when scale mode changes."""
-        self._sync_placeholder_mode_fields()
-        self._trigger_preview_update()
-
-    def _sync_placeholder_mode_fields(self) -> None:
-        """Show only the placeholder lock controls relevant to the zoom mode."""
-        mode_widget = self._placeholder_zoom_mode
-        mode = (mode_widget.currentText() if mode_widget is not None else "").lower()
-        show_locked_zoom = mode == "locked_zoom"
-        show_locked_size = mode == "locked_size"
-        self._set_field_visible("placeholder.locked_zoom", show_locked_zoom)
-        self._set_field_visible("placeholder.locked_size", show_locked_size)
-        locked_zoom_widget = self._widgets.get("placeholder.locked_zoom")
-        if locked_zoom_widget is not None:
-            locked_zoom_widget.setEnabled(show_locked_zoom)
-        locked_size_widget = self._widgets.get("placeholder.locked_size")
-        if locked_size_widget is not None:
-            locked_size_widget.setEnabled(show_locked_size)
-        scale_widget = self._placeholder_scale_mode
-        scale_mode = (
-            scale_widget.currentText().lower() if scale_widget is not None else ""
-        )
-        sizing_visible = scale_mode in {"logical_fit", "physical_fit", "relative_fit"}
-        for path in (
-            "placeholder.display_size",
-            "placeholder.min_display_size",
-            "placeholder.max_display_size",
-        ):
-            self._set_field_visible(path, sizing_visible)
-            widget = self._widgets.get(path)
-            if widget is not None:
-                widget.setEnabled(sizing_visible)
-        scale_factor_visible = scale_mode == "relative_fit"
-        self._set_field_visible("placeholder.scale_factor", scale_factor_visible)
-        widget = self._widgets.get("placeholder.scale_factor")
-        if widget is not None:
-            widget.setEnabled(scale_factor_visible)
-
     def _sync_cache_mode_fields(self) -> None:
         """Show Auto headroom controls or Hard budget based on the selected mode."""
         mode_widget = self._cache_mode
@@ -1104,22 +1043,6 @@ class ConfigDialog(QDialog):
                         if float(normalized_reference) <= threshold
                         else float(normalized_reference)
                     )
-            if spec and spec.path == "placeholder.locked_zoom":
-                mode_widget = self._placeholder_zoom_mode
-                mode = (
-                    mode_widget.currentText().lower() if mode_widget is not None else ""
-                )
-                if mode != "locked_zoom":
-                    return normalized_reference, normalized_reference
-            if spec and spec.path == "placeholder.scale_factor":
-                scale_widget = self._placeholder_scale_mode
-                scale_mode = (
-                    scale_widget.currentText().lower()
-                    if scale_widget is not None
-                    else ""
-                )
-                if scale_mode != "relative_fit":
-                    return normalized_reference, normalized_reference
             return current, normalized_reference
         if isinstance(widget, QCheckBox):
             current = widget.isChecked()
@@ -1152,27 +1075,6 @@ class ConfigDialog(QDialog):
                 else None
             )
             normalized_reference = self._normalize_size_value(reference_value)
-            path = spec.path if spec else ""
-            if path == "placeholder.locked_size":
-                mode_widget = self._placeholder_zoom_mode
-                mode = (
-                    mode_widget.currentText().lower() if mode_widget is not None else ""
-                )
-                if mode != "locked_size":
-                    return normalized_reference, normalized_reference
-            if path in {
-                "placeholder.display_size",
-                "placeholder.min_display_size",
-                "placeholder.max_display_size",
-            }:
-                scale_widget = self._placeholder_scale_mode
-                scale_mode = (
-                    scale_widget.currentText().lower()
-                    if scale_widget is not None
-                    else ""
-                )
-                if scale_mode not in {"logical_fit", "physical_fit"}:
-                    return normalized_reference, normalized_reference
             return current, normalized_reference
         return reference_value, reference_value
 

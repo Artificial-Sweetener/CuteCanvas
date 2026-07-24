@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from ..concurrency import BaseWorker as BaseWorker
+from ..concurrency import PersistentWorkerPool as PersistentWorkerPool
 from ..concurrency import RetryContext as RetryContext
 from ..concurrency import RetryEntriesView as RetryEntriesView
 from ..concurrency import TaskExecutorProtocol as TaskExecutorProtocol

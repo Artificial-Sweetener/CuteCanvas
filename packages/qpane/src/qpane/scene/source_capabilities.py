@@ -60,9 +60,11 @@ class SourceMetadataOwner(Protocol):
 class RasterPresentationOwner(Protocol):
     """Supply renderer-ready raster products for one source-reference type."""
 
-    @property
-    def presentation(self) -> RasterPresentation:
-        """Return the closed raster primitive this owner produces."""
+    def presentation_for(
+        self,
+        source: LayerSourceReference,
+    ) -> RasterPresentation | None:
+        """Return the closed raster primitive produced for ``source``."""
         ...
 
 
@@ -137,6 +139,14 @@ class HybridPresentationOwner(Protocol):
         ...
 
 
+class SampledPresentationOwner(Protocol):
+    """Supply immutable sampled tile sources for procedural raster content."""
+
+    def sampled_source(self, source: LayerSourceReference) -> object | None:
+        """Return one immutable sampled tile source revision."""
+        ...
+
+
 _OwnerT = TypeVar("_OwnerT")
 
 
@@ -191,7 +201,7 @@ class RasterPresentationRegistry(SourceCapabilityRegistry[RasterPresentationOwne
     ) -> RasterPresentation | None:
         """Return the source's closed raster primitive when supported."""
         owner = self.owner_for(source)
-        return None if owner is None else owner.presentation
+        return None if owner is None else owner.presentation_for(source)
 
     def product_policy(self, source: LayerSourceReference) -> RasterProductPolicy:
         """Return the registered source's current derived-product policy."""
@@ -255,6 +265,15 @@ class HybridPresentationRegistry(SourceCapabilityRegistry[HybridPresentationOwne
         return None if owner is None else owner.hybrid_document(source)
 
 
+class SampledPresentationRegistry(SourceCapabilityRegistry[SampledPresentationOwner]):
+    """Route generic sampled tile sources without flattening them eagerly."""
+
+    def sampled_source(self, source: LayerSourceReference) -> object | None:
+        """Return a sampled tile source through the exact typed owner."""
+        owner = self.owner_for(source)
+        return None if owner is None else owner.sampled_source(source)
+
+
 @dataclass(frozen=True, slots=True)
 class LayerSourceCapabilities:
     """Aggregate focused registries for composition-root wiring only."""
@@ -265,6 +284,7 @@ class LayerSourceCapabilities:
     hit_tests: SourceHitTestRegistry
     vectors: VectorPresentationRegistry
     hybrids: HybridPresentationRegistry
+    sampled: SampledPresentationRegistry
 
     @classmethod
     def create(cls) -> LayerSourceCapabilities:
@@ -276,4 +296,5 @@ class LayerSourceCapabilities:
             hit_tests=SourceHitTestRegistry(),
             vectors=VectorPresentationRegistry(),
             hybrids=HybridPresentationRegistry(),
+            sampled=SampledPresentationRegistry(),
         )

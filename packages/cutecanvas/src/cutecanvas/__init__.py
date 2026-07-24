@@ -46,6 +46,15 @@ _VECTOR_TYPE_EXPORTS = (
     "VectorTextStyle",
 )
 
+_RENDER_TYPE_EXPORTS = (
+    "CacheMode",
+    "ComparisonOrientation",
+    "DiagnosticRecord",
+    "OverlayState",
+    "SceneSnapshotOverlayLayer",
+    "SceneSnapshotOverlayState",
+)
+
 _AUTHOR_VECTOR_EXPORTS = (
     "VectorDocumentSnapshot",
     "VectorMaskSnapshot",
@@ -56,20 +65,42 @@ _AUTHOR_VECTOR_EXPORTS = (
 )
 
 __all__ = [
-    *_public_types.__all__,
+    *_RENDER_TYPE_EXPORTS,
     *_editor_types.__all__,
     *_VECTOR_TYPE_EXPORTS,
     *_AUTHOR_VECTOR_EXPORTS,
     "BrushDynamics",
     "BrushOperation",
     "BrushPreset",
+    "CloneStampAlignment",
+    "CloneStampFacade",
+    "CloneStampSampleMode",
+    "CloneStampSource",
+    "CloneStampState",
+    "CloneStampTransform",
+    "CanvasComparison",
+    "CanvasContentKind",
+    "CanvasContentReference",
+    "CanvasInteractionMode",
+    "CanvasDocument",
+    "CanvasPresentation",
+    "CanvasPresentationContext",
+    "CanvasPresentationKind",
+    "CanvasPresentationProvider",
+    "CanvasProjectionHandle",
+    "CanvasProjectionRequest",
+    "CanvasProjectionResult",
+    "CanvasProjectionStatus",
+    "CanvasSessionSnapshot",
+    "CanvasViewSession",
+    "CanvasWorkspace",
     "Config",
     "CoverageShapeOptions",
     "CoverageFacade",
     "CuteCanvas",
-    "DocumentCollection",
-    "DocumentHandle",
-    "DocumentPersistenceFacade",
+    "CompositionCollection",
+    "CompositionHandle",
+    "CompositionPersistenceFacade",
     "EditorFacade",
     "EffectsFacade",
     "HistoryFacade",
@@ -83,6 +114,7 @@ __all__ = [
     "MaskInfo",
     "PlacedAssetMode",
     "PlacedAssetStatus",
+    "ResolvedCanvasContent",
     "SelectionFacade",
     "SnapPolicy",
     "ToolFacade",
@@ -92,11 +124,43 @@ __all__ = sorted(set(__all__) - {"QPane"})
 _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "__version__": ("cutecanvas._version", "version"),
     "CuteCanvas": ("cutecanvas.canvas", "CuteCanvas"),
-    "DocumentCollection": ("cutecanvas.facade.handles", "DocumentCollection"),
-    "DocumentHandle": ("cutecanvas.facade.handles", "DocumentHandle"),
-    "DocumentPersistenceFacade": (
+    "CanvasComparison": ("cutecanvas.document", "CanvasComparison"),
+    "CanvasContentKind": ("cutecanvas.document", "CanvasContentKind"),
+    "CanvasContentReference": (
+        "cutecanvas.document",
+        "CanvasContentReference",
+    ),
+    "CanvasInteractionMode": (
+        "cutecanvas.editor.interaction_policy",
+        "CanvasInteractionMode",
+    ),
+    "CanvasDocument": ("cutecanvas.document", "CanvasDocument"),
+    "CanvasPresentation": ("cutecanvas.document", "CanvasPresentation"),
+    "CanvasPresentationKind": (
+        "cutecanvas.document",
+        "CanvasPresentationKind",
+    ),
+    "CanvasSessionSnapshot": ("cutecanvas.document", "CanvasSessionSnapshot"),
+    "CanvasViewSession": ("cutecanvas.document", "CanvasViewSession"),
+    "CanvasPresentationContext": (
+        "cutecanvas.presentation",
+        "CanvasPresentationContext",
+    ),
+    "CanvasPresentationProvider": (
+        "cutecanvas.presentation",
+        "CanvasPresentationProvider",
+    ),
+    "CanvasWorkspace": ("cutecanvas.presentation", "CanvasWorkspace"),
+    "CanvasProjectionHandle": ("cutecanvas.projection", "CanvasProjectionHandle"),
+    "CanvasProjectionRequest": ("cutecanvas.projection", "CanvasProjectionRequest"),
+    "CanvasProjectionResult": ("cutecanvas.projection", "CanvasProjectionResult"),
+    "CanvasProjectionStatus": ("cutecanvas.projection", "CanvasProjectionStatus"),
+    "ResolvedCanvasContent": ("cutecanvas.document", "ResolvedCanvasContent"),
+    "CompositionCollection": ("cutecanvas.facade.handles", "CompositionCollection"),
+    "CompositionHandle": ("cutecanvas.facade.handles", "CompositionHandle"),
+    "CompositionPersistenceFacade": (
         "cutecanvas.facade.persistence",
-        "DocumentPersistenceFacade",
+        "CompositionPersistenceFacade",
     ),
     "LayerHandle": ("cutecanvas.facade.handles", "LayerHandle"),
     "LayerEffectHandle": ("cutecanvas.facade.handles", "LayerEffectHandle"),
@@ -123,6 +187,30 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "BrushDynamics": ("cutecanvas.painting", "BrushDynamics"),
     "BrushOperation": ("cutecanvas.painting", "BrushOperation"),
     "BrushPreset": ("cutecanvas.painting", "BrushPreset"),
+    "CloneStampAlignment": (
+        "cutecanvas.painting.clone_model",
+        "CloneStampAlignment",
+    ),
+    "CloneStampFacade": (
+        "cutecanvas.facade.clone_stamp",
+        "CloneStampFacade",
+    ),
+    "CloneStampSampleMode": (
+        "cutecanvas.painting.clone_model",
+        "CloneStampSampleMode",
+    ),
+    "CloneStampSource": (
+        "cutecanvas.painting.clone_model",
+        "CloneStampSource",
+    ),
+    "CloneStampState": (
+        "cutecanvas.painting.clone_model",
+        "CloneStampState",
+    ),
+    "CloneStampTransform": (
+        "cutecanvas.painting.clone_model",
+        "CloneStampTransform",
+    ),
     "MaskInfo": ("cutecanvas.masks.workflow", "MaskInfo"),
     "PlacedAssetMode": ("cutecanvas.placed.model", "PlacedAssetMode"),
     "PlacedAssetStatus": ("cutecanvas.placed.model", "PlacedAssetStatus"),
@@ -136,7 +224,7 @@ def __getattr__(name: str) -> Any:
         value = getattr(import_module(target[0]), target[1])
     elif name in _editor_types.__all__:
         value = getattr(_editor_types, name)
-    elif name in _public_types.__all__:
+    elif name in _RENDER_TYPE_EXPORTS:
         value = getattr(_public_types, name)
     elif name in _VECTOR_TYPE_EXPORTS:
         value = getattr(_vector_types, name)

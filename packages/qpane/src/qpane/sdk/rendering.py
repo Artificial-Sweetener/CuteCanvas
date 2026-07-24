@@ -23,14 +23,52 @@ from ..rendering import (
     ViewportZoomMode,
 )
 from ..rendering.coordinates import PanelHitTest
-from ..rendering.layer_rasterization import LayerRasterizationWorker
+from ..rendering.layer_rasterization import (
+    LayerRasterizationWorker,
+    RegionRasterizationWorker,
+)
+from ..rendering.render_tile_geometry import RenderTileRequest
+from ..rendering.render_tile_types import (
+    RegionSampleSource,
+    RenderTileBatchSource,
+    RenderTileProduct,
+)
+from ..rendering.scene_coordinates import (
+    LayerCoordinateProjection,
+    LayerLocalPoint,
+    LayerSourcePoint,
+    PanelPoint,
+    SceneCoordinateProjection,
+    SceneCoordinateSystem,
+    ScenePoint,
+)
+from ..rendering.scene_region import (
+    RasterLayerRegionOverride,
+    SceneLayerRenderScope,
+    SceneRegionRasterizer,
+)
 
 __all__ = (
+    "LayerCoordinateProjection",
+    "LayerLocalPoint",
     "LayerRasterizationWorker",
+    "LayerSourcePoint",
     "PanelHitTest",
+    "PanelPoint",
     "PyramidManager",
+    "RasterLayerRegionOverride",
+    "RegionRasterizationWorker",
+    "RegionSampleSource",
+    "RenderTileBatchSource",
+    "RenderTileProduct",
+    "RenderTileRequest",
     "Renderer",
     "RenderingPresenter",
+    "SceneCoordinateProjection",
+    "SceneCoordinateSystem",
+    "SceneLayerRenderScope",
+    "ScenePoint",
+    "SceneRegionRasterizer",
     "View",
     "ViewportZoomMode",
 )

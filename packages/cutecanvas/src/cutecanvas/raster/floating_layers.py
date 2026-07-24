@@ -30,10 +30,10 @@ from ..composition.layers import (
     CompositionLayerStore,
 )
 from ..editor.floating_layers import FloatingLayerTransition
+from ..resources import ProjectResourceReference
 from ..scene.identity import editable_raster_layer_id
 from .assets import EditableRasterAssetStore
 from .color_surface import ColorRasterSnapshot
-from .source_reference import EditableRasterReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +90,7 @@ class EditableRasterFloatingLayerOwner:
         )
         instance = CompositionLayerInstance(
             layer_id=layer_id,
-            source=EditableRasterReference(raster_id),
+            source=ProjectResourceReference(raster_id),
             transform=transform,
             visible=True,
             opacity=source_layer.opacity,
@@ -121,9 +121,9 @@ class EditableRasterFloatingLayerOwner:
         if state is None:
             return False
         source = state.instance.source
-        if not isinstance(source, EditableRasterReference):
+        if not isinstance(source, ProjectResourceReference):
             return False
-        asset_present = self._assets.get(source.raster_id) is not None
+        asset_present = self._assets.get(source.resource_id) is not None
         instance = self._layers.layer(state.composition_id, state.instance.layer_id)
         return (
             asset_present and instance == state.instance
@@ -145,13 +145,13 @@ class EditableRasterFloatingLayerOwner:
             return True
         if use_after:
             source = state.instance.source
-            if not isinstance(source, EditableRasterReference):
+            if not isinstance(source, ProjectResourceReference):
                 return False
-            created_asset = self._assets.get(source.raster_id) is None
-            self._assets.restore(source.raster_id, state.snapshot)
+            created_asset = self._assets.get(source.resource_id) is None
+            self._assets.restore(source.resource_id, state.snapshot)
             if not self._layers.add_layer(state.composition_id, state.instance):
                 if created_asset:
-                    self._assets.remove(source.raster_id)
+                    self._assets.remove(source.resource_id)
                 return False
         else:
             if not self.matches(transition, use_after=True):

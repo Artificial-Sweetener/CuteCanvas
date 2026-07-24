@@ -63,6 +63,7 @@ class ColorRasterSurface:
         *,
         bounds: RasterBounds | None = None,
         extent_policy: RasterExtentPolicy = RasterExtentPolicy.FIXED,
+        changed: Callable[[], None] | None = None,
     ) -> None:
         """Detach normalized image storage and validate local bounds."""
         if image.isNull():
@@ -77,13 +78,19 @@ class ColorRasterSurface:
         self._image: QImage | None = normalized_image
         self._tile_images: dict[RasterBounds, QImage] = {}
         self._extent_policy = RasterExtentPolicy(extent_policy)
+        self._changed = changed
         self.generation = 0
         self.structure_generation = 0
         self._content_bounds_generation = -1
         self._content_bounds_cache: RasterBounds | None = None
 
     @classmethod
-    def from_sparse_snapshot(cls, snapshot: SparseRasterSnapshot) -> ColorRasterSurface:
+    def from_sparse_snapshot(
+        cls,
+        snapshot: SparseRasterSnapshot,
+        *,
+        changed: Callable[[], None] | None = None,
+    ) -> ColorRasterSurface:
         """Build a surface without materializing a sparse snapshot's envelope."""
         if snapshot.bounds is None or snapshot.channels != 4:
             raise ValueError("color raster snapshots require bounds and four channels")
@@ -93,6 +100,7 @@ class ColorRasterSurface:
         surface.replace_with_sparse_snapshot(snapshot)
         surface.generation = 0
         surface.structure_generation = 0
+        surface._changed = changed
         return surface
 
     @property
@@ -166,6 +174,7 @@ class ColorRasterSurface:
             self._tile_images.clear()
             self.generation += 1
             self.structure_generation += 1
+        self._publish_changed()
 
     def replace_with_snapshot(self, snapshot: ColorRasterSnapshot) -> None:
         """Replace complete storage from validated detached state."""
@@ -179,6 +188,7 @@ class ColorRasterSurface:
             self._extent_policy = snapshot.extent_policy
             self.generation += 1
             self.structure_generation += 1
+        self._publish_changed()
 
     def set_extent_policy(self, policy: RasterExtentPolicy) -> bool:
         """Replace write policy without changing pixels or bounds."""
@@ -188,7 +198,8 @@ class ColorRasterSurface:
                 return False
             self._extent_policy = normalized
             self.structure_generation += 1
-            return True
+        self._publish_changed()
+        return True
 
     def capture_patch(self, bounds: RasterBounds) -> np.ndarray | None:
         """Return detached BGRA pixels for a contained local patch."""
@@ -202,8 +213,10 @@ class ColorRasterSurface:
         with self._lock:
             if not self._bounds.contains(bounds):
                 return None
-            alpha = self._grid.read(bounds)[:, :, 3]
-            return np.where(alpha != 0, np.uint8(255), np.uint8(0))
+            alpha = self._grid.read_channel(bounds, 3)
+            np.not_equal(alpha, 0, out=alpha)
+            np.multiply(alpha, 255, out=alpha)
+            return alpha
 
     def content_bounds(self) -> RasterBounds | None:
         """Return revision-cached bounds of nontransparent pixels."""
@@ -231,7 +244,8 @@ class ColorRasterSurface:
             self._tile_images.clear()
             self.generation += 1
             self.structure_generation += 1
-            return True
+        self._publish_changed()
+        return True
 
     def ensure_bounds(self, bounds: RasterBounds) -> bool:
         """Enlarge logical unbounded extent without materializing transparent gaps."""
@@ -241,7 +255,8 @@ class ColorRasterSurface:
             self._bounds = self._bounds.united(bounds)
             self._image = None
             self.structure_generation += 1
-            return True
+        self._publish_changed()
+        return True
 
     def sparse_tiles(
         self,
@@ -343,7 +358,9 @@ class ColorRasterSurface:
                         x : x + bounds.width,
                     ] = pixels
                 self.generation += 1
-            return changed
+        if changed:
+            self._publish_changed()
+        return changed
 
     def restore_patch(self, bounds: RasterBounds, pixels: np.ndarray) -> bool:
         """Restore detached BGRA patch pixels into canonical storage."""
@@ -376,6 +393,11 @@ class ColorRasterSurface:
             )
             if sample_bounds.intersection(bounds) is not None:
                 self._tile_images.pop(core_bounds, None)
+
+    def _publish_changed(self) -> None:
+        """Publish one completed surface mutation outside the storage lock."""
+        if self._changed is not None:
+            self._changed()
 
 
 def reframe_color_raster_snapshot(

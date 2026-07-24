@@ -26,8 +26,6 @@ from cutecanvas import (
     CacheMode,
     Config,
     DiagnosticsDomain,
-    PlaceholderScaleMode,
-    ZoomMode,
 )
 
 
@@ -71,10 +69,6 @@ class SectionSpec:
 
 
 CACHE_MODE_OPTIONS: tuple[str, ...] = tuple(mode.value for mode in CacheMode)
-PLACEHOLDER_SCALE_OPTIONS: tuple[str, ...] = tuple(
-    mode.value for mode in PlaceholderScaleMode
-)
-PLACEHOLDER_ZOOM_OPTIONS: tuple[str, ...] = tuple(mode.value for mode in ZoomMode)
 SAM_DOWNLOAD_MODE_OPTIONS: tuple[str, ...] = ("background", "blocking", "disabled")
 DIAGNOSTIC_DOMAIN_OPTIONS: tuple[tuple[str, str, str, str | None], ...] = (
     (
@@ -459,98 +453,6 @@ VIEWER_SMOOTH_ZOOM_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="core",
     ),
 )
-PLACEHOLDER_FIELDS: tuple[FieldSpec, ...] = (
-    FieldSpec(
-        path="placeholder.source",
-        kind="path",
-        placeholder=":/app/placeholder.png or C:/path/to/image.png",
-        tooltip="Resource (qrc) URL or filesystem path for the idle placeholder. Leave blank to disable.",
-        label="Placeholder Source",
-    ),
-    FieldSpec(
-        path="placeholder.scale_mode",
-        kind="combo",
-        options=PLACEHOLDER_SCALE_OPTIONS,
-        tooltip="How placeholder size is interpreted. Auto uses image pixels; logical_fit uses Qt logical pixels; physical_fit uses screen device pixels; relative_fit scales the auto-fit zoom.",
-        label="Placeholder Sizing",
-    ),
-    FieldSpec(
-        path="placeholder.panzoom_enabled",
-        kind="checkbox",
-        tooltip="Allow pan/zoom while the placeholder is displayed.",
-        label="Pan/Zoom Enabled",
-    ),
-    FieldSpec(
-        path="placeholder.zoom_mode",
-        kind="combo",
-        options=PLACEHOLDER_ZOOM_OPTIONS,
-        tooltip="Zoom policy to apply to the placeholder image.",
-        label="Zoom Mode",
-    ),
-    FieldSpec(
-        path="placeholder.locked_zoom",
-        kind="double",
-        minimum=0.0,
-        maximum=20.0,
-        step=0.05,
-        decimals=3,
-        tooltip="Zoom value used when zoom mode is locked_zoom (set to Disabled to clear).",
-        label="Locked Zoom",
-        special_value_text="Disabled",
-    ),
-    FieldSpec(
-        path="placeholder.scale_factor",
-        kind="double",
-        minimum=0.01,
-        maximum=10.0,
-        step=0.05,
-        decimals=3,
-        tooltip="Multiplier applied to the auto-fit zoom when sizing mode is relative_fit (1.0 = fit).",
-        label="Scale Factor",
-    ),
-    FieldSpec(
-        path="placeholder.display_size",
-        kind="size",
-        minimum=1,
-        maximum=32768,
-        step=1,
-        tooltip="Target width/height used when sizing is logical/physical. Units match the sizing mode.",
-        label="Target Size (w × h)",
-    ),
-    FieldSpec(
-        path="placeholder.min_display_size",
-        kind="size",
-        minimum=1,
-        maximum=32768,
-        step=1,
-        tooltip="Minimum on-screen size when sizing is logical/physical. Units match the sizing mode.",
-        label="Min Size (w × h)",
-    ),
-    FieldSpec(
-        path="placeholder.max_display_size",
-        kind="size",
-        minimum=1,
-        maximum=32768,
-        step=1,
-        tooltip="Maximum on-screen size when sizing is logical/physical. Units match the sizing mode.",
-        label="Max Size (w × h)",
-    ),
-    FieldSpec(
-        path="placeholder.locked_size",
-        kind="size",
-        minimum=1,
-        maximum=32768,
-        step=1,
-        tooltip="Target width/height when zoom mode is locked_size.",
-        label="Locked Size (px)",
-    ),
-    FieldSpec(
-        path="placeholder.drag_out_enabled",
-        kind="checkbox",
-        tooltip="Permit drag-out while the placeholder is visible.",
-        label="Drag-out Enabled",
-    ),
-)
 MASK_EDITING_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(
         path="default_brush_size",
@@ -743,7 +645,6 @@ CONFIG_DIALOG_SECTIONS: tuple[SectionSpec, ...] = (
             FieldGroupSpec(title="Prefetching", fields=VIEWER_PREFETCH_FIELDS),
             FieldGroupSpec(title="Viewport", fields=VIEWER_VIEWPORT_FIELDS),
             FieldGroupSpec(title="Smooth Zoom", fields=VIEWER_SMOOTH_ZOOM_FIELDS),
-            FieldGroupSpec(title="Placeholder", fields=PLACEHOLDER_FIELDS),
         ),
     ),
     SectionSpec(

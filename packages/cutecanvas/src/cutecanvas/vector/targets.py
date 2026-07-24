@@ -23,11 +23,12 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QTransform
+from qpane.sdk.rendering import LayerSourcePoint, PanelPoint, SceneCoordinateSystem
 from qpane.sdk.scene import LayerTransform, SceneDescriptor
 
 from ..composition.layers import CompositionLayerStore
+from ..resources import ProjectResourceReference
 from .effects import VectorMaskEffect
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 
 
@@ -53,16 +54,14 @@ class VectorAuthoringTargetResolver:
         layers: CompositionLayerStore,
         current_composition_id: Callable[[], uuid.UUID | None],
         current_scene: Callable[[], SceneDescriptor | None],
-        panel_to_source: Callable[[uuid.UUID, uuid.UUID, QPointF], QPointF | None],
-        source_to_panel: Callable[[uuid.UUID, uuid.UUID, QPointF], QPointF | None],
+        coordinates: SceneCoordinateSystem,
     ) -> None:
         """Bind composition, scene, coordinate, and vector owners."""
         self._assets = assets
         self._layers = layers
         self._current_composition_id = current_composition_id
         self._current_scene = current_scene
-        self._panel_to_source = panel_to_source
-        self._source_to_panel = source_to_panel
+        self._coordinates = coordinates
 
     def resolve(self, layer_id: uuid.UUID) -> VectorAuthoringTarget | None:
         """Resolve a direct vector layer or a layer carrying a vector mask."""
@@ -73,7 +72,10 @@ class VectorAuthoringTargetResolver:
         instance = self._layers.layer(composition_id, layer_id)
         if instance is None:
             return None
-        if isinstance(instance.source, VectorDocumentReference):
+        if (
+            isinstance(instance.source, ProjectResourceReference)
+            and self._assets.get(instance.source.resource_id) is not None
+        ):
             source = instance.source
             mapping = LayerTransform()
             is_mask = False
@@ -91,13 +93,13 @@ class VectorAuthoringTargetResolver:
             source = effect.source
             mapping = effect.transform
             is_mask = True
-        if self._assets.get(source.vector_id) is None:
+        if self._assets.get(source.resource_id) is None:
             return None
         return VectorAuthoringTarget(
             composition_id,
             scene.scene_id,
             layer_id,
-            source.vector_id,
+            source.resource_id,
             mapping,
             is_mask,
         )
@@ -108,15 +110,15 @@ class VectorAuthoringTargetResolver:
         panel_point: QPointF,
     ) -> QPointF | None:
         """Map panel input through the selected layer into vector document space."""
-        layer_point = self._panel_to_source(
+        layer_point = self._coordinates.panel_to_layer_source(
             target.scene_id,
             target.layer_id,
-            panel_point,
+            PanelPoint.from_qt(panel_point),
         )
         return (
             None
             if layer_point is None
-            else target.document_to_layer.inverse_map(layer_point)
+            else target.document_to_layer.inverse_map(layer_point.to_qt())
         )
 
     def document_to_panel(
@@ -125,11 +127,14 @@ class VectorAuthoringTargetResolver:
         document_point: QPointF,
     ) -> QPointF | None:
         """Map one vector-document point through its selected layer to panel space."""
-        return self._source_to_panel(
-            target.scene_id,
-            target.layer_id,
-            target.document_to_layer.map_point(document_point),
+        panel = self._coordinates.layer_source_to_panel(
+            LayerSourcePoint.from_qt(
+                target.scene_id,
+                target.layer_id,
+                target.document_to_layer.map_point(document_point),
+            )
         )
+        return None if panel is None else panel.to_qt()
 
     def document_to_panel_transform(
         self,

@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
@@ -35,20 +34,3 @@ class LayerSourceReference(Protocol):
     def resource_id(self) -> uuid.UUID:
         """Return the durable source identity shared by layer instances."""
         ...
-
-
-@dataclass(frozen=True, slots=True)
-class PlaceholderImageReference:
-    """Identify one internal placeholder image source."""
-
-    source_id: uuid.UUID
-
-    @property
-    def kind(self) -> str:
-        """Return the stable placeholder source kind."""
-        return "placeholder-image"
-
-    @property
-    def resource_id(self) -> uuid.UUID:
-        """Return the placeholder source identity."""
-        return self.source_id

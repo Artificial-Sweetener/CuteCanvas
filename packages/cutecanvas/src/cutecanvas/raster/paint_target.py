@@ -17,10 +17,7 @@
 
 from __future__ import annotations
 
-import math
-import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
 
 import numpy as np
 from PySide6.QtGui import QColor
@@ -30,10 +27,8 @@ from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from cutecanvas.fill.sources import SparseFloodFillPixelSource
 from cutecanvas.types import RasterExtentPolicy
 
-from ..composition.edit_controller import CompositionEditController
 from ..painting import (
     BrushCompositor,
-    BrushDab,
     BrushDabEngine,
     BrushDabRegionPlanner,
     BrushPreset,
@@ -44,86 +39,19 @@ from ..painting import (
     PaintTargetContext,
 )
 from ..painting.rendering import render_color_dabs
-from ..selection import LayerCoverageProjector, PixelSelectionService
+from ..resources import ProjectResourceReference
+from ..selection import PixelSelectionService
 from .assets import EditableRasterAssetStore
 from .color_surface import ColorRasterSurface
+from .paint_geometry import (
+    PAINT_TILE_SIZE,
+    blend_constraint,
+    expanded_surface_bounds,
+    group_dabs_by_tile,
+)
+from .paint_history import RasterPaintEdit, RasterPaintHistory, RasterPaintPatch
 from .presentation_state import EditableRasterPresentationState
-from .source_reference import EditableRasterReference
-
-_PAINT_TILE_SIZE = 128
-_EXPANSION_MARGIN = 256
-
-
-@dataclass(frozen=True, slots=True)
-class RasterPaintPatch:
-    """Retain one bounded changed tile for exact paint history."""
-
-    bounds: RasterBounds
-    before: np.ndarray
-    after: np.ndarray
-
-    def __post_init__(self) -> None:
-        """Detach and validate premultiplied tile pixels."""
-        expected = (self.bounds.height, self.bounds.width, 4)
-        before = np.array(self.before, copy=True, order="C")
-        after = np.array(self.after, copy=True, order="C")
-        if (
-            before.dtype != np.uint8
-            or after.dtype != np.uint8
-            or before.shape != expected
-            or after.shape != expected
-        ):
-            raise ValueError("paint patch pixels must match BGRA tile bounds")
-        before.flags.writeable = False
-        after.flags.writeable = False
-        object.__setattr__(self, "before", before)
-        object.__setattr__(self, "after", after)
-
-    @property
-    def retained_bytes(self) -> int:
-        """Return exact history bytes retained by this tile."""
-        return int(self.before.nbytes + self.after.nbytes)
-
-
-@dataclass(frozen=True, slots=True)
-class RasterPaintEdit:
-    """Capture one complete paint stroke as bounded tile transitions."""
-
-    scene_id: uuid.UUID
-    layer_id: uuid.UUID
-    raster_id: uuid.UUID
-    before_bounds: RasterBounds
-    after_bounds: RasterBounds
-    patches: tuple[RasterPaintPatch, ...]
-
-    @property
-    def scope_id(self) -> uuid.UUID:
-        """Return the scene history scope owning this stroke."""
-        return self.scene_id
-
-    @property
-    def retained_bytes(self) -> int:
-        """Return exact retained patch bytes plus compact metadata."""
-        return 256 + sum(patch.retained_bytes for patch in self.patches)
-
-    @property
-    def retained_resources(self) -> tuple[EditableRasterReference, ...]:
-        """Retain the edited raster while this command remains in history."""
-        return (EditableRasterReference(self.raster_id),)
-
-
-@dataclass(slots=True)
-class _RasterPaintSession:
-    """Own one unresolved stroke's original tiles and selection constraint."""
-
-    scene_id: uuid.UUID
-    layer_id: uuid.UUID
-    raster_id: uuid.UUID
-    before_bounds: RasterBounds
-    constraint: CoverageSnapshot | None
-    constrained: bool
-    coordinates: BrushSourceCoordinateSession
-    before_tiles: dict[RasterBounds, np.ndarray] = field(default_factory=dict)
+from .stroke_session import RasterStrokeSession, selection_constraint
 
 
 class EditableRasterPaintTargetOwner:
@@ -134,7 +62,7 @@ class EditableRasterPaintTargetOwner:
         *,
         assets: EditableRasterAssetStore,
         selections: PixelSelectionService,
-        edits: CompositionEditController,
+        history: RasterPaintHistory,
         changed: Callable[[RasterBounds], None],
         structure_changed: Callable[[], None],
         presentation_state: EditableRasterPresentationState,
@@ -143,27 +71,19 @@ class EditableRasterPaintTargetOwner:
         """Bind authoritative pixels, selection, history, and publication."""
         self._assets = assets
         self._selections = selections
-        self._edits = edits
+        self._history = history
         self._changed = changed
         self._structure_changed = structure_changed
         self._presentation_state = presentation_state
-        self._projector = LayerCoverageProjector()
         self._dabs = BrushDabEngine()
         self._compiler = BrushStrokeCompiler()
         self._regions = BrushDabRegionPlanner()
         self._compositor = BrushCompositor() if compositor is None else compositor
-        self._session: _RasterPaintSession | None = None
-        edits.register_handler(
-            RasterPaintEdit,
-            undo=self._undo,
-            redo=self._redo,
-        )
+        self._session: RasterStrokeSession | None = None
 
     def supports(self, target: PaintTargetContext) -> bool:
         """Return whether ``target`` references editable premultiplied pixels."""
-        return target.layer is not None and isinstance(
-            target.layer.source, EditableRasterReference
-        )
+        return target.layer is not None and self._asset(target.layer) is not None
 
     def begin(self, target: PaintTargetContext) -> bool:
         """Capture structure and projected selection for one paint transaction."""
@@ -173,29 +93,22 @@ class EditableRasterPaintTargetOwner:
             return False
         asset = self._asset(layer)
         source = layer.source
-        if asset is None or not isinstance(source, EditableRasterReference):
+        if asset is None or not isinstance(source, ProjectResourceReference):
             return False
         if self._session is not None:
             self._cancel_active_session()
-        scene_selection = self._selections.state(scene.scene_id).coverage
-        constraint = None
-        if (
-            scene_selection is not None
-            and layer.transform is not None
-            and layer.raster_bounds is not None
-        ):
-            constraint = self._projector.project_to_layer(
-                scene_selection,
-                layer.transform,
-                layer.raster_bounds,
-            )
-        self._session = _RasterPaintSession(
+        constraint, constrained = selection_constraint(
+            self._selections,
+            scene,
+            layer,
+        )
+        self._session = RasterStrokeSession(
             scene.scene_id,
             layer.layer_id,
-            source.raster_id,
+            source.resource_id,
             asset.surface.bounds,
             constraint,
-            scene_selection is not None,
+            constrained,
             BrushSourceCoordinateSession(
                 (
                     float(asset.surface.bounds.x),
@@ -203,7 +116,7 @@ class EditableRasterPaintTargetOwner:
                 )
             ),
         )
-        self._presentation_state.begin(source.raster_id)
+        self._presentation_state.begin(source.resource_id)
         return True
 
     def apply(
@@ -235,13 +148,13 @@ class EditableRasterPaintTargetOwner:
         if requested is None:
             return False
         if surface.extent_policy is not RasterExtentPolicy.FIXED:
-            expanded = _expanded_surface_bounds(surface.bounds, requested)
+            expanded = expanded_surface_bounds(surface.bounds, requested)
             if surface.ensure_bounds(expanded):
                 self._structure_changed()
         writable = surface.bounds.intersection(requested)
         if writable is None:
             return False
-        grouped = _group_dabs_by_tile(dabs, writable)
+        grouped = group_dabs_by_tile(dabs, writable)
         changed_tiles: list[RasterBounds] = []
         for canonical_tile, tile_dabs in grouped.items():
             tile = canonical_tile.intersection(writable)
@@ -262,9 +175,9 @@ class EditableRasterPaintTargetOwner:
                 color=color,
                 compositor=self._compositor,
             )
-            constraint = self._constraint_pixels(session, tile)
+            constraint = session.constraint_pixels(tile)
             if constraint is not None:
-                after = _blend_constraint(before, after, constraint)
+                after = blend_constraint(before, after, constraint)
             if np.array_equal(before, after):
                 continue
             if surface.restore_patch(tile, after):
@@ -302,7 +215,7 @@ class EditableRasterPaintTargetOwner:
                 asset.surface.set_bounds(session.before_bounds)
                 self._structure_changed()
             return False
-        self._edits.record_applied(
+        self._history.record_applied(
             RasterPaintEdit(
                 session.scene_id,
                 session.layer_id,
@@ -373,7 +286,7 @@ class EditableRasterPaintTargetOwner:
         layer = target.layer
         asset = None if layer is None else self._asset(layer)
         source = None if layer is None else layer.source
-        if asset is None or not isinstance(source, EditableRasterReference):
+        if asset is None or not isinstance(source, ProjectResourceReference):
             return False
         if self._session is not None:
             self._cancel_active_session()
@@ -382,7 +295,7 @@ class EditableRasterPaintTargetOwner:
         if (
             surface.extent_policy is not RasterExtentPolicy.FIXED
             and surface.ensure_bounds(
-                _expanded_surface_bounds(surface.bounds, coverage.bounds)
+                expanded_surface_bounds(surface.bounds, coverage.bounds)
             )
         ):
             self._structure_changed()
@@ -390,7 +303,7 @@ class EditableRasterPaintTargetOwner:
         if writable is None:
             return False
         patches: list[RasterPaintPatch] = []
-        for tile in _tiles_covering(writable, _PAINT_TILE_SIZE):
+        for tile in _tiles_covering(writable, PAINT_TILE_SIZE):
             before = surface.capture_region(tile)
             mask = _coverage_region(coverage, tile)
             after = _render_coverage_fill(before, mask, color, mode)
@@ -403,11 +316,11 @@ class EditableRasterPaintTargetOwner:
                 surface.set_bounds(before_bounds)
                 self._structure_changed()
             return False
-        self._edits.record_applied(
+        self._history.record_applied(
             RasterPaintEdit(
                 target.scene.scene_id,
                 layer.layer_id,
-                source.raster_id,
+                source.resource_id,
                 before_bounds,
                 surface.bounds,
                 tuple(patches),
@@ -415,47 +328,10 @@ class EditableRasterPaintTargetOwner:
         )
         return True
 
-    def _undo(self, command: object) -> bool:
-        """Restore the exact raster state preceding one paint stroke."""
-        return self._restore_edit(command, use_after=False)
-
-    def _redo(self, command: object) -> bool:
-        """Restore the exact raster state following one paint stroke."""
-        return self._restore_edit(command, use_after=True)
-
-    def _restore_edit(self, command: object, *, use_after: bool) -> bool:
-        """Replay one paint command directly through its retained source."""
-        if not isinstance(command, RasterPaintEdit):
-            return False
-        asset = self._assets.get(command.raster_id)
-        if asset is None:
-            return False
-        surface = asset.surface
-        target_bounds = command.after_bounds if use_after else command.before_bounds
-        structure_changed = surface.set_bounds(target_bounds)
-        for patch in command.patches:
-            overlap = target_bounds.intersection(patch.bounds)
-            if overlap is None:
-                continue
-            pixels = patch.after if use_after else patch.before
-            source_x = overlap.x - patch.bounds.x
-            source_y = overlap.y - patch.bounds.y
-            surface.restore_patch(
-                overlap,
-                pixels[
-                    source_y : source_y + overlap.height,
-                    source_x : source_x + overlap.width,
-                ],
-            )
-            self._changed(overlap)
-        if structure_changed:
-            self._structure_changed()
-        return True
-
     def _restore_session(
         self,
         surface: ColorRasterSurface,
-        session: _RasterPaintSession,
+        session: RasterStrokeSession,
     ) -> bool:
         """Restore an unresolved transaction without entering history."""
         structure_changed = surface.set_bounds(session.before_bounds)
@@ -489,35 +365,9 @@ class EditableRasterPaintTargetOwner:
         asset = self._assets.get(session.raster_id)
         return bool(asset is not None and self._restore_session(asset.surface, session))
 
-    def _constraint_pixels(
-        self, session: _RasterPaintSession, bounds: RasterBounds
-    ) -> np.ndarray | None:
-        """Return local selection coverage for one tile, including empty selection."""
-        if not session.constrained:
-            return None
-        pixels = np.zeros((bounds.height, bounds.width), dtype=np.uint8)
-        constraint = session.constraint
-        if constraint is None or constraint.bounds is None:
-            return pixels
-        overlap = constraint.bounds.intersection(bounds)
-        if overlap is None:
-            return pixels
-        source_x = overlap.x - constraint.bounds.x
-        source_y = overlap.y - constraint.bounds.y
-        target_x = overlap.x - bounds.x
-        target_y = overlap.y - bounds.y
-        pixels[
-            target_y : target_y + overlap.height,
-            target_x : target_x + overlap.width,
-        ] = constraint.pixels[
-            source_y : source_y + overlap.height,
-            source_x : source_x + overlap.width,
-        ]
-        return pixels
-
     def _matching_session(
         self, scene: SceneDescriptor, layer: LayerDescriptor
-    ) -> _RasterPaintSession | None:
+    ) -> RasterStrokeSession | None:
         """Return the active session only for its exact instance."""
         session = self._session
         if session is None:
@@ -531,74 +381,9 @@ class EditableRasterPaintTargetOwner:
         source = layer.source
         return (
             None
-            if not isinstance(source, EditableRasterReference)
-            else self._assets.get(source.raster_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._assets.get(source.resource_id)
         )
-
-
-def _expanded_surface_bounds(
-    current: RasterBounds, requested: RasterBounds
-) -> RasterBounds:
-    """Grow geometrically so long edge strokes avoid repeated full reframing."""
-    if current.contains(requested):
-        return current
-    horizontal_slack = max(_EXPANSION_MARGIN, current.width // 2)
-    vertical_slack = max(_EXPANSION_MARGIN, current.height // 2)
-    left = requested.x - horizontal_slack if requested.x < current.x else current.x
-    top = requested.y - vertical_slack if requested.y < current.y else current.y
-    right = (
-        requested.right + horizontal_slack
-        if requested.right > current.right
-        else current.right
-    )
-    bottom = (
-        requested.bottom + vertical_slack
-        if requested.bottom > current.bottom
-        else current.bottom
-    )
-    return RasterBounds(left, top, right - left, bottom - top)
-
-
-def _group_dabs_by_tile(
-    dabs: tuple[BrushDab, ...], writable: RasterBounds
-) -> dict[RasterBounds, tuple[BrushDab, ...]]:
-    """Spatially bin dabs so long diagonal strokes never allocate their AABB."""
-    grouped: dict[RasterBounds, list[BrushDab]] = {}
-    for dab in dabs:
-        radius = dab.diameter / 2.0 + 1.0
-        left = math.floor((dab.center[0] - radius) / _PAINT_TILE_SIZE)
-        top = math.floor((dab.center[1] - radius) / _PAINT_TILE_SIZE)
-        right = math.floor((dab.center[0] + radius) / _PAINT_TILE_SIZE)
-        bottom = math.floor((dab.center[1] + radius) / _PAINT_TILE_SIZE)
-        for tile_y in range(top, bottom + 1):
-            for tile_x in range(left, right + 1):
-                tile = RasterBounds(
-                    tile_x * _PAINT_TILE_SIZE,
-                    tile_y * _PAINT_TILE_SIZE,
-                    _PAINT_TILE_SIZE,
-                    _PAINT_TILE_SIZE,
-                )
-                if tile.intersection(writable) is not None:
-                    grouped.setdefault(tile, []).append(dab)
-    return {bounds: tuple(values) for bounds, values in grouped.items()}
-
-
-def _blend_constraint(
-    before: np.ndarray,
-    painted: np.ndarray,
-    constraint: np.ndarray,
-) -> np.ndarray:
-    """Blend premultiplied paint through one soft selection constraint."""
-    coverage = constraint.astype(np.uint16)[:, :, np.newaxis]
-    inverse = 255 - coverage
-    return (
-        (
-            before.astype(np.uint16) * inverse
-            + painted.astype(np.uint16) * coverage
-            + 127
-        )
-        // 255
-    ).astype(np.uint8)
 
 
 def _tiles_covering(

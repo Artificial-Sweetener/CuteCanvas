@@ -32,9 +32,9 @@ from cutecanvas.scene.pixel_fragments import (
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.types import RasterExtentPolicy
 
+from ..resources import ProjectResourceReference
 from .assets import EditableRasterAssetStore
 from .pixel_translation import ColorPixelTranslator
-from .source_reference import EditableRasterReference
 
 
 class EditableRasterPixelMutationOwner:
@@ -54,12 +54,17 @@ class EditableRasterPixelMutationOwner:
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
         """Return whether ``layer`` references an editable raster asset."""
-        return isinstance(layer.source, EditableRasterReference)
+        return self._asset(layer) is not None
 
     def extent_policy(self, layer: LayerDescriptor) -> RasterExtentPolicy | None:
         """Return the color surface's authoritative extent policy."""
         asset = self._asset(layer)
         return None if asset is None else asset.surface.extent_policy
+
+    def revision_token(self, layer: LayerDescriptor) -> object | None:
+        """Return the synchronized color-surface revision tuple."""
+        asset = self._asset(layer)
+        return None if asset is None else asset.surface.revisions()
 
     def content_coverage(
         self,
@@ -285,6 +290,6 @@ class EditableRasterPixelMutationOwner:
         source = layer.source
         return (
             None
-            if not isinstance(source, EditableRasterReference)
-            else self._assets.get(source.raster_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._assets.get(source.resource_id)
         )

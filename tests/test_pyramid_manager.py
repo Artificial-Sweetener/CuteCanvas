@@ -27,10 +27,11 @@ import pytest
 from cutecanvas import Config
 from PySide6.QtGui import QImage, Qt
 from qpane.rendering import ImagePyramid, PyramidManager, PyramidStatus
-from qpane.scene.identity import SourceRenderAssetKey, catalog_source_asset_key
+from qpane.scene.identity import SourceRenderAssetKey
 
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
+from tests.helpers.render_plan import make_source_key
 
 
 class _DummyExecutor:
@@ -74,11 +75,7 @@ def _asset_key(
     """Return a default-scene asset key for pyramid tests."""
     if image_id is None:
         image_id = uuid.uuid4()
-    return catalog_source_asset_key(
-        image_id,
-        revision=revision,
-        source_path=source_path,
-    )
+    return make_source_key(image_id, source_path, revision=revision)
 
 
 @pytest.mark.usefixtures("qapp")

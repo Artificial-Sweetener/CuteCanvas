@@ -17,9 +17,13 @@
 
 from __future__ import annotations
 
-import uuid
-
-from cutecanvas import CuteCanvas, RasterExtentPolicy, VectorShapeKind, VectorStyle
+from cutecanvas import (
+    CuteCanvas,
+    LayerPolicy,
+    RasterExtentPolicy,
+    VectorShapeKind,
+    VectorStyle,
+)
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPen
 
@@ -27,10 +31,17 @@ from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPen
 def seed_welcome_document(canvas: CuteCanvas) -> None:
     """Create a layered starter composition through the public editor facade."""
     image = _background_image(QSize(1600, 1000))
-    image_id = uuid.uuid4()
-    canvas.setImagesByID(
-        CuteCanvas.imageMapFromLists((image,), ids=(image_id,)),
-        image_id,
+    canvas.createCompositionFromImage(
+        image,
+        title="Welcome",
+        label="Background",
+        interaction=LayerPolicy(
+            selectable=True,
+            movable=True,
+            pixel_editable=False,
+            reorderable=True,
+            removable=True,
+        ),
     )
     scene = canvas.currentScene()
     if scene is None:

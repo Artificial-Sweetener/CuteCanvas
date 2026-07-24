@@ -47,6 +47,7 @@ class FloatingPixelSession:
     lift: RasterPixelLift
     selected_layer: SceneLayerSelection
     extent_policy: RasterExtentPolicy
+    source_revision: object
     cut_source: bool
     session_id: uuid.UUID = field(default_factory=uuid.uuid4)
     delta: tuple[int, int] = (0, 0)
@@ -76,6 +77,7 @@ class FloatingPixelSession:
             lift=lift,
             selected_layer=selected_layer,
             extent_policy=target.extent_policy,
+            source_revision=target.source_revision,
             cut_source=not copy,
         )
 

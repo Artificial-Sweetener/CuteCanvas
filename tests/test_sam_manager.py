@@ -32,12 +32,30 @@ from cutecanvas.masks.generated_edits import MaskGeneratedEditService
 from cutecanvas.masks.mask import MaskAssetStore, MaskLayer
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.projection import MaskCanvasProjectionService
+from cutecanvas.resources import ProjectResourceStore
 from cutecanvas.sam.manager import SamManager, SamWorker
 from PySide6.QtGui import QColor, QImage
 
 from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
 
 DEFAULT_CHECKPOINT = Path("sam-checkpoint.pt")
+
+
+class _DeferredWorkerResult:
+    """Record deferred executor completions from direct manager callbacks."""
+
+    def __init__(self) -> None:
+        self.completions: list[tuple[bool, object | None]] = []
+
+    def complete_executor(
+        self,
+        success: bool,
+        payload: object | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        """Record one result-owner completion."""
+        del error
+        self.completions.append((success, payload))
 
 
 def _touch_checkpoint(path: Path) -> Path:
@@ -54,6 +72,21 @@ def test_prepare_image_rgb_preserves_channels():
     assert rgb.shape == (1, 2, 3)
     assert rgb[0, 0, :].tolist() == [10, 20, 30]
     assert rgb[0, 1, :].tolist() == [10, 20, 30]
+
+
+@pytest.mark.usefixtures("qapp")
+def test_prepare_image_rgb_does_not_detach_normalized_source() -> None:
+    """SAM preparation must not mutate or detach shared large-image storage."""
+    image = QImage(64, 32, QImage.Format_RGBA8888)
+    image.fill(QColor(10, 20, 30, 255))
+    shared = QImage(image)
+    cache_key = image.cacheKey()
+
+    rgb = SamWorker._prepare_image_rgb(shared)
+
+    assert rgb.shape == (32, 64, 3)
+    assert image.cacheKey() == cache_key
+    assert shared.cacheKey() == cache_key
 
 
 def test_generate_mask_emits_none_when_predictor_missing():
@@ -95,18 +128,20 @@ def test_generate_mask_emits_none_when_service_returns_none(monkeypatch):
 
 def test_worker_error_emits_failure_signal():
     manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
+    worker = _DeferredWorkerResult()
     failures: list[tuple[uuid.UUID, str]] = []
     manager.predictorLoadFailed.connect(
         lambda path, message: failures.append((path, message))
     )
     image_id = uuid.uuid4()
-    manager._on_worker_error(image_id, "boom")
+    manager._on_worker_error(worker, image_id, "boom")
     assert failures == [(image_id, "boom")]
+    assert worker.completions == [(False, (image_id, "boom"))]
 
 
 @pytest.mark.usefixtures("qapp")
 def test_mask_controller_handles_none_mask():
-    mask_manager = MaskAssetStore()
+    mask_manager = MaskAssetStore(ProjectResourceStore())
     controller = MaskController(
         mask_manager,
         lambda point: point,
@@ -190,10 +225,63 @@ def test_requestPredictor_queues_executor(monkeypatch, qapp, tmp_path):
     pending = list(executor.pending_tasks())
     assert pending and pending[0].handle.category == "sam"
     executor.run_task(pending[0].handle.task_id)
+    assert executor.active_counts() == {"sam": 1}
+    assert executor.finished == []
     qapp.processEvents()
     assert executor.finished
     assert manager.getPredictor(image_id) is not None
     manager.shutdown()
+
+
+@pytest.mark.usefixtures("qapp")
+def test_predictor_eviction_finishes_before_native_slot_is_released(
+    monkeypatch,
+    qapp,
+    tmp_path,
+) -> None:
+    """Cache teardown must finish before another shared-model job can start."""
+    executor = StubExecutor()
+    checkpoint = _touch_checkpoint(tmp_path / "sam-checkpoint.pt")
+    manager = SamManager(
+        executor=executor,
+        checkpoint_path=checkpoint,
+        cache_limit=1,
+    )
+
+    class _FakePredictor:
+        def set_image(self, image: np.ndarray) -> None:
+            self.image = image
+
+    monkeypatch.setattr(
+        sam.service,
+        "load_predictor",
+        lambda checkpoint_path, device="cpu": _FakePredictor(),
+    )
+    image = QImage(8, 8, QImage.Format_ARGB32)
+    image.fill(QColor("white"))
+    first_id = uuid.uuid4()
+    second_id = uuid.uuid4()
+    retained_during_eviction: list[int] = []
+    manager.predictorRemoved.connect(
+        lambda _image_id: retained_during_eviction.append(
+            len(manager._retired_predictors)
+        )
+    )
+
+    manager.requestPredictor(image, first_id)
+    first_task = next(iter(executor.pending_tasks()))
+    executor.run_task(first_task.handle.task_id)
+    qapp.processEvents()
+
+    manager.requestPredictor(image, second_id)
+    second_task = next(iter(executor.pending_tasks()))
+    executor.run_task(second_task.handle.task_id)
+    qapp.processEvents()
+
+    assert retained_during_eviction == [1]
+    assert manager._retired_predictors == []
+    assert executor.active_counts() == {}
+    assert manager.predictorImageIds() == [second_id]
 
 
 def test_cancel_pending_predictor_requests_executor_cancellation(monkeypatch, tmp_path):
@@ -217,6 +305,22 @@ def test_cancel_pending_predictor_requests_executor_cancellation(monkeypatch, tm
     assert handle in executor.cancelled
     assert image_id not in manager._inflight
     manager.shutdown()
+
+
+def test_shutdown_releases_owned_predictor_executor() -> None:
+    """Managers must deterministically release execution lanes they created."""
+    executor = StubExecutor()
+    manager = SamManager(
+        executor=executor,
+        owns_executor=True,
+        checkpoint_path=DEFAULT_CHECKPOINT,
+    )
+
+    manager.shutdown()
+    manager.shutdown()
+
+    assert executor.shutdown_called is True
+    assert manager._owns_executor is False
 
 
 @pytest.mark.usefixtures("qapp")
@@ -295,10 +399,16 @@ def test_cache_limit_enforced_on_predictor_ready(qapp):
     manager.predictorRemoved.connect(lambda path: removed.append(path))
     first = uuid.uuid4()
     second = uuid.uuid4()
-    manager._on_worker_finished(object(), first)
-    manager._on_worker_finished(object(), second)
+    first_worker = _DeferredWorkerResult()
+    second_worker = _DeferredWorkerResult()
+    first_predictor = object()
+    second_predictor = object()
+    manager._on_worker_finished(first_worker, first_predictor, first)
+    manager._on_worker_finished(second_worker, second_predictor, second)
     assert removed == [first]
     assert list(manager._sam_predictors.keys()) == [second]
+    assert first_worker.completions == [(True, (first_predictor, first))]
+    assert second_worker.completions == [(True, (second_predictor, second))]
 
 
 def test_snapshot_metrics_report_cache_bytes():
@@ -331,10 +441,13 @@ def test_snapshot_metrics_report_cache_bytes():
         def __init__(self):
             self.model = _Model()
 
-    manager._on_worker_finished(_Predictor(), image_id)
+    worker = _DeferredWorkerResult()
+    predictor = _Predictor()
+    manager._on_worker_finished(worker, predictor, image_id)
     metrics = manager.snapshot_metrics()
     assert metrics.cache_bytes == 16
     assert manager.cache_usage_bytes() == 16
+    assert worker.completions == [(True, (predictor, image_id))]
     manager.removeFromCache(image_id)
     assert manager.cache_usage_bytes() == 0
 

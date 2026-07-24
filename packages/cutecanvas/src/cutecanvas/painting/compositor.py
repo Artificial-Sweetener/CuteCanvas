@@ -17,14 +17,13 @@
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor
 
 from .model import BrushDab, BrushOperation
 from .tip_cache import BrushTipCache
+from .tip_projection import BrushTipProjector
 
 
 class BrushCompositor:
@@ -33,6 +32,7 @@ class BrushCompositor:
     def __init__(self, tips: BrushTipCache | None = None) -> None:
         """Bind a cache or create one bounded private cache."""
         self.tips = BrushTipCache() if tips is None else tips
+        self.tip_projector = BrushTipProjector(self.tips)
 
     def render_coverage_dabs(
         self,
@@ -49,14 +49,15 @@ class BrushCompositor:
             raise ValueError("coverage compositor requires a uint8 2D patch")
         for dab in dabs:
             scaled = _scaled_dab(dab, max(1, int(stride)))
-            alpha = self._positioned_alpha(
+            projected = self.tip_projector.project(
                 scaled,
                 patch_bounds,
                 opacity=scaled.opacity,
             )
-            if alpha is None:
+            if projected is None:
                 continue
-            target, source_alpha = alpha
+            target = (projected.rows, projected.columns)
+            source_alpha = projected.alpha
             destination = result[target]
             inverse = 255 - source_alpha.astype(np.uint16)
             if operation is BrushOperation.ERASE:
@@ -87,14 +88,15 @@ class BrushCompositor:
             dtype=np.uint16,
         )
         for dab in dabs:
-            positioned = self._positioned_alpha(
+            projected = self.tip_projector.project(
                 dab,
                 patch_bounds,
                 opacity=dab.opacity * color_alpha,
             )
-            if positioned is None:
+            if projected is None:
                 continue
-            target, alpha = positioned
+            target = (projected.rows, projected.columns)
+            alpha = projected.alpha
             destination = result[target].astype(np.uint16)
             inverse = 255 - alpha.astype(np.uint16)
             if operation is BrushOperation.ERASE:
@@ -110,43 +112,6 @@ class BrushCompositor:
             output[:, :, 3] = alpha + (destination[:, :, 3] * inverse + 127) // 255
             result[target] = np.minimum(output, 255).astype(np.uint8)
         return result
-
-    def _positioned_alpha(
-        self,
-        dab: BrushDab,
-        patch_bounds: QRect,
-        *,
-        opacity: float,
-    ) -> tuple[tuple[slice, slice], np.ndarray] | None:
-        """Clip one cached tip to its destination and apply dab opacity."""
-        tip = self.tips.opacity_tip(
-            diameter=dab.diameter,
-            hardness=dab.hardness,
-            texture_strength=dab.texture_strength,
-            texture_scale=dab.texture_scale,
-            texture_seed=dab.texture_seed,
-            angle=dab.angle,
-            opacity=opacity,
-        )
-        left = math.floor(dab.center[0] - (tip.shape[1] - 1) / 2.0)
-        top = math.floor(dab.center[1] - (tip.shape[0] - 1) / 2.0)
-        right = left + tip.shape[1]
-        bottom = top + tip.shape[0]
-        clip_left = max(left, patch_bounds.left())
-        clip_top = max(top, patch_bounds.top())
-        clip_right = min(right, patch_bounds.left() + patch_bounds.width())
-        clip_bottom = min(bottom, patch_bounds.top() + patch_bounds.height())
-        if clip_left >= clip_right or clip_top >= clip_bottom:
-            return None
-        source = tip[
-            clip_top - top : clip_bottom - top,
-            clip_left - left : clip_right - left,
-        ]
-        target = (
-            slice(clip_top - patch_bounds.top(), clip_bottom - patch_bounds.top()),
-            slice(clip_left - patch_bounds.left(), clip_right - patch_bounds.left()),
-        )
-        return target, source
 
 
 def _scaled_dab(dab: BrushDab, stride: int) -> BrushDab:

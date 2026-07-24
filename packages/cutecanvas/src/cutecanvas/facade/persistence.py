@@ -13,18 +13,18 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Focused public document persistence over the archive service."""
+"""Focused public composition persistence over the archive service."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from ..persistence import CompositionPersistenceService
-from .handles import DocumentHandle, EditorHandleHost
+from .handles import CompositionHandle, EditorHandleHost
 
 
-class DocumentPersistenceFacade:
-    """Save and load complete editable documents through typed handles."""
+class CompositionPersistenceFacade:
+    """Save and load complete editable compositions through typed handles."""
 
     def __init__(
         self,
@@ -35,13 +35,18 @@ class DocumentPersistenceFacade:
         self._host = host
         self._service = service
 
-    def save(self, document: DocumentHandle, path: str | Path) -> None:
-        """Atomically save ``document`` and all referenced editor resources."""
-        self._service.save(document.id, Path(path))
+    def save(self, composition: CompositionHandle, path: str | Path) -> None:
+        """Atomically save a composition and every referenced resource."""
+        self._service.save(composition.id, Path(path))
 
-    def load(self, path: str | Path, *, open_document: bool = True) -> DocumentHandle:
-        """Validate and transactionally restore one complete document archive."""
-        document = DocumentHandle(self._host, self._service.load(Path(path)))
-        if open_document:
-            document.open()
-        return document
+    def load(
+        self,
+        path: str | Path,
+        *,
+        open_composition: bool = True,
+    ) -> CompositionHandle:
+        """Validate and transactionally restore one composition archive."""
+        composition = CompositionHandle(self._host, self._service.load(Path(path)))
+        if open_composition:
+            composition.open()
+        return composition

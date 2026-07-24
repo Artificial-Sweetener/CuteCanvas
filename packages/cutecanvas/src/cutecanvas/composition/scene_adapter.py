@@ -19,9 +19,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 
 from PySide6.QtCore import QRectF
-from qpane.sdk.catalog import CatalogImageReference
 from qpane.sdk.scene import (
     LayerPlacement,
     SceneContribution,
@@ -47,24 +47,31 @@ class CompositionSceneAdapter:
         *,
         compositions: CompositionService,
         assembler: CompositionLayerSceneAssembler,
+        current_composition_id: Callable[[], uuid.UUID | None],
     ) -> None:
         """Capture document and cross-domain assembly collaborators."""
         self._compositions = compositions
         self._assembler = assembler
+        self._current_composition_id = current_composition_id
 
     def scene_contribution(self) -> SceneContribution | None:
         """Return the active composition document as a replacement contribution."""
         record = self._active_record()
         if record is None:
             return None
+        scene = self.scene_for(record.composition_id)
+        return SceneContribution(scene=scene, order=_LAYERED_COMPOSITION_ORDER)
+
+    def scene_for(self, composition_id: uuid.UUID) -> SceneDescriptor:
+        """Assemble one addressed composition without changing view activation."""
+        record = self._compositions.record(composition_id)
         document = SceneDescriptor(
             scene_id=record.composition_id,
             kind=SceneKind.EXPLICIT,
             bounds=_placement_from_rect(record.canvas_bounds),
             layers=(),
         )
-        scene = self._assembler.assemble(document)
-        return SceneContribution(scene=scene, order=_LAYERED_COMPOSITION_ORDER)
+        return self._assembler.assemble(document)
 
     def revision(self) -> tuple[object, ...]:
         """Return revisions that can change the replacement scene contribution."""
@@ -92,11 +99,7 @@ class CompositionSceneAdapter:
             composition_id=record.composition_id,
             scene_id=record.composition_id,
             layer_id=result.layer_id,
-            image_id=(
-                layer.source.image_id
-                if isinstance(layer.source, CatalogImageReference)
-                else None
-            ),
+            source_id=layer.source.resource_id,
             role=layer.role,
             metadata=layer.metadata,
             panel_point=result.panel_point,
@@ -106,7 +109,13 @@ class CompositionSceneAdapter:
 
     def _active_record(self) -> CompositionRecord | None:
         """Return the active composition document, if one is active."""
-        return self._compositions.active_record()
+        composition_id = self._current_composition_id()
+        if composition_id is None:
+            return None
+        try:
+            return self._compositions.record(composition_id)
+        except KeyError:
+            return None
 
     def _record_layer_for_id(
         self, record: CompositionRecord, layer_id: uuid.UUID

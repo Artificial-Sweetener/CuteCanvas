@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from qpane.sdk.concurrency import TaskExecutorProtocol
@@ -74,7 +75,7 @@ class MaskAutosaveCoordinator:
             manager = AutosaveManager(
                 snapshot_provider=self._snapshot_provider,
                 settings=require_mask_config(self._qpane.settings),
-                get_current_image_path=lambda: self._qpane.currentImagePath,
+                get_current_image_path=self._current_source_path,
                 executor=self._executor,
                 diagnostics_dirty=lambda domain="mask": self._qpane.diagnostics().set_dirty(
                     domain
@@ -160,10 +161,15 @@ class MaskAutosaveCoordinator:
         """Request creation-time persistence for the active blank mask."""
         manager = self._qpane.autosaveManager()
         active_id = self._mask_controller.get_active_mask_id()
-        image = self._qpane.original_image
-        if manager is None or active_id is None or image is None or image.isNull():
+        raster = self._qpane.activeRasterResolver().resolve()
+        if manager is None or active_id is None or raster is None:
             return
-        manager.saveBlankMask(str(active_id), image.size())
+        manager.saveBlankMask(str(active_id), raster.image.size())
+
+    def _current_source_path(self) -> Path | None:
+        """Return provenance for the active raster resource when available."""
+        raster = self._qpane.activeRasterResolver().resolve()
+        return None if raster is None else raster.source_path
 
     def _handle_save_completed(self, mask_id: str, path: str) -> None:
         """Publish successful autosave completion for diagnostics."""

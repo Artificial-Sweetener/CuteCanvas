@@ -18,25 +18,20 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Protocol
 
-from qpane.sdk.scene import LayerDescriptor, LayerSourceReference, LayerTransform
+from qpane.sdk.scene import LayerSourceReference, LayerTransform
 
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.edit_history import CompositionEditCommand
-from ..scene.layer_selection import (
-    SceneLayerSelection,
-    SceneLayerSelectionController,
-)
-from ..scene.pixel_owners import LayerPixelMutationOwner
+from ..scene.layer_selection import SceneLayerSelection
 from ..selection import PixelSelectionService
 from .floating_layers import FloatingLayerPromotionRegistry, FloatingLayerTransition
-from .pixel_move_target import SelectedPixelMoveTargetResolver
-from .selection_projection import LayerSelectionProjectionCache
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +48,7 @@ class FloatingPixelCommitEdit:
     """Retain one atomic multi-layer floating-pixel resolution."""
 
     scene_id: uuid.UUID
+    origin_session_id: uuid.UUID
     transitions: tuple[LayerPixelTransition, ...]
     selection_before: CoverageSnapshot
     selection_after: CoverageSnapshot
@@ -87,11 +83,26 @@ class FloatingPixelCommitEdit:
         return () if self.promotion is None else self.promotion.resources
 
 
-_ResolvedTransition: TypeAlias = tuple[
-    LayerPixelTransition,
-    LayerDescriptor,
-    LayerPixelMutationOwner,
-]
+class PixelTransitionHistoryOwner(Protocol):
+    """Replay one layer-bound pixel transition without view state."""
+
+    def matches(
+        self,
+        item: LayerPixelTransition,
+        *,
+        use_after: bool,
+    ) -> bool:
+        """Return whether the resource equals one transition side."""
+        ...
+
+    def restore(
+        self,
+        item: LayerPixelTransition,
+        *,
+        use_after: bool,
+    ) -> bool:
+        """Restore one transition side."""
+        ...
 
 
 class FloatingPixelHistory:
@@ -101,19 +112,19 @@ class FloatingPixelHistory:
         self,
         *,
         edits: CompositionEditController,
-        targets: SelectedPixelMoveTargetResolver,
+        transitions: PixelTransitionHistoryOwner,
         pixel_selection: PixelSelectionService,
-        layer_selection: SceneLayerSelectionController,
-        selection_projections: LayerSelectionProjectionCache,
         promotions: FloatingLayerPromotionRegistry,
     ) -> None:
         """Bind chronology and authoritative raster/selection owners."""
         self._edits = edits
-        self._targets = targets
+        self._transitions = transitions
         self._pixel_selection = pixel_selection
-        self._layer_selection = layer_selection
-        self._selection_projections = selection_projections
         self._promotions = promotions
+        self._replay_subscribers: dict[
+            uuid.UUID,
+            list[Callable[[FloatingPixelCommitEdit, bool], None]],
+        ] = {}
         edits.register_handler(
             FloatingPixelCommitEdit,
             undo=lambda command: self._restore(command, use_after=False),
@@ -124,6 +135,28 @@ class FloatingPixelHistory:
         """Record an already-applied floating raster resolution."""
         self._edits.record_applied(command)
 
+    def subscribe_replay(
+        self,
+        session_id: uuid.UUID,
+        callback: Callable[[FloatingPixelCommitEdit, bool], None],
+    ) -> Callable[[], None]:
+        """Observe replay hints only for one originating view session."""
+        subscribers = self._replay_subscribers.setdefault(session_id, [])
+        if callback not in subscribers:
+            subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            """Detach this view session's replay observer idempotently."""
+            current = self._replay_subscribers.get(session_id)
+            if current is None:
+                return
+            if callback in current:
+                current.remove(callback)
+            if not current:
+                self._replay_subscribers.pop(session_id, None)
+
+        return unsubscribe
+
     def _restore(
         self,
         command: CompositionEditCommand,
@@ -133,13 +166,14 @@ class FloatingPixelHistory:
         """Restore every participating raster and editor state transactionally."""
         if not isinstance(command, FloatingPixelCommitEdit):
             return False
-        resolved: list[_ResolvedTransition] = []
-        for item in command.transitions:
-            target = self._targets.resolve_layer(item.scene_id, item.layer_id)
-            if target is None:
-                return False
-            _scene, layer, owner = target
-            resolved.append((item, layer, owner))
+        if any(
+            not self._transitions.matches(item, use_after=not use_after)
+            for item in _current_endpoints(
+                command.transitions,
+                use_after=use_after,
+            )
+        ):
+            return False
         promotion = command.promotion
         promotion_owner = (
             None
@@ -157,23 +191,17 @@ class FloatingPixelHistory:
             if not promotion_owner.restore(promotion, use_after=False):
                 return False
             promotion_changed = True
-        applied: list[_ResolvedTransition] = []
-        ordered = resolved if use_after else list(reversed(resolved))
-        for item, layer, owner in ordered:
-            if not owner.transition_matches(
-                layer,
-                item.raster,
-                use_after=not use_after,
-            ) or not owner.restore_transition(
-                layer,
-                item.raster,
-                use_after=use_after,
-            ):
+        applied: list[LayerPixelTransition] = []
+        ordered = (
+            command.transitions if use_after else tuple(reversed(command.transitions))
+        )
+        for item in ordered:
+            if not self._transitions.restore(item, use_after=use_after):
                 self._rollback(applied, use_after=not use_after)
                 if promotion_changed:
                     promotion_owner.restore(promotion, use_after=True)
                 return False
-            applied.append((item, layer, owner))
+            applied.append(item)
         if use_after and promotion is not None:
             if not promotion_owner.restore(promotion, use_after=True):
                 self._rollback(applied, use_after=False)
@@ -185,38 +213,33 @@ class FloatingPixelHistory:
                 promotion_owner.restore(promotion, use_after=not use_after)
             self._rollback(applied, use_after=not use_after)
             return False
-        selected = command.selected_after if use_after else command.selected_before
-        self._layer_selection.select(selected.scene_id, selected.layer_id)
-        self._remember_projection(command, use_after=use_after)
+        for callback in tuple(
+            self._replay_subscribers.get(command.origin_session_id, ())
+        ):
+            callback(command, use_after)
         return True
 
-    @staticmethod
     def _rollback(
-        applied: list[_ResolvedTransition],
+        self,
+        applied: list[LayerPixelTransition],
         *,
         use_after: bool,
     ) -> None:
         """Restore already-applied raster transitions in reverse order."""
-        for item, layer, owner in reversed(applied):
-            owner.restore_transition(layer, item.raster, use_after=use_after)
+        for item in reversed(applied):
+            self._transitions.restore(item, use_after=use_after)
 
-    def _remember_projection(
-        self,
-        command: FloatingPixelCommitEdit,
-        *,
-        use_after: bool,
-    ) -> None:
-        """Associate replayed selection with its selected layer coordinate space."""
-        transform = command.target_transform if use_after else command.source_transform
-        if transform is None:
-            return
-        state = self._pixel_selection.state(command.scene_id)
-        selected = command.selected_after if use_after else command.selected_before
-        local = command.local_after if use_after else command.local_before
-        self._selection_projections.remember(
-            scene_id=command.scene_id,
-            layer_id=selected.layer_id,
-            selection_revision=state.revision,
-            transform=transform,
-            coverage=local,
-        )
+
+def _current_endpoints(
+    transitions: tuple[LayerPixelTransition, ...],
+    *,
+    use_after: bool,
+) -> tuple[LayerPixelTransition, ...]:
+    """Return the observable transition endpoint for each participating layer."""
+    endpoints: dict[tuple[uuid.UUID, uuid.UUID], LayerPixelTransition] = {}
+    ordered = transitions if use_after else tuple(reversed(transitions))
+    for item in ordered:
+        key = (item.scene_id, item.layer_id)
+        if key not in endpoints:
+            endpoints[key] = item
+    return tuple(endpoints.values())

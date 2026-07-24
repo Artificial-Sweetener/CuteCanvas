@@ -28,18 +28,7 @@ from PySide6.QtGui import QTransform
 if TYPE_CHECKING:
     from ..scene.render_plan import SceneContentSnapshot
     from ..viewer import QPane
-    from .viewport import ViewportZoomMode
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class NormalizedViewState:
-    """Viewport center, visible width fraction, and zoom mode snapshot."""
-
-    center_x: float
-    center_y: float
-    zoom_frac: float
-    zoom_mode: ViewportZoomMode
 
 
 @dataclass(frozen=True)

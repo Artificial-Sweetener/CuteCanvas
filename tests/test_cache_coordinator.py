@@ -25,6 +25,7 @@ from cutecanvas import Config
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
+from cutecanvas.resources import ProjectResourceStore
 from PySide6.QtGui import QImage, Qt
 from qpane.cache.consumers import EvictableCacheConsumer
 from qpane.cache.coordinator import (
@@ -304,7 +305,7 @@ def test_trim_handles_reentrant_usage_updates():
 
 @pytest.mark.usefixtures("qapp")
 def test_mask_overlay_consumer_uses_controller_callback():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     controller = MaskController(
         manager,
         lambda pt: pt,
@@ -340,7 +341,7 @@ def test_mask_guard_rejects_oversized_item(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Mask overlays that exceed the hard budget should not be cached."""
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     controller = MaskController(
         manager,
         lambda pt: pt,

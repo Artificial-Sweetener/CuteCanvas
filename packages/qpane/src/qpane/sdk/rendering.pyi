@@ -23,3 +23,32 @@ from ..rendering.coordinates import PanelHitTest as PanelHitTest
 from ..rendering.layer_rasterization import (
     LayerRasterizationWorker as LayerRasterizationWorker,
 )
+from ..rendering.layer_rasterization import (
+    RegionRasterizationWorker as RegionRasterizationWorker,
+)
+from ..rendering.render_tile_geometry import RenderTileRequest as RenderTileRequest
+from ..rendering.render_tile_types import (
+    RegionSampleSource as RegionSampleSource,
+)
+from ..rendering.render_tile_types import (
+    RenderTileBatchSource as RenderTileBatchSource,
+)
+from ..rendering.render_tile_types import (
+    RenderTileProduct as RenderTileProduct,
+)
+from ..rendering.scene_coordinates import (
+    LayerCoordinateProjection as LayerCoordinateProjection,
+)
+from ..rendering.scene_coordinates import LayerLocalPoint as LayerLocalPoint
+from ..rendering.scene_coordinates import LayerSourcePoint as LayerSourcePoint
+from ..rendering.scene_coordinates import PanelPoint as PanelPoint
+from ..rendering.scene_coordinates import (
+    SceneCoordinateProjection as SceneCoordinateProjection,
+)
+from ..rendering.scene_coordinates import SceneCoordinateSystem as SceneCoordinateSystem
+from ..rendering.scene_coordinates import ScenePoint as ScenePoint
+from ..rendering.scene_region import (
+    RasterLayerRegionOverride as RasterLayerRegionOverride,
+)
+from ..rendering.scene_region import SceneLayerRenderScope as SceneLayerRenderScope
+from ..rendering.scene_region import SceneRegionRasterizer as SceneRegionRasterizer

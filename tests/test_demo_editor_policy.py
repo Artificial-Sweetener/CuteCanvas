@@ -42,7 +42,8 @@ def test_demo_editor_policy_menu_composes_public_capabilities(qapp) -> None:
 
         assert EditorCapability.PAINT not in viewer.editorPolicy().capabilities
         assert len(viewer.editorPolicy().capabilities) == len(EditorCapability) - 1
-        assert messages[-1] == "Host editor policy enables 4 capabilities."
+        expected = len(EditorCapability) - 1
+        assert messages[-1] == (f"Host editor policy enables {expected} capabilities.")
     finally:
         menu.deleteLater()
         viewer.deleteLater()

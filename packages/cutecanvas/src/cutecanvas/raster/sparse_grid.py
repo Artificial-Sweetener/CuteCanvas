@@ -24,6 +24,8 @@ from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.types import RasterExtentPolicy
 
+from .content_bounds import occupied_channel_bounds
+
 
 @dataclass(frozen=True, slots=True)
 class SparseRasterTile:
@@ -96,6 +98,7 @@ class SparseRasterGrid:
         self._channels = int(channels)
         self._tile_size = int(tile_size)
         self._tiles: dict[tuple[int, int], np.ndarray] = {}
+        self._content_bounds_by_tile: dict[tuple[int, int], RasterBounds] = {}
 
     @property
     def channels(self) -> int:
@@ -120,6 +123,7 @@ class SparseRasterGrid:
     def clear(self) -> None:
         """Discard every allocated tile."""
         self._tiles.clear()
+        self._content_bounds_by_tile.clear()
 
     def snapshot(
         self,
@@ -150,11 +154,12 @@ class SparseRasterGrid:
             )
             for tile in snapshot.tiles
         }
+        self._refresh_all_content_bounds()
 
     def replace(self, bounds: RasterBounds, pixels: np.ndarray) -> None:
         """Replace the grid from one dense region while omitting zero tiles."""
         normalized = self._normalize_pixels(bounds, pixels)
-        self._tiles.clear()
+        self.clear()
         self.write(bounds, normalized)
 
     def read(self, bounds: RasterBounds) -> np.ndarray:
@@ -178,6 +183,38 @@ class SparseRasterGrid:
             ] = tile[
                 source_y : source_y + overlap.height,
                 source_x : source_x + overlap.width,
+            ]
+        return result
+
+    def read_channel(self, bounds: RasterBounds, channel: int) -> np.ndarray:
+        """Return one detached channel without materializing sibling channels."""
+        index = int(channel)
+        if self._channels == 1:
+            if index != 0:
+                raise IndexError("single-channel raster accepts channel zero only")
+            return self.read(bounds)
+        if not 0 <= index < self._channels:
+            raise IndexError("channel is outside raster storage")
+        result = np.zeros((bounds.height, bounds.width), dtype=np.uint8)
+        for key in self._keys_for(bounds):
+            tile = self._tiles.get(key)
+            if tile is None:
+                continue
+            tile_bounds = self._tile_bounds(key)
+            overlap = tile_bounds.intersection(bounds)
+            if overlap is None:
+                continue
+            source_x = overlap.x - tile_bounds.x
+            source_y = overlap.y - tile_bounds.y
+            target_x = overlap.x - bounds.x
+            target_y = overlap.y - bounds.y
+            result[
+                target_y : target_y + overlap.height,
+                target_x : target_x + overlap.width,
+            ] = tile[
+                source_y : source_y + overlap.height,
+                source_x : source_x + overlap.width,
+                index,
             ]
         return result
 
@@ -247,8 +284,12 @@ class SparseRasterGrid:
                 tile_y : tile_y + overlap.height,
                 tile_x : tile_x + overlap.width,
             ] = replacement
-            if not np.any(tile):
+            occupied = self._tile_content_bounds(key, tile)
+            if occupied is None:
                 self._tiles.pop(key, None)
+                self._content_bounds_by_tile.pop(key, None)
+            else:
+                self._content_bounds_by_tile[key] = occupied
 
     def crop(self, bounds: RasterBounds) -> None:
         """Discard pixels outside one fixed layer-local extent."""
@@ -257,6 +298,7 @@ class SparseRasterGrid:
             overlap = tile_bounds.intersection(bounds)
             if overlap is None:
                 self._tiles.pop(key, None)
+                self._content_bounds_by_tile.pop(key, None)
                 continue
             if overlap == tile_bounds:
                 continue
@@ -271,31 +313,18 @@ class SparseRasterGrid:
                 source_y : source_y + overlap.height,
                 source_x : source_x + overlap.width,
             ]
-            if np.any(retained):
+            occupied = self._tile_content_bounds(key, retained)
+            if occupied is not None:
                 self._tiles[key] = retained
+                self._content_bounds_by_tile[key] = occupied
             else:
                 self._tiles.pop(key, None)
+                self._content_bounds_by_tile.pop(key, None)
 
     def content_bounds(self) -> RasterBounds | None:
         """Return the exact envelope of nonzero pixels across allocated tiles."""
         occupied: RasterBounds | None = None
-        for key, tile in self._tiles.items():
-            if self._channels == 1:
-                occupancy = tile
-            else:
-                occupancy = tile[:, :, -1]
-            occupied_y, occupied_x = np.nonzero(occupancy)
-            if occupied_x.size == 0:
-                continue
-            tile_bounds = self._tile_bounds(key)
-            left = int(occupied_x.min())
-            top = int(occupied_y.min())
-            bounds = RasterBounds(
-                tile_bounds.x + left,
-                tile_bounds.y + top,
-                int(occupied_x.max()) - left + 1,
-                int(occupied_y.max()) - top + 1,
-            )
+        for bounds in self._content_bounds_by_tile.values():
             occupied = bounds if occupied is None else occupied.united(bounds)
         return occupied
 
@@ -357,6 +386,32 @@ class SparseRasterGrid:
             tile_y * self._tile_size,
             self._tile_size,
             self._tile_size,
+        )
+
+    def _refresh_all_content_bounds(self) -> None:
+        """Rebuild exact derived tile bounds after structural restoration."""
+        self._content_bounds_by_tile = {
+            key: bounds
+            for key, tile in self._tiles.items()
+            if (bounds := self._tile_content_bounds(key, tile)) is not None
+        }
+
+    def _tile_content_bounds(
+        self,
+        key: tuple[int, int],
+        tile: np.ndarray,
+    ) -> RasterBounds | None:
+        """Return exact absolute content bounds for one canonical tile."""
+        occupancy = tile if self._channels == 1 else tile[:, :, -1]
+        local = occupied_channel_bounds(occupancy)
+        if local is None:
+            return None
+        tile_bounds = self._tile_bounds(key)
+        return RasterBounds(
+            tile_bounds.x + local.x,
+            tile_bounds.y + local.y,
+            local.width,
+            local.height,
         )
 
     def _normalize_pixels(

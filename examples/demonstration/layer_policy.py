@@ -22,7 +22,7 @@ from PySide6.QtCore import QObject
 
 
 class DemoLayerPolicyController(QObject):
-    """Keep the selected authoring layer editable while catalog images stay frozen."""
+    """Make the selected layer movable and enable pixels when its source permits."""
 
     def __init__(self, qpane: CuteCanvas, parent: QObject | None = None) -> None:
         """Observe every public transition that can change layer capabilities."""
@@ -31,9 +31,7 @@ class DemoLayerPolicyController(QObject):
         self._active_mask_id = None
         self._reconciling = False
         qpane.compositionSelectionChanged.connect(self.reconcile)
-        qpane.catalogChanged.connect(self.reconcile)
-        qpane.catalogSelectionChanged.connect(self.reconcile)
-        qpane.currentImageChanged.connect(self.reconcile)
+        qpane.compositionChanged.connect(self.reconcile)
         qpane.selectedLayerChanged.connect(self.reconcile)
         qpane.sceneChanged.connect(self.reconcile)
 
@@ -50,7 +48,7 @@ class DemoLayerPolicyController(QObject):
     def select_active_mask_layer(self) -> None:
         """Align selected layer identity with the active mask before editing."""
         active_mask_id = self._qpane.activeMaskID()
-        for mask in self._qpane.listMasksForImage():
+        for mask in self._qpane.listMasksForComposition():
             if (
                 mask.mask_id == active_mask_id
                 and mask.scene_id is not None
@@ -65,7 +63,6 @@ class DemoLayerPolicyController(QObject):
         scene = self._qpane.currentScene()
         if scene is None:
             return
-        frozen = LayerPolicy(selectable=True)
         selectable = LayerPolicy(selectable=True)
         editable = LayerPolicy(
             selectable=True,
@@ -79,7 +76,7 @@ class DemoLayerPolicyController(QObject):
         active_mask_layer_id = next(
             (
                 mask.layer_id
-                for mask in self._qpane.listMasksForImage()
+                for mask in self._qpane.listMasksForComposition()
                 if mask.mask_id == active_mask_id
             ),
             None,
@@ -90,10 +87,9 @@ class DemoLayerPolicyController(QObject):
         if selected_layer_id is None:
             selected_layer_id = active_mask_layer_id
         for layer in scene.layers:
-            authoring_layer = layer.source_kind != "catalog-image"
-            selected_authoring = authoring_layer and layer.layer_id == selected_layer_id
+            selected_layer = layer.layer_id == selected_layer_id
             pixel_editable = bool(
-                selected_authoring
+                selected_layer
                 and self._qpane.rasterSurfaceState(
                     scene.scene_id,
                     layer.layer_id,
@@ -103,11 +99,7 @@ class DemoLayerPolicyController(QObject):
             policy = (
                 editable
                 if pixel_editable
-                else (
-                    movable
-                    if selected_authoring
-                    else selectable if authoring_layer else frozen
-                )
+                else (movable if selected_layer else selectable)
             )
             if layer.interaction != policy:
                 self._qpane.setLayerInteractionPolicy(

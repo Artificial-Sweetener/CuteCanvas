@@ -17,12 +17,11 @@
 from __future__ import annotations
 
 import types
-import uuid
 
 import pytest
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QRegion, Qt, QTransform
+from qpane import QPane
 from qpane.rendering import Renderer
 from qpane.scene.render_plan import RenderStrategy
 
@@ -95,25 +94,14 @@ def test_redraw_base_image_buffer_respects_strategy(
 
 
 def test_calculate_render_plan_prefers_direct_when_image_fits(qapp):
-    qpane = CuteCanvas(features=())
+    qpane = QPane()
     try:
         qpane.resize(256, 256)
         image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.black)
-        image_id = uuid.uuid4()
-        image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
-        qpane.setImagesByID(image_map, image_id)
-        # Ensure fit_view=False behavior by manually resetting zoom if needed,
-        # but setImagesByID might fit view by default.
-        # The original test passed fit_view=False.
-        # setImagesByID doesn't take fit_view. It usually resets view.
-        # We might need to manually set zoom to 1.0 or whatever fit_view=False implied.
-        # fit_view=False usually means "don't change zoom" or "set to 1.0"?
-        # Actually, setImagesByID calls catalog.setImagesByID which calls displayCurrentCatalogImage(fit_view=True).
-        # So it forces fit_view=True.
-        # If we want to test specific zoom behavior, we should set the zoom after loading.
+        qpane.setImage(image, fit=True)
         viewport = qpane.view().viewport
-        viewport.setZoomFit()  # The original test called this anyway!
+        viewport.setZoomFit()
         plan = qpane.view().calculateRenderPlan()
     finally:
         qpane.deleteLater()
@@ -125,14 +113,12 @@ def test_calculate_render_plan_prefers_direct_when_image_fits(qapp):
 
 
 def test_calculate_render_plan_switches_to_tile_for_large_zoom(qapp):
-    qpane = CuteCanvas(features=())
+    qpane = QPane()
     try:
         qpane.resize(128, 128)
         image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.black)
-        image_id = uuid.uuid4()
-        image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
-        qpane.setImagesByID(image_map, image_id)
+        qpane.setImage(image, fit=True)
         viewport = qpane.view().viewport
         viewport.setZoomFit()
         viewport.applyZoom(4.0)

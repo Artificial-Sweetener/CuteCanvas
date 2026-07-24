@@ -32,8 +32,7 @@ from cutecanvas.editor.operation_resolution import (
     EditorSourceOperations,
 )
 from cutecanvas.painting.targets import PaintTargetRegistry
-from cutecanvas.placed.source_reference import PlacedAssetReference
-from cutecanvas.raster.source_reference import EditableRasterReference
+from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.scene.layer_selection import SceneLayerSelectionController
 from cutecanvas.scene.mutations import SceneMutationCoordinator
 from cutecanvas.scene.pixel_owners import LayerPixelOwnerRegistry
@@ -71,8 +70,8 @@ class _PaintOwner:
     @staticmethod
     def supports(target) -> bool:
         """Accept only editable color-raster layers."""
-        return target.layer is not None and isinstance(
-            target.layer.source, EditableRasterReference
+        return bool(
+            target.layer is not None and target.layer.capabilities.raster_editable
         )
 
 
@@ -82,7 +81,7 @@ class _PixelOwner:
     @staticmethod
     def supports_layer(_scene, layer) -> bool:
         """Accept only editable color-raster layers."""
-        return isinstance(layer.source, EditableRasterReference)
+        return layer.capabilities.raster_editable
 
 
 def _resolver_fixture(
@@ -95,11 +94,7 @@ def _resolver_fixture(
     """Build one operation resolver around real selection and registry owners."""
     scene_id = uuid.uuid4()
     layer_id = uuid.uuid4()
-    source = (
-        PlacedAssetReference(uuid.uuid4())
-        if placed
-        else EditableRasterReference(uuid.uuid4())
-    )
+    source = ProjectResourceReference(uuid.uuid4())
     placement = LayerPlacement(0.0, 0.0, 16.0, 16.0)
     layer = LayerDescriptor(
         scene_id=scene_id,
@@ -142,9 +137,13 @@ def _resolver_fixture(
     pixel_owners = LayerPixelOwnerRegistry()
     pixel_owners.register(_PixelOwner())
     source_operations = EditorSourceOperationRegistry()
-    source_operations.register(
-        PlacedAssetReference,
-        EditorSourceOperations(rasterize=True, edit_contents=True),
+    source_operations.register_resolver(
+        ProjectResourceReference,
+        lambda _source: (
+            EditorSourceOperations(rasterize=True, edit_contents=True)
+            if placed
+            else EditorSourceOperations()
+        ),
     )
     resolver = EditorOperationResolver(
         active_scene=lambda: scene,
@@ -156,7 +155,9 @@ def _resolver_fixture(
         floating_pixels_can_begin=lambda _point: False,
         active_paint_target=lambda: None,
         default_paint_target_available=lambda: False,
-        paint_targets=paint_targets,
+        paint_target_supported=lambda target: (
+            paint_targets.owner_for(target) is not None
+        ),
         pixel_owners=pixel_owners,
         source_operations=source_operations,
         capability_allowed=(

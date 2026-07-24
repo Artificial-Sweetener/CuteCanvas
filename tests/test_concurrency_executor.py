@@ -63,6 +63,22 @@ class _CompletionWorker(QRunnable, BaseWorker):
         self.emit_finished(True, payload="ok")
 
 
+class _DeferredCompletionWorker(QRunnable, BaseWorker):
+    """Worker whose result owner releases the scheduler slot later."""
+
+    def __init__(self) -> None:
+        QRunnable.__init__(self)
+        BaseWorker.__init__(self)
+
+    def run(self) -> None:
+        """Publish the result while retaining executor ownership."""
+        self.emit_finished(
+            True,
+            payload="ready",
+            defer_executor_completion=True,
+        )
+
+
 class _BlockingWorker(QRunnable, BaseWorker):
     """Worker that waits on an event before reporting completion."""
 
@@ -149,6 +165,26 @@ class TestQThreadPoolExecutor:
         assert snapshot.pending_total == 0
         assert executor.cancel(handle) is False
         executor.shutdown()
+
+    def test_deferred_completion_retains_scheduler_slot_until_result_adoption(
+        self,
+    ) -> None:
+        """Native result adoption must remain inside executor concurrency limits."""
+        executor = StubExecutor()
+        worker = _DeferredCompletionWorker()
+        handle = executor.submit(worker, category="native", device="cpu")
+
+        executor.run_task(handle.task_id)
+
+        assert executor.active_counts() == {"native": 1}
+        assert executor.finished == []
+
+        worker.complete_executor(True, payload="adopted")
+        worker.complete_executor(True, payload="duplicate")
+
+        assert executor.active_counts() == {}
+        assert len(executor.finished) == 1
+        assert executor.finished[0][1].payload == "adopted"
 
     def test_cancel_pending_task(self) -> None:
         """Pending tasks should be cancellable while another worker is active."""

@@ -20,10 +20,12 @@ from __future__ import annotations
 from PySide6.QtCore import QRectF, QSize
 
 from ..hybrid.tile_source import HybridRenderTileSource
+from ..scene.model import LayerDescriptor
 from ..scene.render_plan import SampledLayerRenderItem, SampledTileRenderData
 from .compiled_scene import CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
+from .render_tile_types import RenderTileBatchSource
 from .render_tiles import RenderTileWorkCoordinator
 from .sdk import HybridSource
 
@@ -91,7 +93,56 @@ class HybridRenderPlanner:
                     ),
                 )
             )
+        for compiled_layer in compiled.sampled_layers:
+            source = compiled_layer.snapshot
+            if not isinstance(source, RenderTileBatchSource):
+                continue
+            item = self._sampled_item(
+                compiled, frame, compiled_layer.descriptor, source
+            )
+            if item is not None:
+                items.append(item)
         return tuple(items)
+
+    def _sampled_item(
+        self,
+        compiled: CompiledRenderScene,
+        frame: RenderFrameGeometry,
+        layer: LayerDescriptor,
+        source: RenderTileBatchSource,
+    ) -> SampledLayerRenderItem | None:
+        """Plan one generic sampled source through the shared tile coordinator."""
+        source_size = QSize(source.bounds.width, source.bounds.height)
+        layer_to_panel = self._projector.layer_to_panel(
+            scene=compiled.scene,
+            layer=layer,
+            source_size=source_size,
+            frame=frame,
+        )
+        refinement = self._refinement.request(
+            source=source,
+            source_to_panel=layer_to_panel,
+            panel_rect=QRectF(frame.qpane_rect),
+            device_pixel_ratio=_device_pixel_ratio(frame),
+        )
+        if refinement.products is None and not refinement.pending:
+            return None
+        products = refinement.products or ()
+        return SampledLayerRenderItem(
+            descriptor=layer,
+            transform=layer_to_panel,
+            placement=layer.placement,
+            clip=layer.clip,
+            source_size=source_size,
+            tiles=tuple(
+                SampledTileRenderData(
+                    product.image,
+                    product.source_rect,
+                    product.image_source_rect,
+                )
+                for product in products
+            ),
+        )
 
 
 def _device_pixel_ratio(frame: RenderFrameGeometry) -> float:

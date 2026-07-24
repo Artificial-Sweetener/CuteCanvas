@@ -29,7 +29,7 @@ from cutecanvas.masks.projection import (
     MaskCanvasProjectionService,
     project_mask_snapshot,
 )
-from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
 from qpane.scene.affine import LayerTransform
@@ -54,7 +54,7 @@ def _descriptor(
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.MASK,
-        source=MaskAssetReference(mask_id=mask_id),
+        source=ProjectResourceReference(mask_id),
         placement=transform.map_bounds(bounds),
         raster_bounds=bounds,
         transform=transform,
@@ -114,7 +114,7 @@ def test_projection_applies_layer_translation_before_canvas_clipping() -> None:
 
 def test_generated_canvas_mask_obeys_fixed_and_expand_on_write_policy() -> None:
     """Generated canvas pixels should map through movement into local storage."""
-    assets = MaskAssetStore()
+    assets = MaskAssetStore(ProjectResourceStore())
     mask_id = assets.create_mask(QImage(QSize(4, 4), QImage.Format_Grayscale8))
     scene_id = uuid.uuid4()
     bounds = RasterBounds(0, 0, 4, 4)
@@ -123,7 +123,7 @@ def test_generated_canvas_mask_obeys_fixed_and_expand_on_write_policy() -> None:
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.MASK,
-        source=MaskAssetReference(mask_id=mask_id),
+        source=ProjectResourceReference(mask_id),
         placement=transform.map_bounds(bounds),
         raster_bounds=bounds,
         transform=transform,

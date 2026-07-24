@@ -28,7 +28,6 @@ from qpane.sdk.scene import LayerDescriptor, LayerSourceReference, SceneDescript
 from ..painting.targets import (
     PaintTargetContext,
     PaintTargetIdentity,
-    PaintTargetRegistry,
 )
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
@@ -99,7 +98,10 @@ class EditorSourceOperationRegistry:
 
     def __init__(self) -> None:
         """Initialize an empty exact-type registry."""
-        self._operations: dict[type[object], EditorSourceOperations] = {}
+        self._resolvers: dict[
+            type[object],
+            Callable[[LayerSourceReference], EditorSourceOperations],
+        ] = {}
 
     def register(
         self,
@@ -107,13 +109,22 @@ class EditorSourceOperationRegistry:
         operations: EditorSourceOperations,
     ) -> None:
         """Register one source type exactly once."""
-        if source_type in self._operations:
+        self.register_resolver(source_type, lambda _source: operations)
+
+    def register_resolver(
+        self,
+        source_type: type[object],
+        resolver: Callable[[LayerSourceReference], EditorSourceOperations],
+    ) -> None:
+        """Register one source-aware alternative resolver exactly once."""
+        if source_type in self._resolvers:
             raise ValueError("editor source operations already registered")
-        self._operations[source_type] = operations
+        self._resolvers[source_type] = resolver
 
     def operations_for(self, source: LayerSourceReference) -> EditorSourceOperations:
         """Return alternatives owned by the source's exact domain."""
-        return self._operations.get(type(source), EditorSourceOperations())
+        resolver = self._resolvers.get(type(source))
+        return EditorSourceOperations() if resolver is None else resolver(source)
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +156,7 @@ class EditorOperationResolver:
         floating_pixels_can_begin: Callable[[QPointF], bool],
         active_paint_target: Callable[[], PaintTargetIdentity | None],
         default_paint_target_available: Callable[[], bool],
-        paint_targets: PaintTargetRegistry,
+        paint_target_supported: Callable[[PaintTargetContext], bool],
         pixel_owners: LayerPixelOwnerRegistry,
         source_operations: EditorSourceOperationRegistry,
         capability_allowed: Callable[[EditorCapability], bool],
@@ -160,7 +171,7 @@ class EditorOperationResolver:
         self._floating_pixels_can_begin = floating_pixels_can_begin
         self._active_paint_target = active_paint_target
         self._default_paint_target_available = default_paint_target_available
-        self._paint_targets = paint_targets
+        self._paint_target_supported = paint_target_supported
         self._pixel_owners = pixel_owners
         self._source_operations = source_operations
         self._capability_allowed = capability_allowed
@@ -353,32 +364,6 @@ class EditorOperationResolver:
                 scene.scene_id,
                 None,
             )
-        if (
-            active_target is not None
-            and active_target.scene_id == scene.scene_id
-            and active_target.layer_id is not None
-        ):
-            active_layer = next(
-                (
-                    layer
-                    for layer in scene.layers
-                    if layer.layer_id == active_target.layer_id
-                ),
-                None,
-            )
-            if active_layer is not None:
-                target = PaintTargetContext(
-                    PaintTargetIdentity(scene.scene_id, active_layer.layer_id),
-                    scene,
-                    active_layer,
-                )
-                if self._paint_targets.owner_for(target) is not None:
-                    return self._allowed(
-                        EditorOperation.PAINT,
-                        EditorOperationTarget.LAYER,
-                        scene.scene_id,
-                        active_layer.layer_id,
-                    )
         layer = self._selected_layer(scene)
         if layer is None:
             if self._default_paint_target_available():
@@ -398,19 +383,8 @@ class EditorOperationResolver:
             scene,
             layer,
         )
-        if self._paint_targets.owner_for(target) is None:
+        if not self._paint_target_supported(target):
             return self._unsupported_direct_edit(EditorOperation.PAINT, scene, layer)
-        if (
-            active_target is not None
-            and active_target.scene_id == scene.scene_id
-            and active_target.layer_id == layer.layer_id
-        ):
-            return self._allowed(
-                EditorOperation.PAINT,
-                EditorOperationTarget.LAYER,
-                scene.scene_id,
-                layer.layer_id,
-            )
         if not layer.interaction.pixel_editable:
             return self._denied(
                 EditorOperation.PAINT,
@@ -418,11 +392,11 @@ class EditorOperationResolver:
                 scene_id=scene.scene_id,
                 layer_id=layer.layer_id,
             )
-        return self._denied(
+        return self._allowed(
             EditorOperation.PAINT,
-            EditorOperationDenial.SOURCE_UNAVAILABLE,
-            scene_id=scene.scene_id,
-            layer_id=layer.layer_id,
+            EditorOperationTarget.LAYER,
+            scene.scene_id,
+            layer.layer_id,
         )
 
     def _resolve_delete(

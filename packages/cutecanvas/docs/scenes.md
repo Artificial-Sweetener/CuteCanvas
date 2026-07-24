@@ -1,59 +1,53 @@
 **← Previous:** [Getting Started](getting-started.md)
 
-# Documents and Layers
+# Compositions and Layers
 
-A CuteCanvas document has its own canvas, title, layer stack, policies,
-selection, and undo history. It does not belong to a catalog image. You may
-start with an empty canvas or use an image to choose the initial size and first
-layer.
+A CuteCanvas composition has its own canvas, title, layer stack, policy, and
+selection. Compositions live together in one host-owned `CanvasDocument` and
+share its chronological history and reusable resources. You may start with an
+empty composition or use an image to choose the initial size and first layer.
 
-This page covers document and layer structure. Painting, masks, selections,
+This page covers composition and layer structure. Painting, masks, selections,
 and direct-manipulation tools have focused guides of their own.
 
-## Create an Empty Document
+## Create an Empty Composition
 
-Use the typed document collection for ordinary application code:
+Use the typed composition collection for ordinary application code:
 
 ```python
 from PySide6.QtCore import QRectF
 
-document = canvas.editor.documents.create(
+composition = canvas.editor.compositions.create(
     QRectF(0.0, 0.0, 1920.0, 1080.0),
     title="Untitled",
 )
-document.open()
+composition.open()
 ```
 
-The canvas remains 1920 × 1080 even when the document is empty or every layer
-moves outside it. It defines the visible and exported document region; it does
+The canvas remains 1920 × 1080 even when the composition is empty or every layer
+moves outside it. It defines the visible and exported composition region; it does
 not restrict where unbounded layer content may be stored.
 
-Create several documents the same way. Iterate `canvas.editor.documents` in
-browser order and use `canvas.editor.documents.current` for the open document.
+Create several compositions the same way. Iterate `canvas.editor.compositions`
+in browser order and use `canvas.editor.compositions.current` for the open one.
 
 ## Start from an Image
 
-An image enters the source catalog once, then any number of documents can use
-it:
+Import detached pixels and create a composition containing one ordinary layer:
 
 ```python
-from pathlib import Path
-
 from PySide6.QtGui import QImage
 
 image = QImage("photo.png")
-image_map = canvas.imageMapFromLists(
-    [image],
-    paths=[Path("photo.png")],
-)
-image_id = next(iter(image_map))
-canvas.setImagesByID(image_map, current_id=image_id)
+if image.isNull():
+    raise RuntimeError("Could not load photo.png")
 
-document_id = canvas.createCompositionFromImage(
-    image_id,
+composition_id = canvas.createCompositionFromImage(
+    image,
     title="Photo study",
+    label="Photo",
 )
-document = canvas.editor.documents.get(document_id)
+composition = canvas.editor.compositions.get(composition_id)
 ```
 
 The seed image becomes the first ordinary layer. The host decides whether that
@@ -70,9 +64,10 @@ movable_image = LayerPolicy(
     removable=True,
 )
 
-document_id = canvas.createCompositionFromImage(
-    image_id,
+composition_id = canvas.createCompositionFromImage(
+    image,
     title="Layout",
+    label="Photo",
     interaction=movable_image,
 )
 ```
@@ -81,49 +76,62 @@ document_id = canvas.createCompositionFromImage(
 moved and transformed. A user may rasterize a placed image or work on a new
 paint layer when direct pixel changes are needed.
 
-## Add Another Catalog Image
+## Share, Fork, and Nest Content
 
-Add a new layer instance to the open document:
+Duplicating a layer creates another instance of the same project resource.
+Both instances reuse pixels or vector content while keeping independent
+placement, visibility, opacity, policy, and order:
 
 ```python
-from PySide6.QtCore import QRectF
+scene = canvas.currentScene()
+if scene is not None and scene.layers:
+    source_layer_id = scene.layers[-1].layer_id
+    duplicate_id = canvas.duplicateLayer(scene.scene_id, source_layer_id)
+```
 
-layer_id = canvas.addCatalogImageLayer(
-    image_id,
-    placement=QRectF(240.0, 120.0, 960.0, 540.0),
-    label="Reference",
-    interaction=movable_image,
+An edit to shared editable content appears through both instances. Fork the
+selected instance when it should become independent:
+
+```python
+if scene is not None and duplicate_id is not None:
+    resource_id = canvas.forkLayerResource(scene.scene_id, duplicate_id)
+```
+
+Compositions are resources too. Place another open composition as a live nested
+layer:
+
+```python
+layer_id = canvas.placeComposition(
+    other_composition_id,
+    label="Reusable artwork",
 )
 ```
 
-Several layer instances may use the same image source. They share decoded
-pixels and render products, while keeping independent position, transform,
-visibility, opacity, policy, and order.
-
-Removing one layer does not remove the source from the catalog. Removing the
-catalog source removes layers that refer to it.
+Edits inside the nested composition invalidate its parents automatically. Saving
+the outer composition follows these dependencies and stores the complete editable
+resource graph.
 
 ## Understand Layer Order
 
-`DocumentHandle.layers` is ordered from bottom to top. The last item is the
+`CompositionHandle.layers` is ordered from bottom to top. The last item is the
 topmost layer:
 
 ```python
-document = canvas.editor.documents.current
-if document is not None:
-    for layer in reversed(document.layers):
+composition = canvas.editor.compositions.current
+if composition is not None:
+    for layer in reversed(composition.layers):
         print(layer.state.label)
 ```
 
 Move a layer to another stack index with `move_to()`:
 
 ```python
-layer = document.layers[-1]
+layer = composition.layers[-1]
 layer.move_to(0)
 ```
 
-Index `0` is the bottom of the stack. Reordering creates one undoable document
-edit and respects the layer's `reorderable` policy.
+Index `0` is the bottom of the stack. Reordering creates one undoable
+composition edit and respects the layer's `reorderable` policy.
 
 ## Select a Layer
 
@@ -131,7 +139,7 @@ Layer selection chooses the target for layer commands and direct pixel edits.
 It is separate from pixel selection:
 
 ```python
-layer = document.layers[-1]
+layer = composition.layers[-1]
 if layer.select():
     print(layer.state.label)
 ```
@@ -155,7 +163,7 @@ layer.move_to(0)
 layer.remove()
 ```
 
-These changes belong to the document's undo history. They do not alter the
+These changes belong to the `CanvasDocument` undo history. They do not alter the
 underlying source, and changing one instance does not affect another instance
 of the same source.
 
@@ -197,7 +205,7 @@ layer.center(horizontally=True, vertically=False)
 ```
 
 `translate()` preserves scale, rotation, reflection, and skew. `center()`
-aligns the chosen content center with the document canvas.
+aligns the chosen content center with the composition canvas.
 
 Use `set_transform()` when the host owns the complete affine value:
 
@@ -211,7 +219,7 @@ transform.scale(0.75, 0.75)
 layer.set_transform(transform)
 ```
 
-The Move and Transform tools use these same document operations. Their
+The Move and Transform tools use these same composition operations. Their
 gesture behavior, snapping, and temporary navigation are covered in
 [Interaction and Tools](interaction-modes.md).
 
@@ -233,15 +241,14 @@ needs one:
 
 Apply the policy through `layer.set_geometry()`. `layerLocalBounds()` reports
 the bounds selected by the current policy, while `layerTransform()` reports the
-independent local-to-document transform.
+independent local-to-composition transform.
 
 ## Layer Types
 
-Every layer shares the same document structure. Its source determines what can
+Every layer shares the same composition structure. Its source determines what can
 be edited:
 
-* **Catalog images** reuse source pixels and are ideal for review or fixed
-  backgrounds.
+* **Imported images** preserve their source pixels until rasterized.
 * **Paint layers** store editable RGBA pixels sparsely.
 * **Masks** store soft grayscale coverage from brush strokes, shapes, paths,
   and imported images.
@@ -252,16 +259,16 @@ be edited:
 Selection, visibility, ordering, transforms, policies, snapping, history, and
 persistence apply to all of them through the same layer model.
 
-## Inspect Documents for a Layer Tree
+## Inspect Compositions for a Layer Tree
 
-`getCompositionSnapshot()` returns every document and its layers without
+`getCompositionSnapshot()` returns every composition and its layers without
 opening each one:
 
 ```python
 snapshot = canvas.getCompositionSnapshot()
 
-for document_id in snapshot.order:
-    entry = snapshot.compositions[document_id]
+for composition_id in snapshot.order:
+    entry = snapshot.compositions[composition_id]
     print(entry.title)
     for layer in reversed(entry.layers):
         print("  ", layer.label or layer.source_kind)
@@ -272,48 +279,39 @@ reverse. Each `CompositionLayerEntry` includes stable layer and source IDs,
 label, source kind, visibility, opacity, policy, and transform.
 
 Use `compositionChanged` to rebuild the tree and
-`compositionSelectionChanged` to update its active document row. The snapshot
-is a view for host UI, not a second document model.
+`compositionSelectionChanged` to update its active composition row. The
+snapshot is a view for host UI, not a second content model.
 
-## Document Policy
+## Composition Policy
 
-`CompositionPolicy` controls document-level actions:
+`CompositionPolicy` controls composition-level actions:
 
 ```python
 from cutecanvas import CompositionPolicy
 
-document.set_policy(
-    CompositionPolicy(
-        removable=True,
-        comparison_enabled=False,
-    )
-)
+composition.set_policy(CompositionPolicy(removable=True))
 ```
 
-Layer policy and document policy solve different problems. A non-removable
-document can still contain removable layers. A removable document can still
+Layer policy and composition policy solve different problems. A non-removable
+composition can still contain removable layers. A removable composition can still
 contain a locked background.
 
 ## Build a Host-Defined Layout
 
-`CompositionRequest` and `CatalogLayerRequest` are useful when the host already
-has a complete review grid or contact-sheet layout. Each request supplies the
-canvas and an ordered tuple of image-layer placements. `composeScene()` stores
-the result as a normal document.
+Create a composition, add or place its resources, and set each layer transform
+through the same public layer API used by interactive tools. `fitSceneRect()`
+fits a source inside a slot while preserving aspect ratio, and
+`fillSceneRect()` covers the slot.
 
-Use `fitSceneRect()` to fit an image inside a slot while preserving aspect
-ratio, or `fillSceneRect()` to cover the slot. `CompositionTemplate` and
-`TemplateBindings` let a host reuse the same arrangement with different
-catalog sources.
-
-These request values are layout conveniences. The resulting document and
-layers use the same handles, snapshots, policies, rendering, and history as
-documents created one step at a time.
+For repeated layouts, keep the composition and layer IDs in host state or save a
+`.cutecanvas` archive as the reusable starting point. The result uses the same
+handles, rendering, history, and persistence as a composition assembled by a
+user.
 
 ## Hit Test and Draw Host Chrome
 
 `sceneHitTest()` returns the topmost eligible layer under a widget point along
-with panel, document, and source coordinates. It does not select or navigate;
+with panel, scene, and source coordinates. It does not select or navigate;
 the host decides what a click means.
 
 Use `registerSceneOverlay()` for labels, hover outlines, guides, or badges tied
@@ -334,7 +332,6 @@ actual rendered content. See [Extensibility](extensibility.md) for both paths.
 * [Pixel Selections](pixel-selections.md): edit part of a raster or mask.
 * [Masks and AI Selection](masks-and-sam.md): mask layers, shape authoring,
   painting, export, and autosave.
-* [API Reference](api-reference.md): ad-hoc layout requests, templates, clips,
-  and every document and layer value.
+* [API Reference](api-reference.md): every composition, resource, and layer value.
 
 **Continue →** [Interaction and Tools](interaction-modes.md)

@@ -25,11 +25,13 @@ from typing import Any
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QEnterEvent,
+    QHideEvent,
     QImage,
     QKeyEvent,
     QMouseEvent,
     QPaintEvent,
     QResizeEvent,
+    QShowEvent,
     QTabletEvent,
     QWheelEvent,
 )
@@ -68,6 +70,7 @@ from .interaction import (
 )
 from .rendering import ViewerRenderingRuntime
 from .rendering.coordinates import PanelHitTest
+from .rendering.scene_coordinates import SceneCoordinateSystem
 from .rendering.sdk import RasterSource, RenderLayer, RenderScene
 from .scene.presentation_effects import (
     LayerPresentationEffect,
@@ -624,6 +627,10 @@ class QPane(QWidget):
         """Project one widget point into scene and source coordinates."""
         return self._rendering.panel_hit_test(point)
 
+    def coordinateSystem(self) -> SceneCoordinateSystem:
+        """Return the typed authoritative coordinate projection service."""
+        return self._rendering.presenter.coordinates
+
     def minimumSizeHint(self) -> QSize:
         """Return the configured minimum viewer size."""
         return self._rendering.minimum_size_hint()
@@ -656,6 +663,17 @@ class QPane(QWidget):
         """Realign viewport geometry after widget resize."""
         super().resizeEvent(event)
         self._rendering.resize()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Enable visible-view input observation and refresh the cursor."""
+        super().showEvent(event)
+        self._interaction.set_visible(True)
+        self._interaction.refresh_cursor()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Release global input observation while the viewer is hidden."""
+        self._interaction.set_visible(False)
+        super().hideEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """Route wheel input through the active QPane tool."""

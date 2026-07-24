@@ -78,7 +78,6 @@ class MaskService:
     ) -> None:
         """Bind qpane collaborators plus mask, autosave, and executor plumbing."""
         self._qpane = qpane
-        self._catalog = qpane.catalog()
         self._assets = mask_assets
         self._component_adjustment = MaskComponentAdjustmentTool(mask_assets)
         mask_config = mask_config or require_mask_config(config)
@@ -105,24 +104,26 @@ class MaskService:
             publish_status=self._record_status,
         )
         self._status_messages: deque[tuple[str, str]] = deque(maxlen=8)
+        self._history_unsubscribe: Callable[[], None] | None = None
+        self._history_actions_after_stroke: dict[
+            uuid.UUID,
+            deque[Callable[[], None]],
+        ] = {}
         self._layers = MaskLayerCoordinator(
             layers=qpane.compositionService().layers,
             layer_edits=qpane.compositionService().layer_edits,
             assets=mask_assets,
             controller=mask_controller,
-            composition_for_image=qpane.compositionService().default_composition_for_image,
-            image_for_composition=qpane.compositionService().image_id_for_default_composition,
-            current_composition_id=qpane.compositionService().current_composition_id,
-            current_image_id=self._catalog.currentImageID,
+            current_composition_id=qpane.currentCompositionID,
         )
         self._mask_controller.set_color_resolver(self._layers.color)
         self._render_work = MaskRenderWorkCoordinator(
             assets=mask_assets,
             controller=mask_controller,
             executor=executor,
-            mask_ids_for_image=self._layers.mask_ids_for_image,
-            image_ids_for_mask=self._layers.image_ids_for_mask,
-            current_image_id=self._catalog.currentImageID,
+            mask_ids_for_composition=self._layers.mask_ids_for_composition,
+            composition_ids_for_mask=self._layers.composition_ids_for_mask,
+            current_composition_id=qpane.currentCompositionID,
             current_zoom=self._current_zoom,
             should_defer_prefetch=lambda active_id, next_id: self._activation.should_defer(
                 active_id, next_id
@@ -137,34 +138,32 @@ class MaskService:
         self._activation = MaskActivationController(
             controller=mask_controller,
             assets=mask_assets,
-            catalog=self._catalog,
-            mask_ids_for_image=self._layers.mask_ids_for_image,
+            mask_ids_for_composition=self._layers.mask_ids_for_composition,
             invalidate_jobs=self._invalidate_pending_mask_jobs,
             promote_to_top=self.promoteMaskToTop,
             scene_stack_end=self._layers.mask_stack_end_index,
             route_reorder=self._layers.route_reorder,
-            reorder=self._layers.reorder_mask_slot,
+            reorder=self._layers.reorder_mask_slot_in_composition,
             prefetch=self._render_work.prefetch,
             prefetch_pending=self._render_work.is_prefetch_pending,
             publish_status=self._record_status,
             resume=lambda _image_id=None: qpane.resumeOverlays(),
             resume_and_update=lambda _image_id=None: qpane.resumeOverlaysAndUpdate(),
         )
-        self._catalog.onNavigationStarted(self._activation.handle_navigation_started)
         self._stroke_pipeline = MaskStrokePipeline(
             assets=mask_assets,
             controller=mask_controller,
             executor=executor,
             mask_feature_available=lambda: qpane._masks_controller.mask_feature_available(),
-            current_image_id=self._catalog.currentImageID,
+            current_composition_id=qpane.currentCompositionID,
             ensure_active=self._activation.ensure_top_active,
-            mask_ids_for_image=self._layers.mask_ids_for_image,
+            mask_ids_for_composition=self._layers.mask_ids_for_composition,
             view=qpane.view,
             update_region=self._render_work.update_region,
             diagnostics=stroke_diagnostics,
             compositor=qpane.paintingCoordinator().compositor,
         )
-        self._stroke_pipeline.set_idle_callback(self._render_work.handle_mask_idle)
+        self._stroke_pipeline.set_idle_callback(self._handle_stroke_idle)
         self._layer_workflow = MaskLayerWorkflow(
             qpane=qpane,
             assets=mask_assets,
@@ -240,6 +239,34 @@ class MaskService:
             request_redraw=request_redraw,
         )
 
+    def defer_history_action(
+        self,
+        mask_id: uuid.UUID,
+        action: Callable[[], None],
+    ) -> bool:
+        """Run one chronological history action after a pending stroke commits."""
+        if not self._stroke_pipeline.is_mask_busy(mask_id):
+            return False
+        self._history_actions_after_stroke.setdefault(mask_id, deque()).append(action)
+        return True
+
+    def has_pending_stroke(self, mask_id: uuid.UUID) -> bool:
+        """Return whether provisional or worker stroke state remains for a mask."""
+        return self._stroke_pipeline.is_mask_busy(mask_id)
+
+    def _handle_stroke_idle(self, mask_id: uuid.UUID) -> None:
+        """Resume derived work and replay history intents after stroke commit."""
+        self._render_work.handle_mask_idle(mask_id)
+        actions = self._history_actions_after_stroke.pop(mask_id, ())
+        for action in actions:
+            try:
+                action()
+            except Exception:  # pragma: no cover - defensive Qt callback boundary
+                logger.exception(
+                    "Deferred history action failed after mask stroke %s",
+                    mask_id,
+                )
+
     def strokeDebugSnapshot(self) -> MaskStrokeDebugSnapshot:
         """Return a snapshot of pending preview/job state for tests."""
         return self._stroke_pipeline.debug_snapshot()
@@ -298,31 +325,31 @@ class MaskService:
         """Expose the owner of mask layer instances and scene routing."""
         return self._layers
 
-    def mask_ids_for_image(self, image_id: uuid.UUID) -> list[uuid.UUID]:
+    def mask_ids_for_composition(
+        self,
+        composition_id: uuid.UUID,
+    ) -> list[uuid.UUID]:
         """Return mask asset IDs in composition-owned z-order."""
-        return self._layers.mask_ids_for_image(image_id)
-
-    def image_ids_for_mask(self, mask_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
-        """Return image scenes containing an instance of one mask asset."""
-        return self._layers.image_ids_for_mask(mask_id)
+        return self._layers.mask_ids_for_composition(composition_id)
 
     def composition_ids_for_mask(self, mask_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
         """Return composition documents containing an instance of one mask."""
         return self._layers.composition_ids_for_mask(mask_id)
 
-    def layer_instances_for_image(
-        self, image_id: uuid.UUID
+    def layer_instances_for_composition(
+        self,
+        composition_id: uuid.UUID,
     ) -> tuple[CompositionLayerInstance, ...]:
-        """Return the complete composition-owned image scene stack."""
-        return self._layers.instances_for_image(image_id)
+        """Return one composition's complete authoritative layer stack."""
+        return self._layers.instances_for_composition(composition_id)
 
     def layer_instance_for_mask(
         self,
         mask_id: uuid.UUID,
-        image_id: uuid.UUID | None = None,
+        composition_id: uuid.UUID | None = None,
     ) -> CompositionLayerInstance | None:
         """Return one presentation instance for a mask asset."""
-        return self._layers.instance_for_mask(mask_id, image_id)
+        return self._layers.instance_for_mask(mask_id, composition_id)
 
     def mask_color(self, mask_id: uuid.UUID) -> QColor | None:
         """Return the composition-owned tint for one mask instance."""
@@ -376,12 +403,21 @@ class MaskService:
         self._stroke_pipeline.set_selection_constraint(provider)
 
     def bindCompositionEdits(self, edits: CompositionEditController) -> None:
-        """Bind mask commands to composition chronology after CuteCanvas attachment."""
-        self._assets.bind_composition_edits(
+        """Observe document-owned mask history through this view's presentation."""
+        if self._history_unsubscribe is not None:
+            self._history_unsubscribe()
+        self._history_unsubscribe = self._assets.bind_composition_edits(
             edits,
-            lambda mask_id: self._scope_for_mask(mask_id),
+            self._scope_for_mask,
             self._mask_controller.edits.present_history_change,
         )
+
+    def shutdown(self) -> None:
+        """Detach view-local history observation during widget teardown."""
+        unsubscribe = self._history_unsubscribe
+        self._history_unsubscribe = None
+        if unsubscribe is not None:
+            unsubscribe()
 
     def _scope_for_mask(self, mask_id: uuid.UUID) -> uuid.UUID | None:
         """Resolve a mask asset to its active or first owning composition."""
@@ -429,54 +465,45 @@ class MaskService:
 
     def prefetchColorizedMasks(
         self,
-        image_id: uuid.UUID | None,
+        composition_id: uuid.UUID | None,
         *,
         reason: str = "navigation",
         scales: Sequence[float] | None = None,
     ) -> bool:
-        """Warm mask renders for image_id using the background executor."""
+        """Warm mask renders for one composition using the background executor."""
         return self._render_work.prefetch(
-            image_id,
+            composition_id,
             reason=reason,
             scales=scales,
         )
 
-    def cancelPrefetch(self, image_id: uuid.UUID | None) -> bool:
-        """Cancel queued mask prefetch work associated with image_id."""
-        return self._render_work.cancel_prefetch(image_id)
-
-    def prepareCatalogImageRemoval(self, image_ids: Sequence[uuid.UUID]) -> None:
-        """Cancel work and remove layer instances before catalog removal."""
-        for image_id in tuple(dict.fromkeys(image_ids)):
-            self.cancelPrefetch(image_id)
-            for mask_id in tuple(self.mask_ids_for_image(image_id)):
-                self._invalidate_pending_mask_jobs(
-                    mask_id,
-                    reason="image_removal",
-                    request_redraw=False,
-                )
-                self._layers.remove(image_id, mask_id)
+    def cancelPrefetch(self, composition_id: uuid.UUID | None) -> bool:
+        """Cancel queued mask prefetch work for one composition."""
+        return self._render_work.cancel_prefetch(composition_id)
 
     def activateMask(self, mask_id: uuid.UUID | None) -> bool:
         """Select the mask edited by tools."""
         return self._activation.activate(mask_id)
 
-    def ensureTopMaskActiveForImage(self, image_id: uuid.UUID | None) -> bool:
-        """Align the editable mask with an image's top mask layer."""
-        return self._activation.ensure_top_active(image_id)
+    def ensureTopMaskActiveForComposition(
+        self,
+        composition_id: uuid.UUID | None,
+    ) -> bool:
+        """Align the editable mask with one composition's top mask layer."""
+        return self._activation.ensure_top_active(composition_id)
 
-    def isActivationPending(self, image_id: uuid.UUID | None) -> bool:
-        """Return whether deferred activation remains pending for an image."""
-        return self._activation.is_pending(image_id)
+    def isActivationPending(self, composition_id: uuid.UUID | None) -> bool:
+        """Return whether deferred activation remains pending for a document."""
+        return self._activation.is_pending(composition_id)
 
     def undoActiveMaskEdit(self) -> bool:
         """Undo the most recent edit on the active mask layer."""
         result = self._mask_controller.edits.undo()
         if result:
             mask_id = self._mask_controller.get_active_mask_id()
-            image_id = self._image_id_for_mask(mask_id)
-            if image_id is not None:
-                self.prefetchColorizedMasks(image_id, reason="undo")
+            composition_id = self._composition_id_for_mask(mask_id)
+            if composition_id is not None:
+                self.prefetchColorizedMasks(composition_id, reason="undo")
         return result
 
     def redoActiveMaskEdit(self) -> bool:
@@ -484,9 +511,9 @@ class MaskService:
         result = self._mask_controller.edits.redo()
         if result:
             mask_id = self._mask_controller.get_active_mask_id()
-            image_id = self._image_id_for_mask(mask_id)
-            if image_id is not None:
-                self.prefetchColorizedMasks(image_id, reason="redo")
+            composition_id = self._composition_id_for_mask(mask_id)
+            if composition_id is not None:
+                self.prefetchColorizedMasks(composition_id, reason="redo")
         return result
 
     def pushActiveMaskState(self) -> bool:
@@ -503,14 +530,17 @@ class MaskService:
         """Invalidate cached mask renders for mask_id when present."""
         self._mask_controller.renders.invalidate(mask_id)
 
-    def invalidateMaskCachesForImage(self, image_id: uuid.UUID | None) -> None:
-        """Invalidate cached mask renders for all masks associated with image_id."""
-        if image_id is None:
+    def invalidateMaskCachesForComposition(
+        self,
+        composition_id: uuid.UUID | None,
+    ) -> None:
+        """Invalidate cached mask renders for one composition."""
+        if composition_id is None:
             return
-        for mask_id in self.mask_ids_for_image(image_id):
+        for mask_id in self.mask_ids_for_composition(composition_id):
             self._mask_controller.renders.invalidate(
                 mask_id,
-                reason="image_invalidate",
+                reason="composition_invalidate",
             )
 
     def updateMaskRegion(
@@ -537,12 +567,11 @@ class MaskService:
     ) -> None:
         """Merge a generated mask array into the active layer or clear stale overlays."""
         del bbox
-        catalog = self._catalog
-        current_image_id = catalog.currentImageID() if catalog else None
-        if not self.ensureTopMaskActiveForImage(current_image_id):
+        composition_id = self._qpane.currentCompositionID()
+        if not self.ensureTopMaskActiveForComposition(composition_id):
             logger.info(
-                "Mask generation skipped: no active mask available for image %s.",
-                current_image_id,
+                "Mask generation skipped: no active mask available for document %s.",
+                composition_id,
             )
             return
         update = self._generated_edits.apply(
@@ -609,17 +638,17 @@ class MaskService:
             return value.hex[:8].upper()
         return "None"
 
-    def _image_id_for_mask(self, mask_id: uuid.UUID | None) -> uuid.UUID | None:
-        """Return the most relevant composition image for a mask asset."""
+    def _composition_id_for_mask(
+        self,
+        mask_id: uuid.UUID | None,
+    ) -> uuid.UUID | None:
+        """Return the most relevant document for a mask asset."""
         if mask_id is None:
             return None
-        image_ids = self.image_ids_for_mask(mask_id)
-        if image_ids:
-            return image_ids[-1]
-        try:
-            return self._catalog.currentImageID()
-        except RuntimeError:  # pragma: no cover - catalog teardown
-            return None
+        composition_ids = self.composition_ids_for_mask(mask_id)
+        if composition_ids:
+            return composition_ids[-1]
+        return self._qpane.currentCompositionID()
 
     def _current_zoom(self) -> float:
         """Adapt the host viewport zoom for render-work policy."""
@@ -719,7 +748,7 @@ class MaskService:
         self._status_messages.append((label, message))
 
     def loadMaskFromPath(self, path: str) -> uuid.UUID | None:
-        """Import a mask from path and attach it to the current image."""
+        """Import a mask from path and attach it to the current document."""
         return self._layer_workflow.load_from_path(path)
 
     def updateMaskFromPath(self, mask_id: uuid.UUID, path: str) -> bool:
@@ -727,12 +756,16 @@ class MaskService:
         return self._layer_workflow.update_from_path(mask_id, path)
 
     def createBlankMask(self, size: QSize) -> uuid.UUID | None:
-        """Create a blank mask layer for the current image."""
+        """Create a blank mask layer for the current document."""
         return self._layer_workflow.create_blank(size)
 
-    def removeMaskFromImage(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> bool:
+    def removeMaskFromComposition(
+        self,
+        composition_id: uuid.UUID,
+        mask_id: uuid.UUID,
+    ) -> bool:
         """Remove a mask instance and refresh edit/render lifecycle state."""
-        return self._layer_workflow.remove_from_image(image_id, mask_id)
+        return self._layer_workflow.remove_from_composition(composition_id, mask_id)
 
     def setMaskProperties(
         self,
@@ -748,9 +781,14 @@ class MaskService:
             opacity=opacity,
         )
 
-    def cycleMasks(self, image_id: uuid.UUID | None, *, forward: bool) -> None:
-        """Cycle mask ordering for an image adapter or active composition."""
-        self._layer_workflow.cycle(image_id, forward=forward)
+    def cycleMasks(
+        self,
+        composition_id: uuid.UUID | None,
+        *,
+        forward: bool,
+    ) -> None:
+        """Cycle mask ordering for one document or the active document."""
+        self._layer_workflow.cycle(composition_id, forward=forward)
 
     def promoteMaskToTop(self, mask_id: uuid.UUID) -> bool:
         """Bring mask_id to the top of the active composition's mask stack."""

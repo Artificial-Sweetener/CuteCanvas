@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import threading
 import time
-import uuid
 from pathlib import Path
 
 from cutecanvas import CuteCanvas, RasterExtentPolicy, VectorShapeKind
@@ -50,15 +49,12 @@ def _wait_for(qapp, predicate, timeout: float = 3.0) -> None:
 def test_demo_layer_inspector_changes_policy_and_pads_through_public_api(qapp) -> None:
     """The demo inspector should teach the complete host-facing resize workflow."""
     viewer = CuteCanvas(features=("mask",))
-    image_id = uuid.uuid4()
     image = QImage(12, 10, QImage.Format_RGB32)
-    viewer.setImagesByID(
-        CuteCanvas.imageMapFromLists([image], ids=[image_id]), image_id
-    )
+    viewer.createCompositionFromImage(image, title="Inspector", label="Background")
     mask_id = viewer.createBlankMask(image.size())
     assert mask_id is not None
     assert viewer.setActiveMaskID(mask_id)
-    mask = viewer.listMasksForImage()[0]
+    mask = viewer.listMasksForComposition()[0]
     assert mask.scene_id is not None and mask.layer_id is not None
     inspector = RasterStorageProperties(viewer, mask.scene_id, mask.layer_id)
     try:
@@ -97,15 +93,12 @@ def test_demo_layer_inspector_changes_policy_and_pads_through_public_api(qapp) -
 def test_demo_layer_inspector_preserves_manual_bounds_until_applied(qapp) -> None:
     """Scene refreshes and async submission must not discard edited bounds."""
     viewer = CuteCanvas(features=("mask",))
-    image_id = uuid.uuid4()
     image = QImage(40, 30, QImage.Format_RGB32)
-    viewer.setImagesByID(
-        CuteCanvas.imageMapFromLists([image], ids=[image_id]), image_id
-    )
+    viewer.createCompositionFromImage(image, title="Inspector", label="Background")
     mask_id = viewer.createBlankMask(image.size())
     assert mask_id is not None
     assert viewer.setActiveMaskID(mask_id)
-    mask = viewer.listMasksForImage()[0]
+    mask = viewer.listMasksForComposition()[0]
     assert mask.scene_id is not None and mask.layer_id is not None
     inspector = RasterStorageProperties(viewer, mask.scene_id, mask.layer_id)
     requested = QRect(-8, -6, 56, 44)
@@ -161,7 +154,7 @@ def test_demo_layer_inspector_accepts_crop_and_clips_painted_pixels(
         mask_count=1,
         brush_size=4,
     )
-    mask = harness.viewer.listMasksForImage()[0]
+    mask = harness.viewer.listMasksForComposition()[0]
     assert mask.scene_id is not None and mask.layer_id is not None
     inspector = RasterStorageProperties(
         harness.viewer,
@@ -220,12 +213,12 @@ def test_demo_transform_controls_apply_to_non_destructive_placed_layer(qapp) -> 
     window = ExampleWindow(ExampleOptions(feature_set="core"))
     inspector = None
     try:
-        image_id = uuid.uuid4()
         background = QImage(400, 300, QImage.Format_ARGB32_Premultiplied)
         background.fill(QColor("black"))
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([background], ids=[image_id]),
-            image_id,
+        window.qpane.createCompositionFromImage(
+            background,
+            title="Transform",
+            label="Background",
         )
         placed = QImage(80, 60, QImage.Format_ARGB32_Premultiplied)
         placed.fill(QColor("magenta"))
@@ -309,12 +302,12 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
     inspector = None
     release_rasterization = threading.Event()
     try:
-        image_id = uuid.uuid4()
         background = QImage(240, 180, QImage.Format_ARGB32_Premultiplied)
         background.fill(QColor("black"))
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([background], ids=[image_id]),
-            image_id,
+        window.qpane.createCompositionFromImage(
+            background,
+            title="Rasterize",
+            label="Background",
         )
         placed = QImage(64, 48, QImage.Format_ARGB32_Premultiplied)
         placed.fill(QColor(220, 40, 80, 255))
@@ -379,7 +372,7 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
                 for layer in window.qpane.currentScene().layers
                 if layer.layer_id == layer_id
             ).source_kind
-            == "placed-asset"
+            == "imported-raster"
         )
 
         release_rasterization.set()
@@ -402,7 +395,7 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
             for layer in window.qpane.currentScene().layers
             if layer.layer_id == layer_id
         )
-        assert restored_placed.source_kind == "placed-asset"
+        assert restored_placed.source_kind == "imported-raster"
         assert restored_placed.interaction.movable
         assert not restored_placed.interaction.pixel_editable
         assert window.qpane.redoSceneEdit()
@@ -473,12 +466,12 @@ def test_demo_rasterized_vector_layer_is_immediately_pixel_editable(qapp) -> Non
     """Every semantic-to-raster source swap must refresh demo edit policy."""
     window = ExampleWindow(ExampleOptions(feature_set="core"))
     try:
-        image_id = uuid.uuid4()
         background = QImage(240, 180, QImage.Format_ARGB32_Premultiplied)
         background.fill(QColor("black"))
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([background], ids=[image_id]),
-            image_id,
+        window.qpane.createCompositionFromImage(
+            background,
+            title="Vector rasterize",
+            label="Background",
         )
         scene = window.qpane.currentScene()
         assert scene is not None
@@ -499,7 +492,7 @@ def test_demo_rasterized_vector_layer_is_immediately_pixel_editable(qapp) -> Non
             lambda *values: completions.append(tuple(values))
         )
 
-        request_id = window.qpane.rasterizeVectorLayer(scene.scene_id, layer_id)
+        request_id = window.qpane.rasterizeLayer(scene.scene_id, layer_id)
         assert request_id is not None
         _wait_for(
             qapp,

@@ -21,14 +21,35 @@ import uuid
 
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QColor, QImage, QTransform
+from qpane import (
+    HybridDocument,
+    HybridPresentationStyle,
+    HybridSource,
+    HybridVectorPrimitive,
+)
 from qpane.rendering.scene_compiler import SceneRenderCompiler
 from qpane.rendering.sdk import RasterSource, RenderLayer, RenderScene, VectorSource
 from qpane.rendering.sdk_adapter import RenderSceneController
 from qpane.scene.affine import LayerTransform
+from qpane.scene.model import LayerDescriptor
 from qpane.scene.raster import RasterBounds
 from qpane.scene.source_capabilities import LayerSourceCapabilities
-from qpane.vector.model import VectorDocument
+from qpane.sdk.raster import (
+    qimage_to_numpy_const_view_argb32,
+    qimage_to_numpy_const_view_bgra32,
+)
+from qpane.sdk.rendering import (
+    RegionRasterizationWorker,
+    SceneLayerRenderScope,
+    SceneRegionRasterizer,
+)
+from qpane.vector.model import VectorDocument, VectorObject
+from qpane.vector.public import (
+    VectorObjectKind,
+    VectorShapeKind,
+    VectorStyle,
+)
 
 
 def _image(width: int = 32, height: int = 24) -> QImage:
@@ -36,6 +57,51 @@ def _image(width: int = 32, height: int = 24) -> QImage:
     image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(25, 100, 175, 255))
     return image
+
+
+def test_const_raster_views_preserve_storage_and_reject_mutation() -> None:
+    """Expose compatible Qt pixels without a detached large-image allocation."""
+    image = QImage(2, 1, QImage.Format.Format_ARGB32)
+    image.fill(QColor(10, 20, 30, 40))
+    cache_key = image.cacheKey()
+
+    argb, argb_backing = qimage_to_numpy_const_view_argb32(image)
+    bgra, bgra_backing = qimage_to_numpy_const_view_bgra32(image)
+
+    assert image.format() is QImage.Format.Format_ARGB32
+    assert image.cacheKey() == cache_key
+    assert argb.flags.writeable is False
+    assert bgra.flags.writeable is False
+    assert argb.shape == (1, 2, 4)
+    assert bgra.shape == (1, 2, 4)
+    assert argb[0, 0].tolist() == [5, 3, 2, 40]
+    assert bgra[0, 0].tolist() == [30, 20, 10, 40]
+    assert argb_backing.format() is QImage.Format.Format_ARGB32_Premultiplied
+    assert bgra_backing.format() is QImage.Format.Format_ARGB32
+
+
+def test_const_bgra_view_normalizes_incompatible_formats() -> None:
+    """Normalize unsupported storage without mutating the caller's image."""
+    image = QImage(1, 1, QImage.Format.Format_RGB888)
+    image.fill(QColor(12, 34, 56))
+
+    pixels, backing = qimage_to_numpy_const_view_bgra32(image)
+
+    assert image.format() is QImage.Format.Format_RGB888
+    assert backing.format() is QImage.Format.Format_ARGB32_Premultiplied
+    assert pixels.flags.writeable is False
+    assert pixels[0, 0].tolist() == [56, 34, 12, 255]
+
+
+class _SolidRegionSource:
+    """Return exact solid samples for worker contract testing."""
+
+    def sample(self, source_rect: QRectF, pixel_size: QSize) -> QImage:
+        """Return requested dimensions while recording no mutable state."""
+        assert source_rect == QRectF(10.0, 20.0, 30.0, 40.0)
+        image = QImage(pixel_size, QImage.Format_ARGB32_Premultiplied)
+        image.fill(QColor("magenta"))
+        return image
 
 
 def test_raster_source_detaches_simple_image_and_validates_inputs() -> None:
@@ -52,6 +118,23 @@ def test_raster_source_detaches_simple_image_and_validates_inputs() -> None:
     assert source.size == QSize(32, 24)
     with pytest.raises(ValueError, match="must not be null"):
         RasterSource.from_image(QImage())
+
+
+def test_region_rasterization_worker_samples_exact_bounded_output() -> None:
+    """Advanced sampled sources must rasterize without a full source image."""
+    worker = RegionRasterizationWorker(
+        uuid.uuid4(),
+        _SolidRegionSource(),
+        QRectF(10.0, 20.0, 30.0, 40.0),
+        QSize(90, 120),
+    )
+
+    worker.run()
+
+    assert worker.error_message is None
+    assert worker.result is not None
+    assert worker.result.size() == QSize(90, 120)
+    assert worker.result.pixelColor(45, 60) == QColor("magenta")
 
 
 def test_render_scene_rejects_invalid_canvas_and_duplicate_layer_ids() -> None:
@@ -128,6 +211,210 @@ def test_simple_raster_source_hit_test_uses_alpha() -> None:
     assert not capabilities.hit_tests.contains(source, QPointF(0.5, 0.5))
     assert not capabilities.hit_tests.contains(source, QPointF(3.0, 0.5))
     assert capabilities.raster_patches.source_patches(source, source.bounds) is None
+
+
+def test_scene_region_rasterizer_preserves_layer_order_and_geometry() -> None:
+    """Bounded offscreen samples use the same source and transform contracts."""
+    capabilities = LayerSourceCapabilities.create()
+    controller = RenderSceneController(capabilities)
+    background = QImage(8, 8, QImage.Format.Format_ARGB32_Premultiplied)
+    background.fill(QColor(180, 20, 30))
+    foreground = QImage(2, 2, QImage.Format.Format_ARGB32_Premultiplied)
+    foreground.fill(QColor(20, 180, 30))
+    scene = RenderScene.from_size(
+        QSize(8, 8),
+        (
+            RenderLayer(RasterSource.from_image(background)),
+            RenderLayer(
+                RasterSource.from_image(foreground),
+                transform=LayerTransform(dx=2.0, dy=3.0),
+            ),
+        ),
+    )
+    controller.set_scene(scene)
+    descriptor = controller.scene_descriptor()
+
+    assert descriptor is not None
+    sample = SceneRegionRasterizer(capabilities).rasterize(
+        descriptor,
+        QSize(2, 2),
+        QTransform.fromTranslate(-2.0, -3.0),
+    )
+
+    assert sample.pixelColor(0, 0) == QColor(20, 180, 30)
+    assert sample.pixelColor(1, 1) == QColor(20, 180, 30)
+
+
+def test_scene_region_rasterizer_limits_layers_without_changing_visibility() -> None:
+    """A render scope preserves scene order and never includes hidden layers."""
+    capabilities = LayerSourceCapabilities.create()
+    controller = RenderSceneController(capabilities)
+    background = QImage(4, 4, QImage.Format.Format_ARGB32_Premultiplied)
+    background.fill(QColor(180, 20, 30))
+    middle = QImage(4, 4, QImage.Format.Format_ARGB32_Premultiplied)
+    middle.fill(QColor(20, 180, 30))
+    hidden = QImage(4, 4, QImage.Format.Format_ARGB32_Premultiplied)
+    hidden.fill(QColor(20, 30, 180))
+    scene = RenderScene.from_size(
+        QSize(4, 4),
+        (
+            RenderLayer(RasterSource.from_image(background)),
+            RenderLayer(RasterSource.from_image(middle)),
+            RenderLayer(RasterSource.from_image(hidden), visible=False),
+        ),
+    )
+    controller.set_scene(scene)
+    descriptor = controller.scene_descriptor()
+
+    assert descriptor is not None
+    sample = SceneRegionRasterizer(capabilities).rasterize(
+        descriptor,
+        QSize(4, 4),
+        QTransform(),
+        layer_scope=SceneLayerRenderScope(
+            frozenset(
+                {
+                    descriptor.layers[1].layer_id,
+                    descriptor.layers[2].layer_id,
+                }
+            )
+        ),
+    )
+
+    assert sample.pixelColor(2, 2) == QColor(20, 180, 30)
+
+
+def test_scene_region_rasterizer_accepts_revision_stable_raster_override() -> None:
+    """A caller can replace selected source pixels without altering scene state."""
+    capabilities = LayerSourceCapabilities.create()
+    controller = RenderSceneController(capabilities)
+    source_image = QImage(4, 4, QImage.Format.Format_ARGB32_Premultiplied)
+    source_image.fill(QColor(10, 20, 30))
+    scene = RenderScene.from_size(
+        QSize(4, 4),
+        (RenderLayer(RasterSource.from_image(source_image)),),
+    )
+    controller.set_scene(scene)
+    descriptor = controller.scene_descriptor()
+
+    class Override:
+        """Return one fixed revision for every requested source region."""
+
+        def sample(
+            self,
+            layer: LayerDescriptor,
+            local_bounds: RasterBounds,
+        ) -> QImage:
+            """Return exact opaque replacement pixels."""
+            del layer
+            image = QImage(
+                local_bounds.width,
+                local_bounds.height,
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            image.fill(QColor(90, 80, 70))
+            return image
+
+    assert descriptor is not None
+    sample = SceneRegionRasterizer(capabilities).rasterize(
+        descriptor,
+        QSize(4, 4),
+        QTransform(),
+        raster_override=Override(),
+    )
+
+    assert sample.pixelColor(2, 2) == QColor(90, 80, 70)
+
+
+def test_scene_region_rasterizer_samples_vector_content_at_output_scale() -> None:
+    """Bounded scene samples should preserve semantic vector paint and opacity."""
+    capabilities = LayerSourceCapabilities.create()
+    controller = RenderSceneController(capabilities)
+    vector = VectorObject(
+        object_id=uuid.uuid4(),
+        kind=VectorObjectKind.SHAPE,
+        local_bounds=(100.0, 80.0, 200.0, 120.0),
+        transform=LayerTransform(),
+        style=VectorStyle(fill=QColor(50, 160, 230, 255)),
+        shape_kind=VectorShapeKind.RECTANGLE,
+    )
+    document = VectorDocument(
+        vector_id=uuid.uuid4(),
+        bounds=RasterBounds(0, 0, 1000, 800),
+        objects=(vector,),
+    )
+    scene = RenderScene.from_size(
+        QSize(1000, 800),
+        (
+            RenderLayer(
+                VectorSource(document),
+                opacity=0.5,
+            ),
+        ),
+    )
+    controller.set_scene(scene)
+    descriptor = controller.scene_descriptor()
+
+    assert descriptor is not None
+    sample = SceneRegionRasterizer(capabilities).rasterize(
+        descriptor,
+        QSize(100, 60),
+        QTransform(0.5, 0.0, 0.0, 0.5, -50.0, -40.0),
+    )
+
+    center = sample.pixelColor(50, 30)
+    assert abs(center.red() - 50) <= 1
+    assert abs(center.green() - 160) <= 1
+    assert abs(center.blue() - 230) <= 1
+    assert 126 <= center.alpha() <= 129
+
+
+def test_scene_region_rasterizer_samples_hybrid_content_at_output_scale() -> None:
+    """Bounded scene samples should evaluate hybrid coverage at target density."""
+    capabilities = LayerSourceCapabilities.create()
+    controller = RenderSceneController(capabilities)
+    bounds = RasterBounds(0, 0, 200, 120)
+    geometry = VectorObject(
+        object_id=uuid.uuid4(),
+        kind=VectorObjectKind.SHAPE,
+        local_bounds=(0.0, 0.0, 200.0, 120.0),
+        transform=LayerTransform(),
+        style=VectorStyle(fill=QColor("white")),
+        shape_kind=VectorShapeKind.RECTANGLE,
+    )
+    source = HybridSource(
+        HybridDocument(
+            source_id=uuid.uuid4(),
+            bounds=bounds,
+            primitives=(
+                HybridVectorPrimitive(
+                    primitive_id=uuid.uuid4(),
+                    geometry=geometry,
+                    bounds=bounds,
+                ),
+            ),
+        ),
+        HybridPresentationStyle(QColor(35, 190, 145, 255)),
+    )
+    scene = RenderScene.from_size(
+        QSize(200, 120),
+        (RenderLayer(source, opacity=0.75),),
+    )
+    controller.set_scene(scene)
+    descriptor = controller.scene_descriptor()
+
+    assert descriptor is not None
+    sample = SceneRegionRasterizer(capabilities).rasterize(
+        descriptor,
+        QSize(100, 60),
+        QTransform.fromScale(0.5, 0.5),
+    )
+
+    center = sample.pixelColor(50, 30)
+    assert abs(center.red() - 35) <= 1
+    assert abs(center.green() - 190) <= 1
+    assert abs(center.blue() - 145) <= 1
+    assert 190 <= center.alpha() <= 192
 
 
 def test_vector_source_uses_the_same_scene_and_compiler_boundary() -> None:

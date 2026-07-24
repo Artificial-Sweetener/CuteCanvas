@@ -289,9 +289,7 @@ class EditorControls(QObject):
         self.delete_pixels_action.setEnabled(
             has_selection and (delete_state.allowed or bool(delete_state.alternatives))
         )
-        self.add_paint_layer_action.setEnabled(
-            self._qpane.currentImage is not None and scene is not None
-        )
+        self.add_paint_layer_action.setEnabled(scene is not None)
         has_floating = floating is not None
         self.anchor_floating_action.setEnabled(has_floating)
         self.promote_floating_action.setEnabled(has_floating)

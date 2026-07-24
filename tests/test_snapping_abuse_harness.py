@@ -84,17 +84,19 @@ def test_mask_layer_corner_snapping_survives_jitter_history_and_repaint_abuse(
         viewer.update()
         assert harness.wait_for_mask_render_idle()
 
-        mask_entries = {entry.mask_id: entry for entry in viewer.listMasksForImage()}
+        mask_entries = {
+            entry.mask_id: entry for entry in viewer.listMasksForComposition()
+        }
         moving_entry = mask_entries[moving_mask_id]
         target_entry = mask_entries[target_mask_id]
         assert moving_entry.scene_id is not None and moving_entry.layer_id is not None
         assert target_entry.scene_id == moving_entry.scene_id
         assert target_entry.layer_id is not None
         policy = LayerPolicy(selectable=True, movable=True, pixel_editable=True)
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             moving_entry.scene_id, moving_entry.layer_id, policy
         )
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             target_entry.scene_id, target_entry.layer_id, policy
         )
         viewer.setActiveMaskID(moving_mask_id)
@@ -213,7 +215,7 @@ def test_mask_edges_snap_to_stroked_vector_painted_edges(qapp, tmp_path) -> None
         )
         target_bounds = viewer.layerLocalBounds(scene.scene_id, vector_layer_id)
         assert target_bounds == QRectF(356.0, 256.0, 888.0, 488.0)
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             scene.scene_id,
             vector_layer_id,
             LayerPolicy(selectable=False, movable=False),
@@ -240,12 +242,13 @@ def test_mask_edges_snap_to_stroked_vector_painted_edges(qapp, tmp_path) -> None
         mask_layer = next(
             layer for layer in active_scene.layers if layer.source_id == mask_id
         )
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             active_scene.scene_id,
             mask_layer.layer_id,
             LayerPolicy(selectable=True, movable=True, pixel_editable=True),
         )
-        assert viewer.setSelectedLayer(active_scene.scene_id, mask_layer.layer_id)
+        viewer.setSelectedLayer(active_scene.scene_id, mask_layer.layer_id)
+        assert viewer.selectedLayer().layer_id == mask_layer.layer_id
         viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
         harness.drain_events()
         moving_bounds = viewer.layerLocalBounds(
@@ -393,7 +396,7 @@ def test_mask_edges_snap_to_stroked_vector_painted_edges(qapp, tmp_path) -> None
         assert restored.dx() == pytest.approx(expected_dx)
         assert restored.dy() == pytest.approx(expected_dy)
 
-        document = viewer.editor.documents.get(composition_id)
+        document = viewer.editor.compositions.get(composition_id)
         assert document is not None
         archive = tmp_path / "fractional-snapping.cutecanvas"
         viewer.editor.persistence.save(document, archive)

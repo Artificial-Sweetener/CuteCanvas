@@ -144,6 +144,12 @@ class ViewerInteractionController:
         self._pointer.cancel_active_sequences()
         self.refresh_cursor()
 
+    def set_visible(self, visible: bool) -> None:
+        """Limit application-wide pointer observation to a visible viewer."""
+        self._pointer.set_application_observation(visible)
+        if not visible:
+            self._pointer.cancel_active_sequences()
+
     def handle_event(self, event: QEvent) -> bool:
         """Route a Qt touch frame through normalized input."""
         if event.type() not in {

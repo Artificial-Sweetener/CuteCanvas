@@ -42,7 +42,7 @@ def draw_vector_document(
             continue
         painter.save()
         try:
-            painter.setOpacity(item.style.opacity)
+            painter.setOpacity(painter.opacity() * item.style.opacity)
             if item.kind is VectorObjectKind.TEXT and item.text is not None:
                 bounds = QRectF(*item.local_bounds)
                 painter.setTransform(item.transform.to_qtransform(), True)

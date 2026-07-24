@@ -54,10 +54,12 @@ from .sdk import (
 class RenderSdkSourceCapabilities:
     """Present public SDK sources through focused internal capabilities."""
 
-    @property
-    def presentation(self) -> RasterPresentation:
+    def presentation_for(
+        self,
+        source: LayerSourceReference,
+    ) -> RasterPresentation | None:
         """Return the ordinary raster primitive used by SDK raster sources."""
-        return RasterPresentation.IMAGE
+        return RasterPresentation.IMAGE if isinstance(source, RasterSource) else None
 
     def source_size(self, source: LayerSourceReference) -> QSize | None:
         """Return intrinsic dimensions for a public render source."""

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from functools import lru_cache
 
 from PySide6.QtCore import QObject, QSize, Signal
 
@@ -165,7 +166,7 @@ class ViewerComparison(QObject):
         layers = [
             RenderLayer(
                 primary.source,
-                layer_id=uuid.uuid5(_PRIMARY_LAYER_NAMESPACE, str(primary.entry_id)),
+                layer_id=_primary_layer_id(primary.entry_id),
                 label=primary.label,
             )
         ]
@@ -173,9 +174,9 @@ class ViewerComparison(QObject):
             layers.append(
                 RenderLayer(
                     secondary.source,
-                    layer_id=uuid.uuid5(
-                        _COMPARE_LAYER_NAMESPACE,
-                        f"{primary.entry_id}:{secondary.entry_id}",
+                    layer_id=_compare_layer_id(
+                        primary.entry_id,
+                        secondary.entry_id,
                     ),
                     clip=self._clip(),
                     label=secondary.label,
@@ -185,7 +186,7 @@ class ViewerComparison(QObject):
         return RenderScene.from_size(
             QSize(width, height),
             tuple(layers),
-            scene_id=uuid.uuid5(_SCENE_NAMESPACE, str(primary.entry_id)),
+            scene_id=_scene_id(primary.entry_id),
         )
 
     def _clip(self) -> LayerClip:
@@ -206,3 +207,24 @@ class ViewerComparison(QObject):
             1.0,
             1.0 - split,
         )
+
+
+@lru_cache(maxsize=4096)
+def _scene_id(source_id: uuid.UUID) -> uuid.UUID:
+    """Return one cache-stable viewer scene identity."""
+    return uuid.uuid5(_SCENE_NAMESPACE, str(source_id))
+
+
+@lru_cache(maxsize=4096)
+def _primary_layer_id(source_id: uuid.UUID) -> uuid.UUID:
+    """Return one cache-stable primary layer identity."""
+    return uuid.uuid5(_PRIMARY_LAYER_NAMESPACE, str(source_id))
+
+
+@lru_cache(maxsize=4096)
+def _compare_layer_id(primary_id: uuid.UUID, secondary_id: uuid.UUID) -> uuid.UUID:
+    """Return one cache-stable comparison pair identity."""
+    return uuid.uuid5(
+        _COMPARE_LAYER_NAMESPACE,
+        f"{primary_id}:{secondary_id}",
+    )

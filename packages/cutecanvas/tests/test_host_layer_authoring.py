@@ -25,6 +25,7 @@ from cutecanvas import (
 )
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtTest import QSignalSpy
 
 from tests.harness.timing import interaction_clock
 
@@ -42,14 +43,16 @@ def test_layer_handle_visibility_is_generic_and_chronological(qapp) -> None:
     """A host can hide any layer and undo or redo that presentation edit."""
     canvas = CuteCanvas(features=())
     try:
-        document = canvas.editor.documents.create(QRectF(0.0, 0.0, 200.0, 100.0))
+        document = canvas.editor.compositions.create(QRectF(0.0, 0.0, 200.0, 100.0))
         layer_id = canvas.addEditableRasterLayer(_opaque_image(), label="Subject")
         layer = document.layer(layer_id)
         assert layer is not None
         assert layer.state.visible
 
+        changed = QSignalSpy(canvas.sceneChanged)
         assert layer.set_visible(False)
         assert not layer.state.visible
+        assert changed.count() == 1
         assert canvas.undoSceneEdit()
         assert layer.state.visible
         assert canvas.redoSceneEdit()
@@ -63,7 +66,7 @@ def test_layer_handle_translation_and_centering_preserve_affine_geometry(qapp) -
     """Host conveniences retain scale and rotation while changing translation."""
     canvas = CuteCanvas(features=())
     try:
-        document = canvas.editor.documents.create(QRectF(10.0, 20.0, 200.0, 100.0))
+        document = canvas.editor.compositions.create(QRectF(10.0, 20.0, 200.0, 100.0))
         layer_id = canvas.addEditableRasterLayer(_opaque_image(), label="Subject")
         layer = document.layer(layer_id)
         assert layer is not None
@@ -95,7 +98,7 @@ def test_retained_shape_authoring_can_split_two_masks_exactly(qapp) -> None:
     """Two host-authored rectangles can partition an image-aligned mask canvas."""
     canvas = CuteCanvas(features=("mask",))
     try:
-        canvas.editor.documents.create(QRectF(0.0, 0.0, 64.0, 32.0))
+        canvas.editor.compositions.create(QRectF(0.0, 0.0, 64.0, 32.0))
         left_id = canvas.createBlankMask(QSize(64, 32))
         assert left_id is not None
         assert canvas.setActiveMaskID(left_id)
@@ -132,7 +135,7 @@ def test_normalized_mask_coordinates_do_not_shrink_to_existing_content(qapp) -> 
     """Percentage geometry must remain anchored to stable raster storage bounds."""
     canvas = CuteCanvas(features=("mask",))
     try:
-        canvas.editor.documents.create(QRectF(0.0, 0.0, 100.0, 40.0))
+        canvas.editor.compositions.create(QRectF(0.0, 0.0, 100.0, 40.0))
         mask_id = canvas.createBlankMask(QSize(100, 40))
         assert mask_id is not None and canvas.setActiveMaskID(mask_id)
         assert canvas.editor.coverage.rectangle(
@@ -157,7 +160,7 @@ def test_arbitrary_soft_coverage_commits_without_mutating_pixel_selection(qapp) 
     """A host can add bounded grayscale coverage directly to an active mask."""
     canvas = CuteCanvas(features=("mask",))
     try:
-        canvas.editor.documents.create(QRectF(0.0, 0.0, 32.0, 24.0))
+        canvas.editor.compositions.create(QRectF(0.0, 0.0, 32.0, 24.0))
         mask_id = canvas.createBlankMask(QSize(32, 24))
         assert mask_id is not None
         assert canvas.setActiveMaskID(mask_id)
@@ -186,7 +189,7 @@ def test_retained_coverage_facade_targets_pixel_selection_and_undo(qapp) -> None
     """The same authoring facade should target selection without mask logic."""
     canvas = CuteCanvas(features=())
     try:
-        canvas.editor.documents.create(QRectF(10.0, 20.0, 80.0, 40.0))
+        canvas.editor.compositions.create(QRectF(10.0, 20.0, 80.0, 40.0))
         assert canvas.setPixelSelectionPaintTarget()
         assert canvas.editor.coverage.ellipse(
             QRectF(0.25, 0.25, 0.5, 0.5),
@@ -210,7 +213,7 @@ def test_host_authoring_commands_remain_responsive_under_storms(qapp) -> None:
     """Visibility, alignment, and retained geometry must survive rapid host use."""
     canvas = CuteCanvas(features=("mask",))
     try:
-        document = canvas.editor.documents.create(QRectF(0.0, 0.0, 4096.0, 4096.0))
+        document = canvas.editor.compositions.create(QRectF(0.0, 0.0, 4096.0, 4096.0))
         layer_id = canvas.addEditableRasterLayer(_opaque_image(256, 256))
         layer = document.layer(layer_id)
         assert layer is not None
@@ -249,7 +252,7 @@ def test_layer_handle_highlight_is_transient_and_renderer_owned(qapp) -> None:
     """Editor highlights never mutate document state or chronological history."""
     canvas = CuteCanvas(features=())
     try:
-        document = canvas.editor.documents.create(QRectF(0.0, 0.0, 200.0, 100.0))
+        document = canvas.editor.compositions.create(QRectF(0.0, 0.0, 200.0, 100.0))
         layer_id = canvas.addEditableRasterLayer(_opaque_image(), label="Subject")
         layer = document.layer(layer_id)
         assert layer is not None

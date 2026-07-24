@@ -71,10 +71,6 @@ class EditorCursorController:
         if self._cursor_suppressed():
             canvas.setCursor(QCursor(Qt.CursorShape.BlankCursor))
             return
-        divider_cursor = canvas.comparisonDividerInteraction().cursor()
-        if divider_cursor is not None:
-            canvas.setCursor(divider_cursor)
-            return
         active_tool = canvas._tools_manager.get_active_tool()
         if active_tool and hasattr(active_tool, "getCursor"):
             try:
@@ -96,8 +92,15 @@ class EditorCursorController:
                 if cursor is not None:
                     canvas.setCursor(cursor)
                     return
-        if mode == Tools.CONTROL_MODE_DRAW_BRUSH:
-            self.update_brush(erase_indicator=self.alt_held)
+        if mode in (
+            Tools.CONTROL_MODE_DRAW_BRUSH,
+            Tools.CONTROL_MODE_CLONE_STAMP,
+        ):
+            self.update_brush(
+                erase_indicator=(
+                    self.alt_held and mode == Tools.CONTROL_MODE_DRAW_BRUSH
+                )
+            )
         elif mode == Tools.CONTROL_MODE_SMART_SELECT:
             canvas.setCursor(
                 canvas.cursor_builder.create_smart_select_cursor(
@@ -140,6 +143,7 @@ class EditorCursorController:
         """Refresh cursor feedback when mode-sensitive modifiers change."""
         if self._canvas._tools_manager.get_control_mode() in (
             Tools.CONTROL_MODE_DRAW_BRUSH,
+            Tools.CONTROL_MODE_CLONE_STAMP,
             Tools.CONTROL_MODE_SMART_SELECT,
         ):
             self.update()

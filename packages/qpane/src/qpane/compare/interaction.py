@@ -106,6 +106,16 @@ class CompareDividerInteraction:
         """Return divider geometry for the active comparison state."""
         return self._geometry(self._HIT_WIDTH)
 
+    def geometry_for_split(
+        self,
+        split_position: float,
+    ) -> ProjectedClipBoundary | None:
+        """Project an alternate split through the active comparison item."""
+        return self._geometry(
+            self._HIT_WIDTH,
+            split_position=split_position,
+        )
+
     def state(self) -> ComparisonDividerState:
         """Return public divider state for host-owned drawing."""
         comparison = self._service.state()
@@ -212,7 +222,12 @@ class CompareDividerInteraction:
         """Return whether divider hit testing should run."""
         return self._interactive and self._service.state().enabled
 
-    def _geometry(self, hit_width: float) -> ProjectedClipBoundary | None:
+    def _geometry(
+        self,
+        hit_width: float,
+        *,
+        split_position: float | None = None,
+    ) -> ProjectedClipBoundary | None:
         """Return divider geometry using the requested interaction target width."""
         state = self._service.state()
         if not state.enabled:
@@ -224,6 +239,8 @@ class CompareDividerInteraction:
             plan,
             orientation=state.orientation,
             hit_width=hit_width,
+            source_id=state.source_id,
+            split_position=split_position,
         )
 
     def _set_split_from_point(self, point: QPointF) -> None:

@@ -50,6 +50,9 @@ class CanvasViewStateMixin:
             self.refreshCursor()
         self._emit_zoom_snapshot()
         self._emit_viewport_rect_if_changed()
+        binding = self._inspection_binding
+        if binding is not None:
+            binding.publish()
 
     def _allocate_buffers(self):
         """Calculate buffer properties and tell the renderer to allocate them."""

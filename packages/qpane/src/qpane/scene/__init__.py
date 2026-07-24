@@ -18,15 +18,10 @@
 from __future__ import annotations
 
 from .affine import LayerTransform
-from .default_scene import DefaultCatalogSceneProvider, build_default_catalog_scene
 from .identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
     SourceRenderAssetKey,
-    base_image_layer_id,
-    catalog_source_asset_key,
-    compare_layer_id,
-    default_scene_id,
     placeholder_layer_id,
     placeholder_scene_id,
     placeholder_source_id,
@@ -46,7 +41,6 @@ from .model import (
     SceneDescriptor,
     SceneKind,
 )
-from .placeholder_scene import build_placeholder_scene
 from .providers import SceneContribution, SceneProvider, SceneResolver
 from .raster import RasterBounds
 from .registry import (
@@ -71,12 +65,11 @@ from .source_capabilities import (
     SourceHitTestRegistry,
     SourceMetadataRegistry,
 )
-from .source_references import LayerSourceReference, PlaceholderImageReference
+from .source_references import LayerSourceReference
 
 __all__ = [
     "BlendMode",
     "ClipCoordinateSpace",
-    "DefaultCatalogSceneProvider",
     "LayerClip",
     "LayerContentCapabilities",
     "LayerDescriptor",
@@ -87,7 +80,6 @@ __all__ = [
     "LayerSourceCapabilities",
     "LayerSourceReference",
     "LayerTransform",
-    "PlaceholderImageReference",
     "RasterBounds",
     "RasterLayerRenderItem",
     "RasterPresentation",
@@ -112,12 +104,6 @@ __all__ = [
     "SourceMetadataRegistry",
     "SourceRenderAssetKey",
     "TileRenderData",
-    "base_image_layer_id",
-    "build_default_catalog_scene",
-    "build_placeholder_scene",
-    "catalog_source_asset_key",
-    "compare_layer_id",
-    "default_scene_id",
     "placeholder_layer_id",
     "placeholder_scene_id",
     "placeholder_source_id",

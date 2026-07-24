@@ -42,9 +42,9 @@ from cutecanvas.coverage import (
 )
 from cutecanvas.types import RasterExtentPolicy
 
+from ..resources import ProjectResourceReference
 from .image_ops import resize_mask_nearest
 from .mask import MaskAssetStore
-from .source_reference import MaskAssetReference
 
 
 class MaskCanvasProjectionService:
@@ -213,8 +213,8 @@ class MaskCanvasProjectionService:
             return snapshot
         return reframe_coverage_snapshot(snapshot, bounds.united(requested))
 
-    @staticmethod
     def _layer_for_mask(
+        self,
         scene: SceneDescriptor | None,
         mask_id: uuid.UUID,
     ) -> LayerDescriptor | None:
@@ -225,8 +225,9 @@ class MaskCanvasProjectionService:
             (
                 layer
                 for layer in scene.layers
-                if isinstance(layer.source, MaskAssetReference)
-                and layer.source.mask_id == mask_id
+                if isinstance(layer.source, ProjectResourceReference)
+                and layer.source.resource_id == mask_id
+                and self._assets.get_layer(mask_id) is not None
             ),
             None,
         )

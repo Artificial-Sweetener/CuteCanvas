@@ -22,9 +22,16 @@ import argparse
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [
+    str(_REPOSITORY_ROOT / "packages" / "cutecanvas" / "src"),
+    str(_REPOSITORY_ROOT / "packages" / "qpane" / "src"),
+]
 
 from PySide6.QtWidgets import QApplication
 

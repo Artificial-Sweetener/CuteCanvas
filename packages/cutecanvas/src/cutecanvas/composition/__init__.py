@@ -17,7 +17,6 @@
 """Internal composition ownership package."""
 
 from .model import (
-    CompositionComparison,
     CompositionDocumentPolicy,
     CompositionOrigin,
     CompositionRecord,
@@ -25,7 +24,6 @@ from .model import (
 from .service import CompositionService
 
 __all__ = [
-    "CompositionComparison",
     "CompositionDocumentPolicy",
     "CompositionOrigin",
     "CompositionRecord",

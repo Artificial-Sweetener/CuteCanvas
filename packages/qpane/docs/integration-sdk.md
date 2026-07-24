@@ -76,6 +76,13 @@ raster products, while `LayerRasterizationWorker` resolves bounded layer
 content away from the GUI thread. `ViewportZoomMode` names the authoritative
 fit, native-scale, and explicit zoom policies.
 
+`View.coordinates` and `QPane.coordinateSystem()` expose the same
+`SceneCoordinateSystem`. Advanced interactions pass `PanelPoint`,
+`ScenePoint`, `LayerLocalPoint`, and `LayerSourcePoint` values through that
+owner instead of reconstructing viewport or layer transforms. The coordinate
+values retain scene and layer identity so stale or cross-layer projections
+fail without producing plausible coordinates.
+
 Advanced hosts should still prefer the `QPane` widget when they do not need to
 own this lifecycle. Constructing these collaborators directly means accepting
 their cancellation, teardown, and cache contracts as one unit.
@@ -95,9 +102,17 @@ implementations.
 Render-adjacent work implements `BaseWorker` and is submitted through
 `TaskExecutorProtocol`; `TaskHandle` represents cancellation and completion,
 while `TaskRejected` reports a bounded executor refusing more work.
-`QThreadPoolExecutor` is QPane's Qt-backed implementation and
+Workers whose GUI-thread result handling owns native-resource teardown can
+defer scheduler completion until that handling finishes, keeping category and
+device limits authoritative across the complete resource lifecycle.
+`QThreadPoolExecutor` owns QPane's bounded scheduler and uses a Qt thread pool
+by default.
 `LiveTunableExecutorProtocol` is the narrow contract used when concurrency may
 change at runtime.
+`PersistentWorkerPool` is an optional executor backend for native libraries
+that require stable Python worker-thread identity across serialized jobs. It
+uses the same QPane queueing, cancellation, limits, completion, and diagnostics
+ownership as the default Qt pool.
 
 `ThreadPolicy` is the immutable resolved scheduling policy and
 `build_thread_policy` derives it from settings and host limits.
@@ -139,18 +154,16 @@ to the host.
 
 ## Catalog and comparison integration
 
-`Catalog` owns ordered generic resource entries and emits a
-`CatalogMutationEvent` for structural changes. `ImageCatalog` specializes image
-resources, `ViewerCatalog` adds the public viewer workflow, and `CatalogEntry`
-plus `CatalogImageReference` carry detached entry and source identities.
-`CatalogSourceCapabilities` adapts catalog references to the renderer.
+`ViewerCatalog` is QPane's convenience owner for an ordered image-review list.
+Each immutable `ViewerCatalogEntry` retains one reusable `RasterSource`, a
+label, and an optional path. Selecting an entry adapts that source into an
+ordinary one-layer `RenderScene`; the catalog does not define documents,
+editable resources, or layer lifetime.
 
-`ImageMap` tracks stable resource-to-image associations, `LinkManager` owns
-linked viewport groups, and `NavigationEvent` describes deterministic
-selection changes. Custom comparison shells use `CompareService` for state and
-`CompareDividerInteraction` for input; `ComparisonChange` and
-`ComparisonChangeKind` publish exact changes rather than forcing consumers to
-diff mutable state.
+Custom viewer hosts can use `CompareDividerInteraction` for divider input.
+`ComparisonChange` and `ComparisonChangeKind` publish exact interaction changes
+rather than forcing consumers to diff mutable state. Comparison presentation
+and source selection remain available directly through the `QPane` facade.
 
 `ComparisonState`, `ComparisonDividerState`, and `ComparisonOrientation` are
 detached public snapshots. `LinkedGroup` describes synchronized identities,
@@ -159,13 +172,42 @@ policies. `OverlayState`, `SceneSnapshotOverlayState`, and
 `SceneSnapshotOverlayLayer` contain prepared geometry for paint-only host
 extensions.
 
+## Independent inspection and target layout
+
+`qpane.sdk.inspection` stores the visible region independently of source
+resolution. `InspectionTarget` identifies native bounds,
+`capture_inspection()` converts a viewport transform into an
+`InspectionViewState`, and `project_inspection()` derives target-local zoom and
+pan for another view. `InspectionStateStore` owns explicit link groups,
+generation-guards callbacks, and keeps 1:1 interpretation local to the target
+that requested it.
+
+An `InspectionRegion` records normalized center and span values rather than
+source pixels. `InspectionZoomMode` retains fit, native-scale, or custom
+interpretation for the target that authored the state. Projection produces a
+`ProjectedViewport`, while linked publication sends an `InspectionUpdate` to
+each registered `InspectionObserver` without recursively republishing it.
+
+`qpane.sdk.layout` supplies source-neutral target geometry.
+A `ViewTargetSpec` combines a stable target identity with its native size.
+`ResponsiveGridLayout` applies `ResponsiveGridPolicy`, partitions physical
+pixels without cumulative rounding drift, and returns a
+`ResponsiveGridSnapshot` containing logical `ViewTargetFrame` values for
+layout, hit testing, damage, visibility, and prefetch order.
+`TargetComparisonLayout` places a two-target reveal divider on one exact
+physical-pixel boundary and returns that geometry as a
+`TargetComparisonSnapshot`.
+
 ## Raster conversion
 
 `AffineImageResampler` performs bounded transform sampling for worker-side
 pixel operations. `qimage_to_numpy_argb32` and `qimage_to_numpy_grayscale8`
-return detached arrays; `qimage_to_numpy_view_argb32` and
-`qimage_to_numpy_view_grayscale8` provide scoped zero-copy views when the
-caller can honor the image lifetime.
+return detached arrays. `qimage_to_numpy_const_view_argb32` provides a
+read-only zero-copy view and its normalized backing image.
+`qimage_to_numpy_const_view_bgra32` preserves compatible 32-bit storage when
+only channel values, rather than premultiplication, matter.
+`qimage_to_numpy_view_argb32` and `qimage_to_numpy_view_grayscale8` provide
+writable scoped zero-copy views when the caller can honor the image lifetime.
 
 For the reverse direction, `numpy_to_qimage_argb32` and
 `numpy_to_qimage_grayscale8` preserve the array's intrinsic size, while
@@ -186,16 +228,26 @@ drawing and hit testing. `painted_document_path` applies document paint rules,
 and `draw_vector_document` renders that semantic result into a supplied painter
 without creating a second vector model.
 
-## Widget and swap helpers
+## Widget helpers
 
 `apply_widget_defaults` applies QPane's polished viewer attributes to a custom
 widget. `copyToClipboard` and `maybeStartDrag` implement familiar image export
 gestures, while `drag_out_image` and `is_drag_out_allowed` keep drag payload and
 policy decisions separate.
 
-`SwapDelegate` is the focused image-swap boundary used by a host that supplies
-its own viewer shell. `SystemHeadroomWorker` samples memory pressure away from
-the GUI thread so cache policy can react without blocking input.
+`DragSubject`, `OutboundDragPayload`, and `OutboundMimeItem` describe
+host-selected outbound content without assuming it is one image file.
+`OutboundMimeProvider` may materialize URLs, text, previews, and custom MIME
+values synchronously or later. `OutboundDragController` cancels superseded
+work, ignores stale completion, marshals delivery to the GUI thread, and uses
+the same native Qt drag executor as QPane's ready-made image workflow.
+Deferred providers receive a one-shot `DragCompletion` callback and may return
+a `DragCancellation` object for superseded work. Custom native hosts can call
+`execute_outbound_drag` after materializing an `OutboundDragPayload`; the
+helper builds the Qt MIME data, preview, hotspot, and copy action consistently.
+
+`SystemHeadroomWorker` samples memory pressure away from the GUI thread so
+cache policy can react without blocking input.
 
 The advanced SDK deliberately stops at renderer integration. Documents,
 editable layers, masks, selections, history, painting, and authoring tools

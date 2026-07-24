@@ -18,6 +18,13 @@
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
+from .clone_model import (
+    CloneStampAlignment,
+    CloneStampSampleMode,
+    CloneStampSource,
+    CloneStampState,
+    CloneStampTransform,
+)
 from .compositor import BrushCompositor
 from .configuration import BrushStrokeCompiler
 from .coordinates import BrushSourceCoordinateSession
@@ -30,33 +37,26 @@ from .model import (
     BrushSample,
     BrushStrokeSegment,
 )
+from .operations import BrushStrokeOperation, DirectBrushStrokeOperation
 from .regions import BrushDabRegionPlanner
 from .stroke_session import BrushStrokeSession
+from .target_contracts import (
+    CoverageFillTargetOwner,
+    FloodFillSource,
+    FloodFillTargetOwner,
+    PaintTargetContext,
+    PaintTargetIdentity,
+    PaintTargetOwner,
+    PaintTargetRegistry,
+    RetainedCoverageTargetOwner,
+)
 from .tip_cache import BrushTipCache
 
 if TYPE_CHECKING:
-    from .targets import (
-        CoverageFillTargetOwner,
-        FloodFillSource,
-        FloodFillTargetOwner,
-        PaintingCoordinator,
-        PaintTargetContext,
-        PaintTargetIdentity,
-        PaintTargetOwner,
-        PaintTargetRegistry,
-        RetainedCoverageTargetOwner,
-    )
+    from .targets import PaintingCoordinator
 
 _TARGET_EXPORTS = {
-    "CoverageFillTargetOwner",
-    "FloodFillSource",
-    "FloodFillTargetOwner",
     "PaintingCoordinator",
-    "PaintTargetContext",
-    "PaintTargetIdentity",
-    "PaintTargetOwner",
-    "PaintTargetRegistry",
-    "RetainedCoverageTargetOwner",
 }
 
 __all__ = (
@@ -70,10 +70,17 @@ __all__ = (
     "BrushSample",
     "BrushSourceCoordinateSession",
     "BrushStrokeCompiler",
+    "BrushStrokeOperation",
     "BrushStrokeSegment",
     "BrushStrokeSession",
     "BrushTipCache",
+    "CloneStampAlignment",
+    "CloneStampSampleMode",
+    "CloneStampSource",
+    "CloneStampState",
+    "CloneStampTransform",
     "CoverageFillTargetOwner",
+    "DirectBrushStrokeOperation",
     "FloodFillSource",
     "FloodFillTargetOwner",
     "PaintTargetContext",

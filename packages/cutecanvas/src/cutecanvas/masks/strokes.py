@@ -66,9 +66,9 @@ class MaskStrokePipeline:
         controller: MaskController,
         executor: TaskExecutorProtocol | None,
         mask_feature_available: Callable[[], bool],
-        current_image_id: Callable[[], UUID | None],
+        current_composition_id: Callable[[], UUID | None],
         ensure_active: Callable[[UUID | None], bool],
-        mask_ids_for_image: Callable[[UUID], list[UUID]],
+        mask_ids_for_composition: Callable[[UUID], list[UUID]],
         view: Callable[[], object],
         update_region: Callable[..., None],
         diagnostics: MaskStrokeDiagnostics | None = None,
@@ -80,9 +80,9 @@ class MaskStrokePipeline:
         self._controller = controller
         self._task_executor = executor
         self._mask_feature_available = mask_feature_available
-        self._current_image_id = current_image_id
+        self._current_composition_id = current_composition_id
         self._ensure_active = ensure_active
-        self._mask_ids_for_image = mask_ids_for_image
+        self._mask_ids_for_composition = mask_ids_for_composition
         self._view = view
         self._update_region = update_region
         self._region_planner = MaskStrokeRegionPlanner(
@@ -577,7 +577,7 @@ class MaskStrokePipeline:
         if not self._mask_feature_available():
             return
         active_mask_id = self._controller.get_active_mask_id()
-        current_image_id = self._current_image_id()
+        current_image_id = self._current_composition_id()
         if active_mask_id is None:
             if not self._ensure_active(current_image_id):
                 logger.info(
@@ -591,7 +591,7 @@ class MaskStrokePipeline:
             return
         mask_manager = self._assets
         if current_image_id is not None:
-            mask_ids = self._mask_ids_for_image(current_image_id)
+            mask_ids = self._mask_ids_for_composition(current_image_id)
             if active_mask_id not in mask_ids:
                 logger.warning(
                     "Brush stroke skipped: active mask %s is not linked to image %s.",

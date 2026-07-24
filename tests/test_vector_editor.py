@@ -215,7 +215,7 @@ def test_vector_conversions_use_selection_and_raster_authorities_atomically(
     before = next(
         item for item in qpane.currentScene().layers if item.layer_id == layer_id
     )
-    raster_request = qpane.rasterizeVectorLayer(
+    raster_request = qpane.rasterizeLayer(
         scene.scene_id,
         layer_id,
         QSize(240, 180),

@@ -25,6 +25,7 @@ from PySide6.QtCore import (
     QRectF,
 )
 from PySide6.QtGui import (
+    QImage,
     QTransform,
 )
 from qpane.sdk.scene import LayerPlacement, LayerTransform
@@ -36,54 +37,30 @@ from cutecanvas.composition.public_policy import (
 )
 from cutecanvas.types import (
     CompositionPolicy,
-    CompositionRequest,
-    CompositionTemplate,
+    CompositionSnapshot,
     LayerHit,
     LayerPolicy,
     LayerSelectionSnapshot,
     SceneSnapshot,
-    TemplateBindings,
 )
 
 
 class CompositionApiMixin:
     """Group compositionapi facade behavior."""
 
-    def composeScene(
-        self,
-        request: CompositionRequest,
-        *,
-        activate: bool = True,
-        fit_view: bool = True,
-    ) -> uuid.UUID:
-        """Create or replace a stored catalog-backed scene composition.
+    def currentCompositionID(self) -> uuid.UUID | None:
+        """Return the active document identity."""
+        return self.viewSession().active_composition_id
 
-        Args:
-            request: Scene composition request whose layers reference catalog image IDs.
-            activate: Open the stored composition immediately when True.
-            fit_view: Fit the composed scene bounds when activation occurs.
+    def compositionIDs(self) -> list[uuid.UUID]:
+        """Return document identities in browser order."""
+        return list(self.compositionService().composition_ids())
 
-        Raises:
-            TypeError: If request objects have invalid types.
-            ValueError: If scene geometry, layer values, or replacement targets are invalid.
-            KeyError: If a layer references an image ID outside the catalog.
-
-        Side effects:
-            Stores a composition record, optionally opens it, and emits
-            composition and scene signals.
-        """
-        previous_active_id = self.currentCompositionID()
-        record = self.compositionService().compose_scene(
-            request,
-            catalog_contains=self._image_catalog.containsImage,
-            activate=activate,
+    def getCompositionSnapshot(self) -> CompositionSnapshot:
+        """Return a detached snapshot of every document and layer."""
+        return self.compositionService().snapshot(
+            active_composition_id=self.viewSession().active_composition_id,
         )
-        self._emit_composition_changed()
-        if activate:
-            self._open_composition_record(record, fit_view=fit_view)
-        elif record.composition_id == previous_active_id:
-            self._refresh_active_scene_content(fit_view=fit_view)
-        return record.composition_id
 
     def createComposition(
         self,
@@ -118,18 +95,20 @@ class CompositionApiMixin:
 
     def createCompositionFromImage(
         self,
-        image_id: uuid.UUID,
+        image: QImage,
         *,
         title: str | None = None,
+        label: str | None = None,
         interaction: LayerPolicy | None = None,
         policy: CompositionPolicy | None = None,
         fit_view: bool = True,
     ) -> uuid.UUID:
-        """Create an independent composition seeded by a catalog resource.
+        """Create an independent composition from detached image pixels.
 
         Args:
-            image_id: Existing catalog resource used for canvas size and first layer.
-            title: Optional document title derived from the catalog path when omitted.
+            image: Non-null raster copied into project resource storage.
+            title: Optional document title.
+            label: Optional label for the ordinary seeded layer.
             interaction: Host policy for the ordinary seeded layer.
             policy: Optional document-level removal and comparison permissions.
             fit_view: Fit the new canvas in the viewport when True.
@@ -140,59 +119,12 @@ class CompositionApiMixin:
         Side effects:
             Opens the document and emits composition and scene signals.
         """
-        if not isinstance(image_id, uuid.UUID):
-            raise TypeError("image_id must be a UUID")
-        if not self._image_catalog.containsImage(image_id):
-            raise KeyError("image_id must exist in the catalog")
+        if not isinstance(image, QImage):
+            raise TypeError("image must be a QImage")
+        if image.isNull():
+            raise ValueError("image must not be null")
         if title is not None and not isinstance(title, str):
             raise TypeError("title must be a string or None")
-        if interaction is not None and not isinstance(
-            interaction,
-            LayerPolicy,
-        ):
-            raise TypeError("interaction must be LayerPolicy or None")
-        if policy is not None and not isinstance(policy, CompositionPolicy):
-            raise TypeError("policy must be CompositionPolicy or None")
-        path = self.imagePath(image_id)
-        resolved_title = title or (path.name if path is not None else "Composition")
-        record = self.compositionService().create_from_catalog_image(
-            image_id,
-            title=resolved_title,
-            interaction=internal_layer_policy(interaction or LayerPolicy()),
-            policy=internal_document_policy(policy or CompositionPolicy()),
-        )
-        self._emit_composition_changed()
-        self._open_composition_record(record, fit_view=fit_view)
-        return record.composition_id
-
-    def addCatalogImageLayer(
-        self,
-        image_id: uuid.UUID,
-        *,
-        placement: QRectF | None = None,
-        label: str | None = None,
-        interaction: LayerPolicy | None = None,
-    ) -> uuid.UUID | None:
-        """Place one shared catalog resource in the active composition.
-
-        Args:
-            image_id: Existing catalog resource to place.
-            placement: Optional scene-space destination rectangle.
-            label: Optional composition-local display label.
-            interaction: Host policy for the new independent instance.
-
-        Returns:
-            The new layer UUID, or None when no composition is active.
-
-        Side effects:
-            Adds one undoable layer instance and refreshes the active scene.
-        """
-        if not isinstance(image_id, uuid.UUID):
-            raise TypeError("image_id must be a UUID")
-        if not self._image_catalog.containsImage(image_id):
-            raise KeyError("image_id must exist in the catalog")
-        if placement is not None and not isinstance(placement, QRectF):
-            raise TypeError("placement must be a QRectF or None")
         if label is not None and not isinstance(label, str):
             raise TypeError("label must be a string or None")
         if interaction is not None and not isinstance(
@@ -200,15 +132,29 @@ class CompositionApiMixin:
             LayerPolicy,
         ):
             raise TypeError("interaction must be LayerPolicy or None")
-        layer_id = self.compositionService().add_catalog_layer(
-            image_id,
-            placement=self._layer_placement(placement),
-            interaction=internal_layer_policy(interaction or LayerPolicy()),
+        if policy is not None and not isinstance(policy, CompositionPolicy):
+            raise TypeError("policy must be CompositionPolicy or None")
+        workflow = self._image_documents
+        if workflow is None:
+            raise RuntimeError("image document workflow is not available")
+        result = workflow.create(
+            image,
+            title=title or "Untitled",
             label=label,
+            interaction=internal_layer_policy(
+                interaction
+                or LayerPolicy(
+                    selectable=True,
+                    movable=True,
+                    pixel_editable=False,
+                )
+            ),
+            policy=internal_document_policy(policy or CompositionPolicy()),
         )
-        if layer_id is not None:
-            self._refresh_active_scene_content(fit_view=False)
-        return layer_id
+        record = self.compositionService().record(result.document_id)
+        self._emit_composition_changed()
+        self._open_composition_record(record, fit_view=fit_view)
+        return record.composition_id
 
     def setCompositionPolicy(
         self,
@@ -219,68 +165,25 @@ class CompositionApiMixin:
 
         Args:
             composition_id: Existing composition identity.
-            policy: Host-selected removal and comparison permissions.
+            policy: Host-selected structural permissions.
 
         Returns:
-            True when document policy or comparison state changed.
+            True when composition policy changed.
 
         Side effects:
-            Clears an existing comparison when comparison becomes disabled and
-            emits composition state when a change occurs.
+            Emits composition state when a change occurs.
         """
         if not isinstance(composition_id, uuid.UUID):
             raise TypeError("composition_id must be a UUID")
         if not isinstance(policy, CompositionPolicy):
             raise TypeError("policy must be CompositionPolicy")
-        record = self.compositionService().record(composition_id)
         changed = self.compositionService().set_document_policy(
             composition_id,
-            internal_document_policy(
-                policy,
-                remove_if_catalog_resource_missing=(
-                    record.policy.remove_if_catalog_resource_missing
-                ),
-            ),
+            internal_document_policy(policy),
         )
         if changed:
             self._emit_composition_changed()
-            if self.currentCompositionID() == composition_id:
-                self._handle_comparison_changed()
         return changed
-
-    def composeSceneFromTemplate(
-        self,
-        template: CompositionTemplate,
-        bindings: TemplateBindings,
-        *,
-        activate: bool = True,
-        fit_view: bool = True,
-    ) -> uuid.UUID:
-        """Create or replace a stored scene composition from a host template.
-
-        Args:
-            template: Host-owned reusable template object.
-            bindings: Catalog image bindings for this composition instance.
-            activate: Open the stored composition immediately when True.
-            fit_view: Fit the composed scene bounds when activation occurs.
-
-        Side effects:
-            Stores a composition record, optionally opens it, and emits
-            composition and scene signals.
-        """
-        previous_active_id = self.currentCompositionID()
-        record = self.compositionService().compose_scene_from_template(
-            template,
-            bindings,
-            catalog_contains=self._image_catalog.containsImage,
-            activate=activate,
-        )
-        self._emit_composition_changed()
-        if activate:
-            self._open_composition_record(record, fit_view=fit_view)
-        elif record.composition_id == previous_active_id:
-            self._refresh_active_scene_content(fit_view=fit_view)
-        return record.composition_id
 
     def currentScene(self) -> SceneSnapshot | None:
         """Return the normalized scene snapshot for the active composition."""
@@ -657,3 +560,32 @@ class CompositionApiMixin:
             self._anchor_floating_pixels_before_edit()
             and self.editorInteraction().clear_selected_layer()
         )
+
+    def openComposition(self, composition_id: uuid.UUID) -> None:
+        """Open an existing project composition."""
+        if not isinstance(composition_id, uuid.UUID):
+            raise TypeError("composition_id must be a UUID")
+        service = self.compositionService()
+        record = service.record(composition_id)
+        self._open_composition_record(record)
+
+    def removeComposition(self, composition_id: uuid.UUID) -> None:
+        """Remove a policy-enabled composition and open its successor."""
+        if not isinstance(composition_id, uuid.UUID):
+            raise TypeError("composition_id must be a UUID")
+        service = self.compositionService()
+        session = self.viewSession()
+        previous_id = session.active_composition_id
+        if previous_id == composition_id:
+            self._cancel_floating_pixels_for_context_change()
+        service.remove_composition(composition_id)
+        session.reconcile(service.composition_ids())
+        active_id = session.active_composition_id
+        active = None if active_id is None else service.record(active_id)
+        if previous_id == composition_id and active is not None:
+            self._open_composition_record(active, force_context_refresh=True)
+        elif active is None:
+            self.blank()
+            self._emit_composition_selection_changed(None)
+            self._emit_scene_changed()
+        self._emit_composition_changed()

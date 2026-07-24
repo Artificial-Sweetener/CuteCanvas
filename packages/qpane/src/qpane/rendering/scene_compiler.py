@@ -35,6 +35,7 @@ from ..scene.source_capabilities import (
     HybridPresentationRegistry,
     RasterPresentation,
     RasterPresentationRegistry,
+    SampledPresentationRegistry,
     SourceMetadataRegistry,
     VectorPresentationRegistry,
 )
@@ -58,6 +59,7 @@ class SceneRenderCompiler:
         raster_sources: RasterPresentationRegistry,
         vector_sources: VectorPresentationRegistry,
         hybrid_sources: HybridPresentationRegistry,
+        sampled_sources: SampledPresentationRegistry | None = None,
     ) -> None:
         """Capture the scene snapshot and focused source capabilities."""
         self._scene_provider = scene_provider
@@ -66,6 +68,7 @@ class SceneRenderCompiler:
         self._raster_sources = raster_sources
         self._vector_sources = vector_sources
         self._hybrid_sources = hybrid_sources
+        self._sampled_sources = sampled_sources or SampledPresentationRegistry()
         self._cached_key: object | None = None
         self._cached_scene: CompiledRenderScene | None = None
         self._has_cached_result = False
@@ -98,6 +101,7 @@ class SceneRenderCompiler:
         raster_layers: list[CompiledRenderLayer] = []
         vector_layers: list[CompiledPresentationLayer] = []
         hybrid_layers: list[CompiledPresentationLayer] = []
+        sampled_layers: list[CompiledPresentationLayer] = []
         for layer in scene.layers:
             if not layer.visible:
                 continue
@@ -108,6 +112,10 @@ class SceneRenderCompiler:
             hybrid_snapshot = self._hybrid_sources.hybrid_document(layer.source)
             if hybrid_snapshot is not None:
                 hybrid_layers.append(CompiledPresentationLayer(layer, hybrid_snapshot))
+                continue
+            sampled_source = self._sampled_sources.sampled_source(layer.source)
+            if sampled_source is not None:
+                sampled_layers.append(CompiledPresentationLayer(layer, sampled_source))
                 continue
             presentation = self._raster_sources.presentation_for(layer.source)
             if presentation not in (
@@ -128,6 +136,7 @@ class SceneRenderCompiler:
             layers=tuple(raster_layers),
             vector_layers=tuple(vector_layers),
             hybrid_layers=tuple(hybrid_layers),
+            sampled_layers=tuple(sampled_layers),
             hit_test_items=hit_test_items_for_scene(scene),
         )
 

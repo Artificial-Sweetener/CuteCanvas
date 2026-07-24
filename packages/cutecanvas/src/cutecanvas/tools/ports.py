@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from qpane.sdk.scene import TransformModifiers, TransformOperation
 
     from cutecanvas.coverage import CoverageCombineMode, CoverageItem, CoverageSnapshot
+    from cutecanvas.painting.tools.brush_preview import AffineBrushPreview
 
     from ..editor.transform_interaction import TransformBoxPresentation
 
@@ -109,6 +110,7 @@ class PaintingInteractionPort:
     is_alt_held: Callable[[], bool] = _false
     is_shift_held: Callable[[], bool] = _false
     can_paint: Callable[[], bool] = _true
+    prepare_paint: Callable[[], bool] = _true
     get_brush_size: Callable[[], int] = lambda: 20
     get_preview_pens: Callable[[], tuple[QPen, QPen]] | None = None
     panel_hit_test: Callable[[QPoint], PanelHitTest | None] | None = None
@@ -131,6 +133,18 @@ class PaintingInteractionPort:
     get_dpr: Callable[[], float] = _one
     get_preview_color: Callable[[], QColor | None] = lambda: None
     request_overlay_update: Callable[[QRect], None] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CloneStampInteractionPort:
+    """Dependencies used by Clone Stamp interaction and source feedback."""
+
+    painting: PaintingInteractionPort = field(default_factory=PaintingInteractionPort)
+    set_source_from_panel: Callable[[QPointF], bool] = lambda _point: False
+    source_footprint: Callable[[float], AffineBrushPreview | None] = (
+        lambda _diameter: None
+    )
+    source_set: Callable[[], bool] = _false
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +230,7 @@ BuiltInToolPort = (
     | TransformInteractionPort
     | PixelSelectionInteractionPort
     | PaintingInteractionPort
+    | CloneStampInteractionPort
     | PaintBucketInteractionPort
     | SmartSelectionInteractionPort
     | VectorInteractionPort
@@ -243,6 +258,9 @@ class ToolActivationPorts:
         default_factory=PixelSelectionInteractionPort
     )
     painting: PaintingInteractionPort = field(default_factory=PaintingInteractionPort)
+    clone_stamp: CloneStampInteractionPort = field(
+        default_factory=CloneStampInteractionPort
+    )
     paint_bucket: PaintBucketInteractionPort = field(
         default_factory=PaintBucketInteractionPort
     )
@@ -266,6 +284,7 @@ class ToolActivationPorts:
             "mask-ellipse": self.coverage_shapes,
             "mask-lasso": self.coverage_shapes,
             "draw-brush": self.painting,
+            "clone-stamp": self.clone_stamp,
             "paint-bucket": self.paint_bucket,
             "smart-select": self.smart_selection,
         }
@@ -280,6 +299,7 @@ def tool_activation_ports(
     transform: TransformInteractionPort,
     pixel_selection: PixelSelectionInteractionPort,
     painting: PaintingInteractionPort,
+    clone_stamp: CloneStampInteractionPort | None = None,
     paint_bucket: PaintBucketInteractionPort | None = None,
     smart_selection: SmartSelectionInteractionPort,
     coverage_shapes: PixelSelectionInteractionPort | None = None,
@@ -352,6 +372,7 @@ def tool_activation_ports(
         pixel_selection=pixel_selection,
         coverage_shapes=coverage_shapes or pixel_selection,
         painting=painting,
+        clone_stamp=clone_stamp or CloneStampInteractionPort(painting=painting),
         paint_bucket=paint_bucket or PaintBucketInteractionPort(),
         smart_selection=smart_selection,
         domain_ports={} if domain_ports is None else dict(domain_ports),

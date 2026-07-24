@@ -53,7 +53,6 @@ class MaskLayerWorkflow:
     ) -> None:
         """Bind owners required to coordinate complete mask layer commands."""
         self._qpane = qpane
-        self._catalog = qpane.catalog()
         self._assets = assets
         self._controller = controller
         self._layers = layers
@@ -66,24 +65,17 @@ class MaskLayerWorkflow:
 
     def load_from_path(self, path: str) -> uuid.UUID | None:
         """Import a mask from path and attach it to the active composition."""
-        image = self._qpane.original_image
         scene = self._qpane.currentScene()
         composition_id = self._qpane.currentCompositionID()
-        if composition_id is None or (
-            (image is None or image.isNull()) and scene is None
-        ):
+        if composition_id is None or scene is None:
             self._publish_status(
                 "Cannot load a mask without an active composition.",
                 label="Mask Error",
             )
             return None
-        target_size = (
-            image.size()
-            if image is not None and not image.isNull()
-            else QSize(
-                max(1, round(scene.bounds.width())),
-                max(1, round(scene.bounds.height())),
-            )
+        target_size = QSize(
+            max(1, round(scene.bounds.width())),
+            max(1, round(scene.bounds.height())),
         )
         prepared = self._prepare_from_path(
             path,
@@ -92,7 +84,9 @@ class MaskLayerWorkflow:
         )
         if prepared is None:
             return None
-        mask_id = self._assets.create_mask(image)
+        seed = QImage(target_size, QImage.Format_Grayscale8)
+        seed.fill(0)
+        mask_id = self._assets.create_mask(seed)
         if not self._commit_image(mask_id, prepared):
             return None
         layer = self._assets.get_layer(mask_id)
@@ -101,7 +95,7 @@ class MaskLayerWorkflow:
             mask_id,
             composition_id,
             color=random_mask_color(layer_index),
-            undoable=not self._is_legacy_image_composition(composition_id),
+            undoable=True,
         ):
             self._assets.delete_mask(mask_id)
             return None
@@ -158,7 +152,7 @@ class MaskLayerWorkflow:
             mask_id,
             composition_id,
             color=color,
-            undoable=not self._is_legacy_image_composition(composition_id),
+            undoable=True,
         ):
             self._assets.delete_mask(mask_id)
             return None
@@ -168,28 +162,23 @@ class MaskLayerWorkflow:
         self._publish_status(f"Created blank mask layer ({mask_id}).", label="Mask")
         return mask_id
 
-    def _is_legacy_image_composition(self, composition_id: uuid.UUID) -> bool:
-        """Return whether image-scoped compatibility owns this generated document."""
-        image_id = self._catalog.currentImageID()
-        return bool(
-            image_id is not None
-            and self._qpane.compositionService().default_composition_for_image(image_id)
-            == composition_id
-        )
-
-    def remove_from_image(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> bool:
+    def remove_from_composition(
+        self,
+        composition_id: uuid.UUID,
+        mask_id: uuid.UUID,
+    ) -> bool:
         """Remove a mask instance and refresh edit/render lifecycle state."""
-        if image_id is None:
+        if composition_id is None:
             self._publish_status(
-                "Cannot remove mask because the image identifier is missing.",
+                "Cannot remove mask because the document identifier is missing.",
                 label="Mask Error",
             )
             return False
         was_active = self._controller.get_active_mask_id() == mask_id
         layer = self._assets.get_layer(mask_id)
-        if not self._layers.remove(image_id, mask_id):
+        if not self._layers.remove(composition_id, mask_id):
             self._publish_status(
-                f"Mask {mask_id} is not associated with image {image_id}.",
+                f"Mask {mask_id} is not associated with document {composition_id}.",
                 label="Mask Error",
             )
             return False
@@ -197,7 +186,7 @@ class MaskLayerWorkflow:
         self._controller.edits.advance_epoch(mask_id, reason="mask_removed")
         self._reset_strokes(mask_id, request_redraw=False)
         self._controller.edits.discard_source(mask_id)
-        remaining_ids = self._layers.mask_ids_for_image(image_id)
+        remaining_ids = self._layers.mask_ids_for_composition(composition_id)
         next_active = remaining_ids[-1] if remaining_ids else None
         if was_active:
             self._controller.setActiveMaskID(next_active)
@@ -207,7 +196,7 @@ class MaskLayerWorkflow:
         self._qpane.markDirty()
         self._qpane.update()
         self._publish_status(
-            f"Removed mask {mask_id} from image {image_id}.",
+            f"Removed mask {mask_id} from document {composition_id}.",
             label="Mask",
         )
         return True
@@ -226,16 +215,10 @@ class MaskLayerWorkflow:
             opacity=opacity,
         )
 
-    def cycle(self, image_id: uuid.UUID | None, *, forward: bool) -> None:
-        """Cycle masks in an image adapter or the active composition."""
+    def cycle(self, composition_id: uuid.UUID | None, *, forward: bool) -> None:
+        """Cycle masks in one document or the active composition."""
         previous_active = self._controller.get_active_mask_id()
-        composition_id = (
-            self._qpane.currentCompositionID()
-            if image_id is None
-            else self._qpane.compositionService().default_composition_for_image(
-                image_id
-            )
-        )
+        composition_id = composition_id or self._qpane.currentCompositionID()
         mask_ids = (
             []
             if composition_id is None
@@ -278,7 +261,7 @@ class MaskLayerWorkflow:
             )
         else:
             self._publish_status(
-                f"Cycling {direction} mask order for {image_id} had no effect.",
+                f"Cycling {direction} mask order for {composition_id} had no effect.",
                 label="Mask",
             )
 

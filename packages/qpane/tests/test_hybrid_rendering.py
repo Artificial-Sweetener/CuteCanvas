@@ -257,9 +257,19 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
         pane.applyZoom(4.0, QPointF(400.0, 300.0))
         qapp.processEvents()
         pane.calculateRenderPlan()
-        assert executor.snapshot().queued_by_category.get("render_refinement", 0) == 2
-        executor.run_category("render_refinement")
-        qapp.processEvents()
+        assert executor.snapshot().queued_by_category.get("render_refinement", 0) == 1
+        assert pane._rendering.presenter._render_refinement.pending_count == 3
+        for _ in range(5):
+            queued = executor.snapshot().queued_by_category.get(
+                "render_refinement",
+                0,
+            )
+            if queued == 0:
+                break
+            executor.run_category("render_refinement")
+            qapp.processEvents()
+        else:
+            raise AssertionError("hybrid refinement did not settle")
         assert pane.calculateRenderPlan() is not None
         pane.update()
         qapp.processEvents()

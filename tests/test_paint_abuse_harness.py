@@ -27,8 +27,8 @@ from cutecanvas import (
     LayerPolicy,
     RasterExtentPolicy,
 )
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
@@ -42,6 +42,80 @@ from tests.harness.timing import (
 
 _MEDIAN_POINTER_BUDGET_MS = 16.0
 _ISOLATED_POINTER_CEILING_MS = 100.0
+
+
+def test_brush_on_noneditable_selection_creates_and_selects_real_paint_layer(
+    qapp: QApplication,
+) -> None:
+    """The first brush gesture visibly provisions its actual raster destination."""
+    viewer = CuteCanvas()
+    source = QImage(128, 96, QImage.Format.Format_ARGB32_Premultiplied)
+    source.fill(QColor(30, 45, 65, 255))
+    paint_color = QColor(240, 75, 125, 255)
+    try:
+        viewer.resize(640, 480)
+        viewer.show()
+        viewer.createCompositionFromImage(
+            source,
+            title="Automatic brush destination",
+            interaction=LayerPolicy(
+                selectable=True,
+                movable=True,
+                pixel_editable=False,
+            ),
+        )
+        scene = viewer.currentScene()
+        assert scene is not None
+        source_layer_id = scene.layers[0].layer_id
+        assert viewer.setSelectedLayer(scene.scene_id, source_layer_id)
+        viewer.setPaintColor(paint_color)
+        viewer.setBrushPreset(BrushPreset(size=3.0, hardness=1.0))
+        viewer.setControlMode(viewer.CONTROL_MODE_DRAW_BRUSH)
+        viewer.setZoomFit()
+        qapp.processEvents()
+        panel_point = viewer.view().scene_to_panel_point(QPointF(80.0, 48.0))
+        assert panel_point is not None
+
+        QTest.mouseClick(
+            viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            panel_point.toPoint(),
+        )
+        qapp.processEvents()
+
+        updated = viewer.currentScene()
+        selected = viewer.selectedLayer()
+        target = viewer.paintTargetState()
+        assert updated is not None and len(updated.layers) == 2
+        assert selected is not None and selected.layer_id != source_layer_id
+        assert target is not None and target.layer_id == selected.layer_id
+        assert [layer.layer_id for layer in updated.layers] == [
+            source_layer_id,
+            selected.layer_id,
+        ]
+        painted = viewer.editableRasterLayerImage(
+            updated.scene_id,
+            selected.layer_id,
+        )
+        assert painted is not None
+        assert painted.pixelColor(80, 48) == paint_color
+
+        assert viewer.undoSceneEdit()
+        restored = viewer.editableRasterLayerImage(
+            updated.scene_id,
+            selected.layer_id,
+        )
+        assert restored is not None and restored.pixelColor(80, 48).alpha() == 0
+        assert viewer.undoSceneEdit()
+        assert viewer.currentScene() is not None
+        assert [layer.layer_id for layer in viewer.currentScene().layers] == [
+            source_layer_id
+        ]
+    finally:
+        viewer.close()
+        viewer.deleteLater()
+        qapp.processEvents()
 
 
 def test_mounted_textured_color_paint_is_responsive_exact_and_transactional(
@@ -198,7 +272,9 @@ def test_mounted_selection_paint_and_stale_target_cancel_without_residue(
         QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, QPoint(250, 250))
         QTest.mouseMove(viewer, QPoint(390, 390), delay=0)
         harness.drain_events()
-        viewer.clearImages()
+        composition_id = viewer.currentCompositionID()
+        assert composition_id is not None
+        viewer.removeComposition(composition_id)
         harness.drain_events()
         assert viewer.paintTargetState() is None
     finally:
@@ -218,7 +294,7 @@ def test_empty_composition_mask_paint_is_responsive_and_exact(
         scene = viewer.currentScene()
         assert mask_id is not None and scene is not None
         layer = next(item for item in scene.layers if item.source_id == mask_id)
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             scene.scene_id,
             layer.layer_id,
             LayerPolicy(

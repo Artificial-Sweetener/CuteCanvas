@@ -49,7 +49,7 @@ def test_one_megapixel_hard_translation_stays_below_commit_budgets() -> None:
     selection = _large_hard_selection()
     image = QImage(1200, 1000, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(30, 120, 210, 255))
-    repetitions = 8
+    repetitions = 16
     color_surfaces = tuple(ColorRasterSurface(image.copy()) for _ in range(repetitions))
     color_translator = ColorPixelTranslator()
     masks = tuple(

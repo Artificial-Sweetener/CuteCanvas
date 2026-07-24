@@ -126,22 +126,40 @@ class SamWorker(QRunnable, BaseWorker):
                 if self.is_cancelled:
                     self._handle_cancelled()
                     return
-                predictor.set_image(image_rgb)
+                service.set_predictor_image(predictor, image_rgb)
             if self.is_cancelled:
                 self._handle_cancelled()
                 return
-            self.emit_finished(True, payload=(predictor, self.image_id))
+            self.emit_finished(
+                True,
+                payload=(predictor, self.image_id),
+                defer_executor_completion=True,
+            )
         except service.SamDependencyError as exc:
-            self.emit_finished(False, payload=(self.image_id, str(exc)), error=exc)
+            self.emit_finished(
+                False,
+                payload=(self.image_id, str(exc)),
+                error=exc,
+                defer_executor_completion=True,
+            )
         except Exception as exc:  # noqa: BLE001 - predictor worker boundary
-            self.emit_finished(False, payload=(self.image_id, str(exc)), error=exc)
+            self.emit_finished(
+                False,
+                payload=(self.image_id, str(exc)),
+                error=exc,
+                defer_executor_completion=True,
+            )
 
     def _handle_cancelled(self) -> None:
         """Emit a cancellation result when work stops early."""
         self.logger.info(
             "Cancelled SAM predictor load for %s", self.path or self.image_id
         )
-        self.emit_finished(False, payload=(self.image_id, "cancelled"))
+        self.emit_finished(
+            False,
+            payload=(self.image_id, "cancelled"),
+            defer_executor_completion=True,
+        )
 
     @staticmethod
     def _prepare_image_rgb(image: QImage) -> np.ndarray:
@@ -153,7 +171,7 @@ class SamWorker(QRunnable, BaseWorker):
         height = working.height()
         width = working.width()
         bytes_per_line = working.bytesPerLine()
-        buffer = working.bits()
+        buffer = working.constBits()
         raw = np.frombuffer(
             buffer, dtype=np.uint8, count=height * bytes_per_line
         ).reshape((height, bytes_per_line))
@@ -181,6 +199,7 @@ class SamManager(QObject):
         *,
         device: str = "cpu",
         executor: TaskExecutorProtocol,
+        owns_executor: bool = False,
         cache_limit: int | None = None,
         checkpoint_path: Path,
     ):
@@ -190,13 +209,16 @@ class SamManager(QObject):
             parent: Optional QObject parent for Qt ownership.
             device: Compute target passed through to predictor and model loading.
             executor: Shared executor to reuse for predictor workers.
+            owns_executor: Shut down ``executor`` with this manager when True.
             checkpoint_path: Resolved filesystem path to the SAM checkpoint file.
         """
         super().__init__(parent)
         self._device = device
         self._checkpoint_path = checkpoint_path
         self._executor: TaskExecutorProtocol | None = executor
+        self._owns_executor = owns_executor
         self._sam_predictors: dict[uuid.UUID, SamPredictor] = {}
+        self._retired_predictors: list[SamPredictor] = []
         self._cache_hits: int = 0
         self._cache_misses: int = 0
         self._predictor_sizes: dict[uuid.UUID, int] = {}
@@ -229,6 +251,8 @@ class SamManager(QObject):
             ),
             dispatcher=qt_retry_dispatcher(self._executor, category="sam_main"),
         )
+        if parent is not None and owns_executor:
+            parent.destroyed.connect(self._shutdown_for_parent)
 
     def retrySnapshot(self):
         """Expose retry metrics for diagnostics without leaking controllers."""
@@ -385,7 +409,9 @@ class SamManager(QObject):
             self.cancelPendingPredictor(image_id)
         for key in list(self._predictor_retry_entries.keys()):
             self._cancel_predictor_retry(key[0])
+        retired = tuple(self._sam_predictors.values())
         self._sam_predictors.clear()
+        self._retain_predictors_during_native_work(retired)
         self._predictor_sizes.clear()
         self._predictor_paths.clear()
         self._pending_estimates.clear()
@@ -397,11 +423,19 @@ class SamManager(QObject):
         return self._drop_predictor(image_id)
 
     def shutdown(self) -> None:
-        """Cancel pending predictor work and clear retries."""
+        """Cancel predictor work and release an owned native execution lane."""
         for image_id in list(self._inflight.keys()):
             self.cancelPendingPredictor(image_id)
         self._retry.cancelAll()
         self._pending_estimates.clear()
+        executor = self._executor
+        if self._owns_executor and executor is not None:
+            executor.shutdown(wait=False)
+            self._owns_executor = False
+
+    def _shutdown_for_parent(self, _parent: object | None = None) -> None:
+        """Release owned background resources as the parent QObject closes."""
+        self.shutdown()
 
     def generateMaskFromBox(
         self, image_id: uuid.UUID, bbox: np.ndarray, erase_mode: bool = False
@@ -457,28 +491,49 @@ class SamManager(QObject):
         """Return the retry bookkeeping key for image_id on this device."""
         return (image_id, self._device)
 
-    def _on_worker_finished(self, predictor: "SamPredictor", image_id: uuid.UUID):
+    def _on_worker_finished(
+        self,
+        worker: SamWorker,
+        predictor: "SamPredictor",
+        image_id: uuid.UUID,
+    ) -> None:
         """Cache the finished predictor, resolve retries, and emit predictorReady."""
-        self._inflight.pop(image_id, None)
-        self._retry.onSuccess(self._retry_key(image_id))
-        self._pending_estimates.pop(image_id, None)
-        self._sam_predictors[image_id] = predictor
-        measured_bytes = self._measure_predictor_bytes(predictor)
-        self._predictor_sizes[image_id] = measured_bytes
-        logger.info("SAM predictor ready for %s", image_id)
-        self.predictorReady.emit(predictor, image_id)
-        self._enforce_cache_limit()
+        try:
+            self._inflight.pop(image_id, None)
+            self._retry.onSuccess(self._retry_key(image_id))
+            self._pending_estimates.pop(image_id, None)
+            self._sam_predictors[image_id] = predictor
+            measured_bytes = self._measure_predictor_bytes(predictor)
+            self._predictor_sizes[image_id] = measured_bytes
+            logger.info("SAM predictor ready for %s", image_id)
+            self.predictorReady.emit(predictor, image_id)
+            self._enforce_cache_limit()
+        finally:
+            self._release_retired_predictors()
+            worker.complete_executor(True, payload=(predictor, image_id))
 
-    def _on_worker_error(self, image_id: uuid.UUID, message: str):
+    def _on_worker_error(
+        self,
+        worker: SamWorker,
+        image_id: uuid.UUID,
+        message: str,
+    ) -> None:
         """Remove failed jobs from bookkeeping, update retries, and emit predictorLoadFailed unless cancelled."""
-        self._inflight.pop(image_id, None)
-        self._retry.onFailure(self._retry_key(image_id))
-        self._pending_estimates.pop(image_id, None)
-        if message == "cancelled":
-            logger.info("SAM predictor load cancelled for %s", image_id)
-            return
-        logger.error("SAM predictor load failed for %s: %s", image_id, message)
-        self.predictorLoadFailed.emit(image_id, message)
+        try:
+            self._inflight.pop(image_id, None)
+            self._retry.onFailure(self._retry_key(image_id))
+            self._pending_estimates.pop(image_id, None)
+            if message == "cancelled":
+                logger.info("SAM predictor load cancelled for %s", image_id)
+                return
+            logger.error("SAM predictor load failed for %s: %s", image_id, message)
+            self.predictorLoadFailed.emit(image_id, message)
+        finally:
+            self._release_retired_predictors()
+            worker.complete_executor(
+                False,
+                payload=(image_id, message),
+            )
 
     def _submit_predictor_job(
         self,
@@ -498,8 +553,22 @@ class SamManager(QObject):
             self._checkpoint_path,
             device=self._device,
         )
-        BaseWorker.connect_queued(worker.signals.finished, self._on_worker_finished)
-        BaseWorker.connect_queued(worker.signals.error, self._on_worker_error)
+        BaseWorker.connect_queued(
+            worker.signals.finished,
+            lambda predictor, finished_id: self._on_worker_finished(
+                worker,
+                predictor,
+                finished_id,
+            ),
+        )
+        BaseWorker.connect_queued(
+            worker.signals.error,
+            lambda failed_id, message: self._on_worker_error(
+                worker,
+                failed_id,
+                message,
+            ),
+        )
         try:
             handle = executor.submit(worker, category="sam", device=self._device)
         except TaskRejected as exc:
@@ -702,11 +771,26 @@ class SamManager(QObject):
         predictor = self._sam_predictors.pop(image_id, None)
         if predictor is None:
             return False
+        self._retain_predictors_during_native_work((predictor,))
         self._predictor_sizes.pop(image_id, None)
         self._predictor_paths.pop(image_id, None)
         self._pending_estimates.pop(image_id, None)
         self.predictorRemoved.emit(image_id)
         return True
+
+    def _retain_predictors_during_native_work(
+        self,
+        predictors: tuple["SamPredictor", ...],
+    ) -> None:
+        """Delay predictor destruction while serialized native work is active."""
+        if not predictors:
+            return
+        if self.activePredictorLoads() > 0:
+            self._retired_predictors.extend(predictors)
+
+    def _release_retired_predictors(self) -> None:
+        """Destroy retired predictors before the next native job may start."""
+        self._retired_predictors.clear()
 
     @staticmethod
     def _sanitize_cache_limit(limit: int | None) -> int | None:

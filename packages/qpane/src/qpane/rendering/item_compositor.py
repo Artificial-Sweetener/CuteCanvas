@@ -364,7 +364,18 @@ class SceneItemCompositor:
             buffer = QImage(size, QImage.Format_ARGB32_Premultiplied)
             buffer.setDevicePixelRatio(dpr)
             self._isolation_buffer = buffer
-        buffer.fill(Qt.transparent)
+            buffer.fill(Qt.transparent)
+        elif painter.hasClipping():
+            clear = QPainter(buffer)
+            try:
+                clear.setWorldTransform(painter.worldTransform())
+                clear.setClipRegion(painter.clipRegion())
+                clear.setCompositionMode(QPainter.CompositionMode_Source)
+                clear.fillRect(painter.clipBoundingRect(), Qt.transparent)
+            finally:
+                clear.end()
+        else:
+            buffer.fill(Qt.transparent)
         return buffer
 
     def _apply_transient_products(

@@ -23,17 +23,16 @@ import json
 import os
 import random
 import sys
-import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QPainter, QRegion
 from PySide6.QtWidgets import QApplication
+from qpane import QPane
 
 if TYPE_CHECKING:
     from qpane.scene.render_plan import SceneRenderPlan
@@ -155,8 +154,7 @@ class HeadlessPanHarness:
         zoom: float = 1.0,
         channel_tolerance: int = 0,
         artifact_root: Path = Path("pan-harness-artifacts"),
-        configure_qpane: Callable[[CuteCanvas], None] | None = None,
-        features: Sequence[str] = (),
+        configure_qpane: Callable[[QPane], None] | None = None,
     ) -> None:
         """Mount the offscreen widgets and initialize their identical scenes."""
         viewport_size = (
@@ -176,7 +174,6 @@ class HeadlessPanHarness:
         self._device_pixel_ratio = float(device_pixel_ratio)
         self._zoom = float(zoom)
         self._configure_qpane = configure_qpane
-        self._features = tuple(features)
         self._qpane = self._create_qpane(image, viewport_size)
         self._settle_widget()
 
@@ -195,7 +192,7 @@ class HeadlessPanHarness:
             self._qpane.setPan(requested_pan)
             self._qpane.update()
             self._settle_widget()
-            actual_pan = self._qpane.getPan()
+            actual_pan = self._qpane.currentPan()
             actual_history.append(QPointF(actual_pan))
             actual_frame = self.capture_visible_frame(self._qpane)
             snapshot = self._snapshot_incremental_renderer()
@@ -234,9 +231,9 @@ class HeadlessPanHarness:
         self._application.processEvents()
 
     @staticmethod
-    def capture_visible_frame(qpane: CuteCanvas) -> QImage:
+    def capture_visible_frame(qpane: QPane) -> QImage:
         """Return the exact viewport crop presented from a QPane render buffer."""
-        renderer = qpane.view().renderer
+        renderer = qpane._rendering.presenter.renderer
         base_buffer = renderer.get_base_buffer()
         if base_buffer is None:
             raise RuntimeError("QPane has no allocated render buffer")
@@ -271,25 +268,24 @@ class HeadlessPanHarness:
             painter.end()
         return frame
 
-    def _create_qpane(self, image: QImage, viewport_size: QSize) -> CuteCanvas:
+    def _create_qpane(self, image: QImage, viewport_size: QSize) -> QPane:
         """Create one configured QPane used by the differential harness."""
-        qpane = CuteCanvas(features=self._features)
+        qpane = QPane()
         try:
             device_pixel_ratio = self._device_pixel_ratio
             qpane.devicePixelRatioF = lambda: device_pixel_ratio  # type: ignore[method-assign]
             qpane.resize(viewport_size)
-            image_id = uuid.uuid4()
-            qpane.setImagesByID(
-                CuteCanvas.imageMapFromLists([QImage(image)], [None], [image_id]),
-                image_id,
-            )
+            qpane.setImage(QImage(image))
             qpane.setZoom1To1()
             if self._configure_qpane is not None:
                 self._configure_qpane(qpane)
-            qpane.view().viewport.setZoomAndPan(self._zoom, QPointF(0.0, 0.0))
+            qpane._rendering.viewport.setZoomAndPan(
+                self._zoom,
+                QPointF(0.0, 0.0),
+            )
             qpane.show()
-            qpane.view().ensure_view_alignment(force=True)
-            qpane.markDirty()
+            qpane._rendering.presenter.ensure_view_alignment(force=True)
+            qpane._rendering.presenter.mark_dirty()
             qpane.update()
             return qpane
         except Exception:
@@ -305,7 +301,7 @@ class HeadlessPanHarness:
 
     def _snapshot_incremental_renderer(self) -> _RendererBufferSnapshot:
         """Capture the buffer identity needed to continue incremental abuse."""
-        renderer = self._qpane.view().renderer
+        renderer = self._qpane._rendering.presenter.renderer
         base_buffer = renderer.get_base_buffer()
         if base_buffer is None:
             raise RuntimeError("QPane has no allocated render buffer")
@@ -319,7 +315,7 @@ class HeadlessPanHarness:
 
     def _capture_full_redraw_reference(self) -> QImage:
         """Render and capture a clean frame from the same live QPane state."""
-        presenter = self._qpane.view().presenter
+        presenter = self._qpane._rendering.presenter
         presenter.mark_dirty()
         presenter.paint(
             is_blank=False,
@@ -335,7 +331,7 @@ class HeadlessPanHarness:
         snapshot: _RendererBufferSnapshot,
     ) -> None:
         """Restore the incremental buffer after capturing its redraw oracle."""
-        renderer = self._qpane.view().renderer
+        renderer = self._qpane._rendering.presenter.renderer
         renderer._base_image_buffer = QImage(snapshot.base_buffer)
         renderer._buffer_pan = QPointF(snapshot.buffer_pan)
         renderer._subpixel_pan_offset = QPointF(snapshot.subpixel_pan_offset)
@@ -496,7 +492,6 @@ def _parse_args(arguments: Sequence[str]) -> argparse.Namespace:
         default=Path("pan-harness-artifacts"),
     )
     parser.add_argument("--keep-going", action="store_true")
-    parser.add_argument("--features", nargs="*", default=())
     return parser.parse_args(arguments)
 
 
@@ -525,7 +520,6 @@ def main(arguments: Sequence[str] | None = None) -> int:
         zoom=options.zoom,
         channel_tolerance=options.tolerance,
         artifact_root=options.artifact_root,
-        features=options.features,
     )
     try:
         failures = harness.run(

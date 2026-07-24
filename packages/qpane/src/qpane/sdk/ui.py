@@ -17,20 +17,36 @@
 
 from ..ui import (
     DiagnosticsOverlayController,
+    DragCancellation,
+    DragCompletion,
+    DragSubject,
+    OutboundDragController,
+    OutboundDragPayload,
+    OutboundMimeItem,
+    OutboundMimeProvider,
     apply_widget_defaults,
     copyToClipboard,
     create_status_overlay,
     drag_out_image,
+    execute_outbound_drag,
     is_drag_out_allowed,
     maybeStartDrag,
 )
 
 __all__ = (
     "DiagnosticsOverlayController",
+    "DragCancellation",
+    "DragCompletion",
+    "DragSubject",
+    "OutboundDragController",
+    "OutboundDragPayload",
+    "OutboundMimeItem",
+    "OutboundMimeProvider",
     "apply_widget_defaults",
     "copyToClipboard",
     "create_status_overlay",
     "drag_out_image",
+    "execute_outbound_drag",
     "is_drag_out_allowed",
     "maybeStartDrag",
 )

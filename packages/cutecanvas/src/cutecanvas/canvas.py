@@ -14,12 +14,11 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""CuteCanvas widget facade coordinating rendering, catalog, mask, and tool APIs."""
+"""CuteCanvas widget facade coordinating document rendering and editor APIs."""
 
 import logging
 import uuid
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import Any, cast
 
 from PySide6.QtCore import (
@@ -30,26 +29,26 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
-    QImage,
+    QHideEvent,
     QPainter,
     QScreen,
+    QShowEvent,
     QTabletEvent,
     QTouchEvent,
     QWheelEvent,
     QWindow,
 )
 from PySide6.QtWidgets import QWidget
-from qpane.sdk.catalog import Catalog, CatalogMutationEvent
-from qpane.sdk.compare import (
-    CompareDividerInteraction,
-    CompareService,
-)
 from qpane.sdk.concurrency import TaskExecutorProtocol, ThreadPolicy
 from qpane.sdk.rendering import (
     View,
 )
 from qpane.sdk.scene import LayerSourceCapabilities, SceneProviderRegistry
-from qpane.sdk.ui import DiagnosticsOverlayController
+from qpane.sdk.ui import (
+    DiagnosticsOverlayController,
+    OutboundDragController,
+    OutboundMimeProvider,
+)
 
 from .composition import (
     CompositionService,
@@ -67,6 +66,7 @@ from .editor import (
     EditorOperationResolver,
     EditorPolicyController,
     FloatingLayerPromotionRegistry,
+    InteractivePaintDestinationCoordinator,
     LayerSelectionProjectionCache,
     SelectedPixelMovementController,
 )
@@ -79,12 +79,12 @@ from .masks.paint_target import MaskCoveragePaintTargetOwner
 from .masks.pixel_edits import (
     MaskLayerPixelMutationOwner,
 )
-from .masks.resource_lifecycle import MaskResourceLifecycleOwner
 from .masks.source_resolver import MaskSourceCapabilities
 from .masks.workflow import Masks
 from .painting import (
     PaintingCoordinator,
 )
+from .painting.clone_operation import CloneStampOperation
 from .persistence import CompositionPersistenceService
 from .placed.rasterization import PlacedAssetRasterizationService
 from .placed.store import PlacedAssetStore
@@ -94,6 +94,13 @@ from .raster.floating_layers import EditableRasterFloatingLayerOwner
 from .raster.layers import (
     EditableRasterLayerController,
 )
+from .resources.active_raster import ActiveRasterResolver
+from .resources.composition_rasterization import (
+    CompositionResourceRasterizationService,
+)
+from .resources.image_documents import ImageDocumentWorkflow
+from .resources.layer_operations import LayerResourceOperations
+from .resources.rasterization import LayerResourceRasterizationRouter
 from .scene.layer_assembly import CompositionLayerSceneAssembler
 from .scene.layer_geometry import LayerGeometryResolver
 from .scene.layer_selection import SceneLayerSelectionController
@@ -128,17 +135,26 @@ logger = logging.getLogger(__name__)
 __all__ = ["CuteCanvas"]
 
 
+from .document import CanvasDocument, CanvasViewSession
+from .document.inspection import SessionInspectionBinding
 from .facade.composition_api import CompositionApiMixin
+from .facade.configuration_api import ConfigurationApiMixin
 from .facade.coverage_api import CoverageApiMixin
+from .facade.diagnostics_api import DiagnosticsApiMixin
+from .facade.drag_api import CanvasDragSubjectResolver, OutboundDragApiMixin
 from .facade.editor import EditorFacade
+from .facade.editor_policy_api import EditorPolicyApiMixin
 from .facade.effect_api import EffectApiMixin
 from .facade.interaction_api import InteractionApiMixin
 from .facade.layer_api import LayerApiMixin
+from .facade.mask_api import MaskApiMixin
 from .facade.placed_api import PlacedAssetApiMixin
+from .facade.projection_api import ProjectionApiMixin
 from .facade.raster_api import RasterApiMixin
+from .facade.resource_api import ResourceApiMixin
 from .facade.snapping_api import SnappingApiMixin
 from .facade.vector_api import VectorApiMixin
-from .facade.viewer_api import ViewerApiMixin
+from .facade.view_api import ViewApiMixin
 from .runtime.accessors import CanvasAccessorsMixin
 from .runtime.document_events import DocumentEventsMixin
 from .runtime.lifecycle import CanvasLifecycleMixin
@@ -147,10 +163,17 @@ from .runtime.view_state import CanvasViewStateMixin
 
 class CuteCanvas(
     QWidget,
-    ViewerApiMixin,
+    ViewApiMixin,
+    ConfigurationApiMixin,
+    DiagnosticsApiMixin,
+    OutboundDragApiMixin,
+    EditorPolicyApiMixin,
     CompositionApiMixin,
+    MaskApiMixin,
     LayerApiMixin,
+    ResourceApiMixin,
     PlacedAssetApiMixin,
+    ProjectionApiMixin,
     VectorApiMixin,
     RasterApiMixin,
     CoverageApiMixin,
@@ -162,7 +185,7 @@ class CuteCanvas(
     CanvasViewStateMixin,
     DocumentEventsMixin,
 ):
-    """QWidget facade that routes rendering, catalog, mask, and tool orchestration."""
+    """QWidget facade that routes document rendering and editor orchestration."""
 
     # ========================================================================
     # Public API
@@ -172,6 +195,7 @@ class CuteCanvas(
     CONTROL_MODE_MOVE = Tools.CONTROL_MODE_MOVE
     CONTROL_MODE_TRANSFORM = Tools.CONTROL_MODE_TRANSFORM
     CONTROL_MODE_DRAW_BRUSH = Tools.CONTROL_MODE_DRAW_BRUSH
+    CONTROL_MODE_CLONE_STAMP = Tools.CONTROL_MODE_CLONE_STAMP
     CONTROL_MODE_PAINT_BUCKET = Tools.CONTROL_MODE_PAINT_BUCKET
     CONTROL_MODE_SMART_SELECT = Tools.CONTROL_MODE_SMART_SELECT
     CONTROL_MODE_SELECT_RECTANGLE = Tools.CONTROL_MODE_SELECT_RECTANGLE
@@ -184,8 +208,6 @@ class CuteCanvas(
     CONTROL_MODE_VECTOR_PATH = VECTOR_PATH_MODE
     CONTROL_MODE_VECTOR_NODE = VECTOR_NODE_MODE
     CONTROL_MODE_VECTOR_TEXT = VECTOR_TEXT_MODE
-    imageLoaded: Signal = Signal(Path)
-    """Emit the current image path after a swap applies; empty when unknown."""
     zoomChanged: Signal = Signal(float)
     """Emit the viewport zoom factor when view state changes."""
     viewportRectChanged: Signal = Signal(QRectF)
@@ -194,20 +216,10 @@ class CuteCanvas(
     """Emit ``mask_id`` and file path after a mask autosave completes."""
     maskUndoStackChanged: Signal = Signal(uuid.UUID)
     """Emit the mask UUID when its undo stack mutates."""
-    currentImageChanged: Signal = Signal(uuid.UUID)
-    """Emit the active image UUID after navigation completes."""
-    catalogChanged: Signal = Signal(CatalogMutationEvent)
-    """Emit catalog mutation events describing the latest change."""
-    catalogSelectionChanged: Signal = Signal(object)
-    """Emit the active image UUID or ``None`` when selection changes."""
-    linkGroupsChanged: Signal = Signal()
-    """Emit when linked-group definitions change."""
     diagnosticsOverlayToggled: Signal = Signal(bool)
     """Emit overlay visibility state when the diagnostics HUD toggles."""
     diagnosticsDomainToggled: Signal = Signal(str, bool)
     """Emit diagnostics domain ID and enabled state after detail toggles."""
-    comparisonChanged: Signal = Signal(object)
-    """Emit the comparison state after comparison rendering changes."""
     compositionChanged: Signal = Signal(object)
     """Emit the composition snapshot after composition records change."""
     compositionSelectionChanged: Signal = Signal(object)
@@ -224,6 +236,8 @@ class CuteCanvas(
     """Emit the detached immutable brush preset after it changes."""
     paintColorChanged: Signal = Signal(QColor)
     """Emit the detached color used by editable color-raster targets."""
+    cloneStampChanged: Signal = Signal(object)
+    """Emit the immutable Clone Stamp state after its configuration changes."""
     vectorSelectionChanged: Signal = Signal(object)
     """Emit vector-object selection or ``None`` independently of pixel selection."""
     vectorNodeSelectionChanged: Signal = Signal(object)
@@ -246,6 +260,16 @@ class CuteCanvas(
     """Emit request, scene, layer, success, and message after a bounds request."""
     placedAssetRequestCompleted: Signal = Signal(uuid.UUID, object, object, bool, str)
     """Emit request, scene, layer, success, and message after placed-asset work."""
+    layerRasterizationCompleted: Signal = Signal(
+        uuid.UUID,
+        object,
+        object,
+        bool,
+        str,
+    )
+    """Emit request, scene, layer, success, and message after rasterization."""
+    projectionCompleted: Signal = Signal(object)
+    """Emit one terminal :class:`CanvasProjectionResult`."""
     samCheckpointStatusChanged: Signal = Signal(str, object)
     """Emit checkpoint status and path updates for SAM readiness tracking.
     The payload is ``(status, path)``, where ``path`` is a ``Path`` and status
@@ -262,6 +286,8 @@ class CuteCanvas(
         *,
         config: Config | None = None,
         features: Iterable[str] | None = None,
+        document: CanvasDocument | None = None,
+        session: CanvasViewSession | None = None,
         task_executor: TaskExecutorProtocol | None = None,
         thread_policy: ThreadPolicy | Mapping[str, Any] | None = None,
         config_strict: bool = False,
@@ -272,6 +298,8 @@ class CuteCanvas(
         Args:
             config: Initial configuration snapshot to apply.
             features: Optional feature names to install (mask, sam, etc.).
+            document: Headless content aggregate to mount.
+            session: Detachable activation and presentation state to mount.
             task_executor: Existing executor instance to reuse.
             thread_policy: Policy or mapping forwarded to the executor builder.
             config_strict: When ``True``, reject overrides targeting inactive
@@ -279,30 +307,52 @@ class CuteCanvas(
             **kwargs: Configuration overrides forwarded to ``QPaneState``.
         """
         super().__init__()
+        self._session = session or CanvasViewSession()
+        if (
+            document is not None
+            and task_executor is not None
+            and task_executor is not document.executor
+        ):
+            raise ValueError("task_executor must match the mounted document executor")
+        effective_executor = (
+            document.executor if document is not None else task_executor
+        )
         self._state = CuteCanvasState(
             qpane=self,
             initial_config=config,
             config_overrides=kwargs,
             features=features,
-            task_executor=task_executor,
+            task_executor=effective_executor,
             thread_policy=thread_policy,
             config_strict=config_strict,
         )
+        self._owns_document = document is None
+        self._document = document or CanvasDocument(task_executor=self._state.executor)
         self._diagnostics_manager = self._state.diagnostics
-        self.original_image = QImage()
         self.interaction = ToolInteractionDelegate(self)
         self._hooks = CuteCanvasHooks(self)
         self._view: View | None = None
-        self._catalog: Catalog | None = None
         self._composition_service: CompositionService | None = None
         self._editable_raster_assets: EditableRasterAssetStore | None = None
         self._editable_raster_layers: EditableRasterLayerController | None = None
         self._placed_assets: PlacedAssetStore | None = None
+        self._image_documents: ImageDocumentWorkflow | None = None
+        self._active_raster: ActiveRasterResolver | None = None
+        self._layer_resource_operations: LayerResourceOperations | None = None
+        self._project_resource_descriptors = None
+        self._project_resource_capabilities = None
+        self._project_resource_lifecycle = None
+        self._mask_resource_fork_owner = None
         self._placed_asset_workflow: PlacedAssetWorkflow | None = None
         self._placed_asset_rasterization: PlacedAssetRasterizationService | None = None
+        self._composition_rasterization: (
+            CompositionResourceRasterizationService | None
+        ) = None
+        self._resource_rasterization: LayerResourceRasterizationRouter | None = None
         self._pixel_selection: PixelSelectionService | None = None
         self._layer_geometry: LayerGeometryResolver | None = None
         self._painting: PaintingCoordinator | None = None
+        self._clone_stamp: CloneStampOperation | None = None
         self._paint_bucket: PaintBucketCoordinator | None = None
         self._selection_fill: SelectionFillCoordinator | None = None
         self._snap_configuration: SnapConfiguration | None = None
@@ -312,8 +362,6 @@ class CuteCanvas(
         self._vector_nodes: VectorNodeEditController | None = None
         self._vector_text: VectorTextEditController | None = None
         self._persistence_service: CompositionPersistenceService | None = None
-        self.compare_service: CompareService | None = None
-        self._compare_interaction: CompareDividerInteraction | None = None
         self._composition_scene_adapter: CompositionSceneAdapter | None = None
         self._scene_mutations: SceneMutationCoordinator | None = None
         self._raster_mutations: RasterLayerMutationCoordinator | None = None
@@ -327,10 +375,10 @@ class CuteCanvas(
             None
         )
         self._mask_floating_layer_owner: MaskFloatingLayerOwner | None = None
-        self._mask_resource_lifecycle_owner: MaskResourceLifecycleOwner | None = None
         self._selected_pixel_movement: SelectedPixelMovementController | None = None
         self._editor_movement_interaction: EditorMovementInteraction | None = None
         self._operation_resolver: EditorOperationResolver | None = None
+        self._paint_destination: InteractivePaintDestinationCoordinator | None = None
         self._last_floating_pixel_state: FloatingPixelSnapshot | None = None
         self._mask_raster_mutation_owner = None
         self._mask_pixel_edit_owner: MaskLayerPixelMutationOwner | None = None
@@ -348,6 +396,8 @@ class CuteCanvas(
         self._source_capabilities: LayerSourceCapabilities | None = None
         self._editor_source_capabilities: EditorSourceCapabilities | None = None
         self._composition_layer_assembler: CompositionLayerSceneAssembler | None = None
+        self._scene_rasterizer = None
+        self._projection_service = None
         self._mask_descriptor_factory: MaskLayerDescriptorFactory | None = None
         self._mask_source_capabilities: MaskSourceCapabilities | None = None
         self._masks: Masks | None = None
@@ -359,17 +409,15 @@ class CuteCanvas(
         self._tracked_screen: QScreen | None = None
         self._tracked_screen_connections: set[str] = set()
         self._last_screen_dpr = float(self.devicePixelRatioF())
-        self._last_link_groups: tuple[tuple[uuid.UUID, tuple[uuid.UUID, ...]], ...] = ()
         self._last_viewport_rect: QRectF | None = None
-        self._catalog_placeholder_previous_mode: str | None = None
+        self._inspection_binding: SessionInspectionBinding | None = None
+        self._outbound_mime_provider: OutboundMimeProvider | None = None
+        self._drag_subject_resolver: CanvasDragSubjectResolver | None = None
+        self._outbound_drag = OutboundDragController(self)
         self._initial_view_signals_scheduled = False
         self._init_core_components()
-        view = self.view()
-        catalog = self.catalog()
         self._masks = Masks(
             qpane=self,
-            catalog=catalog,
-            swap_delegate=view.swap_delegate,
             cache_registry=self._state.cache_registry,
         )
         self._masks.register_diagnostics(self._diagnostics_manager)
@@ -377,14 +425,34 @@ class CuteCanvas(
         self.applyCacheSettings()
         self.interaction.initialize_widget_properties()
         self.interaction.connect_signals()
-        self._catalog.applyConfig(self.settings)
         self._apply_diagnostics_overlay_preferences()
         self._wire_facade_signals()
+        self._inspection_binding = SessionInspectionBinding(
+            session=self.viewSession(),
+            viewport=self.view().viewport,
+            target_bounds=self._inspection_target_bounds,
+            viewport_size=lambda: self.physicalViewportRect().size(),
+        )
         persistence = self._persistence_service
         if persistence is None:  # pragma: no cover - construction invariant
             raise RuntimeError("CuteCanvas persistence service was not installed")
         self._editor_facade = EditorFacade.create(self, persistence)
         self.destroyed.connect(self._state.on_destroyed)
+        self.destroyed.connect(lambda _obj=None: self._outbound_drag.close())
+        self.destroyed.connect(
+            lambda _obj=None: (
+                None
+                if self._projection_service is None
+                else self._projection_service.shutdown()
+            )
+        )
+        self.destroyed.connect(
+            lambda _obj=None: (
+                None
+                if self._inspection_binding is None
+                else self._inspection_binding.close()
+            )
+        )
         self._schedule_initial_view_signals()
 
     @property
@@ -492,12 +560,17 @@ class CuteCanvas(
             return
         event.ignore()
 
-    def showEvent(self, event):
+    def showEvent(self, event: QShowEvent) -> None:
         """Handle initial show-time setup that depends on widget geometry."""
         super().showEvent(event)
         self.interaction.handle_show_event()
         self._refresh_screen_tracking()
         self._emit_viewport_rect_if_changed(force=True)
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Release application-wide input observation while hidden."""
+        self.interaction.handle_hide_event()
+        super().hideEvent(event)
 
     def keyPressEvent(self, event):
         """Let the interaction layer handle key presses first, falling back to QWidget."""

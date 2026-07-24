@@ -16,9 +16,22 @@
 
 """Reusable mounted-widget infrastructure for CuteCanvas system tests."""
 
-from .mounted_qpane import MountedQPaneHarness, PixelMeasurement
-from .pointer_transition_probe import PointerEventObservation, PointerTransitionProbe
-from .release_probe import ReleaseFrame, ReleaseTransition, ReleaseTransitionProbe
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .mounted_qpane import MountedQPaneHarness, PixelMeasurement
+    from .pointer_transition_probe import (
+        PointerEventObservation,
+        PointerTransitionProbe,
+    )
+    from .release_probe import (
+        ReleaseFrame,
+        ReleaseTransition,
+        ReleaseTransitionProbe,
+    )
 
 __all__ = [
     "MountedQPaneHarness",
@@ -29,3 +42,24 @@ __all__ = [
     "ReleaseTransition",
     "ReleaseTransitionProbe",
 ]
+
+_PUBLIC_MODULES = {
+    "MountedQPaneHarness": ".mounted_qpane",
+    "PixelMeasurement": ".mounted_qpane",
+    "PointerEventObservation": ".pointer_transition_probe",
+    "PointerTransitionProbe": ".pointer_transition_probe",
+    "ReleaseFrame": ".release_probe",
+    "ReleaseTransition": ".release_probe",
+    "ReleaseTransitionProbe": ".release_probe",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Load public harness types without burdening command-line bootstrap."""
+    try:
+        module_name = _PUBLIC_MODULES[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    value = getattr(import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value

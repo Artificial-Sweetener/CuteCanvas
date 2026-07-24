@@ -201,16 +201,92 @@ def test_removing_final_mask_disarms_brush_mode_and_cursor(
         assert harness.viewer.getControlMode() == harness.viewer.CONTROL_MODE_DRAW_BRUSH
         assert harness.viewer.cursor().shape() == Qt.CursorShape.BitmapCursor
 
-        assert harness.viewer.removeMaskFromImage(
+        assert harness.viewer.removeMaskFromComposition(
             harness.image_id,
             harness.mask_ids[0],
         )
         harness.drain_events(wait_ms=10)
 
         assert harness.viewer.activeMaskID() is None
-        assert harness.viewer.maskIDsForImage(harness.image_id) == []
+        assert harness.viewer.maskIDsForComposition(harness.image_id) == []
         assert harness.viewer.getControlMode() == harness.viewer.CONTROL_MODE_PANZOOM
         assert harness.viewer.cursor().shape() != Qt.CursorShape.BitmapCursor
+    finally:
+        harness.close()
+
+
+def test_hidden_raster_never_reappears_during_mask_navigation_abuse(
+    qapp: QApplication,
+) -> None:
+    """Mask-only navigation must retain the canvas and reject stale raster frames."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(1024, 1024),
+        widget_size=QSize(500, 500),
+        mask_count=1,
+        brush_size=48,
+    )
+    driver = QtStrokeDriver(harness)
+    stroke = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(220, 250), HarnessPoint(280, 250)),
+        brush_size=48,
+    )
+    try:
+        driver.begin(stroke)
+        driver.move(stroke, 1)
+        driver.end(stroke)
+        assert harness.wait_for_mask_undo_depth(harness.mask_ids[0], 1)
+        assert harness.wait_for_mask_tint(QPoint(250, 250)).latency_ms is not None
+
+        scene = harness.viewer.currentScene()
+        assert scene is not None
+        raster = next(
+            layer for layer in scene.layers if layer.source_kind == "imported-raster"
+        )
+        assert harness.viewer.setLayerVisible(
+            scene.scene_id,
+            raster.layer_id,
+            False,
+        )
+        assert harness.wait_for_mask_render_idle()
+        assert harness.wait_for_render_refinement_idle()
+        assert harness.wait_for_raster_render_idle()
+
+        for index in range(48):
+            zoom = 1.25 + (index % 6) * 0.25
+            anchor = QPoint(
+                40 + (index * 67) % 420,
+                40 + (index * 43) % 420,
+            )
+            harness.viewer.applyZoom(zoom, anchor=anchor)
+            harness.viewer.setPan(
+                QPointF(
+                    float((index % 9 - 4) * 35),
+                    float((index % 7 - 3) * 30),
+                )
+            )
+            harness.drain_events()
+            plan = harness.viewer.view().calculateRenderPlan()
+            assert plan is not None
+            assert all(
+                item.descriptor.layer_id != raster.layer_id
+                for item in plan.render_items
+            )
+            if index % 8 == 0:
+                assert not harness.capture().isNull()
+
+        assert harness.wait_for_render_refinement_idle()
+        renderer = harness.viewer.view().presenter.renderer
+        incremental = renderer.get_base_buffer()
+        assert incremental is not None
+        incremental = incremental.copy()
+        renderer.markDirty()
+        harness.viewer.update()
+        harness.drain_events(wait_ms=10)
+        repaired = renderer.get_base_buffer()
+        assert repaired is not None
+        assert incremental == repaired
     finally:
         harness.close()
 
@@ -227,7 +303,7 @@ def test_moved_default_mask_keeps_fixed_image_sized_write_bounds(
         brush_size=20,
     )
     mask_id = harness.mask_ids[0]
-    mask_info = harness.viewer.listMasksForImage()[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
     driver = QtStrokeDriver(harness)
     outside_surface = StrokeAction(
         PointerKind.MOUSE,
@@ -242,11 +318,8 @@ def test_moved_default_mask_keeps_fixed_image_sized_write_bounds(
     try:
         assert mask_info.scene_id is not None
         assert mask_info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
-            mask_info.scene_id,
-            mask_info.layer_id,
-            LayerPolicy(selectable=True, movable=True),
-        )
+        assert mask_info.interaction.movable
+        assert mask_info.interaction.pixel_editable
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
             mask_info.layer_id,
@@ -294,7 +367,7 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
         brush_size=20,
     )
     mask_id = harness.mask_ids[0]
-    mask_info = harness.viewer.listMasksForImage()[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
     driver = QtStrokeDriver(harness)
     off_surface = StrokeAction(
         pointer_kind,
@@ -304,11 +377,8 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
     try:
         assert mask_info.scene_id is not None
         assert mask_info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
-            mask_info.scene_id,
-            mask_info.layer_id,
-            LayerPolicy(selectable=True, movable=True),
-        )
+        assert mask_info.interaction.movable
+        assert mask_info.interaction.pixel_editable
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
             mask_info.layer_id,
@@ -383,7 +453,7 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
         brush_size=32,
     )
     mask_id = harness.mask_ids[0]
-    mask_info = harness.viewer.listMasksForImage()[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
     driver = QtStrokeDriver(harness)
     stroke = StrokeAction(
         PointerKind.MOUSE,
@@ -393,7 +463,7 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
     try:
         assert mask_info.scene_id is not None
         assert mask_info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
+        harness.viewer.setLayerInteractionPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
             LayerPolicy(
@@ -402,10 +472,11 @@ def test_moved_mask_delete_clears_every_selected_visible_pixel(
                 pixel_editable=True,
             ),
         )
-        assert harness.viewer.setSelectedLayer(
+        harness.viewer.setSelectedLayer(
             mask_info.scene_id,
             mask_info.layer_id,
         )
+        assert harness.viewer.selectedLayer().layer_id == mask_info.layer_id
         driver.begin(stroke)
         driver.move(stroke, 1)
         driver.end(stroke)
@@ -515,11 +586,11 @@ def test_4096_moved_mask_delete_stays_within_interaction_budget(
         mask_count=1,
     )
     mask_id = harness.mask_ids[0]
-    info = harness.viewer.listMasksForImage()[0]
+    info = harness.viewer.listMasksForComposition()[0]
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
+        harness.viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -528,7 +599,8 @@ def test_4096_moved_mask_delete_stays_within_interaction_budget(
                 pixel_editable=True,
             ),
         )
-        assert harness.viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        harness.viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert harness.viewer.selectedLayer().layer_id == info.layer_id
         assert harness.viewer.setLayerPlacement(
             info.scene_id,
             info.layer_id,
@@ -608,12 +680,12 @@ def test_delete_and_history_follow_expanded_negative_mask_bounds(
         brush_size=24,
     )
     mask_id = harness.mask_ids[0]
-    info = harness.viewer.listMasksForImage()[0]
+    info = harness.viewer.listMasksForComposition()[0]
     driver = QtStrokeDriver(harness)
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
+        harness.viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -622,7 +694,8 @@ def test_delete_and_history_follow_expanded_negative_mask_bounds(
                 pixel_editable=True,
             ),
         )
-        assert harness.viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        harness.viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert harness.viewer.selectedLayer().layer_id == info.layer_id
         assert harness.viewer.setRasterExtentPolicy(
             info.scene_id,
             info.layer_id,
@@ -688,7 +761,7 @@ def test_expanding_mask_grows_every_edge_through_mounted_brush_input(
         brush_size=20,
     )
     mask_id = harness.mask_ids[0]
-    mask_info = harness.viewer.listMasksForImage()[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
     driver = QtStrokeDriver(harness)
     edge_strokes = (
         (100.0, 0.0, HarnessPoint(40, 200), HarnessPoint(60, 200)),
@@ -699,11 +772,8 @@ def test_expanding_mask_grows_every_edge_through_mounted_brush_input(
     try:
         assert mask_info.scene_id is not None
         assert mask_info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
-            mask_info.scene_id,
-            mask_info.layer_id,
-            LayerPolicy(selectable=True, movable=True),
-        )
+        assert mask_info.interaction.movable
+        assert mask_info.interaction.pixel_editable
         assert harness.viewer.setRasterExtentPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
@@ -776,7 +846,7 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
         mask_count=1,
         brush_size=40,
     )
-    mask_info = harness.viewer.listMasksForImage()[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
     points = tuple(
         HarnessPoint(round(240 - index * 220 / 63), 250) for index in range(64)
     )
@@ -787,11 +857,8 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
     try:
         assert mask_info.scene_id is not None
         assert mask_info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
-            mask_info.scene_id,
-            mask_info.layer_id,
-            LayerPolicy(selectable=True, movable=True),
-        )
+        assert mask_info.interaction.movable
+        assert mask_info.interaction.pixel_editable
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
             mask_info.layer_id,
@@ -847,7 +914,7 @@ def test_expanding_mask_live_preview_never_flashes_painted_pixels(
         mask_count=1,
         brush_size=32,
     )
-    mask_info = harness.viewer.listMasksForImage()[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
     points = tuple(
         HarnessPoint(round(190 - index * 150 / 31), 200) for index in range(32)
     )
@@ -857,11 +924,8 @@ def test_expanding_mask_live_preview_never_flashes_painted_pixels(
     try:
         assert mask_info.scene_id is not None
         assert mask_info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
-            mask_info.scene_id,
-            mask_info.layer_id,
-            LayerPolicy(selectable=True, movable=True),
-        )
+        assert mask_info.interaction.movable
+        assert mask_info.interaction.pixel_editable
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
             mask_info.layer_id,
@@ -920,7 +984,7 @@ def test_expanding_mask_structural_undo_never_flashes_retained_pixels(
         brush_size=20,
     )
     mask_id = harness.mask_ids[0]
-    mask_info = harness.viewer.listMasksForImage()[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
     driver = QtStrokeDriver(harness)
     retained_point = QPoint(200, 200)
     expanded_point = QPoint(40, 280)
@@ -937,11 +1001,8 @@ def test_expanding_mask_structural_undo_never_flashes_retained_pixels(
     try:
         assert mask_info.scene_id is not None
         assert mask_info.layer_id is not None
-        assert harness.viewer.setLayerInteractionPolicy(
-            mask_info.scene_id,
-            mask_info.layer_id,
-            LayerPolicy(selectable=True, movable=True),
-        )
+        assert mask_info.interaction.movable
+        assert mask_info.interaction.pixel_editable
         assert harness.viewer.setLayerPlacement(
             mask_info.scene_id,
             mask_info.layer_id,

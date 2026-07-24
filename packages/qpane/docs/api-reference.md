@@ -40,6 +40,8 @@
 - `QPane.calculateRenderPlan` returns a detached plan for the active presentation.
 - `QPane.physicalViewportRect` returns the device-pixel render viewport.
 - `QPane.panelHitTest` projects one panel position through authoritative viewport geometry.
+- `QPane.coordinateSystem` returns the typed authoritative scene/layer
+  projection service.
 - `QPane.minimumSizeHint` returns the viewer's useful minimum widget size.
 
 ### Catalog and comparison
@@ -206,14 +208,40 @@ root facade and declarative SDK above.
 - `AffineTransformGeometry`, `TransformOperation`, and `TransformOperationKind` own exact affine interaction math.
 - `TransformHandle`, `TransformLocalBounds`, and `TransformModifiers` describe one transform gesture without rounded coordinates.
 - `LayerEffectReference` and `LayerEffectRenderRegistry` connect generic layer effects to the compositor.
+- `SceneRegionRasterizer` renders a bounded transformed `SceneDescriptor`
+  region across raster, vector, and hybrid layers without materializing the
+  complete scene.
+- `SceneLayerRenderScope` selects an optional layer subset for a bounded scene
+  sample while preserving visibility and stack order.
+- `RasterLayerRegionOverride` supplies revision-specific pixels for selected
+  raster layers during one bounded scene sample.
+- `RenderTileRequest` describes one stable-grid source rectangle and its
+  antialiasing bleed rectangle.
+- `RenderTileProduct` carries one detached sampled tile and exact draw
+  geometry.
+- `RenderTileBatchSource` lets an immutable source revision render a complete
+  request batch away from the GUI thread.
+- `RegionSampleSource` lets nested rendering sample an arbitrary source-local
+  rectangle at a requested output size.
 
 ### Renderer, cache, and scheduling
 
 - `View`, `Renderer`, `RenderingPresenter`, and `ViewportZoomMode` coordinate viewport state and frame publication.
-- `PyramidManager` and `LayerRasterizationWorker` own multiresolution products and worker-side layer resolution.
+- `PanelPoint`, `ScenePoint`, `LayerLocalPoint`, and `LayerSourcePoint` identify
+  non-interchangeable coordinate domains.
+- `SceneCoordinateSystem` projects typed points through current viewport,
+  scene, layer, and raster-origin geometry.
+- `SceneCoordinateProjection` and `LayerCoordinateProjection` are immutable
+  per-frame projection values for advanced renderer integrations.
+- `PyramidManager` owns multiresolution product scheduling and cache-backed
+  source pyramids.
+- `LayerRasterizationWorker` scales one detached raster source away from the
+  GUI thread.
+- `RegionRasterizationWorker` samples one bounded `RegionSampleSource` away
+  from the GUI thread.
 - `CacheRegistry`, `CacheCoordinator`, and `CachePriority` coordinate byte-bounded product stores.
 - `EvictableCacheConsumer`, `KeyedCacheConsumer`, and `cache_detail_provider` connect stores to eviction and diagnostics.
-- `BaseWorker`, `TaskExecutorProtocol`, `TaskHandle`, and `TaskRejected` define cancellable bounded background work.
+- `BaseWorker`, `TaskExecutorProtocol`, `TaskHandle`, and `TaskRejected` define cancellable bounded background work. `PersistentWorkerPool` supplies stable Python worker-thread identity when a native backend requires it.
 - `QThreadPoolExecutor` and `LiveTunableExecutorProtocol` provide Qt-backed execution and live tuning.
 - `ThreadPolicy` and `build_thread_policy` resolve host and configuration concurrency limits.
 - `RetryContext`, `RetryEntriesView`, `makeQtRetryController`, and `qt_retry_dispatcher` coordinate bounded Qt-safe retries.
@@ -231,10 +259,13 @@ root facade and declarative SDK above.
 
 ### Catalog, comparison, and viewer values
 
-- `Catalog`, `ImageCatalog`, `ViewerCatalog`, and `CatalogMutationEvent` own ordered resources and structural notifications.
-- `CatalogEntry`, `CatalogImageReference`, and `CatalogSourceCapabilities` connect catalog identity to renderer sources.
-- `ImageMap`, `LinkManager`, and `NavigationEvent` support stable image association and navigation.
-- `CompareService`, `CompareDividerInteraction`, `ComparisonChange`, and `ComparisonChangeKind` own comparison state and input.
+- `ViewerCatalog` owns the ordered raster-source list used by QPane's
+  ready-made image-review workflow.
+- `ViewerCatalogEntry` carries one reusable `RasterSource` plus its label and
+  optional path. It is a viewer row, not a document or editable resource.
+- `CompareDividerInteraction` handles source-neutral comparison-divider input for custom viewer hosts.
+- `ComparisonChange` carries one immutable comparison interaction observation.
+- `ComparisonChangeKind` identifies hover, drag, and split changes.
 - `ComparisonState`, `ComparisonDividerState`, and `ComparisonOrientation` are detached comparison snapshots.
 - `LinkedGroup`, `PlaceholderScaleMode`, `ZoomMode`, and `CacheMode` describe stable viewer policies.
 - `SceneSnapshotOverlayState` and `SceneSnapshotOverlayLayer` provide prepared scene-aware overlay geometry.
@@ -242,7 +273,9 @@ root facade and declarative SDK above.
 ### Raster and vector helpers
 
 - `AffineImageResampler` performs bounded worker-side affine sampling.
-- `qimage_to_numpy_argb32`, `qimage_to_numpy_grayscale8`, `qimage_to_numpy_view_argb32`, and `qimage_to_numpy_view_grayscale8` convert QImage pixels with explicit ownership.
+- `qimage_to_numpy_argb32` and `qimage_to_numpy_grayscale8` return detached arrays.
+- `qimage_to_numpy_const_view_argb32` exposes normalized premultiplied BGRA pixels; `qimage_to_numpy_const_view_bgra32` preserves compatible 32-bit storage to avoid needless large-image conversion.
+- `qimage_to_numpy_view_argb32` and `qimage_to_numpy_view_grayscale8` expose writable scoped zero-copy views.
 - `numpy_to_qimage_argb32`, `numpy_to_qimage_grayscale8`, `numpy_to_qimage_argb32_at_size`, and `numpy_to_qimage_grayscale8_at_size` create validated QImage values.
 - `VectorPresentationSnapshot`, `SemanticTextLayoutCache`, `TextFontResolution`, and `text_caret_rect` share immutable vector presentation and text layout.
 - `VectorNodeRole`, `object_path`, and `object_contains` provide semantic node and geometry queries.
@@ -252,5 +285,42 @@ root facade and declarative SDK above.
 
 - `apply_widget_defaults`, `copyToClipboard`, and `maybeStartDrag` provide standard viewer widget behavior.
 - `drag_out_image` and `is_drag_out_allowed` separate drag payload construction from host policy.
-- `SwapDelegate` is the supported image-swap boundary for custom shells.
+- `DragSubject` identifies content selected by a drag gesture.
+- `OutboundMimeItem` carries one arbitrary MIME value as detached bytes.
+- `OutboundDragPayload` carries URLs, text, custom values, and a preview.
+- `OutboundMimeProvider` materializes host payloads synchronously or later.
+- `OutboundDragController` owns cancellation, stale-result rejection, GUI
+  delivery, and native execution.
 - `SystemHeadroomWorker` samples memory pressure without blocking the GUI thread.
+
+### Inspection and target layout
+
+- `InspectionTarget` identifies one native coordinate space.
+- `InspectionRegion` stores a source-neutral visible rectangle as normalized center and span values.
+- `InspectionViewState` retains a normalized visible region and target-local
+  zoom interpretation.
+- `InspectionZoomMode` preserves whether a target view is fitted, native scale, or custom.
+- `InspectionUpdate` carries one generation-guarded linked-view observation to a subscribed target.
+- `InspectionObserver` is the callback contract used to receive immutable inspection updates.
+- `ProjectedViewport` contains the target-local zoom, pan, and zoom interpretation produced from normalized inspection.
+- `InspectionStateStore` owns independent state, explicit link groups, and
+  generation-guarded observation.
+- `capture_inspection` and `project_inspection` convert between normalized
+  inspection and target viewport transforms.
+- `ViewTargetSpec` identifies one independently rendered target and its native dimensions.
+- `ViewTargetFrame` contains a responsive-grid cell and its aspect-preserving content rectangle.
+- `ResponsiveGridPolicy` sets minimum cell width, spacing, and an optional column limit.
+- `ResponsiveGridSnapshot` provides stable frames, hit testing, visible-target queries, prefetch order, and bounded layout damage.
+- `ResponsiveGridLayout` returns DPR-stable target cells, content frames, hit
+  testing, visibility, damage, and prefetch order.
+- `TargetComparisonSnapshot` contains exact clips and a physical-pixel-aligned divider for two targets.
+- `TargetComparisonLayout` returns two clips and one exact physical divider
+  boundary for independent target comparison.
+
+### Native outbound dragging
+
+- `OutboundMimeItem` carries one detached arbitrary MIME value.
+- `OutboundDragPayload` combines custom MIME values, URLs, text, and an optional preview for one native drag.
+- `DragCompletion` is the one-shot callback used by a host MIME provider.
+- `DragCancellation` lets deferred materialization stop without blocking the GUI thread.
+- `execute_outbound_drag` turns a fully materialized payload into one Qt native copy drag.

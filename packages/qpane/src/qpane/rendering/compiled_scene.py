@@ -38,6 +38,7 @@ class CompiledRenderScene:
     layers: tuple[CompiledRenderLayer, ...]
     vector_layers: tuple[CompiledPresentationLayer, ...]
     hybrid_layers: tuple[CompiledPresentationLayer, ...]
+    sampled_layers: tuple[CompiledPresentationLayer, ...]
     hit_test_items: tuple[SceneHitTestItem, ...]
 
 

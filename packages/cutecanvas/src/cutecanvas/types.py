@@ -27,23 +27,16 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF
 from PySide6.QtGui import QColor, QImage, QTransform
-from qpane.sdk.types import ComparisonState
 
 if TYPE_CHECKING:
-    from qpane.sdk.types import CatalogEntry, LinkedGroup
-
     from .placed.model import PlacedAssetMode, PlacedAssetStatus
 
 __all__ = [
-    "CatalogLayerRequest",
-    "CatalogSnapshot",
     "CompositionEntry",
     "CompositionLayerClip",
     "CompositionLayerEntry",
     "CompositionPolicy",
-    "CompositionRequest",
     "CompositionSnapshot",
-    "CompositionTemplate",
     "ControlMode",
     "CoverageCoordinateSpace",
     "DiagnosticsDomain",
@@ -58,6 +51,7 @@ __all__ = [
     "LayerSelectionSnapshot",
     "LayerSnapshot",
     "MaskSavedPayload",
+    "NonEditablePaintPolicy",
     "PaintTargetKind",
     "PaintTargetSnapshot",
     "PixelSelectionMode",
@@ -66,8 +60,6 @@ __all__ = [
     "RasterExtentPolicy",
     "RasterSurfaceSnapshot",
     "SceneSnapshot",
-    "TemplateBindings",
-    "TemplateLayer",
 ]
 
 
@@ -94,6 +86,7 @@ class ControlMode(str, Enum):
     MOVE = "move"
     TRANSFORM = "transform"
     DRAW_BRUSH = "draw-brush"
+    CLONE_STAMP = "clone-stamp"
     SMART_SELECT = "smart-select"
     SELECT_RECTANGLE = "select-rectangle"
     SELECT_ELLIPSE = "select-ellipse"
@@ -112,6 +105,9 @@ class EditorCapability(str, Enum):
     PAINT = "paint"
     MOVE_LAYERS = "move-layers"
     TRANSFORM_LAYERS = "transform-layers"
+    EDIT_VECTORS = "edit-vectors"
+    MANAGE_LAYERS = "manage-layers"
+    EDIT_RESOURCES = "edit-resources"
 
 
 class EditorIntent(str, Enum):
@@ -147,6 +143,13 @@ class PaintTargetKind(str, Enum):
     PIXEL_SELECTION = "pixel-selection"
 
 
+class NonEditablePaintPolicy(str, Enum):
+    """Choose how interactive painting handles a non-editable selected layer."""
+
+    REJECT = "reject"
+    CREATE_RASTER_LAYER = "create-raster-layer"
+
+
 class FloatingPixelMode(str, Enum):
     """Control whether a floating edit cuts or copies its source pixels."""
 
@@ -164,10 +167,9 @@ class RasterExtentPolicy(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class CompositionPolicy:
-    """Host-controlled structural permissions for one composition document."""
+    """Host-controlled structural permissions for one composition."""
 
     removable: bool = True
-    comparison_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,9 +179,6 @@ class CompositionEntry:
     composition_id: uuid.UUID
     kind: str
     title: str
-    source_image_ids: tuple[uuid.UUID, ...]
-    current_image_id: uuid.UUID | None
-    comparison: ComparisonState
     scene_layer_count: int = 0
     scene_bounds: QRectF | None = None
     layers: tuple[CompositionLayerEntry, ...] = ()
@@ -199,18 +198,6 @@ class CompositionSnapshot:
     compositions: dict[uuid.UUID, CompositionEntry]
     order: tuple[uuid.UUID, ...]
     current_composition_id: uuid.UUID | None
-
-
-@dataclass(frozen=True, slots=True)
-class CatalogSnapshot:
-    """Structured catalog state returned by the facade snapshot helper."""
-
-    catalog: dict[uuid.UUID, CatalogEntry]
-    linked_groups: tuple[LinkedGroup, ...]
-    order: tuple[uuid.UUID, ...]
-    current_image_id: uuid.UUID | None
-    active_mask_id: uuid.UUID | None
-    mask_capable: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,13 +230,21 @@ class EditorPolicy:
     capabilities: frozenset[EditorCapability] = field(
         default_factory=lambda: frozenset(EditorCapability)
     )
+    noneditable_paint: NonEditablePaintPolicy = (
+        NonEditablePaintPolicy.CREATE_RASTER_LAYER
+    )
 
     def __post_init__(self) -> None:
-        """Normalize caller iterables into one immutable capability set."""
+        """Normalize caller values into one immutable editor policy."""
         object.__setattr__(
             self,
             "capabilities",
             frozenset(EditorCapability(value) for value in self.capabilities),
+        )
+        object.__setattr__(
+            self,
+            "noneditable_paint",
+            NonEditablePaintPolicy(self.noneditable_paint),
         )
 
 
@@ -349,109 +344,12 @@ class FloatingPixelSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class CatalogLayerRequest:
-    """Catalog-backed image layer requested for a stored scene composition."""
-
-    layer_id: uuid.UUID
-    image_id: uuid.UUID
-    placement: QRectF
-    visible: bool = True
-    opacity: float = 1.0
-    clip: CompositionLayerClip | None = None
-    hit_test: bool = True
-    role: str = "content"
-    metadata: Mapping[str, object] = field(default_factory=dict)
-    interaction: LayerPolicy = LayerPolicy()
-
-    def __post_init__(self) -> None:
-        """Detach mutable geometry and protect request metadata."""
-        object.__setattr__(self, "placement", QRectF(self.placement))
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
-
-
-@dataclass(frozen=True, slots=True)
-class CompositionRequest:
-    """Host request for a stored catalog-backed scene composition."""
-
-    composition_id: uuid.UUID | None
-    title: str | None
-    bounds: QRectF
-    layers: tuple[CatalogLayerRequest, ...]
-
-    def __post_init__(self) -> None:
-        """Detach mutable geometry and normalize layer storage."""
-        object.__setattr__(self, "bounds", QRectF(self.bounds))
-        object.__setattr__(self, "layers", tuple(self.layers))
-
-
-@dataclass(frozen=True, slots=True)
-class TemplateLayer:
-    """Reusable template layer that binds to a catalog image source slot."""
-
-    layer_id: uuid.UUID
-    source_slot: str
-    placement: QRectF
-    visible: bool = True
-    opacity: float = 1.0
-    clip: CompositionLayerClip | None = None
-    hit_test: bool = True
-    role: str = "content"
-    metadata: Mapping[str, object] = field(default_factory=dict)
-    interaction: LayerPolicy = LayerPolicy()
-
-    def __post_init__(self) -> None:
-        """Detach mutable geometry and protect template metadata."""
-        object.__setattr__(self, "placement", QRectF(self.placement))
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
-
-
-@dataclass(frozen=True, slots=True)
-class CompositionTemplate:
-    """Reusable host-owned template for scene composition requests."""
-
-    template_id: uuid.UUID
-    bounds: QRectF
-    layers: tuple[TemplateLayer, ...]
-    title: str | None = None
-
-    def __post_init__(self) -> None:
-        """Detach mutable geometry and normalize layer storage."""
-        object.__setattr__(self, "bounds", QRectF(self.bounds))
-        object.__setattr__(self, "layers", tuple(self.layers))
-
-
-@dataclass(frozen=True, slots=True)
-class TemplateBindings:
-    """Concrete catalog bindings used to compose a scene template."""
-
-    composition_id: uuid.UUID | None
-    title: str | None = None
-    catalog_images: Mapping[str, uuid.UUID] = field(default_factory=dict)
-    metadata: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Protect binding mappings from host-side mutation."""
-        object.__setattr__(
-            self, "catalog_images", MappingProxyType(dict(self.catalog_images))
-        )
-        object.__setattr__(
-            self,
-            "metadata",
-            MappingProxyType(
-                {
-                    slot: MappingProxyType(dict(values))
-                    for slot, values in self.metadata.items()
-                }
-            ),
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class LayerSnapshot:
     """One source-backed layer in a public composed scene."""
 
     layer_id: uuid.UUID
-    image_id: uuid.UUID | None
+    source_kind: str
+    source_id: uuid.UUID
     placement: QRectF
     visible: bool = True
     opacity: float = 1.0
@@ -461,8 +359,6 @@ class LayerSnapshot:
     role: str = "content"
     metadata: Mapping[str, object] = field(default_factory=dict)
     interaction: LayerPolicy = LayerPolicy()
-    source_kind: str = "catalog-image"
-    source_id: uuid.UUID | None = None
     label: str | None = None
     transform: QTransform = field(default_factory=QTransform)
 
@@ -473,8 +369,6 @@ class LayerSnapshot:
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         if self.tint is not None:
             object.__setattr__(self, "tint", QColor(self.tint))
-        if self.source_id is None:
-            object.__setattr__(self, "source_id", self.image_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,12 +415,12 @@ class SceneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class LayerHit:
-    """Public hit-test result for a catalog-backed scene layer."""
+    """Public hit-test result for a project-resource layer."""
 
     composition_id: uuid.UUID
     scene_id: uuid.UUID
     layer_id: uuid.UUID
-    image_id: uuid.UUID
+    source_id: uuid.UUID
     role: str
     metadata: Mapping[str, object]
     panel_point: QPointF

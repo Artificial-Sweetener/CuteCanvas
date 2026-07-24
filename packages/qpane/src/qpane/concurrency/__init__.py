@@ -33,6 +33,7 @@ from .metrics import (
     retry_diagnostics_provider,
     retry_summary_provider,
 )
+from .persistent_pool import PersistentWorkerPool
 from .retry import (
     BackoffPolicy,
     QtTimerScheduler,
@@ -52,6 +53,7 @@ __all__ = [
     "BaseWorker",
     "ExecutorSnapshot",
     "LiveTunableExecutorProtocol",
+    "PersistentWorkerPool",
     "QThreadPoolExecutor",
     "QtTimerScheduler",
     "RetryContext",

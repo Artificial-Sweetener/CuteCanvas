@@ -53,10 +53,9 @@ class CompositionPersistenceService:
 
     def save(self, document_id: uuid.UUID, path: Path) -> None:
         """Atomically save one complete document archive to ``path``."""
-        document = self._compositions.record(document_id)
         archive = capture_composition(
-            document,
-            self._compositions.layers,
+            document_id,
+            self._compositions,
             self._masks(),
             self._rasters,
             self._placed_assets,

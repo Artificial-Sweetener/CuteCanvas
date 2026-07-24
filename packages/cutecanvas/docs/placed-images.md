@@ -55,7 +55,7 @@ saves no longer depend on the external path.
 
 ## Duplicate Without Resampling
 
-`duplicatePlacedAsset(scene_id, layer_id)` creates another layer instance that
+`duplicateLayer(scene_id, layer_id)` creates another layer instance that
 references the same immutable source. Each instance keeps independent
 placement, visibility, effects, and policy while sharing renderer products.
 
@@ -65,7 +65,7 @@ Placed assets reject direct painting and pixel deletion. Rasterize when the
 user chooses to edit their pixels:
 
 ```python
-raster_layer_id = canvas.rasterizePlacedAsset(
+raster_layer_id = canvas.rasterizeLayer(
     scene.scene_id,
     layer_id,
 )

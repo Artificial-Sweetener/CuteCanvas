@@ -22,7 +22,6 @@ import os
 import statistics
 import sys
 import time
-import uuid
 from collections.abc import Callable
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -31,9 +30,11 @@ from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QImage, Qt
 from PySide6.QtWidgets import QApplication
 from qpane import (
+    LayerTransform,
     QPane,
-    QPaneCatalogImageLayerRequest,
-    QPaneSceneRequest,
+    RasterSource,
+    RenderLayer,
+    RenderScene,
 )
 
 FrameSetup = Callable[[QPane, int], None]
@@ -67,58 +68,37 @@ def _solid_image(width: int, height: int, color: Qt.GlobalColor) -> QImage:
 
 
 def _default_scene_qpane() -> QPane:
-    """Return a QPane containing one 4096x4096 catalog image."""
-    qpane = QPane(features=())
+    """Return a QPane containing one 4096x4096 viewer image."""
+    qpane = QPane()
     qpane.resize(1024, 768)
-    image_id = uuid.uuid4()
-    qpane.setImagesByID(
-        QPane.imageMapFromLists(
-            [_solid_image(4096, 4096, Qt.red)],
-            [None],
-            [image_id],
-        ),
-        image_id,
-    )
+    qpane.setImage(_solid_image(4096, 4096, Qt.red), fit=False)
     qpane.view().viewport.zoom = 1.0
     return qpane
 
 
 def _two_layer_scene_qpane() -> QPane:
     """Return a QPane containing a two-layer explicit 4096px scene."""
-    qpane = QPane(features=())
+    qpane = QPane()
     qpane.resize(1024, 768)
-    first_id, second_id = uuid.uuid4(), uuid.uuid4()
-    qpane.setImagesByID(
-        QPane.imageMapFromLists(
-            [
-                _solid_image(4096, 4096, Qt.red),
-                _solid_image(4096, 4096, Qt.blue),
-            ],
-            [None, None],
-            [first_id, second_id],
-        ),
-        first_id,
-    )
-    qpane.composeScene(
-        QPaneSceneRequest(
-            composition_id=None,
-            title="Two layer benchmark",
-            bounds=QRectF(0.0, 0.0, 4096.0, 4096.0),
-            layers=(
-                QPaneCatalogImageLayerRequest(
-                    layer_id=uuid.uuid4(),
-                    image_id=first_id,
-                    placement=QRectF(0.0, 0.0, 4096.0, 4096.0),
-                    role="base",
-                ),
-                QPaneCatalogImageLayerRequest(
-                    layer_id=uuid.uuid4(),
-                    image_id=second_id,
-                    placement=QRectF(1024.0, 1024.0, 2048.0, 2048.0),
-                    role="overlay",
+    first = RasterSource.from_image(_solid_image(4096, 4096, Qt.red))
+    second = RasterSource.from_image(_solid_image(4096, 4096, Qt.blue))
+    qpane.setScene(
+        RenderScene(
+            QRectF(0.0, 0.0, 4096.0, 4096.0),
+            (
+                RenderLayer(first),
+                RenderLayer(
+                    second,
+                    transform=LayerTransform(
+                        m11=0.5,
+                        m22=0.5,
+                        dx=1024.0,
+                        dy=1024.0,
+                    ),
                 ),
             ),
-        )
+        ),
+        fit=False,
     )
     qpane.view().viewport.zoom = 1.0
     return qpane
@@ -128,12 +108,12 @@ def _warm_up(qpane: QPane) -> None:
     """Build initial caches before measuring repeated frame planning."""
     for index in range(10):
         _pan_frame(qpane, index)
-        qpane.view().calculateRenderPlan(is_blank=False)
+        qpane.calculateRenderPlan()
 
 
 def _pan_frame(qpane: QPane, frame: int) -> None:
     """Apply a deterministic pan value for one benchmark frame."""
-    qpane.view().viewport.pan = QPointF(float(frame % 128), float(-(frame % 96)))
+    qpane.setPan(QPointF(float(frame % 128), float(-(frame % 96))))
 
 
 def _measure_case(
@@ -147,7 +127,7 @@ def _measure_case(
     for frame in range(frames):
         frame_setup(qpane, frame)
         started = time.perf_counter()
-        plan = qpane.view().calculateRenderPlan(is_blank=False)
+        plan = qpane.calculateRenderPlan()
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         if plan is None:
             raise RuntimeError("render planning returned no plan")

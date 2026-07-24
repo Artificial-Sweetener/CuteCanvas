@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 BRUSH_OUTLINE_PADDING = 4
 
@@ -30,6 +30,17 @@ def draw_brush_outline(
     color: QColor,
 ) -> None:
     """Draw a black/white/color ring visible over arbitrary image content."""
+    path = QPainterPath()
+    path.addEllipse(ellipse)
+    draw_brush_path_outline(painter, path, color)
+
+
+def draw_brush_path_outline(
+    painter: QPainter,
+    path: QPainterPath,
+    color: QColor,
+) -> None:
+    """Draw one high-contrast brush-footprint path."""
     painter.setBrush(Qt.BrushStyle.NoBrush)
     for ring_color, width in (
         (QColor(Qt.GlobalColor.black), 5.0),
@@ -39,4 +50,4 @@ def draw_brush_outline(
         pen = QPen(ring_color, width)
         pen.setCosmetic(True)
         painter.setPen(pen)
-        painter.drawEllipse(ellipse)
+        painter.drawPath(path)

@@ -29,8 +29,8 @@ from qpane.sdk.vector import (
     painted_document_path,
 )
 
+from ..resources import ProjectResourceReference
 from .projection import VectorDocumentProjection
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 
 
@@ -68,7 +68,7 @@ class VectorSourceCapabilities:
         """Return the current immutable document revision."""
         return (
             None
-            if not isinstance(source, VectorDocumentReference)
+            if not isinstance(source, ProjectResourceReference)
             else self._projection.snapshot(source)
         )
 
@@ -106,8 +106,8 @@ class VectorSourceCapabilities:
         """Resolve one exact typed source."""
         return (
             None
-            if not isinstance(source, VectorDocumentReference)
-            else self._assets.get(source.vector_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._assets.get(source.resource_id)
         )
 
     def _effective_document(
@@ -116,8 +116,8 @@ class VectorSourceCapabilities:
         """Resolve presentation geometry for hit testing during transient edits."""
         return (
             None
-            if not isinstance(source, VectorDocumentReference)
-            else self._projection.document(source.vector_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._projection.document(source.resource_id)
         )
 
 

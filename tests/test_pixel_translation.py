@@ -26,9 +26,9 @@ from cutecanvas.coverage import CoverageAsset, CoverageSnapshot, CoverageSurface
 from cutecanvas.masks.mask import MaskLayer
 from cutecanvas.masks.pixel_edits import MaskLayerPixelMutationOwner
 from cutecanvas.masks.pixel_translation import MaskPixelTranslator
-from cutecanvas.masks.source_reference import MaskAssetReference
 from cutecanvas.raster.color_surface import ColorRasterSurface
 from cutecanvas.raster.pixel_translation import ColorPixelTranslator
+from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtGui import QColor, QImage
 from qpane.scene.model import LayerDescriptor
@@ -166,7 +166,7 @@ def test_mask_owner_exposes_nonzero_content_as_binary_movement_occupancy() -> No
     owner = MaskLayerPixelMutationOwner(Lookup(), lambda _mask_id, _bounds: None)
     descriptor = cast(
         LayerDescriptor,
-        SimpleNamespace(source=MaskAssetReference(mask.mask_id)),
+        SimpleNamespace(source=ProjectResourceReference(mask.mask_id)),
     )
 
     coverage = owner.content_coverage(descriptor, RasterBounds(0, 0, 4, 1))

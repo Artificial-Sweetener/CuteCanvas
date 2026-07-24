@@ -14,14 +14,5 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ..catalog import Catalog as Catalog
-from ..catalog import CatalogMutationEvent as CatalogMutationEvent
-from ..catalog import ImageCatalog as ImageCatalog
-from ..catalog import ImageMap as ImageMap
-from ..catalog import LinkManager as LinkManager
-from ..catalog import NavigationEvent as NavigationEvent
 from ..catalog import ViewerCatalog as ViewerCatalog
-from ..catalog.source_capabilities import (
-    CatalogSourceCapabilities as CatalogSourceCapabilities,
-)
-from ..catalog.source_reference import CatalogImageReference as CatalogImageReference
+from ..catalog import ViewerCatalogEntry as ViewerCatalogEntry

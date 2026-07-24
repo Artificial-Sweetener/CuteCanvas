@@ -32,9 +32,9 @@ from ..composition.layers import (
     CompositionLayerStore,
 )
 from ..editor.floating_layers import FloatingLayerTransition
+from ..resources import ProjectResourceReference
 from ..scene.identity import mask_layer_id
 from .mask import MaskAssetStore
-from .source_reference import MaskAssetReference
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +100,7 @@ class MaskFloatingLayerOwner:
         )
         instance = CompositionLayerInstance(
             layer_id=layer_id,
-            source=MaskAssetReference(mask_id),
+            source=ProjectResourceReference(mask_id),
             transform=transform,
             visible=True,
             opacity=source_layer.opacity,
@@ -137,9 +137,9 @@ class MaskFloatingLayerOwner:
         if state is None:
             return False
         source = state.instance.source
-        if not isinstance(source, MaskAssetReference):
+        if not isinstance(source, ProjectResourceReference):
             return False
-        asset_present = self._assets.get_layer(source.mask_id) is not None
+        asset_present = self._assets.get_layer(source.resource_id) is not None
         instance = self._layers.layer(state.composition_id, state.instance.layer_id)
         return (
             asset_present and instance == state.instance
@@ -160,9 +160,9 @@ class MaskFloatingLayerOwner:
         if self.matches(transition, use_after=use_after):
             return True
         source = state.instance.source
-        if not isinstance(source, MaskAssetReference):
+        if not isinstance(source, ProjectResourceReference):
             return False
-        mask_id = source.mask_id
+        mask_id = source.resource_id
         if use_after:
             created_asset = self._assets.get_layer(mask_id) is None
             self._assets.restore_mask(mask_id, state.snapshot)

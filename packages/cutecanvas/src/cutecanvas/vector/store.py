@@ -19,16 +19,20 @@ from __future__ import annotations
 
 import threading
 import uuid
+from dataclasses import replace
 
 from qpane.sdk.scene import RasterBounds
 from qpane.sdk.vector import VectorDocument
+
+from ..resources import ProjectResourceKind, ProjectResourceStore
 
 
 class VectorAssetStore:
     """Own every vector document payload by stable source identity."""
 
-    def __init__(self) -> None:
-        """Initialize an empty synchronized document collection."""
+    def __init__(self, resources: ProjectResourceStore) -> None:
+        """Initialize vector payloads against the project resource graph."""
+        self._resources = resources
         self._documents: dict[uuid.UUID, VectorDocument] = {}
         self._lock = threading.RLock()
         self._revision = 0
@@ -42,6 +46,11 @@ class VectorAssetStore:
     def create(self, bounds: RasterBounds) -> VectorDocument:
         """Create and retain one empty document."""
         document = VectorDocument(uuid.uuid4(), bounds)
+        self._resources.create(
+            ProjectResourceKind.VECTOR,
+            editable=True,
+            resource_id=document.vector_id,
+        )
         with self._lock:
             self._documents[document.vector_id] = document
             self._revision += 1
@@ -59,21 +68,50 @@ class VectorAssetStore:
                 return False
             self._documents[document.vector_id] = document
             self._revision += 1
+            self._resources.touch(document.vector_id)
             return True
 
     def restore(self, document: VectorDocument) -> None:
         """Install a validated document at its retained identity."""
+        record = self._resources.get(document.vector_id)
+        if record is None:
+            self._resources.create(
+                ProjectResourceKind.VECTOR,
+                editable=True,
+                resource_id=document.vector_id,
+            )
+        elif record.kind is not ProjectResourceKind.VECTOR:
+            raise ValueError("vector identity belongs to another resource kind")
         with self._lock:
             self._documents[document.vector_id] = document
             self._revision += 1
 
     def remove(self, vector_id: uuid.UUID) -> bool:
         """Release one unreachable document."""
+        if self._resources.get(vector_id) is not None:
+            self._resources.remove(vector_id)
         with self._lock:
             removed = self._documents.pop(vector_id, None) is not None
             if removed:
                 self._revision += 1
             return removed
+
+    def fork(self, vector_id: uuid.UUID) -> uuid.UUID | None:
+        """Clone one vector document into an independent project resource."""
+        with self._lock:
+            document = self._documents.get(vector_id)
+            if document is None:
+                return None
+            fork_id = uuid.uuid4()
+            forked = replace(document, vector_id=fork_id, revision=0)
+            self._resources.create(
+                ProjectResourceKind.VECTOR,
+                editable=True,
+                resource_id=fork_id,
+            )
+            self._documents[fork_id] = forked
+            self._revision += 1
+            return fork_id
 
     def ids(self) -> tuple[uuid.UUID, ...]:
         """Return stable identities of all retained documents."""

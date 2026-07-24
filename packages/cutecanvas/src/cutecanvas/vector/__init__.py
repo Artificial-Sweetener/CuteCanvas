@@ -17,7 +17,6 @@
 
 from qpane.sdk.vector import *
 
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 
-__all__ = ["VectorAssetStore", "VectorDocumentReference"]
+__all__ = ["VectorAssetStore"]

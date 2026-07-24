@@ -12,10 +12,7 @@ not leak between canvases.
 
 `ZoomMode.FIT` continually frames content, `ZoomMode.LOCKED_ZOOM` preserves an
 explicit scale, and `ZoomMode.LOCKED_SIZE` preserves the presented logical
-size. Empty-canvas images use `PlaceholderScaleMode.AUTO` for automatic choice,
-`PlaceholderScaleMode.LOGICAL_FIT` for logical widget fitting,
-`PlaceholderScaleMode.PHYSICAL_FIT` for device-pixel fitting, or
-`PlaceholderScaleMode.RELATIVE_FIT` for a proportional presentation.
+size.
 
 The `DiagnosticsDomain.CACHE` section describes retained products,
 `DiagnosticsDomain.SWAP` describes navigation and prefetch,
@@ -29,7 +26,8 @@ model work.
 `ControlMode` is the typed vocabulary for built-in tools.
 `ControlMode.PANZOOM` navigates, `ControlMode.CURSOR` inspects, and
 `ControlMode.MOVE` moves pixels or layers. `ControlMode.TRANSFORM` performs
-affine manipulation, while `ControlMode.DRAW_BRUSH` paints the active target.
+affine manipulation, while `ControlMode.DRAW_BRUSH` paints the active target
+and `ControlMode.CLONE_STAMP` retouches an editable RGBA layer.
 
 Selection gestures use `ControlMode.SELECT_RECTANGLE`,
 `ControlMode.SELECT_ELLIPSE`, and `ControlMode.SELECT_LASSO`.
@@ -43,6 +41,11 @@ are `EditorCapability.SELECT_PIXELS`, `EditorCapability.EDIT_PIXELS`,
 `EditorCapability.PAINT`, `EditorCapability.MOVE_LAYERS`, and
 `EditorCapability.TRANSFORM_LAYERS`. A policy disables complete capabilities;
 it does not change source data.
+
+`EditorPolicy.noneditable_paint` controls the first interactive stroke on a
+selected layer that cannot store pixels. `CREATE_RASTER_LAYER` creates and
+selects a real layer above it; `REJECT` leaves the document and selection
+unchanged.
 
 An `EditorOperationState` explains one attempted `EditorIntent`. The
 `EditorOperationState.intent` echoes the request,
@@ -78,84 +81,54 @@ texture, while `BrushPreset.dynamics` contains device-response rules.
 orientation, and `BrushDynamics.tangential_opacity` uses barrel pressure when a
 device supplies it.
 
-## Catalog and Comparison State
+`CloneStampState` is the complete detached Clone Stamp snapshot.
+`CloneStampState.source` is `None` until a source is chosen,
+`CloneStampState.alignment` selects retained or per-stroke source offset, and
+`CloneStampState.sample_mode` selects the anchored layer, that layer and the
+visible layers below it, or the complete visible composition.
+`CloneStampState.transform` retains rotation, output scale, and axis
+reflection. A
+`CloneStampSource` retains scene coordinates plus identified zero-origin
+layer-source coordinates when the source is anchored to a layer.
 
-A `CatalogEntry` carries one source. `CatalogEntry.image` is the decoded Qt
-image and `CatalogEntry.path` is its optional host path. A `CatalogSnapshot`
-combines the ordered entries, selection, and linked groups needed by a browser.
-`LinkedGroup` identifies catalog sources that share normalized pan and zoom.
+## Project Resources and Presentation State
 
-`ComparisonOrientation.VERTICAL` creates a left-and-right reveal, while
-`ComparisonOrientation.HORIZONTAL` creates a top-and-bottom reveal. The
-`ComparisonState.enabled` flag says whether comparison is active,
-`ComparisonState.split_position` gives its normalized position, and
-`ComparisonState.orientation` gives its direction. `ComparisonState.source_id`,
-`ComparisonState.source_path`, and `ComparisonState.source_kind` describe the
-second source for labels and controls.
+Every layer instance references a project resource. The resource owns shared
+pixels, vectors, coverage, linked-file provenance, or a nested composition. The
+layer owns placement, visibility, opacity, policy, and stack order. A duplicated
+layer therefore shares content until the host or user explicitly forks its
+resource.
 
-A `ComparisonDividerState` is projected interaction geometry.
-`ComparisonDividerState.enabled` says whether a boundary exists,
-`ComparisonDividerState.full_segment` contains the complete projected line,
-and `ComparisonDividerState.visible_segment` contains the clipped on-screen
-part. `ComparisonDividerState.orientation` matches the reveal direction and
-`ComparisonDividerState.hit_width` gives the active pointer target.
-`ComparisonDividerState.interactive`, `ComparisonDividerState.hovered`, and
-`ComparisonDividerState.dragging` describe the divider's current behavior and
-feedback state.
+`CanvasPresentation.kind` selects a single view, linked tabs, responsive grid,
+independent-target comparison, or registered host layout.
+`CanvasPresentation.target_ids` identifies the arranged compositions and
+`CanvasPresentation.linked_inspection` says whether their normalized inspected
+region is shared. Comparison adds `CanvasComparison`, whose
+`split_position` and `orientation` describe its transient divider.
 
-## Document Requests and Browser Rows
+`CanvasSessionSnapshot.active_composition_id` identifies the focused target.
+Its presentation and revision belong to the detachable `CanvasViewSession`;
+they are not composition content and never enter edit history.
 
-A `CompositionPolicy` separates document structure from layer editing.
-`CompositionPolicy.removable` controls document removal, while
-`CompositionPolicy.comparison_enabled` controls comparison for that document.
+## Document and Browser Rows
 
-A `CompositionRequest` describes a complete catalog-backed document.
-`CompositionRequest.composition_id` optionally supplies stable identity,
-`CompositionRequest.title` supplies the browser label,
-`CompositionRequest.bounds` supplies the canvas, and
-`CompositionRequest.layers` supplies bottom-to-top layer requests.
-
-Each request layer uses `CatalogLayerRequest.image_id` for the catalog source
-and `CatalogLayerRequest.layer_id` for instance identity.
-`CatalogLayerRequest.placement`, `CatalogLayerRequest.opacity`, and
-`CatalogLayerRequest.visible` control presentation.
-`CatalogLayerRequest.clip` applies an optional clip,
-`CatalogLayerRequest.hit_test` controls pointer eligibility, and
-`CatalogLayerRequest.interaction` sets edit permission.
-`CatalogLayerRequest.role` and `CatalogLayerRequest.metadata` carry host meaning
-without changing renderer behavior.
+A `CompositionPolicy` separates composition structure from layer editing.
+`CompositionPolicy.removable` controls composition removal.
 
 A `CompositionLayerClip` combines `CompositionLayerClip.coordinate_space` with
 `CompositionLayerClip.rect`, allowing one rectangle to be interpreted in
 source or scene coordinates without ambiguity.
 
-`CompositionTemplate.template_id` identifies a reusable layout,
-`CompositionTemplate.title` supplies its optional label,
-`CompositionTemplate.bounds` defines its canvas, and
-`CompositionTemplate.layers` defines source slots. A `TemplateLayer` gives each
-slot `TemplateLayer.layer_id`, `TemplateLayer.source_slot`, and
-`TemplateLayer.placement`. Its `TemplateLayer.visible`,
-`TemplateLayer.opacity`, and `TemplateLayer.clip` control presentation;
-`TemplateLayer.hit_test` and `TemplateLayer.interaction` control interaction;
-and `TemplateLayer.role` plus `TemplateLayer.metadata` carry host meaning.
-
-Bindings turn a template into a document. `TemplateBindings.composition_id`
-can preserve document identity, `TemplateBindings.title` can replace its title,
-`TemplateBindings.catalog_images` maps slots to catalog IDs, and
-`TemplateBindings.metadata` carries host data for the resulting composition.
-
 `CompositionSnapshot.order` gives browser order,
 `CompositionSnapshot.compositions` maps IDs to rows, and
-`CompositionSnapshot.current_composition_id` identifies the open document.
+`CompositionSnapshot.current_composition_id` identifies the open composition.
 
 Each `CompositionEntry.composition_id` is stable identity and
-`CompositionEntry.title` is display text. `CompositionEntry.kind` describes how
-the row was created, `CompositionEntry.source_image_ids` lists catalog
-dependencies, and `CompositionEntry.current_image_id` identifies a seeded
-source when present. `CompositionEntry.scene_bounds` is the canvas and
-`CompositionEntry.scene_layer_count` summarizes its stack.
-`CompositionEntry.comparison` and `CompositionEntry.policy` preserve the
-document's comparison and structural rules.
+`CompositionEntry.title` is display text. `CompositionEntry.kind` identifies
+the composition kind, while `CompositionEntry.layers` contains its ordered
+resource-backed layer instances. `CompositionEntry.scene_bounds` is the canvas,
+`CompositionEntry.scene_layer_count` summarizes its stack, and
+`CompositionEntry.policy` preserves its structural rule.
 
 A `CompositionLayerEntry.layer_id` identifies one layer instance.
 `CompositionLayerEntry.source_kind` and `CompositionLayerEntry.source_id`
@@ -181,8 +154,8 @@ A `LayerSelectionSnapshot.scene_id` identifies the open scene and
 `LayerSelectionSnapshot.layer_id` identifies its selected layer.
 
 `LayerSnapshot.layer_id` identifies the instance, while
-`LayerSnapshot.source_kind`, `LayerSnapshot.source_id`, and
-`LayerSnapshot.image_id` describe its backing resource.
+`LayerSnapshot.source_kind` and `LayerSnapshot.source_id` describe its backing
+resource.
 `LayerSnapshot.label`, `LayerSnapshot.role`, and `LayerSnapshot.metadata` carry
 host presentation and meaning. `LayerSnapshot.placement`,
 `LayerSnapshot.transform`, and `LayerSnapshot.clip` describe geometry;
@@ -196,8 +169,8 @@ describe appearance; and `LayerSnapshot.hit_test` plus
 document canvas, and `SceneSnapshot.layers` is the bottom-to-top stack.
 
 A `LayerHit.scene_id`, `LayerHit.composition_id`, and `LayerHit.layer_id`
-identify what was reached. `LayerHit.image_id` identifies an optional catalog
-source. `LayerHit.panel_point`, `LayerHit.scene_point`, and
+identify what was reached. `LayerHit.source_id` identifies the retained project
+resource. `LayerHit.panel_point`, `LayerHit.scene_point`, and
 `LayerHit.source_point` give the same location in three coordinate spaces,
 while `LayerHit.role` and `LayerHit.metadata` carry host meaning.
 

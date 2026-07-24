@@ -38,6 +38,13 @@ from qpane.types import DiagnosticRecord
 from tests.helpers.executor_stubs import StubExecutor
 
 
+def test_default_cpu_sam_work_is_serialized() -> None:
+    """The shared CPU model must admit only one predictor job at a time."""
+    device_limits = Config().concurrency["device_limits"]
+
+    assert device_limits["cpu"]["sam"] == 1
+
+
 def _stub_sam_service(monkeypatch):
     monkeypatch.setattr(service, "ensure_dependencies", lambda: None)
     monkeypatch.setattr(
@@ -73,7 +80,7 @@ def _detachSamManager_keep_delegate(qpane: CuteCanvas) -> None:
 
 
 def _seed_mask_service(qpane: CuteCanvas) -> None:
-    """Seed the mask service and catalog for SAM feature tests."""
+    """Seed the mask service for SAM feature tests."""
     qpane.mask_service = types.SimpleNamespace(
         adjust_mask_component=lambda mask_id, point, *, grow: True,
         apply_mask_surface=lambda *_args, **_kwargs: True,
@@ -90,9 +97,16 @@ def _seed_mask_service(qpane: CuteCanvas) -> None:
 def qpane_with_sam(monkeypatch, qapp):
     _stub_sam_service(monkeypatch)
     executor = StubExecutor()
+    sam_executor = StubExecutor(name="sam-test")
+    monkeypatch.setattr(
+        "cutecanvas.sam.execution.build_sam_executor",
+        lambda concurrency, *, device: sam_executor,
+    )
     qpane = CuteCanvas(features=("mask", "sam"), task_executor=executor)
     qpane.resize(64, 64)
-    catalog = qpane.catalog()
+    image = QImage(QSize(64, 64), QImage.Format_ARGB32)
+    image.fill(Qt.GlobalColor.white)
+    qpane.createCompositionFromImage(image, title="SAM source")
     qpane.mask_service = types.SimpleNamespace(
         adjust_mask_component=lambda mask_id, point, *, grow: True,
         apply_mask_surface=lambda *_args, **_kwargs: True,
@@ -103,10 +117,8 @@ def qpane_with_sam(monkeypatch, qapp):
             apply_mask_image=lambda *_args, **_kwargs: True
         ),
     )
-    raw_catalog = catalog.imageCatalog()
-    raw_catalog.getCurrentPath = lambda: Path("image.png")
     try:
-        assert qpane.currentImagePath == Path("image.png")
+        assert qpane.activeRasterResolver().resolve() is not None
         yield qpane
     finally:
         qpane.deleteLater()
@@ -116,8 +128,8 @@ def qpane_with_sam(monkeypatch, qapp):
 def test_sam_feature_ignores_empty_bbox(monkeypatch, qpane_with_sam, caplog):
     qpane = qpane_with_sam
     calls = []
-    image_id = uuid.uuid4()
-    monkeypatch.setattr(qpane, "currentImageID", lambda: image_id)
+    raster = qpane.activeRasterResolver().resolve()
+    assert raster is not None
 
     def record_mask(captured_id, bbox, erase_mode=False):
         calls.append((captured_id, bbox, erase_mode))
@@ -136,7 +148,7 @@ def test_sam_feature_ignores_empty_bbox(monkeypatch, qpane_with_sam, caplog):
         valid_bbox,
         True,
     )
-    assert calls[-1] == (image_id, valid_bbox, True)
+    assert calls[-1] == (raster.resource_id, valid_bbox, True)
 
 
 def test_sam_feature_component_adjusts_mask_from_fractional_coordinates(
@@ -168,17 +180,13 @@ def test_sam_component_adjustment_accepts_real_transformed_mask_coordinates(
     _stub_sam_service(monkeypatch)
     qpane = CuteCanvas(features=("mask", "sam"), task_executor=StubExecutor())
     try:
-        image_id = uuid.uuid4()
         image = QImage(QSize(64, 64), QImage.Format_ARGB32)
         image.fill(Qt.GlobalColor.white)
-        qpane.setImagesByID(
-            qpane.imageMapFromLists([image], [None], [image_id]),
-            image_id,
-        )
+        qpane.createCompositionFromImage(image, title="Transformed mask")
         mask_id = qpane.createBlankMask(image.size())
         assert mask_id is not None
         assert qpane.setActiveMaskID(mask_id)
-        mask = qpane.listMasksForImage()[0]
+        mask = qpane.listMasksForComposition()[0]
         assert mask.scene_id is not None
         assert mask.layer_id is not None
         assert qpane.setLayerInteractionPolicy(
@@ -223,7 +231,8 @@ def test_detach_sam_manager_cancels_pending_predictor_work(
     image = QImage(8, 8, QImage.Format_ARGB32)
     image.fill(QColor("white"))
     image_id = uuid.uuid4()
-    executor = qpane.executor
+    executor = manager._executor
+    assert isinstance(executor, StubExecutor)
     existing_handles = {record.handle for record in executor.pending_tasks()}
 
     manager.requestPredictor(image, image_id, source_path=tmp_path / "image.png")

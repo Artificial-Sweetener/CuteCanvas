@@ -41,11 +41,7 @@ def _mounted_mask_canvas(qapp) -> tuple[CuteCanvas, StubExecutor, uuid.UUID, uui
     canvas.resize(128, 96)
     image = QImage(32, 24, QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.GlobalColor.white)
-    image_id = uuid.uuid4()
-    canvas.setImagesByID(
-        CuteCanvas.imageMapFromLists([image], paths=[None], ids=[image_id]),
-        image_id,
-    )
+    image_id = canvas.createCompositionFromImage(image, title="Fill workflow")
     mask_id = canvas.createBlankMask(QSize(32, 24))
     assert mask_id is not None
     service = canvas.mask_service
@@ -55,7 +51,7 @@ def _mounted_mask_canvas(qapp) -> tuple[CuteCanvas, StubExecutor, uuid.UUID, uui
     qapp.processEvents()
     scene = canvas.currentScene()
     assert scene is not None
-    assert canvas.setLayerInteractionPolicy(
+    canvas.setLayerInteractionPolicy(
         scene.scene_id,
         instance.layer_id,
         LayerPolicy(

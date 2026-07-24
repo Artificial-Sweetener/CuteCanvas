@@ -23,13 +23,20 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage, Qt, QTransform
-from qpane.scene.default_scene import build_default_catalog_scene
+from qpane.rendering.sdk import RasterSource
 from qpane.scene.identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
-    catalog_source_asset_key,
-    default_catalog_asset_key,
+    SourceRenderAssetKey,
 )
+from qpane.scene.model import (
+    LayerDescriptor,
+    LayerKind,
+    LayerPlacement,
+    SceneDescriptor,
+    SceneKind,
+)
+from qpane.scene.raster import RasterBounds
 from qpane.scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
@@ -60,24 +67,50 @@ def make_render_plan(
     physical_viewport_rect: QRectF | None = None,
     visible_tile_range: tuple[int, int, int, int] | None = None,
 ) -> SceneRenderPlan:
-    """Return a default-scene render plan for renderer-focused tests."""
+    """Return a source-neutral one-layer render plan for renderer tests."""
     if source_image is None:
         source_image = QImage(qpane_rect.size(), QImage.Format_ARGB32_Premultiplied)
         source_image.fill(Qt.white)
     if image_id is None:
         image_id = uuid.uuid4()
-    scene = build_default_catalog_scene(
-        image_id=image_id,
-        image_size=source_image.size(),
-        source_path=source_path,
-        revision=0,
+    source = RasterSource.from_image(
+        source_image,
+        source_id=image_id,
+        path=source_path,
+        source_kind="test-raster",
     )
-    layer = scene.layers[0]
+    scene_id = uuid.uuid5(image_id, "test-scene")
+    placement = LayerPlacement(
+        0.0,
+        0.0,
+        float(source_image.width()),
+        float(source_image.height()),
+    )
+    layer = LayerDescriptor(
+        scene_id=scene_id,
+        layer_id=uuid.uuid5(image_id, "test-layer"),
+        kind=LayerKind.IMAGE,
+        source=source,
+        placement=placement,
+        source_revision=0,
+        raster_bounds=RasterBounds(
+            0,
+            0,
+            source_image.width(),
+            source_image.height(),
+        ),
+    )
+    scene = SceneDescriptor(
+        scene_id=scene_id,
+        kind=SceneKind.EXPLICIT,
+        bounds=placement,
+        layers=(layer,),
+    )
     asset_key = SceneLayerAssetKey(
         scene_id=scene.scene_id,
         layer_id=layer.layer_id,
         source_id=image_id,
-        source_kind="catalog-image",
+        source_kind=source.source_kind,
         source_revision=0,
         source_path=source_path,
     )
@@ -85,9 +118,10 @@ def make_render_plan(
         descriptor=layer,
         source_image=source_image,
         asset_key=asset_key,
-        pyramid_asset_key=catalog_source_asset_key(
-            image_id,
-            revision=0,
+        pyramid_asset_key=SourceRenderAssetKey(
+            source_id=image_id,
+            source_kind=source.source_kind,
+            source_revision=0,
             source_path=source_path,
         ),
         pyramid_scale=pyramid_scale,
@@ -135,22 +169,42 @@ def make_tile_key(
     *,
     revision: int = 0,
 ) -> SceneLayerTileKey:
-    """Return a default-scene tile key for tests."""
+    """Return a source-neutral tile key for tests."""
     if image_id is None:
         image_id = uuid.uuid4()
-    asset_key = default_catalog_asset_key(
-        image_id,
-        revision=revision,
+    scene_id = uuid.uuid5(image_id, "test-scene")
+    asset_key = SceneLayerAssetKey(
+        scene_id=scene_id,
+        layer_id=uuid.uuid5(image_id, "test-layer"),
+        source_id=image_id,
+        source_kind="test-raster",
+        source_revision=revision,
         source_path=source_path,
     )
     return SceneLayerTileKey(
         asset_key=asset_key,
-        pyramid_asset_key=catalog_source_asset_key(
-            image_id,
-            revision=revision,
+        pyramid_asset_key=SourceRenderAssetKey(
+            source_id=image_id,
+            source_kind="test-raster",
+            source_revision=revision,
             source_path=source_path,
         ),
         pyramid_scale=pyramid_scale,
         row=row,
         col=col,
+    )
+
+
+def make_source_key(
+    source_id: uuid.UUID | None = None,
+    source_path: Path | None = None,
+    *,
+    revision: int = 0,
+) -> SourceRenderAssetKey:
+    """Return one reusable source-product key for renderer tests."""
+    return SourceRenderAssetKey(
+        source_id=source_id or uuid.uuid4(),
+        source_kind="test-raster",
+        source_revision=revision,
+        source_path=source_path,
     )

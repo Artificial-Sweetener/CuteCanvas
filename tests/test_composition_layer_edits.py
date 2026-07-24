@@ -31,23 +31,21 @@ from cutecanvas.composition.layers import (
     CompositionLayerStore,
 )
 from cutecanvas.composition.resource_lifetime import CompositionResourceLifetime
-from cutecanvas.masks.source_reference import MaskAssetReference
-from qpane.catalog.source_reference import CatalogImageReference
-from qpane.scene.identity import base_image_layer_id
+from cutecanvas.resources import ProjectResourceReference
 
 
 class _RecordingLifecycleOwner:
     """Record final releases for generic transition assertions."""
 
-    source_type = MaskAssetReference
+    source_type = ProjectResourceReference
 
     def __init__(self) -> None:
         """Initialize an empty release log."""
-        self.released: list[MaskAssetReference] = []
+        self.released: list[ProjectResourceReference] = []
 
     def release_unreachable(self, source) -> None:
         """Record one final source release."""
-        assert isinstance(source, MaskAssetReference)
+        assert isinstance(source, ProjectResourceReference)
         self.released.append(source)
 
 
@@ -66,12 +64,13 @@ def _edit_graph():
     edits = CompositionLayerEditService(layers, controller, lifetime)
     scope_id = uuid.uuid4()
     image_id = uuid.uuid4()
+    base_layer_id = uuid.uuid5(image_id, "seed-layer")
     layers.ensure_composition(
         scope_id,
         (
             CompositionLayerInstance(
-                layer_id=base_image_layer_id(image_id),
-                source=CatalogImageReference(image_id),
+                layer_id=base_layer_id,
+                source=ProjectResourceReference(image_id),
                 role="base-image",
             ),
         ),
@@ -82,7 +81,7 @@ def _edit_graph():
 def test_layer_lifecycle_add_duplicate_remove_replays_exact_order() -> None:
     """Generic lifecycle edits must preserve source sharing and exact stack order."""
     _lifetime, _history, controller, layers, edits, scope_id = _edit_graph()
-    source = MaskAssetReference(uuid.uuid4())
+    source = ProjectResourceReference(uuid.uuid4())
     first = CompositionLayerInstance(uuid.uuid4(), source, label="First")
 
     assert edits.add(scope_id, first)
@@ -90,7 +89,7 @@ def test_layer_lifecycle_add_duplicate_remove_replays_exact_order() -> None:
     assert duplicate is not None
     assert edits.remove(scope_id, first.layer_id)
     assert [layer.layer_id for layer in layers.layers_for_composition(scope_id)] == [
-        base_image_layer_id(layers.layers_for_composition(scope_id)[0].source.image_id),
+        layers.layers_for_composition(scope_id)[0].layer_id,
         duplicate.layer_id,
     ]
 
@@ -119,8 +118,8 @@ def test_source_swap_retains_outgoing_payload_until_history_is_discarded() -> No
     lifetime, history, controller, layers, edits, scope_id = _edit_graph()
     owner = _RecordingLifecycleOwner()
     lifetime.register_owner(owner)
-    before_source = MaskAssetReference(uuid.uuid4())
-    after_source = MaskAssetReference(uuid.uuid4())
+    before_source = ProjectResourceReference(uuid.uuid4())
+    after_source = ProjectResourceReference(uuid.uuid4())
     layer = CompositionLayerInstance(uuid.uuid4(), before_source)
     assert edits.add(scope_id, layer)
     history.clear_scope(scope_id)

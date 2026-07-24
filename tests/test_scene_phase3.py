@@ -25,8 +25,16 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
-from qpane.scene.default_scene import build_default_catalog_scene
+from qpane.rendering.sdk import RasterSource
 from qpane.scene.identity import SceneLayerAssetKey, SourceRenderAssetKey
+from qpane.scene.model import (
+    LayerDescriptor,
+    LayerKind,
+    LayerPlacement,
+    SceneDescriptor,
+    SceneKind,
+)
+from qpane.scene.raster import RasterBounds
 from qpane.scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
@@ -47,23 +55,54 @@ def _source_key(asset_key: SceneLayerAssetKey) -> SourceRenderAssetKey:
     )
 
 
+def _scene(
+    image_id: uuid.UUID,
+    size: QSize,
+    path: Path | None,
+    revision: int,
+) -> SceneDescriptor:
+    """Return one explicit raster scene without viewer-catalog ownership."""
+    image = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor("white"))
+    source = RasterSource.from_image(
+        image,
+        source_id=image_id,
+        revision=revision,
+        path=path,
+        source_kind="test-raster",
+    )
+    scene_id = uuid.uuid5(image_id, "phase-three-scene")
+    placement = LayerPlacement(0.0, 0.0, float(size.width()), float(size.height()))
+    return SceneDescriptor(
+        scene_id=scene_id,
+        kind=SceneKind.EXPLICIT,
+        bounds=placement,
+        layers=(
+            LayerDescriptor(
+                scene_id=scene_id,
+                layer_id=uuid.uuid5(image_id, "phase-three-layer"),
+                kind=LayerKind.IMAGE,
+                source=source,
+                placement=placement,
+                source_revision=revision,
+                raster_bounds=RasterBounds(0, 0, size.width(), size.height()),
+            ),
+        ),
+    )
+
+
 def test_scene_render_plan_keeps_ordered_items_and_base_item() -> None:
     """Scene render plans should expose ordered immutable raster snapshots."""
     image_id = uuid.uuid4()
     path = Path("phase3.png")
-    scene = build_default_catalog_scene(
-        image_id=image_id,
-        image_size=QSize(32, 24),
-        source_path=path,
-        revision=2,
-    )
+    scene = _scene(image_id, QSize(32, 24), path, 2)
     layer = scene.layers[0]
     source_image = QImage(16, 12, QImage.Format_ARGB32_Premultiplied)
     asset_key = SceneLayerAssetKey(
         scene_id=scene.scene_id,
         layer_id=layer.layer_id,
         source_id=image_id,
-        source_kind="catalog-image",
+        source_kind="test-raster",
         source_revision=2,
         source_path=path,
     )
@@ -125,18 +164,13 @@ def test_scene_render_plan_keeps_ordered_items_and_base_item() -> None:
 def test_raster_layer_render_item_validates_scale_and_tile_metadata() -> None:
     """Raster layer items should reject invalid render-planning metadata."""
     image_id = uuid.uuid4()
-    scene = build_default_catalog_scene(
-        image_id=image_id,
-        image_size=QSize(32, 24),
-        source_path=None,
-        revision=0,
-    )
+    scene = _scene(image_id, QSize(32, 24), None, 0)
     layer = scene.layers[0]
     asset_key = SceneLayerAssetKey(
         scene_id=scene.scene_id,
         layer_id=layer.layer_id,
         source_id=image_id,
-        source_kind="catalog-image",
+        source_kind="test-raster",
         source_revision=0,
     )
 
@@ -167,18 +201,13 @@ def test_render_plan_detaches_mutable_geometry_without_copying_images(
 ) -> None:
     """Render-plan snapshots should share image inputs but detach geometry."""
     image_id = uuid.uuid4()
-    scene = build_default_catalog_scene(
-        image_id=image_id,
-        image_size=QSize(32, 24),
-        source_path=None,
-        revision=0,
-    )
+    scene = _scene(image_id, QSize(32, 24), None, 0)
     layer = scene.layers[0]
     asset_key = SceneLayerAssetKey(
         scene_id=scene.scene_id,
         layer_id=layer.layer_id,
         source_id=image_id,
-        source_kind="catalog-image",
+        source_kind="test-raster",
         source_revision=0,
     )
     source_image = QImage(16, 12, QImage.Format_ARGB32_Premultiplied)

@@ -145,14 +145,18 @@ class MaskController(QObject):
             return False
         self._active_mask_id = mask_id
         if warm_cache:
-            scale = max(1e-6, float(self._render_scale()))
-            if abs(scale - 1.0) < 1e-3:
-                self._renders.warm(mask_id)
-            else:
-                self._renders.warm(mask_id, scale=scale)
+            self.warm_mask(mask_id)
         if emit_signals:
             self.emit_activation_signals(mask_id)
         return True
+
+    def warm_mask(self, mask_id: uuid.UUID | None) -> None:
+        """Warm one mask at the active view's current display density."""
+        scale = max(1e-6, float(self._render_scale()))
+        self._renders.warm(
+            mask_id,
+            scale=None if abs(scale - 1.0) < 1e-3 else scale,
+        )
 
     def emit_activation_signals(self, mask_id: uuid.UUID | None) -> None:
         """Emit activation-related signals for one editable mask."""

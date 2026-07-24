@@ -200,7 +200,7 @@ def test_qpane_updates_consumer_budgets(qapp) -> None:
         )
         view = qpane_widget.view()
         tile_limit = view.tile_manager.cache_limit_bytes
-        pyramid_manager = qpane_widget.catalog().pyramidManager()
+        pyramid_manager = view.pyramid_manager
         assert tile_limit == budgets_bytes["tiles"]
         assert pyramid_manager.cache_limit_bytes == budgets_bytes["pyramids"]
     finally:

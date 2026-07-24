@@ -23,11 +23,9 @@ from cutecanvas.composition.layers import (
     CompositionLayerStore,
 )
 from cutecanvas.composition.resource_lifetime import CompositionResourceLifetime
-from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtGui import QColor
-from qpane.catalog.source_reference import CatalogImageReference
 from qpane.scene.affine import LayerTransform
-from qpane.scene.identity import base_image_layer_id
 from qpane.scene.model import (
     LayerInteractionPolicy,
     LayerPlacement,
@@ -40,15 +38,15 @@ _PLACEMENT = LayerPlacement(0.0, 0.0, 100.0, 80.0)
 class _RecordingMaskLifecycleOwner:
     """Record final mask releases without owning test payloads."""
 
-    source_type = MaskAssetReference
+    source_type = ProjectResourceReference
 
     def __init__(self) -> None:
         """Initialize an empty release log."""
-        self.released: list[MaskAssetReference] = []
+        self.released: list[ProjectResourceReference] = []
 
     def release_unreachable(self, source) -> None:
         """Record one unreachable typed mask source."""
-        assert isinstance(source, MaskAssetReference)
+        assert isinstance(source, ProjectResourceReference)
         self.released.append(source)
 
 
@@ -56,7 +54,7 @@ def _mask_instance(mask_id: uuid.UUID) -> CompositionLayerInstance:
     """Return a representative mask layer instance."""
     return CompositionLayerInstance(
         layer_id=uuid.uuid4(),
-        source=MaskAssetReference(mask_id),
+        source=ProjectResourceReference(mask_id),
         opacity=0.5,
         tint=QColor(255, 0, 0),
         role="mask",
@@ -70,8 +68,8 @@ def _ensure_default(store: CompositionLayerStore, image_id: uuid.UUID) -> None:
         image_id,
         (
             CompositionLayerInstance(
-                layer_id=base_image_layer_id(image_id),
-                source=CatalogImageReference(image_id),
+                layer_id=uuid.uuid5(image_id, "seed-layer"),
+                source=ProjectResourceReference(image_id),
                 transform=LayerTransform.from_placement(bounds, _PLACEMENT),
                 role="base-image",
             ),
@@ -94,7 +92,7 @@ def test_layers_reorder_across_source_kinds_and_preserve_instances():
         layers[1].layer_id,
         first.layer_id,
     ]
-    assert isinstance(layers[1].source, CatalogImageReference)
+    assert layers[1].source == ProjectResourceReference(image_id)
 
 
 def test_layer_removal_does_not_delete_other_instances_of_source():
@@ -109,7 +107,7 @@ def test_layer_removal_does_not_delete_other_instances_of_source():
     store.add_layer(first_image, first)
     store.add_layer(second_image, second)
     assert store.remove_layer(first_image, first.layer_id)
-    assert store.composition_ids_for_source(MaskAssetReference(source_id)) == (
+    assert store.composition_ids_for_source(ProjectResourceReference(source_id)) == (
         second_image,
     )
     assert store.layer(second_image, second.layer_id) == second
@@ -128,7 +126,7 @@ def test_one_composition_can_place_the_same_source_more_than_once():
     assert store.add_layer(image_id, second)
     assert store.layer(image_id, first.layer_id) == first
     assert store.layer(image_id, second.layer_id) == second
-    assert store.composition_ids_for_source(MaskAssetReference(source_id)) == (
+    assert store.composition_ids_for_source(ProjectResourceReference(source_id)) == (
         image_id,
     )
 
@@ -145,10 +143,10 @@ def test_shared_source_releases_only_after_its_last_live_instance() -> None:
     lifetime.register_owner(owner)
     store = CompositionLayerStore(lifetime)
     composition_id = uuid.uuid4()
-    source = MaskAssetReference(uuid.uuid4())
+    source = ProjectResourceReference(uuid.uuid4())
     _ensure_default(store, composition_id)
-    first = _mask_instance(source.mask_id)
-    second = _mask_instance(source.mask_id)
+    first = _mask_instance(source.resource_id)
+    second = _mask_instance(source.resource_id)
     assert store.add_layer(composition_id, first)
     assert store.add_layer(composition_id, second)
 

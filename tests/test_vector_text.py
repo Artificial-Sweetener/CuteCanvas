@@ -225,7 +225,7 @@ def test_semantic_text_uses_existing_selection_and_raster_conversion_boundaries(
     assert viewer.pixelSelectionState().has_selection
     assert viewer.undoSceneEdit()
 
-    raster_request = viewer.rasterizeVectorLayer(scene.scene_id, layer_id)
+    raster_request = viewer.rasterizeLayer(scene.scene_id, layer_id)
     assert raster_request is not None
     _wait_for_request(qapp, completions, raster_request)
     image = viewer.editableRasterLayerImage(scene.scene_id, layer_id)

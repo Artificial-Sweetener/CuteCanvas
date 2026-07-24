@@ -181,7 +181,8 @@ class MountedEditorWorkflow:
                 (
                     layer
                     for layer in scene.layers
-                    if layer.source_kind == "mask" and layer.source_id == active_mask_id
+                    if layer.source_kind == "coverage"
+                    and layer.source_id == active_mask_id
                 ),
                 None,
             )
@@ -191,16 +192,16 @@ class MountedEditorWorkflow:
             movable=True,
             pixel_editable=True,
         )
-        if (
-            scene is None
-            or mask_layer is None
-            or not viewer.setLayerInteractionPolicy(
-                scene.scene_id,
-                mask_layer.layer_id,
-                editable_policy,
-            )
-            or not viewer.setSelectedLayer(scene.scene_id, mask_layer.layer_id)
-        ):
+        if scene is None or mask_layer is None:
+            self._fail("pixel-move-setup", "Active mask could not become editable")
+        viewer.setLayerInteractionPolicy(
+            scene.scene_id,
+            mask_layer.layer_id,
+            editable_policy,
+        )
+        viewer.setSelectedLayer(scene.scene_id, mask_layer.layer_id)
+        selected = viewer.selectedLayer()
+        if selected is None or selected.layer_id != mask_layer.layer_id:
             self._fail("pixel-move-setup", "Active mask could not become editable")
         before_selection = viewer.pixelSelectionState()
         if before_selection is None or before_selection.bounds is None:

@@ -24,7 +24,6 @@ import numpy as np
 from qpane.sdk.scene import LayerSourceReference, RasterBounds
 
 from ..composition.edit_controller import CompositionEditController
-from ..composition.edit_history import CompositionEditCommand
 from ..selection import LayerCoverageProjector, PixelSelectionService
 from .layer_selection import SceneLayerSelectionController
 from .mutations import SceneMutationCoordinator
@@ -82,11 +81,6 @@ class LayerPixelMutationCoordinator:
         self._owners = owners
         self._edit_controller = edit_controller
         self._projector = LayerCoverageProjector()
-        edit_controller.register_handler(
-            RasterPixelEdit,
-            undo=self._undo,
-            redo=self._redo,
-        )
 
     def clear_selected_pixels(self) -> bool:
         """Clear selected coverage from the selected editable layer."""
@@ -142,30 +136,3 @@ class LayerPixelMutationCoordinator:
             )
         )
         return True
-
-    def _undo(self, command: CompositionEditCommand) -> bool:
-        """Restore the before-patch of a chronological raster edit."""
-        return self._restore(command, use_after=False)
-
-    def _redo(self, command: CompositionEditCommand) -> bool:
-        """Restore the after-patch of a chronological raster edit."""
-        return self._restore(command, use_after=True)
-
-    def _restore(self, command: CompositionEditCommand, *, use_after: bool) -> bool:
-        """Route one history patch back to its current source owner."""
-        if not isinstance(command, RasterPixelEdit):
-            return False
-        resolved = self._scene_mutations.find_layer(
-            lambda layer: (
-                layer.scene_id == command.scene_id
-                and layer.layer_id == command.layer_id
-            )
-        )
-        if resolved is None:
-            return False
-        scene, layer = resolved
-        owner = self._owners.owner_for(scene, layer)
-        if owner is None:
-            return False
-        pixels = command.after if use_after else command.before
-        return owner.restore_patch(layer, command.bounds, pixels)

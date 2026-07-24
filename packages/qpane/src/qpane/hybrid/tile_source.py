@@ -22,19 +22,14 @@ import uuid
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 
-import numpy as np
 from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QImage
 
-from ..raster.image_conversion import (
-    numpy_to_qimage_argb32,
-    qimage_to_numpy_grayscale8,
-)
 from ..rendering.render_tile_geometry import RenderTileRequest
 from ..rendering.render_tile_types import RenderTileProduct
 from ..scene.raster import RasterBounds
 from .evaluation import HybridDocumentEvaluator
 from .model import HybridDocument, HybridPresentationStyle
+from .presentation import present_hybrid_coverage
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +87,7 @@ class HybridRenderTileSource:
         )
         if is_cancelled():
             return ()
-        presented = _present_coverage(coverage, self.style)
+        presented = present_hybrid_coverage(coverage, self.style)
         products: list[RenderTileProduct] = []
         for request in requests:
             if is_cancelled():
@@ -134,46 +129,3 @@ def _pixel_rect(rect: QRectF, origin: QRectF, scale: float) -> QRectF:
         rect.width() * scale,
         rect.height() * scale,
     )
-
-
-def _present_coverage(image: QImage, style: HybridPresentationStyle) -> QImage:
-    """Return premultiplied color pixels for grayscale coverage."""
-    coverage = qimage_to_numpy_grayscale8(image)
-    alpha = coverage.astype(np.uint16)
-    color = style.color
-    output = np.empty((*coverage.shape, 4), dtype=np.uint8)
-    output[..., 0] = ((alpha * color.blue()) // 255).astype(np.uint8)
-    output[..., 1] = ((alpha * color.green()) // 255).astype(np.uint8)
-    output[..., 2] = ((alpha * color.red()) // 255).astype(np.uint8)
-    output[..., 3] = coverage
-    if style.outline_color is not None:
-        border = _outer_border(coverage)
-        border_alpha = border.astype(np.uint16)
-        outline = style.outline_color
-        output[..., 0] = np.maximum(
-            output[..., 0],
-            ((border_alpha * outline.blue()) // 255).astype(np.uint8),
-        )
-        output[..., 1] = np.maximum(
-            output[..., 1],
-            ((border_alpha * outline.green()) // 255).astype(np.uint8),
-        )
-        output[..., 2] = np.maximum(
-            output[..., 2],
-            ((border_alpha * outline.red()) // 255).astype(np.uint8),
-        )
-        output[..., 3] = np.maximum(output[..., 3], border)
-    return numpy_to_qimage_argb32(output)
-
-
-def _outer_border(coverage: np.ndarray) -> np.ndarray:
-    """Return one-pixel outer coverage without crossing tile bleed."""
-    padded = np.pad(coverage, 1, mode="constant")
-    expanded = np.zeros_like(coverage)
-    for y in range(3):
-        for x in range(3):
-            expanded = np.maximum(
-                expanded,
-                padded[y : y + coverage.shape[0], x : x + coverage.shape[1]],
-            )
-    return np.maximum(expanded.astype(np.int16) - coverage, 0).astype(np.uint8)

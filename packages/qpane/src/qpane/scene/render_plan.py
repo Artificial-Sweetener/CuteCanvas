@@ -118,6 +118,11 @@ class RasterLayerRenderItem:
         if self.max_tile_cols < 0 or self.max_tile_rows < 0:
             raise ValueError("tile grid dimensions must be non-negative")
 
+    @property
+    def source_size(self) -> QSize:
+        """Return the raster source dimensions shared by render-item geometry."""
+        return self.source_image.size()
+
 
 @dataclass(frozen=True, slots=True)
 class SampledTileRenderData:

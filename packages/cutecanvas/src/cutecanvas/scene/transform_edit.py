@@ -22,6 +22,8 @@ from dataclasses import dataclass
 
 from qpane.sdk.scene import LayerTransform
 
+from ..composition.layers import CompositionLayerStore
+
 
 @dataclass(frozen=True, slots=True)
 class LayerTransformEdit:
@@ -41,3 +43,29 @@ class LayerTransformEdit:
     def retained_bytes(self) -> int:
         """Return the fixed value-storage cost used for history budgeting."""
         return 96
+
+
+class LayerTransformHistoryOwner:
+    """Replay affine edits directly through the durable layer-instance store."""
+
+    def __init__(self, layers: CompositionLayerStore) -> None:
+        """Bind the document-owned layer store."""
+        self._layers = layers
+
+    def undo(self, command: object) -> bool:
+        """Restore one transform edit's previous value."""
+        return self._apply(command, use_after=False)
+
+    def redo(self, command: object) -> bool:
+        """Restore one transform edit's subsequent value."""
+        return self._apply(command, use_after=True)
+
+    def _apply(self, command: object, *, use_after: bool) -> bool:
+        """Apply one validated history value without recording a new command."""
+        if not isinstance(command, LayerTransformEdit):
+            return False
+        return self._layers.update_transform(
+            command.scene_id,
+            command.layer_id,
+            command.after if use_after else command.before,
+        )

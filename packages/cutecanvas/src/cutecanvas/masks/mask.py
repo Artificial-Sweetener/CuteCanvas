@@ -36,6 +36,7 @@ from cutecanvas.coverage import (
 
 from ..composition.edit_controller import CompositionEditController
 from ..raster.sparse_grid import SparseRasterSnapshot
+from ..resources import ProjectResourceKind, ProjectResourceStore
 from .coverage_history import MaskCoverageState
 from .history import MaskHistory
 from .mask_undo import (
@@ -77,15 +78,18 @@ class MaskAssetStore:
 
     def __init__(
         self,
+        resources: ProjectResourceStore,
         *,
         undo_limit: int = 20,
     ) -> None:
         """Initialize asset storage before composition history is bound."""
+        self._resources = resources
         self._masks: dict[uuid.UUID, MaskLayer] = {}
         self._history = MaskHistory(
             self,
             undo_limit=undo_limit,
         )
+        self._history_subscribers: list[Callable[[MaskHistoryChange], None]] = []
 
     def get_layer(self, mask_id: uuid.UUID) -> MaskLayer | None:
         """Return one mask asset when it exists."""
@@ -114,13 +118,34 @@ class MaskAssetStore:
         edits: CompositionEditController,
         scope_for_mask: Callable[[uuid.UUID], uuid.UUID | None],
         completed: Callable[[MaskHistoryChange], None],
-    ) -> None:
-        """Bind mask commands to the authoritative composition timeline."""
-        self._history.bind(edits, scope_for_mask, completed)
+    ) -> Callable[[], None]:
+        """Bind chronology and return an idempotent presentation unsubscribe."""
+
+        if completed not in self._history_subscribers:
+            self._history_subscribers.append(completed)
+        self._history.bind(edits, scope_for_mask, self._publish_history_change)
+
+        def unsubscribe() -> None:
+            """Detach the mounted presentation's history observer."""
+            if completed in self._history_subscribers:
+                self._history_subscribers.remove(completed)
+
+        return unsubscribe
+
+    def _publish_history_change(self, change: MaskHistoryChange) -> None:
+        """Invalidate once, then notify every mounted mask presentation."""
+        self._touch(change.mask_id)
+        for callback in tuple(self._history_subscribers):
+            callback(change)
 
     def create_mask(self, image: QImage) -> uuid.UUID:
         """Create a blank asset matching ``image`` dimensions."""
         mask_id = uuid.uuid4()
+        self._resources.create(
+            ProjectResourceKind.COVERAGE,
+            editable=True,
+            resource_id=mask_id,
+        )
         self._masks[mask_id] = MaskLayer(
             mask_id=mask_id,
             coverage=CoverageAsset(mask_id, CoverageSurface.blank(image.size())),
@@ -143,6 +168,15 @@ class MaskAssetStore:
             raise TypeError("snapshot must be a coverage asset or raster snapshot")
         if mask_id in self._masks:
             self._history.dispose_mask(mask_id)
+        record = self._resources.get(mask_id)
+        if record is None:
+            self._resources.create(
+                ProjectResourceKind.COVERAGE,
+                editable=True,
+                resource_id=mask_id,
+            )
+        elif record.kind is not ProjectResourceKind.COVERAGE:
+            raise ValueError("mask identity belongs to a non-coverage resource")
         if isinstance(snapshot, CoverageAssetSnapshot):
             coverage = CoverageAsset.from_snapshot(mask_id, snapshot)
         else:
@@ -166,9 +200,32 @@ class MaskAssetStore:
         """Delete one asset and its independent history."""
         if mask_id not in self._masks:
             return False
+        if self._resources.get(mask_id) is not None:
+            self._resources.remove(mask_id)
         self._history.dispose_mask(mask_id)
         del self._masks[mask_id]
         return True
+
+    def fork(self, mask_id: uuid.UUID) -> uuid.UUID | None:
+        """Clone one coverage payload into an independent project resource."""
+        layer = self._masks.get(mask_id)
+        if layer is None:
+            return None
+        fork_id = uuid.uuid4()
+        self._resources.create(
+            ProjectResourceKind.COVERAGE,
+            editable=True,
+            resource_id=fork_id,
+        )
+        self._masks[fork_id] = MaskLayer(
+            mask_id=fork_id,
+            coverage=CoverageAsset.from_snapshot(
+                fork_id,
+                layer.coverage.state_snapshot(),
+            ),
+        )
+        self._history.initialize_mask(fork_id)
+        return fork_id
 
     def commit_mask_patches(
         self,
@@ -178,7 +235,10 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Commit patch edits through the history owner."""
-        return self._history.commit_patches(mask_id, patches, notify=notify)
+        changed = self._history.commit_patches(mask_id, patches, notify=notify)
+        if changed:
+            self._touch(mask_id)
+        return changed
 
     def commit_coverage_item(
         self,
@@ -188,7 +248,10 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Commit retained mask authorship through composition history."""
-        return self._history.commit_coverage_item(mask_id, item, notify=notify)
+        changed = self._history.commit_coverage_item(mask_id, item, notify=notify)
+        if changed:
+            self._touch(mask_id)
+        return changed
 
     def rasterize_coverage(
         self,
@@ -210,12 +273,15 @@ class MaskAssetStore:
             layer.coverage.raster.state_snapshot(),
             layer.coverage.retained,
         )
-        return self._history.record_applied_coverage(
+        changed = self._history.record_applied_coverage(
             mask_id,
             before,
             after,
             notify=notify,
         )
+        if changed:
+            self._touch(mask_id)
+        return changed
 
     def record_applied_mask_patches(
         self,
@@ -225,12 +291,15 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Record patches already present on authoritative pixels."""
-        return self._history.commit_patches(
+        changed = self._history.commit_patches(
             mask_id,
             patches,
             notify=notify,
             already_applied=True,
         )
+        if changed:
+            self._touch(mask_id)
+        return changed
 
     def commit_mask_image(
         self,
@@ -241,12 +310,15 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Commit a full-image edit through the history owner."""
-        return self._history.commit_image(
+        changed = self._history.commit_image(
             mask_id,
             image,
             before_image=before_image,
             notify=notify,
         )
+        if changed:
+            self._touch(mask_id)
+        return changed
 
     def record_applied_surface(
         self,
@@ -257,12 +329,15 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Record an already-applied structural surface transition."""
-        return self._history.record_applied_surface(
+        changed = self._history.record_applied_surface(
             mask_id,
             before,
             after,
             notify=notify,
         )
+        if changed:
+            self._touch(mask_id)
+        return changed
 
     def commit_mask_surface(
         self,
@@ -272,7 +347,10 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Commit complete mask structure and pixels through history."""
-        return self._history.commit_surface(mask_id, snapshot, notify=notify)
+        changed = self._history.commit_surface(mask_id, snapshot, notify=notify)
+        if changed:
+            self._touch(mask_id)
+        return changed
 
     def undo_mask(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
         """Undo one asset edit."""
@@ -293,6 +371,7 @@ class MaskAssetStore:
             logger.warning("Mask %s not found while setting pixels; skipping.", mask_id)
             return
         layer.coverage.replace_raster_qimage(image)
+        self._touch(mask_id)
 
     def get_mask_image_copy(self, mask_id: uuid.UUID) -> QImage | None:
         """Return a detached QImage snapshot for one asset."""
@@ -313,5 +392,13 @@ class MaskAssetStore:
     def clear_all(self) -> None:
         """Remove all assets and their history state."""
         for mask_id in self.mask_ids():
-            self._history.dispose_mask(mask_id)
-        self._masks.clear()
+            self.delete_mask(mask_id)
+
+    def _touch(self, mask_id: uuid.UUID) -> None:
+        """Advance one retained coverage resource and its dependents."""
+        self.touch(mask_id)
+
+    def touch(self, mask_id: uuid.UUID) -> None:
+        """Advance one directly mutated coverage resource and its dependents."""
+        if self._resources.get(mask_id) is not None:
+            self._resources.touch(mask_id)

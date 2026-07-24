@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 
 class CompositionPropertiesDialog(QDialog):
-    """Edit one document's host-owned structural policy through public API."""
+    """Edit one composition's host-owned structural policy through public API."""
 
     def __init__(
         self,
@@ -64,9 +64,6 @@ class CompositionPropertiesDialog(QDialog):
         self.removable = QCheckBox("Allow document removal", self)
         self.removable.setChecked(entry.policy.removable)
         layout.addWidget(self.removable)
-        self.comparison_enabled = QCheckBox("Allow image comparison", self)
-        self.comparison_enabled.setChecked(entry.policy.comparison_enabled)
-        layout.addWidget(self.comparison_enabled)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save
             | QDialogButtonBox.StandardButton.Cancel,
@@ -82,7 +79,6 @@ class CompositionPropertiesDialog(QDialog):
             self._composition_id,
             CompositionPolicy(
                 removable=self.removable.isChecked(),
-                comparison_enabled=self.comparison_enabled.isChecked(),
             ),
         )
         if changed and self._show_status is not None:

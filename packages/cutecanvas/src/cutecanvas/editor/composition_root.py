@@ -23,39 +23,24 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QRect, QRectF, QSize, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtWidgets import QApplication
 from qpane.sdk.cache import CacheRegistry, cache_detail_provider
-from qpane.sdk.catalog import (
-    Catalog,
-    CatalogImageReference,
-    CatalogSourceCapabilities,
-    ImageCatalog,
-    ViewerCatalog,
-)
-from qpane.sdk.compare import (
-    CompareDividerInteraction,
-    CompareService,
-    ComparisonChange,
-)
 from qpane.sdk.concurrency import TaskExecutorProtocol
 from qpane.sdk.diagnostics import Diagnostics
-from qpane.sdk.rendering import PyramidManager, View
+from qpane.sdk.rendering import PyramidManager, SceneRegionRasterizer, View
 from qpane.sdk.scene import (
     LayerEffectRenderRegistry,
     LayerSourceCapabilities,
     SceneProviderRegistry,
 )
 
-from ..catalog.descriptor_factory import CatalogLayerDescriptorFactory
 from ..composition import CompositionService
-from ..composition.mutations import (
-    CatalogLayerMutationOwner,
-)
 from ..composition.scene_adapter import CompositionSceneAdapter
 from ..core import CuteCanvasState
 from ..core.config import Config
 from ..coverage import CoverageShapeConfiguration
+from ..document import CanvasDocument
 from ..fill import PaintBucketCoordinator, SelectionFillCoordinator
 from ..masks.coordinates import ActiveMaskLayerCoordinates
 from ..painting import (
@@ -64,17 +49,14 @@ from ..painting import (
     PaintingCoordinator,
     PaintTargetIdentity,
 )
-from ..placed.descriptor_factory import PlacedAssetLayerDescriptorFactory
-from ..placed.history import PlacedAssetEdit, PlacedAssetEditOwner
+from ..painting.clone_model import CloneStampState
+from ..painting.clone_operation import CloneStampOperation
 from ..placed.mutations import PlacedAssetSceneMutationOwner
 from ..placed.rasterization import PlacedAssetRasterizationService
-from ..placed.resource_lifecycle import PlacedAssetResourceLifecycleOwner
-from ..placed.source_capabilities import PlacedAssetSourceCapabilities
-from ..placed.source_reference import PlacedAssetReference
 from ..placed.store import PlacedAssetStore
 from ..placed.workflow import PlacedAssetCompletion, PlacedAssetWorkflow
 from ..raster.assets import EditableRasterAssetStore
-from ..raster.descriptor_factory import EditableRasterLayerDescriptorFactory
+from ..raster.clone_target import EditableRasterCloneTarget
 from ..raster.floating_layers import EditableRasterFloatingLayerOwner
 from ..raster.layers import (
     EditableRasterLayerController,
@@ -82,12 +64,28 @@ from ..raster.layers import (
 )
 from ..raster.paint_target import EditableRasterPaintTargetOwner
 from ..raster.pixel_edits import EditableRasterPixelMutationOwner
-from ..raster.presentation_state import EditableRasterPresentationState
-from ..raster.resource_lifecycle import EditableRasterResourceLifecycleOwner
-from ..raster.source_reference import EditableRasterReference
-from ..raster.source_resolver import EditableRasterSourceCapabilities
 from ..raster.structure_mutations import EditableRasterStructureMutationOwner
 from ..rendering.floating_pixels import FloatingPixelRenderCompiler
+from ..resources import (
+    LayerRasterizationCompletion,
+    LayerResourceRasterizationRouter,
+    ProjectResourceKind,
+    ProjectResourceReference,
+    ProjectResourceStore,
+)
+from ..resources.active_raster import ActiveRasterResolver
+from ..resources.composition_rasterization import (
+    CompositionResourceRasterizationService,
+)
+from ..resources.descriptor_factory import ProjectResourceLayerDescriptorFactory
+from ..resources.image_documents import ImageDocumentWorkflow
+from ..resources.install import (
+    ProjectResourceCallbacks,
+    ProjectResourceDomainInstaller,
+)
+from ..resources.layer_operations import LayerResourceOperations, ResourceForkOwner
+from ..resources.lifecycle import ProjectResourceLifecycleOwner
+from ..resources.source_capabilities import ProjectResourceSourceCapabilities
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
 from ..scene.layer_geometry import LayerGeometryPolicy, LayerGeometryResolver
 from ..scene.layer_selection import SceneLayerSelectionController
@@ -103,7 +101,6 @@ from ..scene.source_capabilities import EditorSourceCapabilities
 from ..scene.transform_preview import SceneLayerTransformPreview
 from ..scene.transform_session import SceneLayerTransformController
 from ..selection import (
-    PixelSelectionEdit,
     PixelSelectionPaintTargetOwner,
     PixelSelectionService,
     PixelSelectionState,
@@ -115,7 +112,6 @@ from ..tools import Tools
 from ..ui import CursorBuilder
 from ..vector.conversion import VectorConversionCompletion
 from ..vector.install import VectorDomainComponents, VectorDomainInstaller
-from ..vector.source_reference import VectorDocumentReference
 from ..vector.tools import install_vector_tools
 from .floating_layers import FloatingLayerPromotionRegistry
 from .interaction import EditorInteractionCoordinator
@@ -125,6 +121,7 @@ from .operation_resolution import (
     EditorSourceOperationRegistry,
     EditorSourceOperations,
 )
+from .paint_destination import InteractivePaintDestinationCoordinator
 from .pixel_movement import SelectedPixelMovementController
 from .policy import EditorPolicyController
 from .selection_projection import LayerSelectionProjectionCache
@@ -149,13 +146,15 @@ class EditorRootCallbacks:
     raster_structure_changed: Callable[[], None]
     raster_bounds_completed: Callable[[RasterBoundsCompletion], None]
     scene_content_changed: Callable[[QRect | QRectF | None], None]
-    placed_asset_changed: Callable[[uuid.UUID], None]
+    resource_content_changed: Callable[[uuid.UUID], None]
     pixel_move_preview_changed: Callable[[], None]
-    comparison_changed: Callable[[ComparisonChange | None], None]
     active_mask_id: Callable[[], uuid.UUID | None]
     placed_asset_completed: Callable[[PlacedAssetCompletion], None]
+    layer_rasterization_completed: Callable[[LayerRasterizationCompletion], None]
+    current_composition_id: Callable[[], uuid.UUID | None]
     current_edit_scope_id: Callable[[], uuid.UUID | None]
     paint_target_changed: Callable[[PaintTargetIdentity | None], None]
+    clone_stamp_changed: Callable[[CloneStampState], None]
     default_paint_target_available: Callable[[], bool]
     vector_selection_changed: Callable[[], None]
     vector_node_selection_changed: Callable[[], None]
@@ -170,6 +169,7 @@ class EditorRootInputs:
     """Existing lifecycle owners and state supplied to the editor root."""
 
     qpane: CuteCanvas
+    document: CanvasDocument
     state: CuteCanvasState
     settings: Config
     executor: TaskExecutorProtocol
@@ -190,14 +190,23 @@ class EditorRootComponents:
     scene_providers: SceneProviderRegistry
     render_source_capabilities: LayerSourceCapabilities
     editor_source_capabilities: EditorSourceCapabilities
-    image_catalog: ImageCatalog
+    project_resources: ProjectResourceStore
+    project_resource_descriptors: ProjectResourceLayerDescriptorFactory
+    project_resource_capabilities: ProjectResourceSourceCapabilities
+    project_resource_lifecycle: ProjectResourceLifecycleOwner
     compositions: CompositionService
     editable_raster_assets: EditableRasterAssetStore
     editable_raster_layers: EditableRasterLayerController
     placed_assets: PlacedAssetStore
+    image_documents: ImageDocumentWorkflow
+    active_raster: ActiveRasterResolver
+    layer_resource_operations: LayerResourceOperations
     placed_asset_workflow: PlacedAssetWorkflow
     placed_asset_rasterization: PlacedAssetRasterizationService
+    composition_rasterization: CompositionResourceRasterizationService
+    resource_rasterization: LayerResourceRasterizationRouter
     painting: PaintingCoordinator
+    clone_stamp: CloneStampOperation
     paint_bucket: PaintBucketCoordinator
     selection_fill: SelectionFillCoordinator
     snap_configuration: SnapConfiguration
@@ -207,6 +216,7 @@ class EditorRootComponents:
     pixel_selection: PixelSelectionService
     layer_geometry: LayerGeometryResolver
     layer_assembler: CompositionLayerSceneAssembler
+    scene_rasterizer: SceneRegionRasterizer
     view: View
     scene_mutations: SceneMutationCoordinator
     scene_movement: SceneLayerTransformController
@@ -220,11 +230,9 @@ class EditorRootComponents:
     selected_pixel_movement: SelectedPixelMovementController
     editor_movement_interaction: EditorMovementInteraction
     operation_resolver: EditorOperationResolver
+    paint_destination: InteractivePaintDestinationCoordinator
     active_mask_coordinates: ActiveMaskLayerCoordinates
-    catalog: Catalog
     composition_scene_adapter: CompositionSceneAdapter
-    compare_service: CompareService
-    compare_interaction: CompareDividerInteraction
     tools: Tools
     cursor_builder: CursorBuilder
 
@@ -245,147 +253,42 @@ class EditorCompositionRoot:
             executor=inputs.executor,
             parent=inputs.qpane,
         )
-        image_catalog = ImageCatalog(
-            catalog=ViewerCatalog(inputs.qpane),
-            pyramid_manager=pyramid_manager,
-            parent=inputs.qpane,
-        )
-        catalog_capabilities = CatalogSourceCapabilities(image_catalog)
-        render_source_capabilities.metadata.register(
-            CatalogImageReference, catalog_capabilities
-        )
-        render_source_capabilities.rasters.register(
-            CatalogImageReference, catalog_capabilities
-        )
-        render_source_capabilities.hit_tests.register(
-            CatalogImageReference, catalog_capabilities
-        )
-
-        compositions = CompositionService(
-            history_changed=callbacks.composition_history_changed,
-            layers_changed=callbacks.composition_layers_changed,
-            catalog_size=lambda image_id: _catalog_image_size(image_catalog, image_id),
-            catalog_reference=CatalogImageReference,
-        )
-        editable_raster_assets = EditableRasterAssetStore()
-        editable_raster_presentation = EditableRasterPresentationState()
-        compositions.resource_lifetime.register_owner(
-            EditableRasterResourceLifecycleOwner(editable_raster_assets)
-        )
-        editable_raster_layers = EditableRasterLayerController(
-            assets=editable_raster_assets,
-            layers=compositions.layers,
-            layer_edits=compositions.layer_edits,
-            current_composition_id=compositions.current_composition_id,
-            is_generated_default=compositions.is_generated_default,
-        )
-        placed_assets = PlacedAssetStore()
-        compositions.resource_lifetime.register_owner(
-            PlacedAssetResourceLifecycleOwner(placed_assets)
-        )
-        placed_history = PlacedAssetEditOwner(
-            placed_assets,
-            compositions.layers,
-            callbacks.placed_asset_changed,
-        )
-        compositions.edit_controller.register_handler(
-            PlacedAssetEdit,
-            undo=placed_history.undo,
-            redo=placed_history.redo,
-        )
-        placed_asset_workflow = PlacedAssetWorkflow(
-            assets=placed_assets,
-            layers=compositions.layers,
-            layer_edits=compositions.layer_edits,
-            edits=compositions.edit_controller,
+        resource_domain = ProjectResourceDomainInstaller().install(
             executor=inputs.executor,
-            current_scope_id=compositions.current_composition_id,
-            current_history_scope_id=callbacks.current_edit_scope_id,
-            changed=callbacks.placed_asset_changed,
-            completed=callbacks.placed_asset_completed,
+            document=inputs.document.resources,
+            render_capabilities=render_source_capabilities,
+            editor_capabilities=editor_source_capabilities,
+            layer_effects=layer_effects,
+            callbacks=ProjectResourceCallbacks(
+                resource_content_changed=callbacks.resource_content_changed,
+                placed_asset_completed=callbacks.placed_asset_completed,
+                layer_rasterization_completed=(callbacks.layer_rasterization_completed),
+                current_edit_scope_id=callbacks.current_edit_scope_id,
+                current_composition_id=callbacks.current_composition_id,
+            ),
         )
-        placed_asset_rasterization = PlacedAssetRasterizationService(
-            placed_assets=placed_assets,
-            raster_assets=editable_raster_assets,
-            layers=compositions.layers,
-            layer_edits=compositions.layer_edits,
-            executor=inputs.executor,
-            changed=callbacks.placed_asset_changed,
-            completed=callbacks.placed_asset_completed,
-        )
-        pixel_selection = PixelSelectionService(
-            changed=callbacks.pixel_selection_changed,
-            record_edit=compositions.edit_controller.record_applied,
-        )
-        compositions.edit_controller.register_handler(
-            PixelSelectionEdit,
-            undo=pixel_selection.undo_edit,
-            redo=pixel_selection.redo_edit,
-        )
-
-        layer_assembler = CompositionLayerSceneAssembler(
-            layer_instances=compositions.layers.layers_for_composition,
-            layer_revision=lambda: compositions.layers.revision,
-        )
-        layer_assembler.register_factory(CatalogLayerDescriptorFactory(image_catalog))
-        layer_assembler.register_factory(
-            EditableRasterLayerDescriptorFactory(editable_raster_assets)
-        )
-        layer_assembler.register_factory(
-            PlacedAssetLayerDescriptorFactory(placed_assets)
-        )
-        editable_raster_capabilities = EditableRasterSourceCapabilities(
-            editable_raster_assets,
-            editable_raster_presentation,
-        )
-        render_source_capabilities.metadata.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        render_source_capabilities.rasters.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        render_source_capabilities.raster_patches.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        render_source_capabilities.hit_tests.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        editor_source_capabilities.pixel_presentation.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        editor_source_capabilities.content_bounds.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        editor_source_capabilities.storage_bounds.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        editor_source_capabilities.authored_bounds.register(
-            EditableRasterReference, editable_raster_capabilities
-        )
-        placed_capabilities = PlacedAssetSourceCapabilities(placed_assets)
-        render_source_capabilities.metadata.register(
-            PlacedAssetReference, placed_capabilities
-        )
-        render_source_capabilities.rasters.register(
-            PlacedAssetReference, placed_capabilities
-        )
-        render_source_capabilities.hit_tests.register(
-            PlacedAssetReference, placed_capabilities
-        )
-        editor_source_capabilities.content_bounds.register(
-            PlacedAssetReference, placed_capabilities
-        )
-        editor_source_capabilities.storage_bounds.register(
-            PlacedAssetReference, placed_capabilities
-        )
-        editor_source_capabilities.authored_bounds.register(
-            PlacedAssetReference, placed_capabilities
-        )
+        project_resources = resource_domain.resources
+        compositions = resource_domain.compositions
+        project_resource_lifecycle = resource_domain.lifecycle
+        editable_raster_assets = resource_domain.editable_raster_assets
+        editable_raster_presentation = resource_domain.editable_raster_presentation
+        editable_raster_layers = resource_domain.editable_raster_layers
+        placed_assets = resource_domain.placed_assets
+        image_documents = resource_domain.image_documents
+        active_raster = resource_domain.active_raster
+        layer_resource_operations = resource_domain.layer_operations
+        placed_asset_workflow = resource_domain.placed_asset_workflow
+        placed_asset_rasterization = resource_domain.placed_asset_rasterization
+        composition_rasterization = resource_domain.composition_rasterization
+        resource_rasterization = resource_domain.rasterization
+        pixel_selection = resource_domain.pixel_selection
+        layer_assembler = resource_domain.layer_assembler
+        project_resource_descriptors = resource_domain.descriptors
+        project_resource_capabilities = resource_domain.capabilities
 
         view = View(
             qpane=inputs.qpane,
             state=inputs.state,
-            catalog=image_catalog,
             pyramid_manager=pyramid_manager,
             executor=inputs.executor,
             scene_providers=scene_providers,
@@ -398,10 +301,16 @@ class EditorCompositionRoot:
         )
         vector = VectorDomainInstaller().install(
             compositions=compositions,
+            document=inputs.document.vectors,
+            resources=project_resources,
+            resource_descriptors=project_resource_descriptors,
+            resource_capabilities=project_resource_capabilities,
+            resource_lifecycle=project_resource_lifecycle,
             layer_assembler=layer_assembler,
             source_capabilities=render_source_capabilities,
             editor_source_capabilities=editor_source_capabilities,
             scene_mutations=scene_mutations,
+            current_composition_id=callbacks.current_composition_id,
             current_history_scope_id=callbacks.current_edit_scope_id,
             changed=lambda _bounds: callbacks.vector_content_changed(),
             selection_changed=callbacks.vector_selection_changed,
@@ -410,14 +319,32 @@ class EditorCompositionRoot:
             options_changed=callbacks.vector_options_changed,
             layer_selection=inputs.layer_selection,
             current_scene=view.current_scene_descriptor,
-            panel_to_source=view.panel_to_layer_source_point,
-            source_to_panel=view.layer_source_to_panel_point,
+            coordinates=view.coordinates,
             raster_assets=editable_raster_assets,
             pixel_selection=pixel_selection,
             executor=inputs.executor,
             conversion_completed=callbacks.vector_conversion_completed,
             layer_effects=layer_effects,
             cache_registry=inputs.cache_registry,
+        )
+        layer_resource_operations.register_fork_owner(
+            ProjectResourceKind.VECTOR,
+            ResourceForkOwner(
+                fork=vector.assets.fork,
+                remove=vector.assets.remove,
+            ),
+        )
+        resource_rasterization.register(
+            ProjectResourceKind.VECTOR,
+            lambda composition_id, history_scope_id, public_scene_id, layer_id, pixel_size: (
+                vector.conversions.request_rasterization(
+                    composition_id=composition_id,
+                    history_scope_id=history_scope_id,
+                    public_scene_id=public_scene_id,
+                    layer_id=layer_id,
+                    pixel_size=pixel_size,
+                )
+            ),
         )
         view.presenter.set_vector_text_layouts(vector.text_layouts)
         pixel_owners = LayerPixelOwnerRegistry()
@@ -457,10 +384,7 @@ class EditorCompositionRoot:
         )
         painting = PaintingCoordinator(
             scenes=scene_mutations,
-            panel_to_source=view.panel_to_layer_source_point,
-            source_to_panel=view.layer_source_to_panel_point,
-            panel_to_scene=view.panel_to_scene_point,
-            scene_to_panel=view.scene_to_panel_point,
+            coordinates=view.coordinates,
             preset=BrushPreset(
                 size=float(inputs.settings.default_brush_size),
                 dynamics=BrushDynamics(
@@ -476,10 +400,11 @@ class EditorCompositionRoot:
         )
         if inputs.cache_registry is not None:
             inputs.cache_registry.attach_brush_tip_cache(painting.compositor.tips)
+        raster_paint_history = inputs.document.resources.raster_paint_history
         raster_paint_target = EditableRasterPaintTargetOwner(
             assets=editable_raster_assets,
             selections=pixel_selection,
-            edits=compositions.edit_controller,
+            history=raster_paint_history,
             changed=callbacks.scene_content_changed,
             structure_changed=callbacks.raster_structure_changed,
             presentation_state=editable_raster_presentation,
@@ -488,6 +413,25 @@ class EditorCompositionRoot:
         painting.registry.register(raster_paint_target)
         painting.registry.register(
             PixelSelectionPaintTargetOwner(pixel_selection, painting.compositor)
+        )
+        raster_clone_target = EditableRasterCloneTarget(
+            assets=editable_raster_assets,
+            selections=pixel_selection,
+            history=raster_paint_history,
+            changed=callbacks.scene_content_changed,
+            structure_changed=callbacks.raster_structure_changed,
+            presentation_state=editable_raster_presentation,
+            compositor=painting.compositor,
+            scene_rasterizer=resource_domain.scene_rasterizer,
+        )
+        clone_stamp = CloneStampOperation(
+            target=raster_clone_target,
+            current_scene=view.current_scene_descriptor,
+            selected_layer=lambda: inputs.layer_selection.resolve(
+                view.current_scene_descriptor()
+            ),
+            coordinates=view.coordinates,
+            changed=callbacks.clone_stamp_changed,
         )
         paint_bucket = PaintBucketCoordinator(
             painting=painting,
@@ -519,7 +463,7 @@ class EditorCompositionRoot:
         raster_floating_owner = EditableRasterFloatingLayerOwner(
             assets=editable_raster_assets,
             layers=compositions.layers,
-            current_composition_id=compositions.current_composition_id,
+            current_composition_id=callbacks.current_composition_id,
             changed=callbacks.raster_structure_changed,
         )
         inputs.floating_promotions.register(raster_floating_owner)
@@ -529,19 +473,19 @@ class EditorCompositionRoot:
             layer_selection=inputs.layer_selection,
             pixel_selection=pixel_selection,
             pixel_owners=pixel_owners,
-            edits=compositions.edit_controller,
+            history=inputs.document.floating_history,
+            session_id=inputs.qpane.viewSession().session_id,
             selection_projections=inputs.selection_projections,
             preview_changed=callbacks.pixel_move_preview_changed,
             promotions=inputs.floating_promotions,
         )
         source_operations = EditorSourceOperationRegistry()
-        source_operations.register(
-            PlacedAssetReference,
-            EditorSourceOperations(rasterize=True),
-        )
-        source_operations.register(
-            VectorDocumentReference,
-            EditorSourceOperations(rasterize=True),
+        source_operations.register_resolver(
+            ProjectResourceReference,
+            lambda source: _project_resource_operations(
+                project_resources,
+                source,
+            ),
         )
         operation_resolver = EditorOperationResolver(
             active_scene=view.current_scene_descriptor,
@@ -553,10 +497,20 @@ class EditorCompositionRoot:
             floating_pixels_can_begin=selected_pixel_movement.can_begin,
             active_paint_target=lambda: painting.identity,
             default_paint_target_available=callbacks.default_paint_target_available,
-            paint_targets=painting.registry,
+            paint_target_supported=painting.supports_context,
             pixel_owners=pixel_owners,
             source_operations=source_operations,
             capability_allowed=inputs.editor_policy.allows,
+        )
+        paint_destination = InteractivePaintDestinationCoordinator(
+            active_scene=view.current_scene_descriptor,
+            selection=inputs.layer_selection,
+            painting=painting,
+            operations=operation_resolver,
+            rasters=editable_raster_layers,
+            policy=lambda: inputs.editor_policy.policy,
+            capability_allowed=inputs.editor_policy.allows,
+            scene_changed=callbacks.raster_structure_changed,
         )
         scene_transform_interaction = EditorTransformInteraction(
             pixels=selected_pixel_movement,
@@ -600,29 +554,22 @@ class EditorCompositionRoot:
         active_mask_coordinates = ActiveMaskLayerCoordinates(
             active_mask_id=callbacks.active_mask_id,
             active_scene=view.coordinate_scene_descriptor,
-            panel_to_scene=view.panel_to_scene_point,
-            layer_to_panel=view.layer_source_to_panel_point,
+            coordinates=view.coordinates,
         )
 
-        catalog = Catalog(
-            catalog=image_catalog,
-            controller=view.catalog_controller,
-            link_manager=view.link_manager,
-            swap_delegate=view.swap_delegate,
-            qpane=inputs.qpane,
-        )
-        scene_mutations.register_owner(CatalogLayerMutationOwner(compositions))
         scene_mutations.register_owner(
             EditableRasterSceneMutationOwner(
+                editable_raster_assets,
                 compositions.layers,
-                compositions.current_composition_id,
+                callbacks.current_composition_id,
             )
         )
         scene_mutations.register_owner(
             PlacedAssetSceneMutationOwner(
                 compositions.layers,
                 compositions.layer_edits,
-                compositions.current_composition_id,
+                placed_assets,
+                callbacks.current_composition_id,
             )
         )
         raster_mutations.register_owner(
@@ -645,20 +592,9 @@ class EditorCompositionRoot:
         composition_scene_adapter = CompositionSceneAdapter(
             compositions=compositions,
             assembler=layer_assembler,
+            current_composition_id=callbacks.current_composition_id,
         )
         scene_providers.register_replacement(composition_scene_adapter)
-        compare_service = CompareService(
-            catalog=image_catalog,
-            compositions=compositions,
-            changed_callback=callbacks.comparison_changed,
-        )
-        compare_interaction = CompareDividerInteraction(
-            qpane=inputs.qpane,
-            service=compare_service,
-        )
-        scene_providers.register_geometry_adapter(compare_service)
-        scene_providers.register_contribution(compare_service)
-
         tools = Tools(parent=inputs.qpane)
         install_vector_tools(tools.registerTool)
         cursor_builder = CursorBuilder()
@@ -671,14 +607,23 @@ class EditorCompositionRoot:
             scene_providers=scene_providers,
             render_source_capabilities=render_source_capabilities,
             editor_source_capabilities=editor_source_capabilities,
-            image_catalog=image_catalog,
+            project_resources=project_resources,
+            project_resource_descriptors=project_resource_descriptors,
+            project_resource_capabilities=project_resource_capabilities,
+            project_resource_lifecycle=project_resource_lifecycle,
             compositions=compositions,
             editable_raster_assets=editable_raster_assets,
             editable_raster_layers=editable_raster_layers,
             placed_assets=placed_assets,
+            image_documents=image_documents,
+            active_raster=active_raster,
+            layer_resource_operations=layer_resource_operations,
             placed_asset_workflow=placed_asset_workflow,
             placed_asset_rasterization=placed_asset_rasterization,
+            composition_rasterization=composition_rasterization,
+            resource_rasterization=resource_rasterization,
             painting=painting,
+            clone_stamp=clone_stamp,
             paint_bucket=paint_bucket,
             selection_fill=selection_fill,
             snap_configuration=snap_configuration,
@@ -688,6 +633,7 @@ class EditorCompositionRoot:
             pixel_selection=pixel_selection,
             layer_geometry=layer_geometry,
             layer_assembler=layer_assembler,
+            scene_rasterizer=resource_domain.scene_rasterizer,
             view=view,
             scene_mutations=scene_mutations,
             scene_movement=scene_movement,
@@ -701,17 +647,31 @@ class EditorCompositionRoot:
             selected_pixel_movement=selected_pixel_movement,
             editor_movement_interaction=editor_movement_interaction,
             operation_resolver=operation_resolver,
+            paint_destination=paint_destination,
             active_mask_coordinates=active_mask_coordinates,
-            catalog=catalog,
             composition_scene_adapter=composition_scene_adapter,
-            compare_service=compare_service,
-            compare_interaction=compare_interaction,
             tools=tools,
             cursor_builder=cursor_builder,
         )
 
 
-def _catalog_image_size(catalog: ImageCatalog, image_id: uuid.UUID) -> QSize:
-    """Return one catalog image's detached size or an empty size when absent."""
-    image = catalog.getImage(image_id)
-    return QSize() if image is None or image.isNull() else QSize(image.size())
+def _project_resource_operations(
+    resources: ProjectResourceStore,
+    source: object,
+) -> EditorSourceOperations:
+    """Return editor alternatives from one resource's authoritative kind."""
+    if not isinstance(source, ProjectResourceReference):
+        return EditorSourceOperations()
+    record = resources.resolve(source)
+    if record is None:
+        return EditorSourceOperations()
+    return EditorSourceOperations(
+        rasterize=record.kind
+        in {
+            ProjectResourceKind.IMPORTED_RASTER,
+            ProjectResourceKind.LINKED_RASTER,
+            ProjectResourceKind.VECTOR,
+            ProjectResourceKind.COMPOSITION,
+        },
+        edit_contents=record.kind is ProjectResourceKind.COMPOSITION,
+    )

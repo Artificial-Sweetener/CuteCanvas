@@ -49,6 +49,7 @@ class SelectedPixelMoveTarget:
     scene_coverage: CoverageSnapshot
     local_coverage: CoverageSnapshot
     extent_policy: RasterExtentPolicy
+    source_revision: object
     owner: LayerPixelMutationOwner
 
 
@@ -150,7 +151,8 @@ class SelectedPixelMoveTargetResolver:
         if scene_coverage is None:
             return None
         extent_policy = owner.extent_policy(layer)
-        if extent_policy is None:
+        source_revision = owner.revision_token(layer)
+        if extent_policy is None or source_revision is None:
             return None
         return SelectedPixelMoveTarget(
             resolved_scene,
@@ -159,6 +161,7 @@ class SelectedPixelMoveTargetResolver:
             scene_coverage,
             local,
             extent_policy,
+            source_revision,
             owner,
         )
 

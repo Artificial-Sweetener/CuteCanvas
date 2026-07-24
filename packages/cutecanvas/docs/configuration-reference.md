@@ -6,9 +6,9 @@ This annotated mapping shows every `Config` field with its shipped default.
 Copy only the groups an application needs to change and apply them with
 `Config.configure()`.
 
-Enum-backed strings match the public `CacheMode`, `PlaceholderScaleMode`,
-`ZoomMode`, and `DiagnosticsDomain` values. Unknown keys and invalid values
-raise immediately. `Config.as_dict()` returns the same detached,
+Enum-backed strings match the public `CacheMode` and `DiagnosticsDomain`
+values. Unknown keys and invalid values raise immediately.
+`Config.as_dict()` returns the same detached,
 JSON-serializable shape for preferences and diagnostics.
 
 
@@ -50,21 +50,6 @@ config = {
                 "mb": -1,  # Negative uses the coordinated weighted budget.
             },
         },
-    },
-    "placeholder": {  # Placeholder image and interaction policy when catalog is empty.
-        "source": None,  # Path or Qt resource; None or "" disables the placeholder image.
-        "panzoom_enabled": False,  # When True, pan/zoom is unlocked and panzoom tool is selected.
-        "drag_out_enabled": False,  # Allow drag-out while placeholder is shown.
-        # Zoom policy: one of "fit", "locked_zoom", or "locked_size".
-        "zoom_mode": "fit",  # Selects which zoom/size rule is applied.
-        "locked_zoom": None,  # Fixed zoom factor; ignored unless zoom_mode="locked_zoom".
-        "locked_size": None,  # (width, height) target; ignored unless zoom_mode="locked_size".
-        # Scaling policy for size-based modes: one of "auto", "logical_fit", "physical_fit", "relative_fit".
-        "scale_mode": "auto",  # Controls how display sizes are interpreted.
-        "display_size": None,  # (width, height) used by fit/relative; ignored when None.
-        "min_display_size": None,  # (width, height) minimum clamp; ignored when None.
-        "max_display_size": None,  # (width, height) maximum clamp; ignored when None.
-        "scale_factor": 1.0,  # Multiplier for relative_fit; ignored by other scale modes.
     },
     # --- Viewport & Rendering ---
     "tile_size": 1024,  # Tile edge length in pixels for cache/rendering.
@@ -136,7 +121,7 @@ config = {
         },
         "device_limits": {  # Per-device caps for categories (e.g., sam on cpu/cuda).
             "cpu": {
-                "sam": 2,
+                "sam": 1,
             },
             "cuda": {
                 "sam": 1,
@@ -167,4 +152,4 @@ config = Config().configure(
 )
 ```
 
-**Continue →** [Catalog and Navigation](catalog-and-navigation.md)
+**Continue →** [Documents and Layers](scenes.md)

@@ -101,13 +101,3 @@ class CompositionLayerSceneAssembler:
             if descriptor is not None:
                 layers.append(replace(descriptor, label=instance.label))
         return replace(document, layers=tuple(layers))
-
-    def adapt_base_scene(
-        self,
-        base_scene: SceneDescriptor,
-        image_id: uuid.UUID | None,
-    ) -> SceneDescriptor:
-        """Adapt a catalog-seeded scene through the same composition assembly path."""
-        if image_id is None:
-            return base_scene
-        return self._assemble_instances(base_scene, self.layer_instances(image_id))

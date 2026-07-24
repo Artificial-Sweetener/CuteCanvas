@@ -13,11 +13,10 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Public editor-state lifecycle checks across composition changes."""
+
+"""Public editor-state lifecycle checks across project documents."""
 
 from __future__ import annotations
-
-import uuid
 
 from cutecanvas import CuteCanvas
 from PySide6.QtCore import QRect, Qt
@@ -25,7 +24,7 @@ from PySide6.QtGui import QImage
 
 
 def _image() -> QImage:
-    """Return a small opaque catalog image."""
+    """Return a small opaque document seed."""
     image = QImage(16, 16, QImage.Format_ARGB32)
     image.fill(Qt.white)
     return image
@@ -38,27 +37,20 @@ def _coverage(width: int, height: int, value: int = 255) -> QImage:
     return image
 
 
-def test_pixel_selection_and_history_follow_scene_lifecycle(qapp) -> None:
-    """Switching and removing scenes must isolate and release editor state."""
-    first_id = uuid.uuid4()
-    second_id = uuid.uuid4()
+def test_pixel_selection_and_history_follow_document_lifecycle(qapp) -> None:
+    """Switching and removing documents must isolate and release editor state."""
     pane = CuteCanvas(features=("mask",))
     try:
-        pane.setImagesByID(
-            CuteCanvas.imageMapFromLists(
-                [_image(), _image()],
-                [None, None],
-                [first_id, second_id],
-            ),
-            first_id,
-        )
+        first_id = pane.createCompositionFromImage(_image(), title="First")
+        second_id = pane.createCompositionFromImage(_image(), title="Second")
+        pane.openComposition(first_id)
         assert pane.setPixelSelection(_coverage(5, 6), QRect(1, 2, 5, 6))
         first_state = pane.pixelSelectionState()
         assert first_state is not None
         assert first_state.bounds == QRect(1, 2, 5, 6)
         assert pane.sceneEditUndoAvailable()
 
-        pane.setCurrentImageID(second_id)
+        pane.openComposition(second_id)
         second_empty = pane.pixelSelectionState()
         assert second_empty is not None
         assert not second_empty.has_selection
@@ -68,7 +60,7 @@ def test_pixel_selection_and_history_follow_scene_lifecycle(qapp) -> None:
         assert second_state is not None
         assert second_state.bounds == QRect(7, 8, 3, 4)
 
-        pane.setCurrentImageID(first_id)
+        pane.openComposition(first_id)
         restored_first = pane.pixelSelectionState()
         assert restored_first is not None
         assert restored_first.bounds == QRect(1, 2, 5, 6)
@@ -77,16 +69,15 @@ def test_pixel_selection_and_history_follow_scene_lifecycle(qapp) -> None:
         assert pane.redoSceneEdit()
         assert pane.pixelSelectionState().bounds == QRect(1, 2, 5, 6)
 
-        pane.removeImageByID(first_id)
-        assert pane.currentImageID() == second_id
+        pane.removeComposition(first_id)
+        assert pane.currentCompositionID() == second_id
         remaining = pane.pixelSelectionState()
         assert remaining is not None
         assert remaining.bounds == QRect(7, 8, 3, 4)
-        pane.removeImageByID(second_id)
+        pane.removeComposition(second_id)
         assert pane.pixelSelectionState() is None
         assert pane.selectedLayer() is None
         assert not pane.sceneEditUndoAvailable()
     finally:
-        pane.clearImages()
         pane.deleteLater()
         qapp.processEvents()

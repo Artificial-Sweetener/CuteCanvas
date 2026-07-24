@@ -20,8 +20,13 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
+from qpane.sdk.raster import qimage_to_numpy_const_view_bgra32
 
+from cutecanvas.resources import ProjectResourceKind, ProjectResourceStore
+
+from ..raster.content_bounds import occupied_channel_bounds
 from .model import (
     FileFingerprint,
     PlacedAssetMode,
@@ -33,9 +38,11 @@ from .model import (
 class PlacedAssetStore:
     """Own placed raster pixels, provenance, status, and source revisions."""
 
-    def __init__(self) -> None:
-        """Initialize an empty asset store."""
+    def __init__(self, resources: ProjectResourceStore | None = None) -> None:
+        """Initialize payloads under one project-resource identity owner."""
+        self._resources = resources or ProjectResourceStore()
         self._assets: dict[uuid.UUID, PlacedAssetSnapshot] = {}
+        self._content_bounds: dict[uuid.UUID, QRectF | None] = {}
         self._revision = 0
 
     @property
@@ -55,6 +62,11 @@ class PlacedAssetStore:
         resolved_id = asset_id or uuid.uuid4()
         if resolved_id in self._assets:
             raise ValueError("placed asset ID already exists")
+        self._resources.create(
+            ProjectResourceKind.IMPORTED_RASTER,
+            editable=False,
+            resource_id=resolved_id,
+        )
         self._assets[resolved_id] = PlacedAssetSnapshot(
             image=QImage(image),
             source_size=image.size(),
@@ -67,6 +79,7 @@ class PlacedAssetStore:
             content_revision=0,
             generation=0,
         )
+        self._content_bounds[resolved_id] = _image_content_bounds(image)
         self._revision += 1
         return resolved_id
 
@@ -85,6 +98,11 @@ class PlacedAssetStore:
         resolved_id = asset_id or uuid.uuid4()
         if resolved_id in self._assets:
             raise ValueError("placed asset ID already exists")
+        self._resources.create(
+            ProjectResourceKind.LINKED_RASTER,
+            editable=False,
+            resource_id=resolved_id,
+        )
         self._assets[resolved_id] = PlacedAssetSnapshot(
             image=QImage(image),
             source_size=image.size(),
@@ -97,6 +115,7 @@ class PlacedAssetStore:
             content_revision=0,
             generation=0,
         )
+        self._content_bounds[resolved_id] = _image_content_bounds(image)
         self._revision += 1
         return resolved_id
 
@@ -105,17 +124,78 @@ class PlacedAssetStore:
         snapshot = self._assets.get(asset_id)
         return None if snapshot is None else snapshot
 
+    def content_bounds(self, asset_id: uuid.UUID) -> QRectF | None:
+        """Return cached alpha-tight bounds for one retained image."""
+        bounds = self._content_bounds.get(asset_id)
+        return None if bounds is None else QRectF(bounds)
+
+    def fork(self, asset_id: uuid.UUID) -> uuid.UUID | None:
+        """Clone provenance and pixels into an independent project resource."""
+        snapshot = self._assets.get(asset_id)
+        if snapshot is None:
+            return None
+        fork_id = uuid.uuid4()
+        self._resources.create(
+            self._resource_kind(snapshot.mode),
+            editable=False,
+            resource_id=fork_id,
+        )
+        self._assets[fork_id] = snapshot
+        bounds = self._content_bounds.get(asset_id)
+        self._content_bounds[fork_id] = None if bounds is None else QRectF(bounds)
+        self._revision += 1
+        return fork_id
+
     def restore(self, asset_id: uuid.UUID, snapshot: PlacedAssetSnapshot) -> None:
         """Create or replace one asset with an exact retained snapshot."""
+        resource_kind = self._resource_kind(snapshot.mode)
+        existing = self._resources.get(asset_id)
+        if existing is None:
+            self._resources.create(
+                resource_kind,
+                editable=False,
+                resource_id=asset_id,
+            )
         self._assets[asset_id] = snapshot
+        self._content_bounds[asset_id] = _optional_image_content_bounds(snapshot.image)
+        if existing is None:
+            pass
+        elif existing.kind is not resource_kind:
+            self._resources.set_kind(asset_id, resource_kind)
+        else:
+            self._resources.touch(asset_id)
+        self._revision += 1
+
+    def restore_payload(
+        self,
+        asset_id: uuid.UUID,
+        snapshot: PlacedAssetSnapshot,
+    ) -> None:
+        """Restore provenance beneath an already restored project-resource record."""
+        resource = self._resources.get(asset_id)
+        if resource is None or resource.kind is not self._resource_kind(snapshot.mode):
+            raise ValueError("placed payload does not match its resource record")
+        self._assets[asset_id] = snapshot
+        self._content_bounds[asset_id] = _optional_image_content_bounds(snapshot.image)
         self._revision += 1
 
     def remove(self, asset_id: uuid.UUID) -> bool:
         """Remove one unreachable placed source."""
-        if self._assets.pop(asset_id, None) is None:
+        if asset_id not in self._assets:
             return False
+        self._resources.remove(asset_id)
+        self._assets.pop(asset_id)
+        self._content_bounds.pop(asset_id, None)
         self._revision += 1
         return True
+
+    def discard_payload(self, asset_id: uuid.UUID) -> bool:
+        """Discard provenance while a transaction restores resource records."""
+        removed = self._assets.pop(asset_id, None) is not None
+        if removed:
+            self._content_bounds.pop(asset_id, None)
+            self._revision += 1
+        return removed
 
     def begin_reload(self, asset_id: uuid.UUID, path: Path | None = None) -> int | None:
         """Advance generation and mark a linked source as loading."""
@@ -139,6 +219,7 @@ class PlacedAssetStore:
             content_revision=current.content_revision,
             generation=generation,
         )
+        self._resources.touch(asset_id)
         self._revision += 1
         return generation
 
@@ -172,6 +253,8 @@ class PlacedAssetStore:
             generation=generation,
         )
         self._assets[asset_id] = updated
+        self._content_bounds[asset_id] = _image_content_bounds(image)
+        self._resources.touch(asset_id)
         self._revision += 1
         return updated
 
@@ -200,6 +283,7 @@ class PlacedAssetStore:
             generation=generation,
         )
         self._assets[asset_id] = updated
+        self._resources.touch(asset_id)
         self._revision += 1
         return updated
 
@@ -221,5 +305,39 @@ class PlacedAssetStore:
             generation=current.generation + 1,
         )
         self._assets[asset_id] = updated
+        self._resources.set_kind(asset_id, ProjectResourceKind.IMPORTED_RASTER)
         self._revision += 1
         return updated
+
+    @property
+    def resources(self) -> ProjectResourceStore:
+        """Return the authoritative resource identity owner."""
+        return self._resources
+
+    @staticmethod
+    def _resource_kind(mode: PlacedAssetMode) -> ProjectResourceKind:
+        """Map provenance mode to its project-resource content kind."""
+        return (
+            ProjectResourceKind.LINKED_RASTER
+            if mode is PlacedAssetMode.LINKED
+            else ProjectResourceKind.IMPORTED_RASTER
+        )
+
+
+def _optional_image_content_bounds(image: QImage | None) -> QRectF | None:
+    """Return alpha-tight bounds when retained pixels are available."""
+    return None if image is None else _image_content_bounds(image)
+
+
+def _image_content_bounds(image: QImage) -> QRectF | None:
+    """Compute alpha-tight bounds once when placed pixels enter the store."""
+    pixels, _backing = qimage_to_numpy_const_view_bgra32(image)
+    occupied = occupied_channel_bounds(pixels[:, :, 3])
+    if occupied is None:
+        return None
+    return QRectF(
+        float(occupied.x),
+        float(occupied.y),
+        float(occupied.width),
+        float(occupied.height),
+    )

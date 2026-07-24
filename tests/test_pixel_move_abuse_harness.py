@@ -169,14 +169,14 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
     )
     viewer = harness.viewer
     mask_id = harness.mask_ids[0]
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     selection_size = 1024
     selection_origin = canvas_size // 4
     displacement = 1536
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -185,7 +185,8 @@ def test_large_mask_selected_pixel_drag_preview_commit_and_undo_stay_responsive(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
         layer = viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
         layer.coverage.raster.fill(255)
@@ -300,12 +301,12 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
         mask_count=1,
     )
     viewer = harness.viewer
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     mask_id = harness.mask_ids[0]
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -314,7 +315,8 @@ def test_demo_scale_fragmented_mask_move_stays_interactive_across_many_updates(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
         layer = viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
 
@@ -422,12 +424,12 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
         mask_count=1,
     )
     viewer = harness.viewer
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     mask_id = harness.mask_ids[0]
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -436,7 +438,8 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
         assert viewer.setLayerPlacement(
             info.scene_id,
             info.layer_id,
@@ -608,13 +611,13 @@ def test_soft_mask_preview_is_pixel_identical_to_transformed_commit(
         mask_count=1,
     )
     viewer = harness.viewer
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     layer = viewer.mask_service.assets.get_layer(harness.mask_ids[0])
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
         assert layer is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -623,7 +626,8 @@ def test_soft_mask_preview_is_pixel_identical_to_transformed_commit(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
         assert viewer.setLayerPlacement(
             info.scene_id,
             info.layer_id,

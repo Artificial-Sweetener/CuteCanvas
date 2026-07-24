@@ -56,11 +56,10 @@ from ..composition.resource_lifetime import (
     ResourceLeaseKind,
 )
 from ..raster.assets import EditableRasterAssetStore
-from ..raster.source_reference import EditableRasterReference
+from ..resources import ProjectResourceReference
 from ..selection import PixelSelectionService
 from .editing import VectorEditService
 from .selection import VectorObjectSelectionController
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 from .text_paths import VectorTextPathConversion, build_text_path_conversion
 
@@ -238,7 +237,7 @@ class _PendingConversion:
     history_scope_id: uuid.UUID
     public_scene_id: uuid.UUID
     layer: CompositionLayerInstance
-    retained_source: VectorDocumentReference
+    retained_source: ProjectResourceReference
     document: VectorDocument
     kind: VectorConversionKind
     selection_mode: CoverageCombineMode
@@ -296,7 +295,7 @@ class VectorConversionService:
         """Begin conversion of vector appearance into scene pixel coverage."""
         layer = self._layers.layer(composition_id, layer_id)
         document = self._assets.get(vector_id)
-        retained_source = VectorDocumentReference(vector_id)
+        retained_source = ProjectResourceReference(vector_id)
         if (
             self._closed
             or layer is None
@@ -376,7 +375,7 @@ class VectorConversionService:
         """Begin exact semantic-text conversion into durable vector paths."""
         layer = self._layers.layer(composition_id, layer_id)
         document = self._assets.get(vector_id)
-        retained_source = VectorDocumentReference(vector_id)
+        retained_source = ProjectResourceReference(vector_id)
         item = None if document is None else document.object(object_id)
         if (
             self._closed
@@ -422,9 +421,9 @@ class VectorConversionService:
         if self._closed:
             return None
         layer = self._layers.layer(composition_id, layer_id)
-        if layer is None or not isinstance(layer.source, VectorDocumentReference):
+        if layer is None or not isinstance(layer.source, ProjectResourceReference):
             return None
-        document = self._assets.get(layer.source.vector_id)
+        document = self._assets.get(layer.source.resource_id)
         return None if document is None else (layer, document)
 
     def _submit(
@@ -436,7 +435,7 @@ class VectorConversionService:
         document: VectorDocument,
         worker: _VectorConversionWorker,
         selection_mode: CoverageCombineMode,
-        retained_source: VectorDocumentReference,
+        retained_source: ProjectResourceReference,
     ) -> uuid.UUID:
         """Submit one bounded request while retaining its exact source."""
         key = (layer.layer_id, worker.kind)
@@ -495,7 +494,7 @@ class VectorConversionService:
                 pending.composition_id,
                 pending.layer.layer_id,
             )
-            document = self._assets.get(pending.retained_source.vector_id)
+            document = self._assets.get(pending.retained_source.resource_id)
             if current != pending.layer or document != pending.document:
                 self._publish(pending, False, "vector layer changed during conversion")
                 return
@@ -568,7 +567,7 @@ class VectorConversionService:
         )
         replacement = replace(
             pending.layer,
-            source=EditableRasterReference(raster.raster_id),
+            source=ProjectResourceReference(raster.raster_id),
             transform=pixels_to_document.followed_by(pending.layer.transform),
             role="raster",
         )

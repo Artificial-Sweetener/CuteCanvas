@@ -17,7 +17,7 @@ workflow, vector editing, persistence, and SAM are not QPane concerns.
 QPane owns:
 
 - immutable render scenes, items, source handles, and revisions;
-- stable source-product and independent placed-instance identity;
+- stable source-product and independent layer-instance identity;
 - raster and vector provider contracts, damage, and invalidation;
 - viewport transforms, visibility, hit testing, clipping, compositing, and
   partial redraw;

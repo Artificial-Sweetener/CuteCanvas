@@ -74,9 +74,9 @@ nontransparent content of a layer:
 from PySide6.QtGui import QColor
 from cutecanvas import LayerPresentationStyle
 
-document = canvas.editor.documents.current
-if document is not None and document.layers:
-    layer = document.layers[-1]
+composition = canvas.editor.compositions.current
+if composition is not None and composition.layers:
+    layer = composition.layers[-1]
     effect = layer.add_effect(
         LayerPresentationStyle.outline(QColor("cyan"), width=2.0)
     )

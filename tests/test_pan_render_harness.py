@@ -149,7 +149,7 @@ def test_headless_pan_harness_keeps_layer_effect_redraws_exact(
     """Effect strip repairs must equal full redraws through abusive viewport motion."""
 
     def add_effect(canvas) -> None:
-        scene = canvas.view().current_scene_descriptor()
+        scene = canvas._rendering.presenter.current_scene_descriptor()
         assert scene is not None
         canvas.addLayerPresentationEffect(
             scene.scene_id,

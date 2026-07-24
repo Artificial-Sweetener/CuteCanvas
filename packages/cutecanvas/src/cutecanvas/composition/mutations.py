@@ -20,7 +20,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from qpane.sdk.catalog import CatalogImageReference
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerInteractionPolicy,
@@ -29,7 +28,7 @@ from qpane.sdk.scene import (
     SceneDescriptor,
 )
 
-from ..masks.source_reference import MaskAssetReference
+from ..resources import ProjectResourceReference
 from ..scene.mutations import (
     BaseSceneMutationOwner,
     SceneMutationResult,
@@ -37,7 +36,6 @@ from ..scene.mutations import (
 )
 from .layer_edits import CompositionLayerEditService
 from .layers import CompositionLayerStore
-from .service import CompositionService
 
 
 class MaskSceneMutationOwner(BaseSceneMutationOwner):
@@ -51,6 +49,7 @@ class MaskSceneMutationOwner(BaseSceneMutationOwner):
         layer_edits: CompositionLayerEditService,
         current_composition_id: Callable[[], uuid.UUID | None],
         *,
+        is_mask: Callable[[uuid.UUID], bool],
         notify_mask_opacity: Callable[[uuid.UUID], None],
         request_mask_revision: Callable[[uuid.UUID, str], bool],
     ) -> None:
@@ -58,12 +57,16 @@ class MaskSceneMutationOwner(BaseSceneMutationOwner):
         self._layers = layers
         self._layer_edits = layer_edits
         self._current_composition_id = current_composition_id
+        self._is_mask = is_mask
         self._notify_mask_opacity = notify_mask_opacity
         self._request_mask_revision = request_mask_revision
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
         """Return True for composition-backed mask instances."""
-        return isinstance(layer.source, MaskAssetReference)
+        return isinstance(
+            layer.source,
+            ProjectResourceReference,
+        ) and self._is_mask(layer.source.resource_id)
 
     def remove_layer(
         self, scene: SceneDescriptor, layer: LayerDescriptor
@@ -106,8 +109,8 @@ class MaskSceneMutationOwner(BaseSceneMutationOwner):
                 opacity=opacity,
             )
         )
-        if changed and isinstance(layer.source, MaskAssetReference):
-            self._notify_mask_opacity(layer.source.mask_id)
+        if changed and isinstance(layer.source, ProjectResourceReference):
+            self._notify_mask_opacity(layer.source.resource_id)
         return _mutation_result(
             self.name, scene, layer, changed, "layer opacity updated"
         )
@@ -181,96 +184,16 @@ class MaskSceneMutationOwner(BaseSceneMutationOwner):
     ) -> SceneMutationResult:
         """Route source invalidation without transferring structure ownership."""
         source = layer.source
-        changed = isinstance(
-            source, MaskAssetReference
-        ) and self._request_mask_revision(
-            source.mask_id,
-            reason,
+        changed = (
+            isinstance(source, ProjectResourceReference)
+            and self._is_mask(source.resource_id)
+            and self._request_mask_revision(
+                source.resource_id,
+                reason,
+            )
         )
         return _mutation_result(
             self.name, scene, layer, changed, "source revision requested"
-        )
-
-
-class CatalogLayerMutationOwner(BaseSceneMutationOwner):
-    """Apply composition-owned mutations to catalog-image instances."""
-
-    name = "catalog-layer"
-
-    def __init__(self, compositions: CompositionService) -> None:
-        """Bind the authoritative stored-composition service."""
-        self._compositions = compositions
-
-    def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
-        """Return True for catalog instances owned by the active composition."""
-        if not isinstance(layer.source, CatalogImageReference):
-            return False
-        try:
-            self._compositions.record(scene.scene_id)
-        except (KeyError, TypeError):
-            return False
-        return (
-            self._compositions.layers.layer(scene.scene_id, layer.layer_id) is not None
-        )
-
-    def set_interaction(
-        self,
-        scene: SceneDescriptor,
-        layer: LayerDescriptor,
-        interaction: LayerInteractionPolicy,
-    ) -> SceneMutationResult:
-        """Update direct-interaction permissions in one stored scene."""
-        changed = self._compositions.update_scene_layer_interaction(
-            scene.scene_id,
-            layer.layer_id,
-            interaction,
-        )
-        return _mutation_result(
-            self.name,
-            scene,
-            layer,
-            changed,
-            "layer interaction updated",
-        )
-
-    def set_placement(
-        self,
-        scene: SceneDescriptor,
-        layer: LayerDescriptor,
-        placement: LayerPlacement,
-    ) -> SceneMutationResult:
-        """Update scene-space placement in one stored scene."""
-        changed = self._compositions.update_scene_layer_placement(
-            scene.scene_id,
-            layer.layer_id,
-            placement,
-        )
-        return _mutation_result(
-            self.name,
-            scene,
-            layer,
-            changed,
-            "layer placement updated",
-        )
-
-    def set_transform(
-        self,
-        scene: SceneDescriptor,
-        layer: LayerDescriptor,
-        transform: LayerTransform,
-    ) -> SceneMutationResult:
-        """Update exact composition-owned geometry in one stored scene."""
-        changed = self._compositions.update_scene_layer_transform(
-            scene.scene_id,
-            layer.layer_id,
-            transform,
-        )
-        return _mutation_result(
-            self.name,
-            scene,
-            layer,
-            changed,
-            "layer transform updated",
         )
 
 

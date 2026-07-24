@@ -35,9 +35,9 @@ from qpane.concurrency import (
     build_thread_policy,
 )
 from qpane.rendering import PyramidManager, TileManager
-from qpane.scene.identity import SceneLayerTileKey, catalog_source_asset_key
+from qpane.scene.identity import SceneLayerTileKey
 
-from tests.helpers.render_plan import make_tile_key
+from tests.helpers.render_plan import make_source_key, make_tile_key
 
 
 def _make_image(size: int = 64) -> QImage:
@@ -108,7 +108,7 @@ def test_concurrency_managers_operate_cleanly(tmp_path, monkeypatch, qapp) -> No
     sam_manager.predictorReady.connect(
         lambda predictor, predictor_id: predictors.append((predictor, predictor_id))
     )
-    asset_key = catalog_source_asset_key(
+    asset_key = make_source_key(
         image_id,
         revision=0,
         source_path=source_path,

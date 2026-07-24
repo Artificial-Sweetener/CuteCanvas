@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Compose rendering, catalog, link, and swap collaborators behind QPane.view()."""
+"""Coordinate one provider-driven rendering surface behind a widget facade."""
 
 from __future__ import annotations
 
@@ -25,13 +25,7 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QTransform
 
 from ..cache.registry import CacheRegistry
-from ..catalog import CatalogController, ImageCatalog, LinkManager
-from ..catalog.scene_resolver import CatalogSceneResolver
-from ..core import (
-    CacheSettings,
-    Config,
-    PrefetchSettings,
-)
+from ..scene.assembly import SceneAssembly
 from ..scene.effects import LayerEffectRenderRegistry
 from ..scene.identity import SceneLayerTileKey
 from ..scene.presentation_effects import (
@@ -40,13 +34,10 @@ from ..scene.presentation_effects import (
 )
 from ..scene.registry import SceneProviderRegistry
 from ..scene.source_capabilities import LayerSourceCapabilities
-from ..scene.source_references import PlaceholderImageReference
-from ..swap import SwapDelegate
-from ..swap.diagnostics import swap_progress_provider, swap_summary_provider
 from .coordinates import PanelHitTest
 from .diagnostics import rendering_retry_provider
-from .placeholder_source import PlaceholderSourceCapabilities
 from .presenter import RenderingPresenter
+from .scene_coordinates import SceneCoordinateSystem, ScenePoint
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
 
@@ -64,7 +55,7 @@ if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
 
 
 class ViewerState(Protocol):
-    """Minimal state contract required by the catalog-backed viewer surface."""
+    """Minimal state contract required by the rendering surface."""
 
     @property
     def cache_registry(self) -> CacheRegistry | None:
@@ -80,80 +71,49 @@ class View:
         *,
         qpane: QPane,
         state: ViewerState,
-        catalog: ImageCatalog,
         pyramid_manager: PyramidManager,
         executor: TaskExecutorProtocol,
         scene_providers: SceneProviderRegistry,
         source_capabilities: LayerSourceCapabilities,
         layer_effects: LayerEffectRenderRegistry,
     ) -> None:
-        """Wire rendering/swap/catalog collaborators owned by QPane.view()."""
+        """Wire one provider-driven scene into the shared rendering pipeline."""
         self._qpane = qpane
         self._state = state
-        self._catalog = catalog
         self._pyramid_manager = pyramid_manager
         self._executor = executor
         self._cache_registry: CacheRegistry | None = state.cache_registry
-        self._placeholder_source = PlaceholderSourceCapabilities()
-        self._scene_resolver = CatalogSceneResolver(catalog, scene_providers)
-        source_capabilities.metadata.register(
-            PlaceholderImageReference, self._placeholder_source
-        )
-        source_capabilities.rasters.register(
-            PlaceholderImageReference, self._placeholder_source
-        )
-        source_capabilities.hit_tests.register(
-            PlaceholderImageReference, self._placeholder_source
-        )
+        self._scene_assembly = SceneAssembly(scene_providers)
         self._attach_pyramid_manager()
         self.presenter = RenderingPresenter(
             qpane=qpane,
             pyramid_products=pyramid_manager,
             cache_registry=self._cache_registry,
             executor=executor,
-            scene_provider=self._scene_resolver.scene,
-            scene_revision=self._scene_resolver.revision,
+            scene_provider=self._scene_assembly.resolve_scene,
+            scene_revision=scene_providers.revision,
             source_metadata=source_capabilities.metadata,
             raster_sources=source_capabilities.rasters,
             raster_patches=source_capabilities.raster_patches,
             source_hit_tests=source_capabilities.hit_tests,
             vector_sources=source_capabilities.vectors,
             hybrid_sources=source_capabilities.hybrids,
+            sampled_sources=source_capabilities.sampled,
             layer_effects=layer_effects,
         )
         qpane.destroyed.connect(
             lambda _obj=None, presenter=self.presenter: presenter.shutdown()
         )
+        self.coordinates: SceneCoordinateSystem = self.presenter.coordinates
         self.viewport = self.presenter.viewport
         self.tile_manager = self.presenter.tile_manager
         self.renderer = self.presenter.renderer
-        self.link_manager = LinkManager()
-        self.swap_delegate = SwapDelegate(
-            qpane=qpane,
-            catalog=catalog,
-            viewport=self.viewport,
-            tile_manager=self.tile_manager,
-            pyramid_manager=pyramid_manager,
-            rendering=self.presenter,
-            prefetch_settings=self._prefetch_settings_from_config(qpane.settings),
-            mark_dirty=self.mark_dirty,
-        )
-        self.catalog_controller = CatalogController(
-            qpane=qpane,
-            catalog=catalog,
-            viewport=self.viewport,
-            tile_manager=self.tile_manager,
-            link_manager=self.link_manager,
-            swap_delegate=self.swap_delegate,
-        )
-        self._scene_resolver.set_placeholder_provider(
-            self.catalog_controller.placeholder_content
-        )
-        self._placeholder_source.set_provider(
-            self.catalog_controller.placeholder_content
-        )
-        self.swap_delegate.attach_catalog_controller(self.catalog_controller)
         self._connect_rendering_signals()
+
+    @property
+    def pyramid_manager(self) -> PyramidManager:
+        """Return the pyramid owner shared by every source rendered in this view."""
+        return self._pyramid_manager
 
     def replace_renderer(self, renderer: Renderer) -> None:
         """Replace the renderer while keeping presenter and view references in sync."""
@@ -285,8 +245,13 @@ class View:
 
     def scene_to_panel_point(self, scene_point: QPoint | QPointF) -> QPointF | None:
         """Project one absolute scene point into the panel."""
-        transform = self.scene_to_panel_transform()
-        return None if transform is None else transform.map(QPointF(scene_point))
+        scene = self.coordinate_scene_descriptor()
+        if scene is None:
+            return None
+        point = self.coordinates.scene_to_panel(
+            ScenePoint.from_qt(scene.scene_id, scene_point)
+        )
+        return None if point is None else point.to_qt()
 
     def panel_to_layer_source_point(
         self,
@@ -323,9 +288,7 @@ class View:
         return self.presenter.minimum_size_hint()
 
     def register_diagnostics(self, broker: Diagnostics) -> None:
-        """Install rendering and swap diagnostics providers via the diagnostics manager."""
-        broker.register_swap_providers(swap_summary_provider, tier="core")
-        broker.register_swap_providers(swap_progress_provider)
+        """Install rendering diagnostics through the host diagnostics manager."""
         broker.register_provider(
             rendering_retry_provider,
             domain="retry",
@@ -333,12 +296,18 @@ class View:
         )
 
     def handle_tile_ready(self, key: SceneLayerTileKey) -> None:
-        """Forward tile-ready signals to the swap delegate."""
-        self.swap_delegate.handle_tile_ready(key)
+        """Invalidate the frame region completed by one derived tile."""
+        self.presenter.invalidate_frame_plan()
+        dirty_rect = self.presenter.dirty_rect_for_tile_key(key)
+        if dirty_rect is not None:
+            self.presenter.mark_dirty(dirty_rect)
+            self._qpane.update()
 
     def handle_pyramid_ready(self, asset_key: object | None) -> None:
-        """Bridge pyramid-ready notifications from the catalog to swap plumbing."""
-        self.swap_delegate.handle_pyramid_ready(asset_key)
+        """Invalidate the frame after one source pyramid becomes available."""
+        self.presenter.invalidate_frame_plan()
+        self.presenter.mark_dirty()
+        self._qpane.update()
 
     def _attach_pyramid_manager(self) -> None:
         """Wire the rendering-owned pyramid manager into shared cache budgeting."""
@@ -351,13 +320,3 @@ class View:
         """Connect tile/pyramid events directly to the rendering stack."""
         self.tile_manager.tileReady.connect(self.handle_tile_ready)
         self._pyramid_manager.pyramidReady.connect(self.handle_pyramid_ready)
-
-    def _prefetch_settings_from_config(self, config: Config) -> PrefetchSettings:
-        """Return a PrefetchSettings clone from config.cache, enforcing the expected shape."""
-        cache_settings = getattr(config, "cache", None)
-        if not isinstance(cache_settings, CacheSettings):
-            raise TypeError("config.cache must be a CacheSettings instance")
-        prefetch = cache_settings.prefetch
-        if not isinstance(prefetch, PrefetchSettings):
-            raise TypeError("config.cache.prefetch must be a PrefetchSettings instance")
-        return prefetch.clone()

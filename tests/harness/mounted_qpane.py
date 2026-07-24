@@ -156,14 +156,10 @@ class MountedQPaneHarness:
         self.host.show()
         self.image = QImage(image_size, QImage.Format.Format_ARGB32)
         self.image.fill(Qt.GlobalColor.white)
-        self.image_id = uuid.uuid4()
-        self.viewer.setImagesByID(
-            self.viewer.imageMapFromLists(
-                [self.image],
-                [None],
-                [self.image_id],
-            ),
-            self.image_id,
+        self.image_id = self.viewer.createCompositionFromImage(
+            self.image,
+            title="Abuse harness",
+            label="Background",
         )
         self.mask_ids = tuple(self._create_mask(image_size) for _ in range(mask_count))
         self.viewer.setActiveMaskID(self.mask_ids[0])
@@ -181,7 +177,9 @@ class MountedQPaneHarness:
 
     def close(self) -> None:
         """Dispose the pane and drain its queued Qt work."""
-        self.viewer.clearImages()
+        for document in tuple(self.viewer.editor.compositions):
+            if document.state.policy.removable:
+                document.remove()
         self.drain_events(wait_ms=25)
         self.host.close()
         self.viewer.deleteLater()

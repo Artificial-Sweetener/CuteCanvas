@@ -13,11 +13,9 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Public composition-first document behavior and compatibility adapters."""
+"""Public composition-first document and resource behavior."""
 
 from __future__ import annotations
-
-import uuid
 
 from cutecanvas import CompositionPolicy, CuteCanvas, LayerPolicy
 from PySide6.QtCore import QRectF, QSize, Qt
@@ -31,7 +29,7 @@ def _image(color: str, width: int = 80, height: int = 60) -> QImage:
     return image
 
 
-def test_empty_composition_is_editable_without_catalog_identity(qapp) -> None:
+def test_empty_composition_is_editable_without_seed_resource(qapp) -> None:
     """An empty document must own a canvas and accept ordinary layer creation."""
     viewer = CuteCanvas(features=())
     try:
@@ -43,34 +41,27 @@ def test_empty_composition_is_editable_without_catalog_identity(qapp) -> None:
         scene = viewer.currentScene()
         entry = viewer.getCompositionSnapshot().compositions[composition_id]
         assert viewer.currentCompositionID() == composition_id
-        assert viewer.currentImageID() is None
         assert scene is not None
         assert scene.bounds == QRectF(-100.0, -50.0, 640.0, 480.0)
         assert scene.layers == ()
         assert entry.kind == "composition"
-        assert entry.current_image_id is None
         assert entry.scene_bounds == scene.bounds
 
         pixels = QImage(32, 24, QImage.Format.Format_ARGB32_Premultiplied)
         pixels.fill(Qt.GlobalColor.transparent)
         layer_id = viewer.addEditableRasterLayer(pixels, label="Paint")
         assert layer_id is not None
-        assert viewer.currentImageID() is None
         assert [layer.layer_id for layer in viewer.currentScene().layers] == [layer_id]
     finally:
         viewer.deleteLater()
         qapp.processEvents()
 
 
-def test_image_seed_is_an_ordinary_independent_layer(qapp) -> None:
-    """Seeding twice from one resource must create independent mutable instances."""
+def test_image_seed_is_an_ordinary_project_resource_layer(qapp) -> None:
+    """Each imported image document must own an ordinary independent resource."""
     viewer = CuteCanvas(features=())
-    image_id = uuid.uuid4()
     try:
-        viewer.setImagesByID(
-            CuteCanvas.imageMapFromLists([_image("red")], ids=[image_id]),
-            image_id,
-        )
+        image = _image("red")
         interaction = LayerPolicy(
             selectable=True,
             movable=True,
@@ -79,7 +70,7 @@ def test_image_seed_is_an_ordinary_independent_layer(qapp) -> None:
             removable=True,
         )
         first = viewer.createCompositionFromImage(
-            image_id,
+            image,
             title="First seed",
             interaction=interaction,
         )
@@ -87,10 +78,10 @@ def test_image_seed_is_an_ordinary_independent_layer(qapp) -> None:
         assert first_scene is not None and len(first_scene.layers) == 1
         first_layer = first_scene.layers[0]
         assert first_layer.role == "content"
-        assert first_layer.source_id == image_id
+        assert first_layer.source_kind == "imported-raster"
 
         second = viewer.createCompositionFromImage(
-            image_id,
+            image,
             title="Second seed",
             interaction=interaction,
         )
@@ -99,6 +90,7 @@ def test_image_seed_is_an_ordinary_independent_layer(qapp) -> None:
         second_layer = second_scene.layers[0]
         assert first != second
         assert first_layer.layer_id != second_layer.layer_id
+        assert first_layer.source_id != second_layer.source_id
 
         assert viewer.removeLayer(second_scene.scene_id, second_layer.layer_id)
         assert viewer.currentScene().layers == ()
@@ -111,48 +103,18 @@ def test_image_seed_is_an_ordinary_independent_layer(qapp) -> None:
         qapp.processEvents()
 
 
-def test_generated_navigation_documents_do_not_derive_instance_identity(qapp) -> None:
-    """Catalog convenience documents must still own independent layer identities."""
-    image_id = uuid.uuid4()
-    first = CuteCanvas(features=())
-    second = CuteCanvas(features=())
-    try:
-        image_map = CuteCanvas.imageMapFromLists([_image("red")], ids=[image_id])
-        first.setImagesByID(image_map, image_id)
-        second.setImagesByID(image_map, image_id)
-
-        first_scene = first.currentScene()
-        second_scene = second.currentScene()
-        assert first_scene is not None and second_scene is not None
-        assert first.currentCompositionID() != second.currentCompositionID()
-        assert first_scene.layers[0].layer_id != second_scene.layers[0].layer_id
-        assert first_scene.layers[0].source_id == image_id
-        assert second_scene.layers[0].source_id == image_id
-    finally:
-        first.deleteLater()
-        second.deleteLater()
-        qapp.processEvents()
-
-
-def test_catalog_resources_place_into_active_composition_with_host_policy(qapp) -> None:
-    """Catalog placement and structural operations must resolve the active document."""
+def test_imported_resources_place_into_active_composition_with_host_policy(
+    qapp,
+) -> None:
+    """Imported images must use ordinary document layer policy."""
     viewer = CuteCanvas(features=())
-    first_id = uuid.uuid4()
-    second_id = uuid.uuid4()
     try:
-        viewer.setImagesByID(
-            CuteCanvas.imageMapFromLists(
-                [_image("red"), _image("blue", 40, 30)],
-                ids=[first_id, second_id],
-            ),
-            first_id,
-        )
         composition_id = viewer.createComposition(
             QRectF(0.0, 0.0, 320.0, 240.0),
             title="Assembly",
         )
-        locked_id = viewer.addCatalogImageLayer(
-            first_id,
+        locked_id = viewer.placeEmbeddedAsset(
+            _image("red"),
             label="Locked",
             interaction=LayerPolicy(
                 selectable=True,
@@ -161,8 +123,8 @@ def test_catalog_resources_place_into_active_composition_with_host_policy(qapp) 
                 removable=False,
             ),
         )
-        movable_id = viewer.addCatalogImageLayer(
-            second_id,
+        movable_id = viewer.placeEmbeddedAsset(
+            _image("blue", 40, 30),
             placement=QRectF(100.0, 80.0, 80.0, 60.0),
             label="Movable",
             interaction=LayerPolicy(
@@ -186,30 +148,6 @@ def test_catalog_resources_place_into_active_composition_with_host_policy(qapp) 
         qapp.processEvents()
 
 
-def test_catalog_resource_removal_does_not_delete_independent_document(qapp) -> None:
-    """Removing a referenced resource must prune its layer, not its document."""
-    viewer = CuteCanvas(features=())
-    image_id = uuid.uuid4()
-    try:
-        viewer.setImagesByID(
-            CuteCanvas.imageMapFromLists([_image("red")], ids=[image_id]),
-            image_id,
-        )
-        composition_id = viewer.createCompositionFromImage(image_id)
-
-        viewer.removeImagesByID((image_id,))
-
-        assert composition_id in viewer.compositionIDs()
-        viewer.openComposition(composition_id)
-        scene = viewer.currentScene()
-        assert scene is not None
-        assert scene.layers == ()
-        assert viewer.currentImageID() is None
-    finally:
-        viewer.deleteLater()
-        qapp.processEvents()
-
-
 def test_empty_composition_accepts_mask_and_vector_domains(qapp) -> None:
     """Composition-scoped authoring must not require a current catalog image."""
     viewer = CuteCanvas(features=("mask",))
@@ -221,9 +159,8 @@ def test_empty_composition_accepts_mask_and_vector_domains(qapp) -> None:
 
         assert mask_id is not None
         assert vector_layer_id is not None
-        assert viewer.currentImageID() is None
         assert {layer.source_kind for layer in viewer.currentScene().layers} == {
-            "mask",
+            "coverage",
             "vector",
         }
     finally:
@@ -257,7 +194,7 @@ def test_image_free_composition_cycles_masks_in_generic_stack(qapp) -> None:
 
 
 def test_document_policy_is_host_controlled_and_origin_independent(qapp) -> None:
-    """Hosts must control document removal and comparison without kind branches."""
+    """Hosts must control document removal without content-kind branches."""
     viewer = CuteCanvas(features=())
     try:
         composition_id = viewer.createComposition(
@@ -265,13 +202,11 @@ def test_document_policy_is_host_controlled_and_origin_independent(qapp) -> None
             title="Policy document",
             policy=CompositionPolicy(
                 removable=False,
-                comparison_enabled=False,
             ),
         )
         entry = viewer.getCompositionSnapshot().compositions[composition_id]
         assert entry.policy == CompositionPolicy(
             removable=False,
-            comparison_enabled=False,
         )
         try:
             viewer.removeComposition(composition_id)
@@ -282,10 +217,10 @@ def test_document_policy_is_host_controlled_and_origin_independent(qapp) -> None
 
         assert viewer.setCompositionPolicy(
             composition_id,
-            CompositionPolicy(removable=True, comparison_enabled=True),
+            CompositionPolicy(removable=True),
         )
         assert viewer.getCompositionSnapshot().compositions[composition_id].policy == (
-            CompositionPolicy(removable=True, comparison_enabled=True)
+            CompositionPolicy(removable=True)
         )
         viewer.removeComposition(composition_id)
         assert composition_id not in viewer.compositionIDs()

@@ -30,6 +30,9 @@ _CAPABILITY_LABELS = (
     (EditorCapability.PAINT, "Painting"),
     (EditorCapability.MOVE_LAYERS, "Move Layers"),
     (EditorCapability.TRANSFORM_LAYERS, "Transform Layers"),
+    (EditorCapability.EDIT_VECTORS, "Vector Editing"),
+    (EditorCapability.MANAGE_LAYERS, "Layer Management"),
+    (EditorCapability.EDIT_RESOURCES, "Resource Editing"),
 )
 
 

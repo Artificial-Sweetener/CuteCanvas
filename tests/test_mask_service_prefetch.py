@@ -29,6 +29,7 @@ from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.mask_service import MaskService
 from cutecanvas.masks.workers import PrefetchedOverlay
+from cutecanvas.resources import ProjectResourceStore
 from PySide6.QtGui import QImage
 from qpane.types import DiagnosticRecord
 
@@ -36,7 +37,7 @@ from tests.helpers.executor_stubs import StubExecutor
 
 
 def _build_service(qpane):
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     controller = MaskController(
         manager,
         lambda point: point,
@@ -55,9 +56,9 @@ def _build_service(qpane):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_resolve_prefetch_scales_filters_invalid(qpane_core):
+def test_resolve_prefetch_scales_filters_invalid(canvas_core):
     """Invalid or duplicate scales should be filtered out."""
-    service, _, _ = _build_service(qpane_core)
+    service, _, _ = _build_service(canvas_core)
     scales = service.render_work.resolve_prefetch_scales(
         [1.0, 0.5, 0.5, 0, "bad", 0.25]
     )
@@ -65,9 +66,9 @@ def test_resolve_prefetch_scales_filters_invalid(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_prefetch_skips_when_disabled_or_no_executor(qpane_core):
+def test_prefetch_skips_when_disabled_or_no_executor(canvas_core):
     """Prefetch should return False when disabled or executor is unavailable."""
-    service, _, _ = _build_service(qpane_core)
+    service, _, _ = _build_service(canvas_core)
     image_id = uuid.uuid4()
     service.setPrefetchEnabled(False)
     assert service.prefetchColorizedMasks(image_id) is False
@@ -77,36 +78,36 @@ def test_prefetch_skips_when_disabled_or_no_executor(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_prefetch_skips_when_no_masks(qpane_core):
+def test_prefetch_skips_when_no_masks(canvas_core):
     """Empty mask lists should short-circuit prefetch."""
-    service, _, _ = _build_service(qpane_core)
+    service, _, _ = _build_service(canvas_core)
     image_id = uuid.uuid4()
     assert service.prefetchColorizedMasks(image_id) is False
     assert service.render_work.stats.skipped == 1
 
 
 @pytest.mark.usefixtures("qapp")
-def test_should_defer_activation_signals_for_small_ratio(qpane_core):
+def test_should_defer_activation_signals_for_small_ratio(canvas_core):
     """Large size drops should defer activation signals."""
-    service, manager, _ = _build_service(qpane_core)
+    service, manager, _ = _build_service(canvas_core)
     prev_id = manager.create_mask(QImage(100, 100, QImage.Format_Grayscale8))
     next_id = manager.create_mask(QImage(10, 10, QImage.Format_Grayscale8))
     assert service._activation.should_defer(prev_id, next_id) is True
 
 
 @pytest.mark.usefixtures("qapp")
-def test_should_defer_activation_signals_skips_when_sizes_grow(qpane_core):
+def test_should_defer_activation_signals_skips_when_sizes_grow(canvas_core):
     """Growing or equal masks should not defer activation signals."""
-    service, manager, _ = _build_service(qpane_core)
+    service, manager, _ = _build_service(canvas_core)
     prev_id = manager.create_mask(QImage(10, 10, QImage.Format_Grayscale8))
     next_id = manager.create_mask(QImage(100, 100, QImage.Format_Grayscale8))
     assert service._activation.should_defer(prev_id, next_id) is False
 
 
 @pytest.mark.usefixtures("qapp")
-def test_consume_prefetch_results_stashes_when_busy(qpane_core):
+def test_consume_prefetch_results_stashes_when_busy(canvas_core):
     """Busy masks should stash overlays and apply them once idle."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     overlay = PrefetchedOverlay(
         mask_id=mask_id,
@@ -138,9 +139,9 @@ def test_consume_prefetch_results_stashes_when_busy(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_deferred_prefetch_is_discarded_when_mask_revision_changes(qpane_core):
+def test_deferred_prefetch_is_discarded_when_mask_revision_changes(canvas_core):
     """A pre-stroke overlay must not publish under the post-stroke cache key."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     overlay = PrefetchedOverlay(
         mask_id=mask_id,
@@ -158,9 +159,9 @@ def test_deferred_prefetch_is_discarded_when_mask_revision_changes(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_stale_prefetch_completion_preserves_replacement_handle(qpane_core):
+def test_stale_prefetch_completion_preserves_replacement_handle(canvas_core):
     """An old completion must not consume a newer request for the same image."""
-    service, _, _ = _build_service(qpane_core)
+    service, _, _ = _build_service(canvas_core)
     image_id = uuid.uuid4()
     replacement = SimpleNamespace(
         handle=SimpleNamespace(task_id="replacement"),
@@ -183,9 +184,9 @@ def test_stale_prefetch_completion_preserves_replacement_handle(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_prefetch_cancellation_balances_completed_worker_awaiting_ui(qpane_core):
+def test_prefetch_cancellation_balances_completed_worker_awaiting_ui(canvas_core):
     """A removed request must terminate even when its worker already completed."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     image_id = uuid.uuid4()
     mask_ids = tuple(
         manager.create_mask(QImage(8, 8, QImage.Format_Grayscale8)) for _ in range(2)
@@ -230,9 +231,9 @@ def test_prefetch_cancellation_balances_completed_worker_awaiting_ui(qpane_core)
 
 
 @pytest.mark.usefixtures("qapp")
-def test_pending_render_work_includes_every_mask_render_stage(qpane_core):
+def test_pending_render_work_includes_every_mask_render_stage(canvas_core):
     """Render-idle state must include stroke, snippet, and prefetch ownership."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     image_id = uuid.uuid4()
     handle = SimpleNamespace(task_id="pending")
@@ -264,9 +265,9 @@ def test_pending_render_work_includes_every_mask_render_stage(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_successful_prefetch_clears_async_colorize_ownership(qpane_core):
+def test_successful_prefetch_clears_async_colorize_ownership(canvas_core):
     """A committed prefetch must terminate the matching cache-miss lifecycle."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     image_id = uuid.uuid4()
     revision = controller.renders.render_revision(mask_id)
@@ -290,9 +291,9 @@ def test_successful_prefetch_clears_async_colorize_ownership(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_stale_prefetch_cannot_clear_newer_async_colorize_ownership(qpane_core):
+def test_stale_prefetch_cannot_clear_newer_async_colorize_ownership(canvas_core):
     """An old render completion must not finish a newer revision request."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     stale_revision = controller.renders.render_revision(mask_id)
     controller.edits.advance_epoch(mask_id, reason="newer-request")
@@ -318,9 +319,9 @@ def test_stale_prefetch_cannot_clear_newer_async_colorize_ownership(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_failed_prefetch_clears_matching_async_colorize_ownership(qpane_core):
+def test_failed_prefetch_clears_matching_async_colorize_ownership(canvas_core):
     """A terminal overlay failure must release its matching render request."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     revision = controller.renders.render_revision(mask_id)
     controller.renders._async_pending[mask_id] = revision
@@ -344,11 +345,11 @@ def test_failed_prefetch_clears_matching_async_colorize_ownership(qpane_core):
 
 @pytest.mark.usefixtures("qapp")
 def test_snippet_result_is_discarded_while_stroke_preview_is_active(
-    qpane_core,
+    canvas_core,
     monkeypatch,
 ):
     """Background snippets must not overwrite a live provisional stroke."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     updates: list[object] = []
     monkeypatch.setattr(
@@ -374,9 +375,9 @@ def test_snippet_result_is_discarded_while_stroke_preview_is_active(
 
 
 @pytest.mark.usefixtures("qapp")
-def test_missing_snippet_layer_clears_async_colorize_ownership(qpane_core):
+def test_missing_snippet_layer_clears_async_colorize_ownership(canvas_core):
     """A removed mask must not retain snippet-render ownership."""
-    service, _manager, controller = _build_service(qpane_core)
+    service, _manager, controller = _build_service(canvas_core)
     mask_id = uuid.uuid4()
     revision = controller.renders.render_revision(mask_id)
     controller.renders._async_pending[mask_id] = revision
@@ -393,19 +394,19 @@ def test_missing_snippet_layer_clears_async_colorize_ownership(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_schedule_activation_signals_warms_and_resumes(monkeypatch, qpane_core):
+def test_schedule_activation_signals_warms_and_resumes(monkeypatch, canvas_core):
     """Activation scheduling should warm caches and resume overlays for pending ids."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(12, 12, QImage.Format_Grayscale8))
     image_id = uuid.uuid4()
-    service._activation._pending_activation_images.add(image_id)
+    service._activation._pending_compositions.add(image_id)
     warm_calls: list[uuid.UUID | None] = []
     emit_calls: list[uuid.UUID | None] = []
     pending_calls: list[uuid.UUID | None] = []
     resume_calls: list[uuid.UUID | None] = []
     resume_update_calls: list[uuid.UUID | None] = []
 
-    monkeypatch.setattr(controller.renders, "warm", lambda mid: warm_calls.append(mid))
+    monkeypatch.setattr(controller, "warm_mask", lambda mid: warm_calls.append(mid))
     monkeypatch.setattr(
         controller,
         "emit_activation_signals",
@@ -425,7 +426,7 @@ def test_schedule_activation_signals_warms_and_resumes(monkeypatch, qpane_core):
     service._activation._schedule_signals(
         mask_id,
         warm_cache=True,
-        image_id=image_id,
+        composition_id=image_id,
     )
 
     assert pending_calls == [image_id]
@@ -433,13 +434,13 @@ def test_schedule_activation_signals_warms_and_resumes(monkeypatch, qpane_core):
     assert emit_calls == [mask_id]
     assert resume_update_calls == [image_id]
     assert resume_calls == []
-    assert image_id not in service._activation._pending_activation_images
+    assert image_id not in service._activation._pending_compositions
 
 
 @pytest.mark.usefixtures("qapp")
-def test_mask_service_diagnostics_provider_aggregates_recent_messages(qpane_core):
+def test_mask_service_diagnostics_provider_aggregates_recent_messages(canvas_core):
     """Diagnostics should summarize recent status entries and prefetch stats."""
-    service, _, controller = _build_service(qpane_core)
+    service, _, controller = _build_service(canvas_core)
     service._status_messages.clear()
     service._status_messages.append(("Mask", "Hidden"))
     service._status_messages.append(("Mask Prefetch", "Prefetch warmed 1 mask(s)"))
@@ -454,7 +455,7 @@ def test_mask_service_diagnostics_provider_aggregates_recent_messages(qpane_core
     service.render_work._last_message = "Prefetch warmed 1 mask(s)"
     service.render_work._last_duration_ms = 10.0
 
-    records = service._diagnostics_provider(qpane_core)
+    records = service._diagnostics_provider(canvas_core)
     assert all(isinstance(record, DiagnosticRecord) for record in records)
     labels = [record.label for record in records]
     assert "Mask" not in labels
@@ -466,9 +467,9 @@ def test_mask_service_diagnostics_provider_aggregates_recent_messages(qpane_core
 
 
 @pytest.mark.usefixtures("qapp")
-def test_request_async_colorize_falls_back_to_snippet(qpane_core):
+def test_request_async_colorize_falls_back_to_snippet(canvas_core):
     """Async colorize should schedule snippet work when prefetch misses."""
-    service, manager, controller = _build_service(qpane_core)
+    service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(8, 8, QImage.Format_Grayscale8))
     layer = manager.get_layer(mask_id)
     assert layer is not None
@@ -482,17 +483,17 @@ def test_request_async_colorize_falls_back_to_snippet(qpane_core):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_invalidate_mask_cache_helpers_forward_to_controller(qpane_core):
+def test_invalidate_mask_cache_helpers_forward_to_controller(canvas_core):
     """Invalidate helpers should proxy to controller cache APIs."""
-    service, _, controller = _build_service(qpane_core)
+    service, _, controller = _build_service(canvas_core)
     mask_id = uuid.uuid4()
     image_id = uuid.uuid4()
     calls: list[tuple[str, object]] = []
     controller.renders.invalidate = lambda mid, **_kwargs: calls.append(("mask", mid))
-    service.mask_ids_for_image = lambda iid: [mask_id] if iid == image_id else []
+    service.mask_ids_for_composition = lambda iid: [mask_id] if iid == image_id else []
     service.invalidateMaskCache(mask_id)
-    service.invalidateMaskCachesForImage(image_id)
+    service.invalidateMaskCachesForComposition(image_id)
     service.invalidateMaskCache(None)
-    service.invalidateMaskCachesForImage(None)
+    service.invalidateMaskCachesForComposition(None)
     assert ("mask", mask_id) in calls
     assert calls.count(("mask", mask_id)) == 2

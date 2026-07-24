@@ -17,8 +17,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from cutecanvas import CuteCanvas
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
@@ -38,11 +36,7 @@ def test_brush_bar_distinguishes_raster_mask_and_selection_color_semantics(
     try:
         base = QImage(320, 240, QImage.Format_ARGB32_Premultiplied)
         base.fill(QColor(30, 50, 80, 255))
-        image_id = uuid.uuid4()
-        canvas.setImagesByID(
-            CuteCanvas.imageMapFromLists([base], ids=[image_id]),
-            image_id,
-        )
+        canvas.createCompositionFromImage(base, title="Brush controls")
         raster_layer_id = canvas.createPaintLayer(QSize(80, 60), label="Ink")
         assert raster_layer_id is not None
         controls.sync_mode(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
@@ -111,11 +105,7 @@ def test_active_mask_tint_change_refreshes_brush_feedback(qapp, monkeypatch) -> 
     try:
         base = QImage(64, 48, QImage.Format_ARGB32_Premultiplied)
         base.fill(QColor("white"))
-        image_id = uuid.uuid4()
-        canvas.setImagesByID(
-            CuteCanvas.imageMapFromLists([base], ids=[image_id]),
-            image_id,
-        )
+        canvas.createCompositionFromImage(base, title="Mask tint")
         mask_id = canvas.createBlankMask(base.size())
         assert mask_id is not None
         assert canvas.setActiveMaskID(mask_id)

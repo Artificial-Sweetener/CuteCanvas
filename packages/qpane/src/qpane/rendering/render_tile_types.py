@@ -20,9 +20,9 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage
 
 from ..scene.raster import RasterBounds
@@ -50,6 +50,7 @@ class RenderTileProduct:
         return int(self.image.sizeInBytes())
 
 
+@runtime_checkable
 class RenderTileBatchSource(Protocol):
     """Render one immutable source revision into requested sampled tiles."""
 
@@ -84,6 +85,15 @@ class RenderTileBatchSource(Protocol):
         is_cancelled: Callable[[], bool],
     ) -> tuple[RenderTileProduct, ...]:
         """Render one complete request batch away from the GUI thread."""
+        ...
+
+
+@runtime_checkable
+class RegionSampleSource(Protocol):
+    """Sample arbitrary source-local regions for nested offscreen rendering."""
+
+    def sample(self, source_rect: QRectF, pixel_size: QSize) -> QImage:
+        """Return exact premultiplied pixels for one source-local region."""
         ...
 
 

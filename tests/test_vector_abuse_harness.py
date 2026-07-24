@@ -496,7 +496,7 @@ def test_mounted_many_object_vectors_convert_without_blocking_or_visual_drift(
         assert len({item[0] for item in completions}) == len(completions)
 
         started = interaction_clock()
-        raster_request = viewer.rasterizeVectorLayer(
+        raster_request = viewer.rasterizeLayer(
             scene.scene_id,
             layer_id,
             QSize(1600, 900),
@@ -539,8 +539,7 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
     viewer = CuteCanvas(features=(), task_executor=executor)
     image = QImage(320, 240, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor("white"))
-    image_id = uuid.uuid4()
-    viewer.setImagesByID(viewer.imageMapFromLists((image,), ids=(image_id,)), image_id)
+    viewer.createCompositionFromImage(image, title="Vector conversion abuse")
     completions: list[tuple] = []
     viewer.vectorRequestCompleted.connect(
         lambda *values: completions.append(tuple(values))
@@ -627,7 +626,7 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
         assert next(item for item in completions if item[0] == requests[-1])[4]
         assert viewer.pixelSelectionState().has_selection
 
-        raster_request = viewer.rasterizeVectorLayer(scene.scene_id, layer_id)
+        raster_request = viewer.rasterizeLayer(scene.scene_id, layer_id)
         assert raster_request is not None
         for _index in range(10):
             if all(
@@ -644,7 +643,9 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
         assert all(layer.layer_id != layer_id for layer in viewer.currentScene().layers)
         assert executor.snapshot().queued_by_category.get("vector_conversion", 0) == 0
     finally:
-        viewer.clearImages()
+        composition_id = viewer.currentCompositionID()
+        if composition_id is not None:
+            viewer.removeComposition(composition_id)
         viewer.deleteLater()
         qapp.processEvents()
 

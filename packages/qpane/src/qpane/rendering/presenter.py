@@ -65,6 +65,13 @@ from .render_tile_cache import RenderTileCache
 from .render_tiles import RenderTileWorkCoordinator
 from .sampled_tile_identity import sampled_tile_batch_identity
 from .scene_compiler import SceneRenderCompiler
+from .scene_coordinates import (
+    LayerCoordinateProjection,
+    LayerSourcePoint,
+    PanelPoint,
+    SceneCoordinateProjection,
+    SceneCoordinateSystem,
+)
 from .scene_hit_testing import SceneRenderHitTester
 from .tiles import TileManager
 from .vector_planner import VectorRenderPlanner
@@ -79,6 +86,7 @@ if TYPE_CHECKING:
         HybridPresentationRegistry,
         RasterPatchPresentationRegistry,
         RasterPresentationRegistry,
+        SampledPresentationRegistry,
         SourceHitTestRegistry,
         SourceMetadataRegistry,
         VectorPresentationRegistry,
@@ -106,6 +114,7 @@ class RenderingPresenter:
         source_hit_tests: SourceHitTestRegistry,
         vector_sources: VectorPresentationRegistry,
         hybrid_sources: HybridPresentationRegistry,
+        sampled_sources: SampledPresentationRegistry,
         layer_effects: LayerEffectRenderRegistry,
     ) -> None:
         """Compose viewport/tile/renderer collaborators owned by the presenter."""
@@ -129,6 +138,7 @@ class RenderingPresenter:
             raster_sources=raster_sources,
             vector_sources=vector_sources,
             hybrid_sources=hybrid_sources,
+            sampled_sources=sampled_sources,
         )
         self._frame_projector = SceneFrameProjector(self.viewport)
         self._raster_planner = RasterRenderPlanner(
@@ -172,6 +182,10 @@ class RenderingPresenter:
         self._transient_raster_provider: Callable[
             [tuple[SceneRenderItem, ...]], TransientRasterContribution | None
         ] = lambda _items: None
+        self.coordinates = SceneCoordinateSystem(
+            scene_projection=self._scene_coordinate_projection,
+            layer_projection=self._layer_coordinate_projection,
+        )
 
     def shutdown(self) -> None:
         """Cancel presenter-owned asynchronous derived rendering work."""
@@ -223,8 +237,6 @@ class RenderingPresenter:
             for layer in compiled.scene.layers
             for item in items_by_layer_id.get(layer.layer_id, ())
         )
-        if not render_items:
-            return None
         return SceneRenderPlan(
             scene_id=compiled.scene.scene_id,
             scene_bounds=compiled.scene.bounds,
@@ -605,19 +617,8 @@ class RenderingPresenter:
 
     def panel_to_scene_point(self, panel_pos: QPoint | QPointF) -> QPointF | None:
         """Project a panel point into the active scene coordinate system."""
-        geometry = self._active_scene_geometry()
-        if geometry is None:
-            return None
-        compiled, frame = geometry
-        transform = self._scene_to_panel_transform(compiled, frame)
-        inverse, invertible = transform.inverted()
-        if not invertible:
-            return None
-        local = inverse.map(QPointF(panel_pos))
-        return QPointF(
-            local.x() + compiled.scene.bounds.x,
-            local.y() + compiled.scene.bounds.y,
-        )
+        point = self.coordinates.panel_to_scene(PanelPoint.from_qt(panel_pos))
+        return None if point is None else point.to_qt()
 
     def scene_to_panel_transform(self) -> QTransform | None:
         """Return a transform mapping absolute scene coordinates into the panel."""
@@ -625,23 +626,7 @@ class RenderingPresenter:
         if geometry is None:
             return None
         compiled, frame = geometry
-        local_to_panel = self._scene_to_panel_transform(compiled, frame)
-        origin = local_to_panel.map(QPointF())
-        x_axis = local_to_panel.map(QPointF(1.0, 0.0))
-        y_axis = local_to_panel.map(QPointF(0.0, 1.0))
-        x_scale_x = x_axis.x() - origin.x()
-        x_scale_y = x_axis.y() - origin.y()
-        y_scale_x = y_axis.x() - origin.x()
-        y_scale_y = y_axis.y() - origin.y()
-        scene_bounds = compiled.scene.bounds
-        return QTransform(
-            x_scale_x,
-            x_scale_y,
-            y_scale_x,
-            y_scale_y,
-            origin.x() - scene_bounds.x * x_scale_x - scene_bounds.y * y_scale_x,
-            origin.y() - scene_bounds.x * x_scale_y - scene_bounds.y * y_scale_y,
-        )
+        return self._absolute_scene_to_panel_transform(compiled, frame)
 
     def panel_to_layer_source_point(
         self,
@@ -650,26 +635,12 @@ class RenderingPresenter:
         panel_pos: QPoint | QPointF,
     ) -> QPointF | None:
         """Project a panel point into one layer's authoritative source space."""
-        geometry = self._layer_coordinate_geometry(scene_id, layer_id)
-        if geometry is None:
-            return None
-        compiled, frame, layer = geometry
-        panel_transform = self._scene_to_panel_transform(compiled, frame)
-        inverse_panel, invertible = panel_transform.inverted()
-        if not invertible or layer.transform is None:
-            return None
-        scene_point = inverse_panel.map(QPointF(panel_pos))
-        scene_point += QPointF(compiled.scene.bounds.x, compiled.scene.bounds.y)
-        local_point = layer.transform.inverse_map(scene_point)
-        if local_point is None:
-            return None
-        raster_bounds = layer.raster_bounds
-        if raster_bounds is None:
-            return local_point
-        return QPointF(
-            local_point.x() - raster_bounds.x,
-            local_point.y() - raster_bounds.y,
+        point = self.coordinates.panel_to_layer_source(
+            scene_id,
+            layer_id,
+            PanelPoint.from_qt(panel_pos),
         )
+        return None if point is None else point.to_qt()
 
     def layer_source_to_panel_point(
         self,
@@ -678,22 +649,14 @@ class RenderingPresenter:
         source_point: QPoint | QPointF,
     ) -> QPointF | None:
         """Project authoritative layer-source coordinates into the panel."""
-        geometry = self._layer_coordinate_geometry(scene_id, layer_id)
-        if geometry is None:
-            return None
-        compiled, frame, layer = geometry
-        if layer.transform is None:
-            return None
-        local_point = QPointF(source_point)
-        raster_bounds = layer.raster_bounds
-        if raster_bounds is not None:
-            local_point += QPointF(raster_bounds.x, raster_bounds.y)
-        scene_point = layer.transform.map_point(local_point)
-        scene_local_point = scene_point - QPointF(
-            compiled.scene.bounds.x,
-            compiled.scene.bounds.y,
+        point = self.coordinates.layer_source_to_panel(
+            LayerSourcePoint.from_qt(
+                scene_id,
+                layer_id,
+                source_point,
+            )
         )
-        return self._scene_to_panel_transform(compiled, frame).map(scene_local_point)
+        return None if point is None else point.to_qt()
 
     def image_to_panel_point(self, image_point: QPoint) -> QPointF | None:
         """Project an image-space coordinate into the widget."""
@@ -742,6 +705,7 @@ class RenderingPresenter:
     def invalidate_content_cache(self) -> None:
         """Drop cached active scene/content geometry."""
         self._scene_compiler.invalidate()
+        self.renderer.invalidate_current_render_plan()
         self.invalidate_frame_plan()
         self._last_scroll_reuse_signature = None
 
@@ -1033,6 +997,46 @@ class RenderingPresenter:
             return None
         return compiled, frame, layer
 
+    def _scene_coordinate_projection(self) -> SceneCoordinateProjection | None:
+        """Resolve one typed projection for the active scene and viewport frame."""
+        geometry = self._active_scene_geometry()
+        if geometry is None:
+            return None
+        compiled, frame = geometry
+        return SceneCoordinateProjection(
+            compiled.scene.scene_id,
+            self._absolute_scene_to_panel_transform(compiled, frame),
+        )
+
+    def _layer_coordinate_projection(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> LayerCoordinateProjection | None:
+        """Resolve one typed layer-source projection for the current frame."""
+        geometry = self._layer_coordinate_geometry(scene_id, layer_id)
+        if geometry is None:
+            return None
+        compiled, frame, layer = geometry
+        if layer.transform is None:
+            return None
+        scene = SceneCoordinateProjection(
+            compiled.scene.scene_id,
+            self._absolute_scene_to_panel_transform(compiled, frame),
+        )
+        raster_bounds = layer.raster_bounds
+        source_origin = (
+            QPointF()
+            if raster_bounds is None
+            else QPointF(raster_bounds.x, raster_bounds.y)
+        )
+        return LayerCoordinateProjection(
+            scene,
+            layer.layer_id,
+            layer.transform,
+            source_origin,
+        )
+
     def _scene_to_panel_transform(
         self,
         compiled: CompiledRenderScene,
@@ -1040,3 +1044,27 @@ class RenderingPresenter:
     ) -> QTransform:
         """Return the authoritative scene-local to panel transform for one frame."""
         return self._frame_projector.scene_to_panel(compiled.scene, frame)
+
+    def _absolute_scene_to_panel_transform(
+        self,
+        compiled: CompiledRenderScene,
+        frame: RenderFrameGeometry,
+    ) -> QTransform:
+        """Return the authoritative absolute-scene to panel transform."""
+        local_to_panel = self._scene_to_panel_transform(compiled, frame)
+        origin = local_to_panel.map(QPointF())
+        x_axis = local_to_panel.map(QPointF(1.0, 0.0))
+        y_axis = local_to_panel.map(QPointF(0.0, 1.0))
+        x_scale_x = x_axis.x() - origin.x()
+        x_scale_y = x_axis.y() - origin.y()
+        y_scale_x = y_axis.x() - origin.x()
+        y_scale_y = y_axis.y() - origin.y()
+        scene_bounds = compiled.scene.bounds
+        return QTransform(
+            x_scale_x,
+            x_scale_y,
+            y_scale_x,
+            y_scale_y,
+            origin.x() - scene_bounds.x * x_scale_x - scene_bounds.y * y_scale_x,
+            origin.y() - scene_bounds.x * x_scale_y - scene_bounds.y * y_scale_y,
+        )

@@ -51,6 +51,7 @@ CuteCanvas includes:
 * **Transform** for affine layer manipulation.
 * **Rectangle, Ellipse, and Lasso Select** for pixel selection.
 * **Brush** for mask and RGBA painting.
+* **Clone Stamp** for revision-stable rendered sampling onto RGBA layers.
 * **Paint Bucket** for selection-constrained flood fill.
 * **Rectangle, Ellipse, and Lasso Mask** for retained mask shapes.
 * **Vector Shape, Path, Nodes, and Text** for vector authoring.
@@ -220,26 +221,63 @@ canvas.setControlMode(canvas.CONTROL_MODE_PAINT_BUCKET)
 An active pixel selection limits both brush and bucket results, including soft
 edge coverage.
 
+## Clone Pixels
+
+Clone Stamp writes to an editable RGBA layer. When the selected source cannot
+store pixels, the normal paint policy can create and select that destination
+on the first stroke:
+
+```python
+canvas.setControlMode(canvas.CONTROL_MODE_CLONE_STAMP)
+```
+
+`CuteCanvas.CONTROL_MODE_CLONE_STAMP` is the string mode constant; typed host
+code may use `ControlMode.CLONE_STAMP`.
+
+Alt-click sets the source. The source marker remains visible until the source
+is replaced or cleared, and the cursor reports an unavailable destination
+before a source exists. Normal painting uses the shared brush size, hardness,
+opacity, flow, spacing, smoothing, dynamics, and input lifecycle.
+
+Aligned mode preserves one source offset across successive strokes. Unaligned
+mode starts every stroke from the chosen source point. The source may come
+from its anchored layer, that layer and the visible layers below it, or the
+complete visible composition. The anchor remains independent from the selected
+paint destination. In every mode, the complete stroke reads a stable rendered
+source and commits as one history edit.
+
 ## Host Capability Policy
 
 `EditorPolicy` lets an application expose only the editing capabilities it
 needs. This is separate from each layer's policy.
 
 ```python
-from cutecanvas import EditorCapability, EditorPolicy
+from cutecanvas import (
+    EditorCapability,
+    EditorPolicy,
+    NonEditablePaintPolicy,
+)
 
 canvas.setEditorPolicy(
     EditorPolicy(
-        frozenset(
+        capabilities=frozenset(
             {
                 EditorCapability.SELECT_PIXELS,
                 EditorCapability.EDIT_PIXELS,
                 EditorCapability.PAINT,
+                EditorCapability.MANAGE_LAYERS,
             }
-        )
+        ),
+        noneditable_paint=NonEditablePaintPolicy.CREATE_RASTER_LAYER,
     )
 )
 ```
+
+With `NonEditablePaintPolicy.CREATE_RASTER_LAYER`, a brush gesture on a
+selected non-editable layer creates and selects a real raster layer above it
+before painting.
+`NonEditablePaintPolicy.REJECT` leaves the selection unchanged and performs no
+stroke. `MANAGE_LAYERS` is required for automatic creation.
 
 Use `editorOperationState()` before enabling an action:
 

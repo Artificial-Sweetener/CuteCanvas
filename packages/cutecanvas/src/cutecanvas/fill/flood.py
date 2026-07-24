@@ -96,6 +96,14 @@ class FloodFillEngine:
             soft = _apply_constraint(soft, bounds, request.constraint)
         if soft[local_y, local_x] == 0:
             return None
+        if np.all(soft):
+            if cancelled is not None and cancelled():
+                raise FillCancelledError("flood fill cancelled")
+            return CoverageSnapshot._adopt_detached(
+                bounds,
+                RasterExtentPolicy.EXPAND_ON_WRITE,
+                soft,
+            )
         coverage = (
             _contiguous_coverage(soft, local_x, local_y, cancelled)
             if request.contiguous

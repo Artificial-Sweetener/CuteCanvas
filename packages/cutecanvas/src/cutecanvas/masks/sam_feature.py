@@ -119,6 +119,7 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
         )
     except ValueError:
         pass
+    from cutecanvas.sam.execution import build_sam_executor
     from cutecanvas.sam.manager import SamManager
 
     sam_config = require_sam_config(qpane.settings)
@@ -222,13 +223,22 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
                     "sam_download_mode to blocking/background."
                 ),
             ) from exc
-    sam_manager = SamManager(
-        parent=qpane,
+    sam_executor = build_sam_executor(
+        qpane.settings.concurrency,
         device=sam_device,
-        executor=qpane.executor,
-        cache_limit=sam_config.sam_cache_limit,
-        checkpoint_path=checkpoint_path,
     )
+    try:
+        sam_manager = SamManager(
+            parent=qpane,
+            device=sam_device,
+            executor=sam_executor,
+            owns_executor=True,
+            cache_limit=sam_config.sam_cache_limit,
+            checkpoint_path=checkpoint_path,
+        )
+    except Exception:
+        sam_executor.shutdown(wait=False)
+        raise
     qpane.attachSamManager(sam_manager)
     hooks.registerCursorProvider(
         qpane.CONTROL_MODE_SMART_SELECT, smart_select_cursor_provider
@@ -245,13 +255,41 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
     )
     tm_signals = qpane._tools_manager.signals
 
+    def _prepare_active_raster(*_args: object) -> None:
+        """Warm the predictor for the active document raster resource."""
+        raster = qpane.activeRasterResolver().resolve(
+            preferred_layer_id=(
+                None
+                if qpane.selectedLayer() is None
+                else qpane.selectedLayer().layer_id
+            )
+        )
+        if raster is None:
+            return
+        manager = qpane.samManager()
+        if manager is not None:
+            manager.requestPredictor(
+                raster.image,
+                raster.resource_id,
+                source_path=raster.source_path,
+            )
+
     def _handle_region_selected(bbox, is_erase: bool):
         """Forward a bounding box selection to SAM when valid."""
         manager = qpane.samManager()
         if manager is None:
             return
-        if qpane.currentImageID() is None:
-            logger.warning("Ignoring smart-select request: no image is active")
+        raster = qpane.activeRasterResolver().resolve(
+            preferred_layer_id=(
+                None
+                if qpane.selectedLayer() is None
+                else qpane.selectedLayer().layer_id
+            )
+        )
+        if raster is None:
+            logger.warning(
+                "Ignoring smart-select request: no raster resource is active"
+            )
             return
         if bbox is None:
             logger.warning("Ignoring smart-select request: bounding box missing")
@@ -264,7 +302,9 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
             )
             return
         manager.generateMaskFromBox(
-            qpane.currentImageID(), bbox_array, erase_mode=is_erase
+            raster.resource_id,
+            bbox_array,
+            erase_mode=is_erase,
         )
 
     def _handle_component_adjustment(image_point: QPoint, grow: bool):
@@ -292,6 +332,9 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
 
     tm_signals.region_selected_for_masking.connect(_handle_region_selected)
     tm_signals.mask_component_adjustment_requested.connect(_handle_component_adjustment)
+    qpane.compositionSelectionChanged.connect(_prepare_active_raster)
+    qpane.selectedLayerChanged.connect(_prepare_active_raster)
+    _prepare_active_raster()
 
 
 def _resolve_expected_hash(

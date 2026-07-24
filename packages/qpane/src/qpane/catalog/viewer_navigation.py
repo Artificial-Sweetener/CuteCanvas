@@ -19,13 +19,19 @@ from __future__ import annotations
 
 import uuid
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QRectF, QSizeF
 from PySide6.QtWidgets import QWidget
 
-from ..rendering.coordinates import NormalizedViewState
+from ..inspection import (
+    InspectionStateStore,
+    InspectionTarget,
+    InspectionViewState,
+    InspectionZoomMode,
+    capture_inspection,
+    project_inspection,
+)
 from ..rendering.viewport import Viewport, ViewportZoomMode
 from ..types import LinkedGroup
-from .link import LinkManager
 from .viewer_catalog import ViewerCatalog, ViewerCatalogEntry
 
 
@@ -42,7 +48,7 @@ class ViewerNavigation:
         self._catalog = catalog
         self._viewport = viewport
         self._widget = widget
-        self._links = LinkManager()
+        self._inspection = InspectionStateStore()
         self._known_ids: set[uuid.UUID] = set()
         catalog.selectionChanging.connect(self._capture_outgoing)
         catalog.selectionChanged.connect(self._restore_incoming)
@@ -50,7 +56,7 @@ class ViewerNavigation:
 
     def groups(self) -> tuple[LinkedGroup, ...]:
         """Return immutable linked-image group records."""
-        return self._links.getGroupRecords()
+        return self._inspection.groups()
 
     def set_groups(self, groups: tuple[LinkedGroup, ...]) -> None:
         """Replace linked-image groups after validating catalog membership."""
@@ -59,7 +65,7 @@ class ViewerNavigation:
             unknown = tuple(member for member in group.members if member not in known)
             if unknown:
                 raise KeyError(f"linked image is not in the catalog: {unknown[0]}")
-        self._links.setGroups(groups)
+        self._inspection.replace_groups(groups)
 
     def set_all_linked(self, enabled: bool) -> None:
         """Link all catalog images or clear every linked group."""
@@ -81,17 +87,17 @@ class ViewerNavigation:
 
     def discard(self, entry_id: uuid.UUID) -> None:
         """Remove one resource from stored individual and linked view state."""
-        self._links.handleImageRemoved(entry_id)
+        self._inspection.discard(entry_id)
 
     def clear(self) -> None:
         """Clear all stored individual and linked viewport state."""
-        self._links.clear()
+        self._inspection.clear()
 
     def _reconcile_catalog(self) -> None:
         """Discard viewport state for resources removed from the catalog."""
         current_ids = {entry.entry_id for entry in self._catalog.entries}
         for removed_id in self._known_ids - current_ids:
-            self._links.handleImageRemoved(removed_id)
+            self._inspection.discard(removed_id)
         self._known_ids = current_ids
 
     def _capture_outgoing(
@@ -104,14 +110,14 @@ class ViewerNavigation:
             return
         state = self._capture(outgoing)
         if state is not None:
-            self._links.updateViewState(outgoing.entry_id, state)
+            self._inspection.update(outgoing.entry_id, state)
 
     def _restore_incoming(self, incoming: ViewerCatalogEntry | None) -> None:
         """Restore a known resource transform or fit a first-time resource."""
         if incoming is None:
             return
-        state = self._links.getViewState(incoming.entry_id)
-        if state is None or state.zoom_mode is ViewportZoomMode.FIT:
+        state = self._inspection.state_for(incoming.entry_id)
+        if state is None or state.zoom_mode is InspectionZoomMode.FIT:
             self._viewport.setZoomFit()
             return
         self._restore(incoming, state)
@@ -119,40 +125,58 @@ class ViewerNavigation:
     def _capture(
         self,
         entry: ViewerCatalogEntry,
-    ) -> NormalizedViewState | None:
-        """Return source-size-independent viewport center and visible width."""
-        width = entry.size.width()
-        height = entry.size.height()
+    ) -> InspectionViewState | None:
+        """Return source-size-independent viewport center and visible region."""
         zoom = float(self._viewport.zoom)
-        if width <= 0 or height <= 0 or zoom <= 0.0:
+        if entry.size.width() <= 0 or entry.size.height() <= 0 or zoom <= 0.0:
             return None
-        pan = self._viewport.pan
-        physical_width = self._widget.width() * self._widget.devicePixelRatioF()
-        return NormalizedViewState(
-            center_x=0.5 - pan.x() / (width * zoom),
-            center_y=0.5 - pan.y() / (height * zoom),
-            zoom_frac=physical_width / (width * zoom),
-            zoom_mode=self._viewport.get_zoom_mode(),
+        return capture_inspection(
+            self._target(entry),
+            self._physical_viewport_size(),
+            zoom=zoom,
+            pan=self._viewport.pan,
+            zoom_mode=self._inspection_zoom_mode(self._viewport.get_zoom_mode()),
         )
 
     def _restore(
         self,
         entry: ViewerCatalogEntry,
-        state: NormalizedViewState,
+        state: InspectionViewState,
     ) -> None:
         """Apply a normalized viewport state to one catalog resource."""
-        width = entry.size.width()
-        height = entry.size.height()
-        physical_width = self._widget.width() * self._widget.devicePixelRatioF()
-        if width <= 0 or height <= 0 or state.zoom_frac <= 0.0:
-            self._viewport.setZoomFit()
-            return
-        zoom = physical_width / (width * state.zoom_frac)
-        pan = QPointF(
-            (0.5 - state.center_x) * width * zoom,
-            (0.5 - state.center_y) * height * zoom,
+        projected = project_inspection(
+            self._target(entry),
+            self._physical_viewport_size(),
+            state,
         )
         self._viewport.zoom_mode = ViewportZoomMode.CUSTOM
-        self._viewport.setZoomAndPan(zoom, pan)
-        if state.zoom_mode is ViewportZoomMode.ONE_TO_ONE:
+        self._viewport.setZoomAndPan(projected.zoom, projected.pan)
+        if projected.zoom_mode is InspectionZoomMode.ONE_TO_ONE:
             self._viewport.zoom_mode = ViewportZoomMode.ONE_TO_ONE
+
+    def _physical_viewport_size(self) -> QSizeF:
+        """Return current widget dimensions in physical device pixels."""
+        dpr = self._widget.devicePixelRatioF()
+        return QSizeF(self._widget.width() * dpr, self._widget.height() * dpr)
+
+    @staticmethod
+    def _target(entry: ViewerCatalogEntry) -> InspectionTarget:
+        """Adapt one catalog entry to the generic inspection contract."""
+        return InspectionTarget(
+            target_id=entry.entry_id,
+            bounds=QRectF(
+                0.0,
+                0.0,
+                float(entry.size.width()),
+                float(entry.size.height()),
+            ),
+        )
+
+    @staticmethod
+    def _inspection_zoom_mode(mode: ViewportZoomMode) -> InspectionZoomMode:
+        """Convert internal viewport mode to a public inspection mode."""
+        if mode is ViewportZoomMode.FIT:
+            return InspectionZoomMode.FIT
+        if mode is ViewportZoomMode.ONE_TO_ONE:
+            return InspectionZoomMode.ONE_TO_ONE
+        return InspectionZoomMode.CUSTOM

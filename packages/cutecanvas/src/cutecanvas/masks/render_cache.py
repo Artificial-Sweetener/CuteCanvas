@@ -172,7 +172,7 @@ class MaskRenderCache:
         self.clear()
         active_id = self._active_mask_id()
         if active_id is not None:
-            self.warm(active_id)
+            self.warm_requested(active_id)
             self._render_changed(active_id, QRect())
 
     def render_revision(self, mask_id: uuid.UUID) -> int:
@@ -401,7 +401,7 @@ class MaskRenderCache:
     def notify_color_changed(self, mask_id: uuid.UUID) -> None:
         """Invalidate derived rasters after a tint change."""
         self.invalidate(mask_id)
-        self.warm(mask_id)
+        self.warm_requested(mask_id)
         self._active_properties_changed()
         self._render_changed(mask_id, QRect())
 
@@ -481,6 +481,12 @@ class MaskRenderCache:
         layer = self._assets.get_layer(mask_id)
         if layer is not None and not layer.coverage.has_retained_items:
             self.get(layer, scale=scale)
+
+    def warm_requested(self, mask_id: uuid.UUID | None) -> None:
+        """Warm the density most recently requested by the active view."""
+        if mask_id is None:
+            return
+        self.warm(mask_id, scale=self._requested_scales.get(mask_id))
 
     def get(self, layer: MaskLayer, *, scale: float | None = None) -> QPixmap | None:
         """Return a colorized cached raster for a layer."""

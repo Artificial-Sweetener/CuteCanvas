@@ -19,53 +19,23 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 
 from PySide6.QtCore import QRectF
-from qpane.sdk.types import ComparisonOrientation
 
 
 class CompositionOrigin(str, Enum):
-    """Descriptive origin metadata for composition compatibility views."""
+    """Describe the one independent editor-document origin."""
 
-    DEFAULT_IMAGE = "default-image"
-    EXPLICIT = "explicit"
-    LAYERED_SCENE = "layered-scene"
     COMPOSITION = "composition"
 
 
 @dataclass(frozen=True, slots=True)
-class CompositionComparison:
-    """Comparison settings owned by one composition."""
-
-    source_id: uuid.UUID
-    source_path: Path | None
-    source_kind: str
-    split_position: float
-    orientation: ComparisonOrientation
-
-    def with_split(
-        self,
-        position: float,
-        orientation: ComparisonOrientation,
-    ) -> CompositionComparison:
-        """Return a comparison record with updated split settings."""
-        return replace(
-            self,
-            split_position=position,
-            orientation=orientation,
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class CompositionDocumentPolicy:
-    """Host-selected structural policy independent of document origin."""
+    """Host-selected structural policy for one composition."""
 
     removable: bool = True
-    comparison_enabled: bool = True
-    remove_if_catalog_resource_missing: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,8 +46,6 @@ class CompositionRecord:
     origin: CompositionOrigin
     title: str
     canvas_bounds: QRectF
-    navigation_image_id: uuid.UUID | None = None
-    comparison: CompositionComparison | None = None
     policy: CompositionDocumentPolicy = CompositionDocumentPolicy()
 
     def __post_init__(self) -> None:
@@ -86,9 +54,3 @@ class CompositionRecord:
         if bounds.width() <= 0.0 or bounds.height() <= 0.0:
             raise ValueError("composition canvas bounds must be positive")
         object.__setattr__(self, "canvas_bounds", bounds)
-
-    def with_comparison(
-        self, comparison: CompositionComparison | None
-    ) -> CompositionRecord:
-        """Return a record with a replaced comparison payload."""
-        return replace(self, comparison=comparison)

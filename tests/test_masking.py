@@ -22,12 +22,13 @@ from cutecanvas import Config
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
+from cutecanvas.resources import ProjectResourceStore
 from PySide6.QtCore import QRect
 
 
 def test_mask_updated_accepts_uuid(qapp):
     controller = MaskController(
-        MaskAssetStore(),
+        MaskAssetStore(ProjectResourceStore()),
         lambda pt: pt,
         Config(),
         mask_config=MaskConfigSlice(),

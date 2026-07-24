@@ -49,11 +49,11 @@ def test_mask_fragment_release_promote_and_history_are_atomic(
     )
     viewer = harness.viewer
     source_mask_id = harness.mask_ids[0]
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -62,7 +62,8 @@ def test_mask_fragment_release_promote_and_history_are_atomic(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
         viewer.configureSnapping(enabled=False)
         source = viewer.mask_service.assets.get_layer(source_mask_id)
         assert source is not None
@@ -105,7 +106,7 @@ def test_mask_fragment_release_promote_and_history_are_atomic(
         assert promoted_layer_id is not None
         assert viewer.floatingPixelEditState() is None
         assert source.coverage.raster.storage_value(60, 60) == 0
-        masks = viewer.listMasksForImage()
+        masks = viewer.listMasksForComposition()
         promoted = next(item for item in masks if item.layer_id == promoted_layer_id)
         promoted_source = viewer.mask_service.assets.get_layer(promoted.mask_id)
         assert promoted_source is not None
@@ -118,14 +119,16 @@ def test_mask_fragment_release_promote_and_history_are_atomic(
         assert viewer.undoSceneEdit()
         assert source.coverage.raster.storage_value(60, 60) == 255
         assert all(
-            item.layer_id != promoted_layer_id for item in viewer.listMasksForImage()
+            item.layer_id != promoted_layer_id
+            for item in viewer.listMasksForComposition()
         )
         assert viewer.selectedLayer().layer_id == info.layer_id
 
         assert viewer.redoSceneEdit()
         assert source.coverage.raster.storage_value(60, 60) == 0
         assert any(
-            item.layer_id == promoted_layer_id for item in viewer.listMasksForImage()
+            item.layer_id == promoted_layer_id
+            for item in viewer.listMasksForComposition()
         )
         assert viewer.selectedLayer().layer_id == promoted_layer_id
     finally:
@@ -143,18 +146,19 @@ def test_escape_cancels_floating_cut_without_history_or_pixel_changes(
         mask_count=1,
     )
     viewer = harness.viewer
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     source = viewer.mask_service.assets.get_layer(harness.mask_ids[0])
     try:
         assert source is not None
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(selectable=True, pixel_editable=True),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
 
         def paint_square(pixels: np.ndarray, _image: QImage) -> None:
             """Paint only the selected payload for exact replay assertions."""
@@ -398,13 +402,13 @@ def test_floating_session_resolves_safely_across_structure_tool_and_teardown(
         mask_count=1,
     )
     viewer = harness.viewer
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     source = viewer.mask_service.assets.get_layer(harness.mask_ids[0])
     try:
         assert source is not None
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -413,7 +417,8 @@ def test_floating_session_resolves_safely_across_structure_tool_and_teardown(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
 
         def paint_pixel(pixels: np.ndarray, _image: QImage) -> None:
             """Paint a tiny asymmetric payload for exact lifecycle checks."""
@@ -451,7 +456,9 @@ def test_floating_session_resolves_safely_across_structure_tool_and_teardown(
         assert viewer.floatingPixelEditState() is None
         QTest.keyClick(viewer, Qt.Key_Right)
         assert viewer.floatingPixelEditState() is not None
-        viewer.clearImages()
+        composition_id = viewer.currentCompositionID()
+        assert composition_id is not None
+        viewer.removeComposition(composition_id)
         harness.drain_events()
         assert viewer.floatingPixelEditState() is None
         assert viewer.selectedLayer() is None

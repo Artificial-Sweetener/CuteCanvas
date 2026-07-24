@@ -23,6 +23,7 @@ from cutecanvas import CuteCanvas
 from cutecanvas.core import config
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
+from qpane import QPane
 
 
 @pytest.fixture(scope="session")
@@ -43,9 +44,9 @@ def _flush_deferred_qt_deletions(qapp: QApplication) -> Iterator[None]:
 
 
 @pytest.fixture()
-def qpane_core(qapp: QApplication) -> Iterator[CuteCanvas]:
-    """Provision a bare CuteCanvas instance and ensure it is cleaned up."""
-    qpane = CuteCanvas(features=())
+def qpane_core(qapp: QApplication) -> Iterator[QPane]:
+    """Provision a bare QPane viewer and ensure it is cleaned up."""
+    qpane = QPane()
     try:
         yield qpane
     finally:
@@ -53,7 +54,17 @@ def qpane_core(qapp: QApplication) -> Iterator[CuteCanvas]:
 
 
 @pytest.fixture()
-def qpane_view(qpane_core: CuteCanvas):
+def canvas_core(qapp: QApplication) -> Iterator[CuteCanvas]:
+    """Provision a bare CuteCanvas editor and ensure it is cleaned up."""
+    canvas = CuteCanvas(features=())
+    try:
+        yield canvas
+    finally:
+        canvas.deleteLater()
+
+
+@pytest.fixture()
+def qpane_view(qpane_core: QPane):
     """Expose the view collaborator for rendering-focused tests."""
     return qpane_core.view()
 
@@ -77,15 +88,15 @@ def qpane_renderer(qpane_view):
 
 
 @pytest.fixture()
-def catalog(qpane_core: CuteCanvas):
+def catalog(qpane_core: QPane):
     """Expose the Catalog attached to the shared qpane."""
     return qpane_core.catalog()
 
 
 @pytest.fixture()
-def mask_workflow(qpane_core: CuteCanvas):
+def mask_workflow(canvas_core: CuteCanvas):
     """Expose the Masks workflow to encourage workflow-centric tests."""
-    return qpane_core._masks_controller
+    return canvas_core._masks_controller
 
 
 @pytest.fixture()

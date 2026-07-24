@@ -31,9 +31,9 @@ from qpane.sdk.scene import (
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import CompositionLayerInstance, CompositionLayerStore
+from ..resources import ProjectResourceReference
 from .mask_cache import VectorMaskPathCache
 from .projection import VectorDocumentProjection
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 
 
@@ -41,7 +41,7 @@ from .store import VectorAssetStore
 class VectorMaskEffect:
     """Reference vector geometry mapped into one target layer's local space."""
 
-    source: VectorDocumentReference
+    source: ProjectResourceReference
     transform: LayerTransform
     object_ids: tuple[uuid.UUID, ...] = ()
     inverted: bool = False
@@ -81,7 +81,7 @@ class VectorMaskRenderOwner:
         """Return exact filled geometry, optionally inverted inside target bounds."""
         if not isinstance(effect, VectorMaskEffect):
             return QPainterPath()
-        document = self._projection.document(effect.source.vector_id)
+        document = self._projection.document(effect.source.resource_id)
         if document is None:
             return QPainterPath()
         selected = frozenset(effect.object_ids) if effect.object_ids else None
@@ -128,10 +128,10 @@ class VectorMaskController:
         if (
             vector_layer is None
             or target is None
-            or not isinstance(vector_layer.source, VectorDocumentReference)
+            or not isinstance(vector_layer.source, ProjectResourceReference)
         ):
             return False
-        document = self._assets.get(vector_layer.source.vector_id)
+        document = self._assets.get(vector_layer.source.resource_id)
         if document is None or any(
             document.object(object_id) is None for object_id in object_ids
         ):

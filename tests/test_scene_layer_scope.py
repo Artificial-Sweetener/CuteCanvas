@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from cutecanvas import CuteCanvas
 from PySide6.QtGui import QImage, Qt
 from qpane.scene.model import LayerKind
@@ -47,11 +45,7 @@ def test_current_product_scene_resolution_omits_removed_layer_domains(qapp) -> N
     """Current product scenes should not resolve removed concrete layer domains."""
     qpane = CuteCanvas(features=())
     try:
-        image_id = uuid.uuid4()
-        qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([_solid_image()], [None], [image_id]),
-            image_id,
-        )
+        qpane.createCompositionFromImage(_solid_image(), title="Layer scope")
 
         plan = qpane.view().calculateRenderPlan(is_blank=False)
 

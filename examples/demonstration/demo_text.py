@@ -19,28 +19,25 @@
 
 from __future__ import annotations
 
-CATALOG_HINT = (
-    "Browse compositions by default. Switch to Catalog to inspect source images, "
-    "link groups, and masks; use Ctrl or Shift there to multi-select images."
+COMPOSITIONS_HINT = (
+    "Each composition contains ordinary ordered layers. Select a row to edit it, "
+    "use its checkbox for visibility, drag rows to reorder, and right-click to "
+    "duplicate an instance, fork shared content, or open focused properties."
 )
 
 EXIT_MESSAGE = "Thanks for trying the CuteCanvas example."
 
 CORE_CHAPTER = (
     "Core: launch CuteCanvas(config=...) with no optional features by default (add features=('mask', 'sam') "
-    "as needed), load images, navigate renderable views with compositionIDs()/openComposition(), and link panes "
-    "with setLinkedGroups(). Catalog helpers like imageIDs()/currentImageID() "
-    "remain available for source inventory. The demo occasionally reads Config.as_dict for "
+    "as needed), import images as independent compositions, and navigate them with "
+    "compositionIDs()/openComposition(). The demo occasionally reads Config.as_dict for "
     "small UI toggles; most hosts should treat config as set-and-forget. The status bar's zoom % label is "
-    "wired directly to CuteCanvas.zoomChanged so you can copy that pattern into your own hosts. The View menu's "
-    "comparison actions use CuteCanvas.compose(), CuteCanvas.setComparisonImageID(), CuteCanvas.setComparisonSplit(), "
-    "CuteCanvas.clearComparisonImage(), CuteCanvas.comparisonState(), and CuteCanvas.comparisonDividerState() to build "
-    "split-view inspection without moving the current catalog selection."
+    "wired directly to CuteCanvas.zoomChanged so you can copy that pattern into your own hosts."
 )
 
 MASK_CHAPTER = (
     "Mask: when features include 'mask', create/import/export masks, rotate mask order, "
-    "and observe mask-driven catalog rows via qpane mask signals. Masks render with the image "
+    "and observe mask layers through the composition tree and mask signals. Masks render with the image "
     "content while host overlay hooks remain available for separate annotations. The status bar's "
     "undo/redo counter listens to CuteCanvas.maskUndoStackChanged so you can mirror stack depth "
     "affordances in your own hosts."
@@ -67,7 +64,7 @@ SAM_CHAPTER = (
 DIAGNOSTICS_CHAPTER = (
     "Diagnostics/Config: toggle diagnosticsOverlayEnabled()/setDiagnosticsDomainEnabled, apply settings via CuteCanvas.applySettings, "
     "pick cache/mask/executor domains in the dialog, and adjust concurrency/cache spec fields grouped by domain. "
-    "Cache rows report the raster work CuteCanvas prepares for rendered content while catalog signals stay UUID-based."
+    "Cache rows report the raster work CuteCanvas prepares for rendered content."
 )
 
 OVERLAY_HOOK_CHAPTER = (
@@ -96,7 +93,7 @@ CUSTOM_OVERLAY_DISABLED = "Custom overlay removed."
 CUSTOM_OVERLAY_APPLIED = "Custom overlay applied and repainted."
 
 CUSTOM_OVERLAY_EDITOR_HINT = (
-    "This editor demonstrates an OverlayState-aware overlay hook for the base catalog image. "
+    "This editor demonstrates an OverlayState-aware overlay hook for displayed content. "
     "Define draw_overlay(painter, state) and click Apply to repaint the qpane; "
     "state.source_image is the resolved base raster, not a flattened mask export."
 )
@@ -114,13 +111,13 @@ LENS_EDITOR_HINT = (
 )
 
 EXTENSION_CHECKLIST = (
-    "Extend the demo by adding actions, catalog snapshot rows, config fields, "
+    "Extend the demo by adding actions, composition controls, config fields, "
     "or hook examples that use CuteCanvas.registerTool, CuteCanvas.registerOverlay, and "
     "CuteCanvas.registerCursorProvider."
 )
 
 PARITY_MAP = (
-    "The main demo window is ExampleWindow, with catalog, config, and hook "
+    "The main demo window is ExampleWindow, with composition, config, and hook "
     "helpers split into small modules. Launch it with examples/cutecanvas_demo.py or the "
     "provided launch scripts."
 )
@@ -130,13 +127,12 @@ def reference_hints(mask_enabled: bool, sam_enabled: bool) -> list[str]:
     """Return the shortcut hints displayed in the quick-reference dialog."""
     hints = [
         "Ctrl+O or right-click: load images",
-        "File -> Set Placeholder: pick the fallback image shown when the gallery is empty",
         "Left/Right, A/D, or arrow toolbar buttons: switch compositions",
-        "Delete: remove current image",
+        "Close All: close every removable composition",
         "Zoom field: double-click to edit, enter a percent (for example, 125%), press Enter",
         "Zoom toggle: click Set Fit / Set 1:1 to switch zoom presets",
-        "Browser panel: switch between Compositions and Catalog; Catalog supports Ctrl/Shift-click for linked views and masks",
-        "View -> Compare Next: reveal the next image over the current composition; drag the image boundary to move the split",
+        "Layers panel: switch compositions, select layers, toggle visibility, and drag rows to reorder",
+        "Place Composition: reference another open composition as a live nested layer",
     ]
     if mask_enabled:
         hints.extend(
@@ -145,7 +141,7 @@ def reference_hints(mask_enabled: bool, sam_enabled: bool) -> list[str]:
                 "Load Mask: import layers from external files",
                 "Digits 1-0: activate mask slots",
                 "Mask Up/Down: rotate the mask stack",
-                "Catalog mask rows: right-click to recolor or delete",
+                "Mask layer rows: right-click to recolor or delete",
             ]
         )
     if mask_enabled and sam_enabled:

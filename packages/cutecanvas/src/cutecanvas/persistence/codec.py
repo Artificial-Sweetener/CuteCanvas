@@ -27,7 +27,6 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor
-from qpane.sdk.catalog import CatalogImageReference
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     qimage_to_numpy_argb32,
@@ -40,7 +39,6 @@ from qpane.sdk.scene import (
     LayerTransform,
     RasterBounds,
 )
-from qpane.sdk.types import ComparisonOrientation
 from qpane.sdk.vector import VectorDocument, VectorObject
 
 from cutecanvas.coverage import (
@@ -52,28 +50,28 @@ from cutecanvas.types import RasterExtentPolicy
 
 from ..composition.layers import CompositionLayerInstance, instance_resources
 from ..composition.model import (
-    CompositionComparison,
     CompositionDocumentPolicy,
     CompositionOrigin,
     CompositionRecord,
 )
-from ..masks.source_reference import MaskAssetReference
 from ..placed.model import (
     FileFingerprint,
     PlacedAssetMode,
     PlacedAssetSnapshot,
     PlacedAssetStatus,
 )
-from ..placed.source_reference import PlacedAssetReference
 from ..raster.color_surface import ColorRasterSnapshot
-from ..raster.source_reference import EditableRasterReference
 from ..raster.sparse_grid import (
     SparseRasterGrid,
     SparseRasterSnapshot,
     SparseRasterTile,
 )
+from ..resources import (
+    ProjectResourceKind,
+    ProjectResourceRecord,
+    ProjectResourceReference,
+)
 from ..vector.effects import VectorMaskEffect
-from ..vector.source_reference import VectorDocumentReference
 from .coverage_codec import (
     decode_coverage_document,
     encode_coverage_document,
@@ -84,8 +82,8 @@ from .model import CompositionArchiveSnapshot
 from .vector_object_codec import decode_vector_object, encode_vector_object
 
 _FORMAT = "qpane-composition"
-_VERSION = 9
-_MIGRATABLE_VERSIONS = frozenset({2, 3, 4, 5, 6, 7, 8, _VERSION})
+_VERSION = 11
+_MIGRATABLE_VERSIONS = frozenset({2, 3, 4, 5, 6, 7, 8, 9, 10, _VERSION})
 _MAX_RASTER_PIXELS = 268_435_456
 _MAX_COLOR_RASTER_BYTES = _MAX_RASTER_PIXELS * 4
 _MAX_VECTOR_OBJECTS = 100_000
@@ -176,9 +174,18 @@ class CompositionArchiveCodec:
         return {
             "format": _FORMAT,
             "version": _VERSION,
-            "document": CompositionArchiveCodec._encode_document(archive.document),
-            "instances": [
-                CompositionArchiveCodec._encode_layer(layer) for layer in archive.layers
+            "root_document_id": str(archive.root_document_id),
+            "documents": [
+                {
+                    "document": CompositionArchiveCodec._encode_document(
+                        archive.documents[document_id]
+                    ),
+                    "instances": [
+                        CompositionArchiveCodec._encode_layer(layer)
+                        for layer in archive.layer_stacks[document_id]
+                    ],
+                }
+                for document_id in sorted(archive.documents, key=str)
             ],
             "resources": CompositionArchiveCodec._encode_resources(archive),
         }
@@ -187,7 +194,6 @@ class CompositionArchiveCodec:
     def _encode_document(document: CompositionRecord) -> dict[str, object]:
         """Encode composition-owned document values independently of resources."""
         bounds = document.canvas_bounds
-        comparison = document.comparison
         return {
             "composition_id": str(document.composition_id),
             "origin": document.origin.value,
@@ -198,32 +204,8 @@ class CompositionArchiveCodec:
                 bounds.width(),
                 bounds.height(),
             ],
-            "navigation_image_id": (
-                None
-                if document.navigation_image_id is None
-                else str(document.navigation_image_id)
-            ),
-            "comparison": (
-                None
-                if comparison is None
-                else {
-                    "source_id": str(comparison.source_id),
-                    "source_path": (
-                        None
-                        if comparison.source_path is None
-                        else str(comparison.source_path)
-                    ),
-                    "source_kind": comparison.source_kind,
-                    "split_position": comparison.split_position,
-                    "orientation": comparison.orientation.value,
-                }
-            ),
             "policy": {
                 "removable": document.policy.removable,
-                "comparison_enabled": document.policy.comparison_enabled,
-                "remove_if_catalog_resource_missing": (
-                    document.policy.remove_if_catalog_resource_missing
-                ),
             },
         }
 
@@ -233,30 +215,30 @@ class CompositionArchiveCodec:
     ) -> list[dict[str, object]]:
         """Return one deduplicated resource-table entry per referenced source."""
         resources: list[dict[str, object]] = []
-        observed: set[tuple[str, uuid.UUID]] = set()
-        for layer in archive.layers:
-            for source in instance_resources(layer):
-                key = (source.kind, source.resource_id)
-                if key in observed:
-                    continue
-                observed.add(key)
-                entry: dict[str, object] = {
-                    "kind": source.kind,
-                    "resource_id": str(source.resource_id),
-                }
-                if isinstance(source, MaskAssetReference):
-                    snapshot = archive.masks[source.mask_id]
-                    entry["payload"] = _coverage_manifest(source.mask_id, snapshot)
-                elif isinstance(source, EditableRasterReference):
-                    snapshot = archive.rasters[source.raster_id]
-                    entry["payload"] = _raster_manifest(source.raster_id, snapshot)
-                elif isinstance(source, PlacedAssetReference):
-                    snapshot = archive.placed_assets[source.asset_id]
-                    entry["payload"] = _placed_manifest(source.asset_id, snapshot)
-                elif isinstance(source, VectorDocumentReference):
-                    document = archive.vectors[source.vector_id]
-                    entry["payload"] = _vector_manifest(document)
-                resources.append(entry)
+        for resource_id in sorted(archive.resources, key=str):
+            record = archive.resources[resource_id]
+            entry = _project_resource_manifest(record)
+            if record.kind is ProjectResourceKind.COVERAGE:
+                entry["payload"] = _coverage_manifest(
+                    resource_id,
+                    archive.masks[resource_id],
+                )
+            elif record.kind is ProjectResourceKind.RASTER:
+                entry["payload"] = _raster_manifest(
+                    resource_id,
+                    archive.rasters[resource_id],
+                )
+            elif record.kind in {
+                ProjectResourceKind.IMPORTED_RASTER,
+                ProjectResourceKind.LINKED_RASTER,
+            }:
+                entry["payload"] = _placed_manifest(
+                    resource_id,
+                    archive.placed_assets[resource_id],
+                )
+            elif record.kind is ProjectResourceKind.VECTOR:
+                entry["payload"] = _vector_manifest(archive.vectors[resource_id])
+            resources.append(entry)
         return resources
 
     @staticmethod
@@ -409,12 +391,43 @@ class CompositionArchiveCodec:
             for raster_id, item in raster_items.items()
         }
         return CompositionArchiveSnapshot(
-            cls._legacy_document(image_id, image_id, layers, masks, rasters, {}),
-            layers,
-            masks,
-            rasters,
-            {},
-            {},
+            root_document_id=image_id,
+            documents={
+                image_id: cls._legacy_document(
+                    image_id,
+                    image_id,
+                    layers,
+                    masks,
+                    rasters,
+                    {},
+                )
+            },
+            layer_stacks={image_id: layers},
+            resources={
+                **{
+                    raster_id: ProjectResourceRecord(
+                        raster_id,
+                        ProjectResourceKind.RASTER,
+                        True,
+                    )
+                    for raster_id in rasters
+                },
+                image_id: ProjectResourceRecord(
+                    image_id,
+                    ProjectResourceKind.COMPOSITION,
+                    True,
+                    dependencies=frozenset(
+                        source.resource_id
+                        for layer in layers
+                        for source in instance_resources(layer)
+                        if isinstance(source, ProjectResourceReference)
+                    ),
+                ),
+            },
+            masks=masks,
+            rasters=rasters,
+            placed_assets={},
+            vectors={},
         )
 
     @classmethod
@@ -426,7 +439,32 @@ class CompositionArchiveCodec:
         version: int,
     ) -> CompositionArchiveSnapshot:
         """Decode one validated current resource-table manifest."""
-        instance_items = manifest["instances"]
+        document_records: dict[uuid.UUID, CompositionRecord] = {}
+        document_layers: dict[
+            uuid.UUID,
+            tuple[CompositionLayerInstance, ...],
+        ] = {}
+        if version >= 11:
+            document_items = manifest["documents"]
+            assert isinstance(document_items, list)
+            for item in document_items:
+                if not isinstance(item, dict):
+                    raise TypeError("archive document entries must be objects")
+                document = cls._decode_document(item.get("document"))
+                instances = item.get("instances")
+                if not isinstance(instances, list):
+                    raise TypeError("archive document instances must be a list")
+                if document.composition_id in document_records:
+                    raise ValueError("archive document identities must be unique")
+                document_records[document.composition_id] = document
+                document_layers[document.composition_id] = tuple(
+                    cls._decode_layer(layer) for layer in instances
+                )
+            instance_items = [
+                layer for item in document_items for layer in item["instances"]
+            ]
+        else:
+            instance_items = manifest["instances"]
         resource_items = manifest["resources"]
         assert isinstance(instance_items, list)
         assert isinstance(resource_items, list)
@@ -435,6 +473,7 @@ class CompositionArchiveCodec:
         rasters: dict[uuid.UUID, SparseRasterSnapshot] = {}
         placed_assets: dict[uuid.UUID, PlacedAssetSnapshot] = {}
         vectors: dict[uuid.UUID, VectorDocument] = {}
+        project_resources: dict[uuid.UUID, ProjectResourceRecord] = {}
         resource_keys: set[tuple[str, uuid.UUID]] = set()
         for item in resource_items:
             if not isinstance(item, dict):
@@ -445,53 +484,122 @@ class CompositionArchiveCodec:
             if key in resource_keys:
                 raise ValueError("archive resource identities must be unique")
             resource_keys.add(key)
-            source = _decode_source_reference(kind, resource_id)
             payload = item.get("payload")
-            if isinstance(source, MaskAssetReference):
+            if kind in {"mask", ProjectResourceKind.COVERAGE.value}:
                 masks[resource_id] = cls._decode_mask(
                     container,
                     str(resource_id),
                     payload,
                     retained=version >= 9,
                 )
-            elif isinstance(source, EditableRasterReference):
+                project_resources[resource_id] = _decode_project_resource(
+                    item,
+                    resource_id,
+                    ProjectResourceKind.COVERAGE,
+                    editable=True,
+                    current=version >= 10 and kind != "mask",
+                )
+            elif kind == "raster":
                 rasters[resource_id] = cls._decode_raster(
                     container, str(resource_id), payload
                 )
-            elif isinstance(source, PlacedAssetReference):
-                placed_assets[resource_id] = cls._decode_placed(
+                project_resources[resource_id] = _decode_project_resource(
+                    item,
+                    resource_id,
+                    ProjectResourceKind.RASTER,
+                    editable=True,
+                    current=version >= 10,
+                )
+            elif kind in {"placed-asset", "imported-raster", "linked-raster"}:
+                placed = cls._decode_placed(
                     container,
                     str(resource_id),
                     payload,
                 )
-            elif isinstance(source, VectorDocumentReference):
+                placed_assets[resource_id] = placed
+                legacy_kind = (
+                    ProjectResourceKind.LINKED_RASTER
+                    if placed.mode is PlacedAssetMode.LINKED
+                    else ProjectResourceKind.IMPORTED_RASTER
+                )
+                project_resources[resource_id] = _decode_project_resource(
+                    item,
+                    resource_id,
+                    (
+                        ProjectResourceKind(kind)
+                        if kind != "placed-asset"
+                        else legacy_kind
+                    ),
+                    editable=False,
+                    current=version >= 10,
+                )
+            elif kind == "vector":
                 vectors[resource_id] = cls._decode_vector(resource_id, payload)
-            elif payload is not None:
-                raise ValueError("catalog resources must not contain payloads")
-        referenced_keys = {
-            (layer.source.kind, layer.source.resource_id) for layer in layers
-        }
-        if referenced_keys != resource_keys:
-            raise ValueError("archive instances and resource table must match")
-        document = (
-            cls._decode_document(manifest.get("document"))
-            if version >= 8
-            else cls._legacy_document(
-                uuid.UUID(str(manifest["composition_id"])),
-                uuid.UUID(str(manifest["base_image_id"])),
-                layers,
-                masks,
-                rasters,
-                vectors,
-            )
-        )
-        return CompositionArchiveSnapshot(
-            document,
+                project_resources[resource_id] = _decode_project_resource(
+                    item,
+                    resource_id,
+                    ProjectResourceKind.VECTOR,
+                    editable=True,
+                    current=version >= 10,
+                )
+            elif kind == ProjectResourceKind.COMPOSITION.value:
+                if payload is not None:
+                    raise ValueError("composition resources must not contain payloads")
+                project_resources[resource_id] = _decode_project_resource(
+                    item,
+                    resource_id,
+                    ProjectResourceKind.COMPOSITION,
+                    editable=True,
+                    current=version >= 10,
+                )
+            else:
+                raise ValueError(f"unsupported project resource kind: {kind}")
+        _validate_resource_table_references(
             layers,
-            masks,
-            rasters,
-            placed_assets,
-            vectors,
+            resource_keys,
+            project_resources,
+        )
+        if version >= 11:
+            root_document_id = uuid.UUID(str(manifest["root_document_id"]))
+            documents = document_records
+            layer_stacks = document_layers
+        else:
+            document = (
+                cls._decode_document(manifest.get("document"))
+                if version >= 8
+                else cls._legacy_document(
+                    uuid.UUID(str(manifest["composition_id"])),
+                    uuid.UUID(str(manifest["base_image_id"])),
+                    layers,
+                    masks,
+                    rasters,
+                    vectors,
+                )
+            )
+            root_document_id = document.composition_id
+            documents = {root_document_id: document}
+            layer_stacks = {root_document_id: layers}
+            project_resources[root_document_id] = ProjectResourceRecord(
+                root_document_id,
+                ProjectResourceKind.COMPOSITION,
+                True,
+                dependencies=frozenset(
+                    source.resource_id
+                    for layer in layers
+                    for source in instance_resources(layer)
+                    if isinstance(source, ProjectResourceReference)
+                    and source.resource_id != root_document_id
+                ),
+            )
+        return CompositionArchiveSnapshot(
+            root_document_id=root_document_id,
+            documents=documents,
+            layer_stacks=layer_stacks,
+            resources=project_resources,
+            masks=masks,
+            rasters=rasters,
+            placed_assets=placed_assets,
+            vectors=vectors,
         )
 
     @staticmethod
@@ -502,45 +610,23 @@ class CompositionArchiveCodec:
         bounds_values = item.get("canvas_bounds")
         if not isinstance(bounds_values, list) or len(bounds_values) != 4:
             raise ValueError("document canvas_bounds must contain four values")
-        comparison_item = item.get("comparison")
-        comparison = None
-        if comparison_item is not None:
-            if not isinstance(comparison_item, dict):
-                raise TypeError("document comparison must be an object or null")
-            source_path = comparison_item.get("source_path")
-            comparison = CompositionComparison(
-                source_id=uuid.UUID(str(comparison_item["source_id"])),
-                source_path=None if source_path is None else Path(str(source_path)),
-                source_kind=str(comparison_item["source_kind"]),
-                split_position=float(comparison_item["split_position"]),
-                orientation=ComparisonOrientation(str(comparison_item["orientation"])),
-            )
         policy_item = item.get("policy")
         if not isinstance(policy_item, dict):
             raise TypeError("document policy must be an object")
-        navigation_id = item.get("navigation_image_id")
         return CompositionRecord(
             composition_id=uuid.UUID(str(item["composition_id"])),
-            origin=CompositionOrigin(str(item["origin"])),
+            origin=CompositionOrigin.COMPOSITION,
             title=str(item["title"]),
             canvas_bounds=QRectF(*(float(value) for value in bounds_values)),
-            navigation_image_id=(
-                None if navigation_id is None else uuid.UUID(str(navigation_id))
-            ),
-            comparison=comparison,
             policy=CompositionDocumentPolicy(
                 removable=bool(policy_item["removable"]),
-                comparison_enabled=bool(policy_item["comparison_enabled"]),
-                remove_if_catalog_resource_missing=bool(
-                    policy_item["remove_if_catalog_resource_missing"]
-                ),
             ),
         )
 
     @staticmethod
     def _legacy_document(
         composition_id: uuid.UUID,
-        base_image_id: uuid.UUID,
+        _base_image_id: uuid.UUID,
         layers: tuple[CompositionLayerInstance, ...],
         masks: dict[uuid.UUID, CoverageAssetSnapshot],
         rasters: dict[uuid.UUID, SparseRasterSnapshot],
@@ -550,14 +636,20 @@ class CompositionArchiveCodec:
         placements = []
         for layer in layers:
             bounds = None
-            if isinstance(layer.source, MaskAssetReference):
-                snapshot = masks.get(layer.source.mask_id)
+            if (
+                isinstance(layer.source, ProjectResourceReference)
+                and layer.source.resource_id in masks
+            ):
+                snapshot = masks.get(layer.source.resource_id)
                 bounds = None if snapshot is None else snapshot.raster.bounds
-            elif isinstance(layer.source, EditableRasterReference):
-                snapshot = rasters.get(layer.source.raster_id)
+            elif isinstance(layer.source, ProjectResourceReference):
+                snapshot = rasters.get(layer.source.resource_id)
                 bounds = None if snapshot is None else snapshot.bounds
-            elif isinstance(layer.source, VectorDocumentReference):
-                document = vectors.get(layer.source.vector_id)
+            elif (
+                isinstance(layer.source, ProjectResourceReference)
+                and layer.source.resource_id in vectors
+            ):
+                document = vectors.get(layer.source.resource_id)
                 bounds = None if document is None else document.bounds
             if bounds is not None:
                 placements.append(layer.transform.map_bounds(bounds))
@@ -571,10 +663,9 @@ class CompositionArchiveCodec:
             canvas = QRectF(0.0, 0.0, 1.0, 1.0)
         return CompositionRecord(
             composition_id=composition_id,
-            origin=CompositionOrigin.DEFAULT_IMAGE,
+            origin=CompositionOrigin.COMPOSITION,
             title="Migrated composition",
             canvas_bounds=canvas,
-            navigation_image_id=base_image_id,
         )
 
     @staticmethod
@@ -858,11 +949,16 @@ class CompositionArchiveCodec:
             if not isinstance(manifest.get("rasters", {}), dict):
                 raise TypeError("archive rasters must be an object")
         else:
-            if not isinstance(manifest.get("instances"), list):
-                raise TypeError("archive instances must be a list")
             if not isinstance(manifest.get("resources"), list):
                 raise TypeError("archive resources must be a list")
-            if version >= 8 and not isinstance(manifest.get("document"), dict):
+            if version >= 11:
+                if not isinstance(manifest.get("documents"), list):
+                    raise TypeError("archive documents must be a list")
+                if not isinstance(manifest.get("root_document_id"), str):
+                    raise TypeError("archive root_document_id must be a string")
+            elif not isinstance(manifest.get("instances"), list):
+                raise TypeError("archive instances must be a list")
+            if 8 <= version < 11 and not isinstance(manifest.get("document"), dict):
                 raise TypeError("archive document must be an object")
         return int(version)
 
@@ -870,49 +966,146 @@ class CompositionArchiveCodec:
     def _validate_references(archive: CompositionArchiveSnapshot) -> None:
         """Require one base image and exact mask payload references."""
         mask_ids = {
-            layer.source.mask_id
-            for layer in archive.layers
-            if isinstance(layer.source, MaskAssetReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind is ProjectResourceKind.COVERAGE
         }
         if mask_ids != set(archive.masks):
             raise ValueError("archive mask sources and payloads must match")
         raster_ids = {
-            layer.source.raster_id
-            for layer in archive.layers
-            if isinstance(layer.source, EditableRasterReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind is ProjectResourceKind.RASTER
         }
         if raster_ids != set(archive.rasters):
             raise ValueError("archive raster sources and payloads must match")
         placed_ids = {
-            layer.source.asset_id
-            for layer in archive.layers
-            if isinstance(layer.source, PlacedAssetReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind
+            in {
+                ProjectResourceKind.IMPORTED_RASTER,
+                ProjectResourceKind.LINKED_RASTER,
+            }
         }
         if placed_ids != set(archive.placed_assets):
             raise ValueError("archive placed sources and payloads must match")
         vector_ids = {
-            source.vector_id
-            for layer in archive.layers
-            for source in instance_resources(layer)
-            if isinstance(source, VectorDocumentReference)
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind is ProjectResourceKind.VECTOR
         }
         if vector_ids != set(archive.vectors):
             raise ValueError("archive vector sources and payloads must match")
+        referenced_project_ids = {
+            source.resource_id
+            for layers in archive.layer_stacks.values()
+            for layer in layers
+            for source in instance_resources(layer)
+            if isinstance(source, ProjectResourceReference)
+        }
+        if not referenced_project_ids.issubset(archive.resources):
+            raise ValueError("archive project-resource sources require records")
+        composition_ids = {
+            resource_id
+            for resource_id, resource in archive.resources.items()
+            if resource.kind is ProjectResourceKind.COMPOSITION
+        }
+        if composition_ids != set(archive.documents):
+            raise ValueError("archive composition resources and documents must match")
 
 
 def _decode_source_reference(kind: str, resource_id: uuid.UUID) -> LayerSourceReference:
     """Decode one version-2 source reference through known domain values."""
     constructors = {
-        "catalog-image": CatalogImageReference,
-        "mask": MaskAssetReference,
-        "raster": EditableRasterReference,
-        "placed-asset": PlacedAssetReference,
-        "vector": VectorDocumentReference,
+        "mask": ProjectResourceReference,
+        "project-resource": ProjectResourceReference,
+        "raster": ProjectResourceReference,
+        "placed-asset": ProjectResourceReference,
+        "imported-raster": ProjectResourceReference,
+        "linked-raster": ProjectResourceReference,
+        "vector": ProjectResourceReference,
     }
     constructor = constructors.get(kind)
     if constructor is None:
         raise ValueError(f"unsupported layer source kind: {kind}")
     return constructor(resource_id)
+
+
+def _project_resource_manifest(
+    record: ProjectResourceRecord,
+) -> dict[str, object]:
+    """Return one authoritative project-resource record manifest."""
+    return {
+        "kind": record.kind.value,
+        "resource_id": str(record.resource_id),
+        "editable": record.editable,
+        "revision": record.revision,
+        "dependencies": [
+            str(resource_id) for resource_id in sorted(record.dependencies, key=str)
+        ],
+    }
+
+
+def _decode_project_resource(
+    item: dict[str, object],
+    resource_id: uuid.UUID,
+    kind: ProjectResourceKind,
+    *,
+    editable: bool,
+    current: bool,
+) -> ProjectResourceRecord:
+    """Decode one current record or synthesize legacy resource metadata."""
+    if not current:
+        return ProjectResourceRecord(resource_id, kind, editable)
+    dependencies = item.get("dependencies", [])
+    if not isinstance(dependencies, list):
+        raise TypeError("project resource dependencies must be a list")
+    return ProjectResourceRecord(
+        resource_id,
+        kind,
+        bool(item.get("editable", editable)),
+        revision=int(item.get("revision", 0)),
+        dependencies=frozenset(uuid.UUID(str(value)) for value in dependencies),
+    )
+
+
+def _validate_resource_table_references(
+    layers: tuple[CompositionLayerInstance, ...],
+    resource_keys: set[tuple[str, uuid.UUID]],
+    project_resources: dict[uuid.UUID, ProjectResourceRecord],
+) -> None:
+    """Require every instance source while allowing dependency-only resources."""
+    expected_non_project = {
+        (source.kind, source.resource_id)
+        for layer in layers
+        for source in instance_resources(layer)
+        if not isinstance(source, ProjectResourceReference)
+    }
+    actual_non_project = {
+        key
+        for key in resource_keys
+        if key[0]
+        not in {
+            ProjectResourceKind.RASTER.value,
+            ProjectResourceKind.IMPORTED_RASTER.value,
+            ProjectResourceKind.LINKED_RASTER.value,
+            ProjectResourceKind.COVERAGE.value,
+            ProjectResourceKind.COMPOSITION.value,
+            ProjectResourceKind.VECTOR.value,
+            "placed-asset",
+        }
+    }
+    if expected_non_project != actual_non_project:
+        raise ValueError("archive instances and resource table must match")
+    referenced_project = {
+        source.resource_id
+        for layer in layers
+        for source in instance_resources(layer)
+        if isinstance(source, ProjectResourceReference)
+    }
+    if not referenced_project.issubset(project_resources):
+        raise ValueError("archive project-resource instances must have records")
 
 
 def _coverage_manifest(
@@ -1100,14 +1293,17 @@ def _decode_effect(item: object) -> VectorMaskEffect:
     source = item.get("source")
     transform = item.get("transform")
     object_ids = item.get("object_ids", [])
-    if not isinstance(source, dict) or source.get("kind") != "vector":
+    if not isinstance(source, dict) or source.get("kind") not in {
+        "project-resource",
+        "vector",
+    }:
         raise ValueError("vector masks require a vector source")
     if not isinstance(transform, list) or len(transform) != 6:
         raise ValueError("vector mask transforms must contain six values")
     if not isinstance(object_ids, list):
         raise TypeError("vector mask object IDs must be a list")
     return VectorMaskEffect(
-        VectorDocumentReference(uuid.UUID(str(source["resource_id"]))),
+        ProjectResourceReference(uuid.UUID(str(source["resource_id"]))),
         LayerTransform(*(float(value) for value in transform)),
         tuple(uuid.UUID(str(value)) for value in object_ids),
         bool(item.get("inverted", False)),

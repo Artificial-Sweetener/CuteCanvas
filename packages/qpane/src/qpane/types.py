@@ -23,14 +23,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
 
 from PySide6.QtCore import QLineF, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QTransform
 
 __all__ = [
     "CacheMode",
-    "CatalogEntry",
     "ComparisonDividerState",
     "ComparisonOrientation",
     "ComparisonState",
@@ -84,14 +82,6 @@ class ComparisonOrientation(str, Enum):
 
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
-
-
-@dataclass(frozen=True, slots=True)
-class CatalogEntry:
-    """Structured catalog entry containing image data and an optional path."""
-
-    image: QImage
-    path: Path | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,12 +204,3 @@ class SceneSnapshotOverlayState:
         )
         object.__setattr__(self, "scene_bounds", QRectF(self.scene_bounds))
         object.__setattr__(self, "layers", tuple(self.layers))
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve catalog mutation values lazily to avoid a catalog cycle."""
-    if name == "CatalogMutationEvent":
-        from .catalog.catalog import CatalogMutationEvent
-
-        return CatalogMutationEvent
-    raise AttributeError(f"module {__name__!s} has no attribute {name}")

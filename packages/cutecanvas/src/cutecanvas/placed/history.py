@@ -21,9 +21,8 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ..composition.layers import CompositionLayerStore
+from ..resources import ProjectResourceReference
 from .model import PlacedAssetSnapshot
-from .source_reference import PlacedAssetReference
 from .store import PlacedAssetStore
 
 
@@ -42,9 +41,9 @@ class PlacedAssetEdit:
         return _image_bytes(self.before) + _image_bytes(self.after) + 512
 
     @property
-    def retained_resources(self) -> tuple[PlacedAssetReference, ...]:
+    def retained_resources(self) -> tuple[ProjectResourceReference, ...]:
         """Keep the edited placed source alive while chronology references it."""
-        return (PlacedAssetReference(self.asset_id),)
+        return (ProjectResourceReference(self.asset_id),)
 
 
 class PlacedAssetEditOwner:
@@ -53,12 +52,10 @@ class PlacedAssetEditOwner:
     def __init__(
         self,
         assets: PlacedAssetStore,
-        layers: CompositionLayerStore,
         changed: Callable[[uuid.UUID], None],
     ) -> None:
-        """Bind source storage, source revision fan-out, and publication."""
+        """Bind source storage and composition publication."""
         self._assets = assets
-        self._layers = layers
         self._changed = changed
 
     def undo(self, command: object) -> bool:
@@ -77,7 +74,6 @@ class PlacedAssetEditOwner:
             command.asset_id,
             command.after if use_after else command.before,
         )
-        self._layers.advance_source_revision(PlacedAssetReference(command.asset_id))
         self._changed(command.scope_id)
         return True
 

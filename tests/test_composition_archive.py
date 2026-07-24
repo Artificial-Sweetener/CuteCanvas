@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import uuid
 import zipfile
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
@@ -57,7 +57,6 @@ from cutecanvas.coverage import (
     VectorCoverageItem,
 )
 from cutecanvas.masks.mask import MaskAssetStore
-from cutecanvas.masks.source_reference import MaskAssetReference
 from cutecanvas.painting import BrushStrokeSegment
 from cutecanvas.persistence import (
     CompositionArchiveCodec,
@@ -65,18 +64,15 @@ from cutecanvas.persistence import (
     capture_composition,
 )
 from cutecanvas.placed.model import FileFingerprint, PlacedAssetStatus
-from cutecanvas.placed.source_reference import PlacedAssetReference
 from cutecanvas.placed.store import PlacedAssetStore
 from cutecanvas.raster.assets import EditableRasterAssetStore
-from cutecanvas.raster.source_reference import EditableRasterReference
+from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
+from cutecanvas.resources.composition_resources import CompositionResourceOwner
 from cutecanvas.vector.effects import VectorMaskEffect
-from cutecanvas.vector.source_reference import VectorDocumentReference
 from cutecanvas.vector.store import VectorAssetStore
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QImage
-from qpane.catalog.source_reference import CatalogImageReference
 from qpane.scene.affine import LayerTransform
-from qpane.scene.identity import base_image_layer_id
 from qpane.scene.model import LayerInteractionPolicy, LayerPlacement
 from qpane.scene.raster import RasterBounds
 from qpane.vector.model import VectorObject
@@ -103,8 +99,32 @@ class _FailingOnceLayerStore(CompositionLayerStore):
             raise RuntimeError("injected layer publication failure")
 
 
+@dataclass(frozen=True, slots=True)
+class _ArchiveOwners:
+    """Group payload owners sharing one authoritative project-resource graph."""
+
+    resources: ProjectResourceStore
+    masks: MaskAssetStore
+    rasters: EditableRasterAssetStore
+    placed_assets: PlacedAssetStore
+    vectors: VectorAssetStore
+
+
+def _resource_owners() -> _ArchiveOwners:
+    """Return every persistence owner over one authoritative resource graph."""
+    resources = ProjectResourceStore()
+    return _ArchiveOwners(
+        resources=resources,
+        masks=MaskAssetStore(resources),
+        rasters=EditableRasterAssetStore(resources),
+        placed_assets=PlacedAssetStore(resources),
+        vectors=VectorAssetStore(resources),
+    )
+
+
 def _ensure_default(
     layers: CompositionLayerStore,
+    placed_assets: PlacedAssetStore,
     composition_id: uuid.UUID,
     image_id: uuid.UUID,
     width: int,
@@ -113,12 +133,20 @@ def _ensure_default(
     """Create one generated composition stack for archive tests."""
     bounds = RasterBounds(0, 0, width, height)
     placement = LayerPlacement(0.0, 0.0, float(width), float(height))
+    image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+    image.fill(QColor(30, 60, 90, 255))
+    resource_id = (
+        uuid.uuid5(composition_id, "archive-base")
+        if image_id == composition_id
+        else image_id
+    )
+    placed_assets.create_embedded(image, asset_id=resource_id)
     layers.ensure_composition(
         composition_id,
         (
             CompositionLayerInstance(
-                layer_id=base_image_layer_id(image_id),
-                source=CatalogImageReference(image_id),
+                layer_id=uuid.uuid5(resource_id, "archive-layer"),
+                source=ProjectResourceReference(resource_id),
                 transform=LayerTransform.from_placement(bounds, placement),
                 role="base-image",
             ),
@@ -143,13 +171,19 @@ def _document(
 def _composition_owner(
     layers: CompositionLayerStore,
     document: CompositionRecord,
+    resources: ProjectResourceStore,
 ) -> CompositionService:
     """Bind a characterized layer store to its document owner for restoration."""
-    service = CompositionService()
+    document_resources = CompositionResourceOwner(resources)
+    service = CompositionService(document_resources=document_resources)
     service._layers = layers
     service._records[document.composition_id] = document
     service._order.append(document.composition_id)
     service._active_id = document.composition_id
+    document_resources.synchronize(
+        document.composition_id,
+        layers.layers_for_composition(document.composition_id),
+    )
     return service
 
 
@@ -163,18 +197,19 @@ def test_empty_document_round_trips_canvas_policy_and_empty_stack(tmp_path) -> N
         canvas_bounds=QRectF(-32.0, 18.0, 4096.0, 2160.0),
         policy=CompositionDocumentPolicy(
             removable=False,
-            comparison_enabled=False,
         ),
     )
     layers = CompositionLayerStore(CompositionResourceLifetime())
     layers.ensure_composition(composition_id, ())
+    owners = _resource_owners()
+    compositions = _composition_owner(layers, document, owners.resources)
     archive = capture_composition(
-        document,
-        layers,
-        MaskAssetStore(),
-        EditableRasterAssetStore(),
-        PlacedAssetStore(),
-        VectorAssetStore(),
+        composition_id,
+        compositions,
+        owners.masks,
+        owners.rasters,
+        owners.placed_assets,
+        owners.vectors,
     )
     path = tmp_path / "empty.qpane"
     codec = CompositionArchiveCodec()
@@ -182,15 +217,18 @@ def test_empty_document_round_trips_canvas_policy_and_empty_stack(tmp_path) -> N
     codec.write(archive, path)
     decoded = codec.read(path)
 
-    assert decoded.document == document
-    assert decoded.layers == ()
-    restored = CompositionService()
+    assert decoded.documents[composition_id] == document
+    assert decoded.layer_stacks[composition_id] == ()
+    restored_owners = _resource_owners()
+    restored = CompositionService(
+        document_resources=CompositionResourceOwner(restored_owners.resources)
+    )
     CompositionArchiveRestorer(
         compositions=restored,
-        masks=MaskAssetStore(),
-        rasters=EditableRasterAssetStore(),
-        placed_assets=PlacedAssetStore(),
-        vectors=VectorAssetStore(),
+        masks=restored_owners.masks,
+        rasters=restored_owners.rasters,
+        placed_assets=restored_owners.placed_assets,
+        vectors=restored_owners.vectors,
     ).restore(decoded)
     assert restored.record(composition_id) == document
     assert restored.layers.layers_for_composition(composition_id) == ()
@@ -201,11 +239,12 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
 ) -> None:
     """Every durable authoring value should survive a private archive round trip."""
     image_id = uuid.uuid4()
+    owners = _resource_owners()
     layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(layers, image_id, image_id, 8, 6)
-    masks = MaskAssetStore()
-    rasters = EditableRasterAssetStore()
-    placed_assets = PlacedAssetStore()
+    _ensure_default(layers, owners.placed_assets, image_id, image_id, 8, 6)
+    masks = owners.masks
+    rasters = owners.rasters
+    placed_assets = owners.placed_assets
     mask_id = masks.create_mask(QImage(8, 6, QImage.Format_Grayscale8))
     mask = masks.get_layer(mask_id)
     assert mask is not None
@@ -215,7 +254,7 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     mask.coverage.raster.mutate(lambda pixels, _image: pixels.__setitem__((1, 1), 217))
     mask_instance = CompositionLayerInstance(
         layer_id=uuid.uuid4(),
-        source=MaskAssetReference(mask_id),
+        source=ProjectResourceReference(mask_id),
         transform=LayerTransform(dx=12.0, dy=-4.0),
         opacity=0.35,
         tint=QColor(12, 34, 56, 200),
@@ -235,7 +274,7 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     expected_raster_pixels = raster.surface.snapshot().pixels
     raster_instance = CompositionLayerInstance(
         layer_id=uuid.uuid4(),
-        source=EditableRasterReference(raster.raster_id),
+        source=ProjectResourceReference(raster.raster_id),
         transform=LayerTransform(
             m11=-0.75,
             m12=0.2,
@@ -274,50 +313,68 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
 
     codec.write(
         capture_composition(
-            _document(image_id, 8, 6),
-            layers,
+            image_id,
+            _composition_owner(
+                layers,
+                _document(image_id, 8, 6),
+                owners.resources,
+            ),
             masks,
             rasters,
             placed_assets,
-            VectorAssetStore(),
+            owners.vectors,
         ),
         archive_path,
     )
     with zipfile.ZipFile(archive_path) as container:
         manifest = json.loads(container.read("manifest.json"))
-    assert manifest["version"] == 9
-    assert manifest["document"]["canvas_bounds"] == [0.0, 0.0, 8.0, 6.0]
-    assert len(manifest["instances"]) == 4
-    assert len(manifest["resources"]) == 3
-    assert all(len(instance["transform"]) == 6 for instance in manifest["instances"])
+    assert manifest["version"] == 11
+    assert manifest["documents"][0]["document"]["canvas_bounds"] == [
+        0.0,
+        0.0,
+        8.0,
+        6.0,
+    ]
+    assert len(manifest["documents"][0]["instances"]) == 4
+    assert len(manifest["resources"]) == 4
+    assert all(
+        len(instance["transform"]) == 6
+        for instance in manifest["documents"][0]["instances"]
+    )
     decoded = codec.read(archive_path)
+    restored_owners = _resource_owners()
     restored_layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(restored_layers, image_id, image_id, 8, 6)
-    restored_masks = MaskAssetStore()
-    restored_rasters = EditableRasterAssetStore()
-    restored_placed = PlacedAssetStore()
+    _ensure_default(
+        restored_layers,
+        restored_owners.placed_assets,
+        image_id,
+        image_id,
+        8,
+        6,
+    )
     CompositionArchiveRestorer(
         compositions=_composition_owner(
             restored_layers,
             _document(image_id, 8, 6),
+            restored_owners.resources,
         ),
-        masks=restored_masks,
-        rasters=restored_rasters,
-        placed_assets=restored_placed,
-        vectors=VectorAssetStore(),
+        masks=restored_owners.masks,
+        rasters=restored_owners.rasters,
+        placed_assets=restored_owners.placed_assets,
+        vectors=restored_owners.vectors,
     ).restore(decoded)
 
     assert restored_layers.layers_for_composition(
         image_id
     ) == layers.layers_for_composition(image_id)
-    restored_mask = restored_masks.get_layer(mask_id)
+    restored_mask = restored_owners.masks.get_layer(mask_id)
     assert restored_mask is not None
     restored = restored_mask.coverage.raster.snapshot()
     assert restored.bounds == expanded_bounds
     assert restored.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
     assert restored.pixels[1, 1] == 217
     assert restored.pixels.shape == (10, 13)
-    restored_raster = restored_rasters.get(raster.raster_id)
+    restored_raster = restored_owners.rasters.get(raster.raster_id)
     assert restored_raster is not None
     raster_snapshot = restored_raster.surface.snapshot()
     assert raster_snapshot.bounds == RasterBounds(-5, 7, 4, 3)
@@ -328,9 +385,17 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
 def test_archive_round_trip_preserves_hybrid_mask_authorship(tmp_path) -> None:
     """Raster, vector, and procedural mask items remain editable after restore."""
     composition_id = uuid.uuid4()
+    owners = _resource_owners()
     layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(layers, composition_id, composition_id, 64, 48)
-    masks = MaskAssetStore()
+    _ensure_default(
+        layers,
+        owners.placed_assets,
+        composition_id,
+        composition_id,
+        64,
+        48,
+    )
+    masks = owners.masks
     mask_id = masks.create_mask(QImage(64, 48, QImage.Format_Grayscale8))
     mask = masks.get_layer(mask_id)
     assert mask is not None
@@ -364,7 +429,7 @@ def test_archive_round_trip_preserves_hybrid_mask_authorship(tmp_path) -> None:
         composition_id,
         CompositionLayerInstance(
             layer_id=uuid.uuid4(),
-            source=MaskAssetReference(mask_id),
+            source=ProjectResourceReference(mask_id),
             interaction=LayerInteractionPolicy(
                 selectable=True,
                 movable=True,
@@ -377,12 +442,16 @@ def test_archive_round_trip_preserves_hybrid_mask_authorship(tmp_path) -> None:
     codec = CompositionArchiveCodec()
     codec.write(
         capture_composition(
-            _document(composition_id, 64, 48),
-            layers,
+            composition_id,
+            _composition_owner(
+                layers,
+                _document(composition_id, 64, 48),
+                owners.resources,
+            ),
             masks,
-            EditableRasterAssetStore(),
-            PlacedAssetStore(),
-            VectorAssetStore(),
+            owners.rasters,
+            owners.placed_assets,
+            owners.vectors,
         ),
         path,
     )
@@ -397,7 +466,7 @@ def test_archive_round_trip_preserves_hybrid_mask_authorship(tmp_path) -> None:
     decoded_raster = retained.items[0]
     assert isinstance(decoded_raster, RasterCoverageItem)
     np.testing.assert_array_equal(decoded_raster.coverage.pixels, raster_pixels)
-    restored = MaskAssetStore()
+    restored = MaskAssetStore(ProjectResourceStore())
     restored.restore_mask(mask_id, decoded.masks[mask_id])
     restored_layer = restored.get_layer(mask_id)
     assert restored_layer is not None
@@ -409,12 +478,11 @@ def test_archive_round_trip_preserves_hybrid_mask_authorship(tmp_path) -> None:
 def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -> None:
     """Far-apart off-canvas pixels must round-trip without encoding their gap."""
     image_id = uuid.uuid4()
+    owners = _resource_owners()
     layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(layers, image_id, image_id, 64, 48)
-    masks = MaskAssetStore()
-    rasters = EditableRasterAssetStore()
-    placed = PlacedAssetStore()
-    vectors = VectorAssetStore()
+    _ensure_default(layers, owners.placed_assets, image_id, image_id, 64, 48)
+    masks = owners.masks
+    rasters = owners.rasters
     negative = RasterBounds(-1_000_000, -1_000_000, 8, 8)
     positive = RasterBounds(1_000_000, 1_000_000, 8, 8)
 
@@ -438,7 +506,7 @@ def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -
         image_id,
         CompositionLayerInstance(
             layer_id=uuid.uuid4(),
-            source=MaskAssetReference(mask_id),
+            source=ProjectResourceReference(mask_id),
             transform=LayerTransform(),
             interaction=LayerInteractionPolicy(
                 selectable=True,
@@ -469,7 +537,7 @@ def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -
         image_id,
         CompositionLayerInstance(
             layer_id=uuid.uuid4(),
-            source=EditableRasterReference(raster.raster_id),
+            source=ProjectResourceReference(raster.raster_id),
             transform=LayerTransform(),
             interaction=LayerInteractionPolicy(
                 selectable=True,
@@ -483,12 +551,16 @@ def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -
     codec = CompositionArchiveCodec()
     codec.write(
         capture_composition(
-            _document(image_id, 64, 48),
-            layers,
+            image_id,
+            _composition_owner(
+                layers,
+                _document(image_id, 64, 48),
+                owners.resources,
+            ),
             masks,
             rasters,
-            placed,
-            vectors,
+            owners.placed_assets,
+            owners.vectors,
         ),
         archive_path,
     )
@@ -497,67 +569,35 @@ def test_archive_keeps_million_coordinate_rasters_sparse_and_durable(tmp_path) -
     assert decoded.masks[mask_id].raster.retained_bytes <= 2 * 512 * 512
     assert decoded.rasters[raster.raster_id].retained_bytes <= 2 * 512 * 512 * 4
 
+    restored_owners = _resource_owners()
     restored_layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(restored_layers, image_id, image_id, 64, 48)
-    restored_masks = MaskAssetStore()
-    restored_rasters = EditableRasterAssetStore()
+    _ensure_default(
+        restored_layers,
+        restored_owners.placed_assets,
+        image_id,
+        image_id,
+        64,
+        48,
+    )
     CompositionArchiveRestorer(
         compositions=_composition_owner(
             restored_layers,
             _document(image_id, 64, 48),
+            restored_owners.resources,
         ),
-        masks=restored_masks,
-        rasters=restored_rasters,
-        placed_assets=PlacedAssetStore(),
-        vectors=VectorAssetStore(),
+        masks=restored_owners.masks,
+        rasters=restored_owners.rasters,
+        placed_assets=restored_owners.placed_assets,
+        vectors=restored_owners.vectors,
     ).restore(decoded)
-    restored_mask = restored_masks.get_layer(mask_id)
-    restored_raster = restored_rasters.get(raster.raster_id)
+    restored_mask = restored_owners.masks.get_layer(mask_id)
+    restored_raster = restored_owners.rasters.get(raster.raster_id)
     assert restored_mask is not None
     assert restored_raster is not None
     assert np.all(restored_mask.coverage.raster.capture_region(negative) == 83)
     assert np.all(restored_mask.coverage.raster.capture_region(positive) == 197)
     assert np.all(restored_raster.surface.capture_region(negative)[:, :, 0] == 111)
     assert np.all(restored_raster.surface.capture_region(positive)[:, :, 0] == 223)
-
-
-def test_version_two_flat_archive_migrates_to_resource_snapshot(tmp_path) -> None:
-    """Existing version-2 archives must restore through the current value model."""
-    image_id = uuid.uuid4()
-    layer_id = base_image_layer_id(image_id)
-    path = tmp_path / "legacy-v2.qpc"
-    manifest = {
-        "format": "qpane-composition",
-        "version": 2,
-        "image_id": str(image_id),
-        "layers": [
-            {
-                "layer_id": str(layer_id),
-                "source_kind": "catalog-image",
-                "source_id": str(image_id),
-                "transform": [1.0, 1.0, 0.0, 0.0],
-                "visible": True,
-                "opacity": 1.0,
-                "tint": None,
-                "hit_test": True,
-                "interaction": [False, False, False],
-                "role": "base-image",
-                "label": None,
-            }
-        ],
-        "masks": {},
-        "rasters": {},
-    }
-    with zipfile.ZipFile(path, "w") as container:
-        container.writestr("manifest.json", json.dumps(manifest))
-
-    archive = CompositionArchiveCodec().read(path)
-
-    assert archive.composition_id == image_id
-    assert archive.document.navigation_image_id == image_id
-    assert len(archive.layers) == 1
-    assert archive.layers[0].layer_id == layer_id
-    assert archive.layers[0].source == CatalogImageReference(image_id)
 
 
 def test_archive_rejects_unknown_version_before_restoration(tmp_path) -> None:
@@ -582,22 +622,24 @@ def test_archive_write_replaces_destination_without_leaving_temp_files(
 ) -> None:
     """Successful writes should atomically replace an existing archive path."""
     image_id = uuid.uuid4()
+    owners = _resource_owners()
     layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(layers, image_id, image_id, 2, 2)
-    masks = MaskAssetStore()
-    rasters = EditableRasterAssetStore()
-    placed_assets = PlacedAssetStore()
+    _ensure_default(layers, owners.placed_assets, image_id, image_id, 2, 2)
     path = tmp_path / "composition.qpc"
     path.write_bytes(b"old")
 
     CompositionArchiveCodec().write(
         capture_composition(
-            _document(image_id, 2, 2),
-            layers,
-            masks,
-            rasters,
-            placed_assets,
-            VectorAssetStore(),
+            image_id,
+            _composition_owner(
+                layers,
+                _document(image_id, 2, 2),
+                owners.resources,
+            ),
+            owners.masks,
+            owners.rasters,
+            owners.placed_assets,
+            owners.vectors,
         ),
         path,
     )
@@ -611,11 +653,10 @@ def test_placed_sources_round_trip_fallback_policy_and_shared_instances(
 ) -> None:
     """Archives must deduplicate placed sources and honor offline fallback policy."""
     image_id = uuid.uuid4()
+    owners = _resource_owners()
     layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(layers, image_id, image_id, 16, 12)
-    masks = MaskAssetStore()
-    rasters = EditableRasterAssetStore()
-    placed_assets = PlacedAssetStore()
+    _ensure_default(layers, owners.placed_assets, image_id, image_id, 16, 12)
+    placed_assets = owners.placed_assets
     fallback_image = QImage(6, 5, QImage.Format_ARGB32_Premultiplied)
     fallback_image.fill(QColor(21, 90, 180, 177))
     fallback_id = placed_assets.create_linked(
@@ -632,19 +673,19 @@ def test_placed_sources_round_trip_fallback_policy_and_shared_instances(
     )
     first = CompositionLayerInstance(
         uuid.uuid4(),
-        PlacedAssetReference(fallback_id),
+        ProjectResourceReference(fallback_id),
         transform=LayerTransform(dx=4.0, dy=2.0),
         role="placed",
     )
     second = CompositionLayerInstance(
         uuid.uuid4(),
-        PlacedAssetReference(fallback_id),
+        ProjectResourceReference(fallback_id),
         transform=LayerTransform(dx=20.0, dy=2.0),
         role="placed",
     )
     third = CompositionLayerInstance(
         uuid.uuid4(),
-        PlacedAssetReference(no_fallback_id),
+        ProjectResourceReference(no_fallback_id),
         role="placed",
     )
     assert layers.add_layer(image_id, first)
@@ -654,12 +695,16 @@ def test_placed_sources_round_trip_fallback_policy_and_shared_instances(
     codec = CompositionArchiveCodec()
     codec.write(
         capture_composition(
-            _document(image_id, 16, 12),
-            layers,
-            masks,
-            rasters,
+            image_id,
+            _composition_owner(
+                layers,
+                _document(image_id, 16, 12),
+                owners.resources,
+            ),
+            owners.masks,
+            owners.rasters,
             placed_assets,
-            VectorAssetStore(),
+            owners.vectors,
         ),
         path,
     )
@@ -667,7 +712,7 @@ def test_placed_sources_round_trip_fallback_policy_and_shared_instances(
     with zipfile.ZipFile(path) as container:
         manifest = json.loads(container.read("manifest.json"))
         placed_resources = [
-            item for item in manifest["resources"] if item["kind"] == "placed-asset"
+            item for item in manifest["resources"] if item["kind"] == "linked-raster"
         ]
         assert len(placed_resources) == 2
         assert f"placed/{fallback_id}.npy" in container.namelist()
@@ -681,31 +726,40 @@ def test_placed_sources_round_trip_fallback_policy_and_shared_instances(
     assert no_fallback.status is PlacedAssetStatus.MISSING
     assert no_fallback.error
 
+    restored_owners = _resource_owners()
     restored_layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(restored_layers, image_id, image_id, 16, 12)
-    restored_placed = PlacedAssetStore()
+    _ensure_default(
+        restored_layers,
+        restored_owners.placed_assets,
+        image_id,
+        image_id,
+        16,
+        12,
+    )
     CompositionArchiveRestorer(
         compositions=_composition_owner(
             restored_layers,
             _document(image_id, 16, 12),
+            restored_owners.resources,
         ),
-        masks=MaskAssetStore(),
-        rasters=EditableRasterAssetStore(),
-        placed_assets=restored_placed,
-        vectors=VectorAssetStore(),
+        masks=restored_owners.masks,
+        rasters=restored_owners.rasters,
+        placed_assets=restored_owners.placed_assets,
+        vectors=restored_owners.vectors,
     ).restore(decoded)
-    assert restored_placed.get(fallback_id).image == fallback_image
-    assert restored_placed.get(no_fallback_id).image is None
+    assert restored_owners.placed_assets.get(fallback_id).image == fallback_image
+    assert restored_owners.placed_assets.get(no_fallback_id).image is None
 
 
-def test_vector_documents_round_trip_semantics_and_version_four_migrates(
+def test_vector_documents_round_trip_semantics_and_reject_invalid_payloads(
     tmp_path,
 ) -> None:
-    """Archives should retain vector commands/styles and accept resource-table v4."""
+    """Archives should retain vector semantics and reject malformed payloads."""
     image_id = uuid.uuid4()
+    owners = _resource_owners()
     layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(layers, image_id, image_id, 64, 48)
-    vectors = VectorAssetStore()
+    _ensure_default(layers, owners.placed_assets, image_id, image_id, 64, 48)
+    vectors = owners.vectors
     document = vectors.create(RasterBounds(0, 0, 64, 48))
     vector_object = VectorObject(
         object_id=uuid.uuid4(),
@@ -761,7 +815,7 @@ def test_vector_documents_round_trip_semantics_and_version_four_migrates(
     assert vectors.replace(document)
     layer = CompositionLayerInstance(
         layer_id=uuid.uuid4(),
-        source=VectorDocumentReference(document.vector_id),
+        source=ProjectResourceReference(document.vector_id),
         transform=LayerTransform(m11=0.9, m12=0.2, m21=-0.1, m22=1.1),
         interaction=LayerInteractionPolicy(selectable=True, movable=True),
         role="vector",
@@ -772,7 +826,7 @@ def test_vector_documents_round_trip_semantics_and_version_four_migrates(
         stack[0],
         effects=(
             VectorMaskEffect(
-                VectorDocumentReference(document.vector_id),
+                ProjectResourceReference(document.vector_id),
                 LayerTransform(dx=2.0, dy=1.0),
                 (vector_object.object_id,),
                 True,
@@ -784,11 +838,15 @@ def test_vector_documents_round_trip_semantics_and_version_four_migrates(
     codec = CompositionArchiveCodec()
     codec.write(
         capture_composition(
-            _document(image_id, 64, 48),
-            layers,
-            MaskAssetStore(),
-            EditableRasterAssetStore(),
-            PlacedAssetStore(),
+            image_id,
+            _composition_owner(
+                layers,
+                _document(image_id, 64, 48),
+                owners.resources,
+            ),
+            owners.masks,
+            owners.rasters,
+            owners.placed_assets,
             vectors,
         ),
         path,
@@ -796,68 +854,32 @@ def test_vector_documents_round_trip_semantics_and_version_four_migrates(
 
     decoded = codec.read(path)
     assert decoded.vectors[document.vector_id] == document
-    assert decoded.layers[0].effects == masked_base.effects
-    restored_vectors = VectorAssetStore()
+    assert decoded.layer_stacks[image_id][0].effects == masked_base.effects
+    restored_owners = _resource_owners()
     restored_layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(restored_layers, image_id, image_id, 64, 48)
+    _ensure_default(
+        restored_layers,
+        restored_owners.placed_assets,
+        image_id,
+        image_id,
+        64,
+        48,
+    )
     CompositionArchiveRestorer(
         compositions=_composition_owner(
             restored_layers,
             _document(image_id, 64, 48),
+            restored_owners.resources,
         ),
-        masks=MaskAssetStore(),
-        rasters=EditableRasterAssetStore(),
-        placed_assets=PlacedAssetStore(),
-        vectors=restored_vectors,
+        masks=restored_owners.masks,
+        rasters=restored_owners.rasters,
+        placed_assets=restored_owners.placed_assets,
+        vectors=restored_owners.vectors,
     ).restore(decoded)
-    assert restored_vectors.get(document.vector_id) == document
+    assert restored_owners.vectors.get(document.vector_id) == document
     assert restored_layers.layers_for_composition(image_id)[0].effects == (
         masked_base.effects
     )
-
-    legacy_path = tmp_path / "resource-v4.qpc"
-    with (
-        zipfile.ZipFile(path, "r") as source,
-        zipfile.ZipFile(legacy_path, "w") as target,
-    ):
-        manifest = json.loads(source.read("manifest.json"))
-        manifest["version"] = 4
-        manifest["composition_id"] = str(image_id)
-        manifest["base_image_id"] = str(image_id)
-        manifest.pop("document")
-        manifest["instances"] = manifest["instances"][:1]
-        manifest["instances"][0].pop("effects", None)
-        manifest["resources"] = manifest["resources"][:1]
-        target.writestr("manifest.json", json.dumps(manifest))
-    legacy = codec.read(legacy_path)
-    assert legacy.vectors == {}
-
-    version_five_path = tmp_path / "resource-v5.qpc"
-    with (
-        zipfile.ZipFile(path, "r") as source,
-        zipfile.ZipFile(version_five_path, "w") as target,
-    ):
-        manifest = json.loads(source.read("manifest.json"))
-        manifest["version"] = 5
-        manifest["composition_id"] = str(image_id)
-        manifest["base_image_id"] = str(image_id)
-        manifest.pop("document")
-        vector_resource = next(
-            resource
-            for resource in manifest["resources"]
-            if resource["kind"] == "vector"
-        )
-        vector_resource["payload"]["objects"] = vector_resource["payload"]["objects"][
-            :1
-        ]
-        vector_resource["payload"]["objects"][0].pop("text", None)
-        target.writestr("manifest.json", json.dumps(manifest))
-        for name in source.namelist():
-            if name != "manifest.json":
-                target.writestr(name, source.read(name))
-    migrated_five = codec.read(version_five_path)
-    migrated_document = migrated_five.vectors[document.vector_id]
-    assert migrated_document.objects == (vector_object,)
 
     invalid_text_path = tmp_path / "invalid-vector-text.qpc"
     with (
@@ -884,7 +906,7 @@ def test_vector_documents_round_trip_semantics_and_version_four_migrates(
         zipfile.ZipFile(invalid_path, "w") as target,
     ):
         invalid_manifest = json.loads(source.read("manifest.json"))
-        invalid_manifest["instances"][0]["effects"] = {}
+        invalid_manifest["documents"][0]["instances"][0]["effects"] = {}
         for name in source.namelist():
             payload = (
                 json.dumps(invalid_manifest).encode("utf-8")
@@ -900,35 +922,53 @@ def test_archive_restore_rolls_back_placed_assets_after_late_failure() -> None:
     """A late layer failure must restore prior pixels, provenance, and instances."""
     image_id = uuid.uuid4()
     asset_id = uuid.uuid4()
+    source_owners = _resource_owners()
     source_layers = CompositionLayerStore(CompositionResourceLifetime())
-    _ensure_default(source_layers, image_id, image_id, 8, 6)
-    source_placed = PlacedAssetStore()
+    _ensure_default(
+        source_layers,
+        source_owners.placed_assets,
+        image_id,
+        image_id,
+        8,
+        6,
+    )
     incoming_image = QImage(5, 4, QImage.Format_ARGB32_Premultiplied)
     incoming_image.fill(QColor("blue"))
-    source_placed.create_embedded(incoming_image, asset_id=asset_id)
+    source_owners.placed_assets.create_embedded(incoming_image, asset_id=asset_id)
     incoming_layer = CompositionLayerInstance(
         layer_id=uuid.uuid4(),
-        source=PlacedAssetReference(asset_id),
+        source=ProjectResourceReference(asset_id),
         role="placed",
     )
     assert source_layers.add_layer(image_id, incoming_layer)
     archive = capture_composition(
-        _document(image_id, 8, 6),
-        source_layers,
-        MaskAssetStore(),
-        EditableRasterAssetStore(),
-        source_placed,
-        VectorAssetStore(),
+        image_id,
+        _composition_owner(
+            source_layers,
+            _document(image_id, 8, 6),
+            source_owners.resources,
+        ),
+        source_owners.masks,
+        source_owners.rasters,
+        source_owners.placed_assets,
+        source_owners.vectors,
     )
 
+    restored_owners = _resource_owners()
     restored_layers = _FailingOnceLayerStore(CompositionResourceLifetime())
-    _ensure_default(restored_layers, image_id, image_id, 8, 6)
+    _ensure_default(
+        restored_layers,
+        restored_owners.placed_assets,
+        image_id,
+        image_id,
+        8,
+        6,
+    )
     previous_layers = restored_layers.layers_for_composition(image_id)
-    restored_placed = PlacedAssetStore()
     previous_image = QImage(3, 2, QImage.Format_ARGB32_Premultiplied)
     previous_image.fill(QColor("red"))
-    restored_placed.create_embedded(previous_image, asset_id=asset_id)
-    previous_asset = restored_placed.get(asset_id)
+    restored_owners.placed_assets.create_embedded(previous_image, asset_id=asset_id)
+    previous_asset = restored_owners.placed_assets.get(asset_id)
     restored_layers.fail_next_replacement = True
 
     with pytest.raises(RuntimeError, match="injected layer publication failure"):
@@ -936,12 +976,13 @@ def test_archive_restore_rolls_back_placed_assets_after_late_failure() -> None:
             compositions=_composition_owner(
                 restored_layers,
                 _document(image_id, 8, 6),
+                restored_owners.resources,
             ),
-            masks=MaskAssetStore(),
-            rasters=EditableRasterAssetStore(),
-            placed_assets=restored_placed,
-            vectors=VectorAssetStore(),
+            masks=restored_owners.masks,
+            rasters=restored_owners.rasters,
+            placed_assets=restored_owners.placed_assets,
+            vectors=restored_owners.vectors,
         ).restore(archive)
 
     assert restored_layers.layers_for_composition(image_id) == previous_layers
-    assert restored_placed.get(asset_id) == previous_asset
+    assert restored_owners.placed_assets.get(asset_id) == previous_asset

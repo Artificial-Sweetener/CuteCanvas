@@ -28,7 +28,11 @@ from qpane.sdk.scene import (
 )
 
 from ..composition.layers import CompositionLayerInstance
-from .source_reference import PlacedAssetReference
+from ..resources import (
+    ProjectResourceKind,
+    ProjectResourceRecord,
+    ProjectResourceReference,
+)
 from .store import PlacedAssetStore
 
 
@@ -37,21 +41,22 @@ class PlacedAssetLayerDescriptorFactory:
     """Resolve placed instances without owning composition order or pixels."""
 
     assets: PlacedAssetStore
-    source_type = PlacedAssetReference
-
-    def revision(self) -> object:
-        """Return the aggregate asset revision for compile invalidation."""
-        return self.assets.revision
 
     def descriptor(
         self,
         scene: SceneDescriptor,
         instance: CompositionLayerInstance,
+        resource: ProjectResourceRecord,
     ) -> LayerDescriptor | None:
         """Resolve one placed raster composition instance."""
-        if not isinstance(instance.source, PlacedAssetReference):
+        if not isinstance(
+            instance.source, ProjectResourceReference
+        ) or resource.kind not in {
+            ProjectResourceKind.IMPORTED_RASTER,
+            ProjectResourceKind.LINKED_RASTER,
+        }:
             return None
-        snapshot = self.assets.get(instance.source.asset_id)
+        snapshot = self.assets.get(instance.source.resource_id)
         if snapshot is None:
             return None
         bounds = RasterBounds.from_size(snapshot.source_size)
@@ -69,7 +74,7 @@ class PlacedAssetLayerDescriptorFactory:
             hit_test=LayerHitTest(enabled=instance.hit_test, role=instance.role),
             interaction=instance.interaction,
             capabilities=LayerContentCapabilities(raster_editable=False),
-            source_revision=snapshot.content_revision,
+            source_revision=resource.revision,
             raster_bounds=bounds,
             transform=instance.transform,
         )

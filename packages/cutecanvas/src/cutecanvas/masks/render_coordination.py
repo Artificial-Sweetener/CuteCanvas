@@ -69,9 +69,9 @@ class MaskRenderWorkCoordinator:
         assets: MaskAssetStore,
         controller: MaskController,
         executor: TaskExecutorProtocol | None,
-        mask_ids_for_image: Callable[[uuid.UUID], list[uuid.UUID]],
-        image_ids_for_mask: Callable[[uuid.UUID], tuple[uuid.UUID, ...]],
-        current_image_id: Callable[[], uuid.UUID | None],
+        mask_ids_for_composition: Callable[[uuid.UUID], list[uuid.UUID]],
+        composition_ids_for_mask: Callable[[uuid.UUID], tuple[uuid.UUID, ...]],
+        current_composition_id: Callable[[], uuid.UUID | None],
         current_zoom: Callable[[], float],
         should_defer_prefetch: Callable[[uuid.UUID | None, uuid.UUID], bool],
         is_mask_busy: Callable[[uuid.UUID], bool],
@@ -81,9 +81,9 @@ class MaskRenderWorkCoordinator:
         self._assets = assets
         self._controller = controller
         self._executor = executor
-        self._mask_ids_for_image = mask_ids_for_image
-        self._image_ids_for_mask = image_ids_for_mask
-        self._current_image_id = current_image_id
+        self._mask_ids_for_composition = mask_ids_for_composition
+        self._composition_ids_for_mask = composition_ids_for_mask
+        self._current_composition_id = current_composition_id
         self._current_zoom = current_zoom
         self._should_defer_prefetch = should_defer_prefetch
         self._is_mask_busy = is_mask_busy
@@ -182,7 +182,7 @@ class MaskRenderWorkCoordinator:
             return False
         mask_ids = [
             mask_id
-            for mask_id in self._mask_ids_for_image(image_id)
+            for mask_id in self._mask_ids_for_composition(image_id)
             if (
                 (layer := self._assets.get_layer(mask_id)) is not None
                 and not layer.coverage.has_retained_items
@@ -209,7 +209,7 @@ class MaskRenderWorkCoordinator:
             mask_manager=self._assets,
             controller=self._controller,
             coordinator=self,
-            current_image_id=self._current_image_id(),
+            current_image_id=self._current_composition_id(),
             scales=prefetch_scales,
         )
         try:
@@ -671,12 +671,12 @@ class MaskRenderWorkCoordinator:
 
     def _resolve_image_id(self, mask_id: uuid.UUID) -> uuid.UUID | None:
         """Return a likely image identifier for mask_id when available."""
-        image_ids = self._image_ids_for_mask(mask_id)
-        if image_ids:
-            return image_ids[-1]
+        composition_ids = self._composition_ids_for_mask(mask_id)
+        if composition_ids:
+            return composition_ids[-1]
         try:
-            return self._current_image_id()
-        except RuntimeError:  # pragma: no cover - catalog teardown
+            return self._current_composition_id()
+        except RuntimeError:  # pragma: no cover - widget teardown
             return None
 
     def _overlay_is_current(self, overlay: PrefetchedOverlay) -> bool:

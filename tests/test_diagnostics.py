@@ -35,8 +35,6 @@ from cutecanvas.masks.sam_feature import (
 )
 from qpane.cache import cache_detail_provider, cache_diagnostics_provider
 from qpane.concurrency.retry import RetryCategorySnapshot, RetrySnapshot
-from qpane.swap.coordinator import SwapCoordinatorMetrics
-from qpane.swap.diagnostics import swap_progress_provider
 from qpane.types import DiagnosticRecord
 
 
@@ -114,15 +112,8 @@ def test_registry_logs_provider_failures_once(qapp, caplog):
 
 
 def test_mask_summary_provider_summarises_state():
-    class FakeCatalog:
-        def __init__(self):
-            self._current_id = "image-1"
-
-        def currentImageID(self):
-            return self._current_id
-
     class FakeMaskService:
-        def mask_ids_for_image(self, _image_id):
+        def mask_ids_for_composition(self, _composition_id):
             return ["mask-1", "mask-2", "mask-3"]
 
         def getActiveMaskId(self):
@@ -139,10 +130,9 @@ def test_mask_summary_provider_summarises_state():
         def strokeDiagnosticsSnapshot(self):
             return None
 
-    catalog = FakeCatalog()
     autosave_manager = object()
     qpane = SimpleNamespace(
-        catalog=lambda: catalog,
+        currentCompositionID=lambda: "document-1",
         mask_service=FakeMaskService(),
         autosaveManager=lambda: autosave_manager,
         settings=MaskConfigSlice(mask_autosave_enabled=True),
@@ -164,7 +154,7 @@ def test_mask_summary_provider_returns_empty_without_service():
 
 def test_mask_job_detail_provider_reports_job_metrics():
     mask_manager = SimpleNamespace(
-        get_mask_ids_for_image=lambda _: ["mask-1"],
+        get_mask_ids_for_composition=lambda _: ["mask-1"],
     )
 
     class FakeCatalog:
@@ -329,62 +319,6 @@ def test_cache_diagnostics_provider_handles_snapshot_failure(qapp, caplog):
         qapp.processEvents()
 
 
-def test_swap_progress_provider_compact(qapp):
-    mb = 1024 * 1024
-    qpane = CuteCanvas(features=())
-    try:
-        view = qpane.view()
-        delegate = view.swap_delegate
-        delegate.snapshot_metrics = lambda: SwapCoordinatorMetrics(
-            pending_scene_prefetch=2,
-            pending_source_warmups=1,
-            pending_pyramid_prefetch=0,
-            pending_tile_prefetch=0,
-            last_navigation_ms=42.0,
-        )
-
-        class MaskStub:
-            @property
-            def renders(self):
-                return self
-
-            def snapshot_metrics(self):
-                return SimpleNamespace(
-                    cache_bytes=3 * mb,
-                    hits=5,
-                    misses=2,
-                    colorize_last_ms=12.5,
-                )
-
-        qpane.mask_controller = MaskStub()
-        tile_manager = view.tile_manager
-        tile_manager._cache_size_bytes = 2 * mb
-        tile_manager.cache_limit_bytes = 4 * mb
-        tile_manager._cache_hits = 7
-        tile_manager._cache_misses = 3
-        pyramid_manager = qpane.catalog().pyramidManager()
-        pyramid_manager._cache_size_bytes = 5 * mb
-        pyramid_manager.cache_limit_bytes = 8 * mb
-        qpane._set_sam_manager(
-            SimpleNamespace(
-                snapshot_metrics=lambda: SimpleNamespace(
-                    cache_bytes=mb,
-                    cache_count=1,
-                    pending_retries=0,
-                )
-            )
-        )
-        records = tuple(swap_progress_provider(qpane))
-        swap_rows = [record for record in records if record.label.startswith("Swap|")]
-        assert len(swap_rows) <= 7
-        assert all(record.label != "Swap|Summary" for record in swap_rows)
-        assert any(record.label == "Swap|Renderer" for record in swap_rows)
-        assert any(record.label == "Swap|Prefetch" for record in swap_rows)
-    finally:
-        qpane.deleteLater()
-        qapp.processEvents()
-
-
 def test_rendering_retry_provider_emits_rows(qapp):
     qpane = CuteCanvas(features=())
     try:
@@ -404,7 +338,7 @@ def test_rendering_retry_provider_emits_rows(qapp):
         )
         view = qpane.view()
         tile_manager = view.tile_manager
-        pyramid_manager = qpane.catalog().pyramidManager()
+        pyramid_manager = view.pyramid_manager
         tile_manager.retry_snapshot = lambda: tile_snapshot  # type: ignore[assignment]
         pyramid_manager.retry_snapshot = lambda: pyramid_snapshot  # type: ignore[assignment]
         diagnostics = qpane.diagnostics()
@@ -420,21 +354,23 @@ def test_rendering_retry_provider_emits_rows(qapp):
         qapp.processEvents()
 
 
-def test_overlay_formats_grouped_swap_rows(qapp):
+def test_overlay_formats_grouped_diagnostics_rows(qapp):
     qpane = CuteCanvas(features=())
     overlay = qpane.createStatusOverlay()
     try:
         rows = (
-            ("Swap|Summary", "nav=1ms"),
-            ("Swap|Prefetch", "mask_prefetch=1"),
+            ("Renderer|Summary", "paint=1ms"),
+            ("Renderer|Prefetch", "pending=1"),
             ("Cache", "1/2 MB"),
         )
         formatted = overlay._format_rows(rows)
         lines = formatted.splitlines()
-        swap_lines = [line for line in lines if line.startswith(("Swap", "    "))]
-        assert swap_lines
-        assert swap_lines[0].startswith("Swap")
-        assert len(swap_lines) == 2
+        renderer_lines = [
+            line for line in lines if line.startswith(("Renderer", "    "))
+        ]
+        assert renderer_lines
+        assert renderer_lines[0].startswith("Renderer")
+        assert len(renderer_lines) == 2
     finally:
         overlay.deleteLater()
         qpane.deleteLater()

@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import numpy as np
 from cutecanvas.raster.assets import EditableRasterAssetStore
-from cutecanvas.raster.descriptor_factory import EditableRasterLayerDescriptorFactory
 from cutecanvas.raster.presentation_state import EditableRasterPresentationState
-from cutecanvas.raster.source_reference import EditableRasterReference
 from cutecanvas.raster.source_resolver import EditableRasterSourceCapabilities
+from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
 from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtGui import QColor, QImage
 from qpane.scene.raster import RasterBounds
@@ -33,21 +32,21 @@ def test_store_revision_tracks_content_and_structure_mutations() -> None:
     """Every render-affecting asset mutation must invalidate scene descriptors."""
     image = QImage(8, 6, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(20, 40, 60, 255))
-    assets = EditableRasterAssetStore()
+    resources = ProjectResourceStore()
+    assets = EditableRasterAssetStore(resources)
     asset = assets.create(image)
-    factory = EditableRasterLayerDescriptorFactory(assets)
-    initial_revision = factory.revision()
+    initial_revision = resources.revision
 
     replacement = np.zeros((2, 3, 4), dtype=np.uint8)
     assert asset.surface.restore_patch(RasterBounds(1, 2, 3, 2), replacement)
-    content_revision = factory.revision()
+    content_revision = resources.revision
 
     assert content_revision != initial_revision
     assert asset.surface.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
-    structure_revision = factory.revision()
+    structure_revision = resources.revision
 
     assert structure_revision != content_revision
-    assert structure_revision == ((asset.raster_id, *asset.surface.revisions()),)
+    assert resources.get(asset.raster_id).revision == 2
 
 
 def test_store_revision_tracks_asset_lifecycle() -> None:
@@ -65,13 +64,26 @@ def test_store_revision_tracks_asset_lifecycle() -> None:
     assert assets.revision == initial_revision
 
 
+def test_huge_empty_raster_asset_allocates_no_transparent_pixel_envelope() -> None:
+    """Logical editor extents retain no raster tiles before their first write."""
+    assets = EditableRasterAssetStore()
+
+    asset = assets.create_empty(
+        RasterBounds(0, 0, 100_000, 100_000),
+        extent_policy=RasterExtentPolicy.UNBOUNDED,
+    )
+
+    assert asset.surface.bounds == RasterBounds(0, 0, 100_000, 100_000)
+    assert asset.surface.allocated_bytes == 0
+
+
 def test_live_raster_transaction_bypasses_derived_products_until_settled() -> None:
     """Interactive pixels must not rebuild pyramids for every pointer sample."""
     assets = EditableRasterAssetStore()
     image = QImage(8, 8, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(10, 20, 30, 255))
     asset = assets.create(image)
-    source = EditableRasterReference(asset.raster_id)
+    source = ProjectResourceReference(asset.raster_id)
     presentation = EditableRasterPresentationState()
     capabilities = EditableRasterSourceCapabilities(assets, presentation)
 

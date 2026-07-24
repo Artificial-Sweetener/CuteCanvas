@@ -22,9 +22,15 @@ import uuid
 from collections.abc import Callable
 
 from PySide6.QtCore import QPoint, QPointF
-from qpane.sdk.scene import SceneDescriptor
+from qpane.sdk.rendering import (
+    LayerLocalPoint,
+    PanelPoint,
+    SceneCoordinateSystem,
+    ScenePoint,
+)
+from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
-from .source_reference import MaskAssetReference
+from ..resources import ProjectResourceReference
 
 
 class ActiveMaskLayerCoordinates:
@@ -35,21 +41,19 @@ class ActiveMaskLayerCoordinates:
         *,
         active_mask_id: Callable[[], uuid.UUID | None],
         active_scene: Callable[[], SceneDescriptor | None],
-        panel_to_scene: Callable[[QPoint | QPointF], QPointF | None],
-        layer_to_panel: Callable[
-            [uuid.UUID, uuid.UUID, QPoint | QPointF], QPointF | None
-        ],
+        coordinates: SceneCoordinateSystem,
     ) -> None:
         """Capture mask identity, scene, and generic layer transforms."""
         self._active_mask_id = active_mask_id
         self._active_scene = active_scene
-        self._panel_to_scene = panel_to_scene
-        self._layer_to_panel = layer_to_panel
+        self._coordinates = coordinates
 
     def panel_to_source(self, panel_point: QPoint | QPointF) -> QPointF | None:
         """Project a canvas panel point into unbounded mask-local space."""
-        scene_point = self._panel_to_scene(panel_point)
-        return None if scene_point is None else self.scene_to_source(scene_point)
+        scene_point = self._coordinates.panel_to_scene(PanelPoint.from_qt(panel_point))
+        return (
+            None if scene_point is None else self.scene_to_source(scene_point.to_qt())
+        )
 
     def scene_to_source(self, scene_point: QPoint | QPointF) -> QPointF | None:
         """Project a canvas scene point into unbounded mask-local space."""
@@ -63,10 +67,11 @@ class ActiveMaskLayerCoordinates:
             and bounds.y <= scene_point.y() < bounds.y + bounds.height
         ):
             return None
-        transform = layer.transform
-        if transform is None:
-            return None
-        return transform.inverse_map(QPointF(scene_point))
+        local = self._coordinates.scene_to_layer_local(
+            ScenePoint.from_qt(scene.scene_id, scene_point),
+            layer.layer_id,
+        )
+        return None if local is None else local.to_qt()
 
     def source_to_panel(self, source_point: QPoint | QPointF) -> QPointF | None:
         """Project active-mask source coordinates into panel space."""
@@ -74,16 +79,18 @@ class ActiveMaskLayerCoordinates:
         if resolved is None:
             return None
         scene, layer = resolved
-        raster_bounds = layer.raster_bounds
-        if raster_bounds is None:
-            return None
-        storage_point = QPointF(
-            source_point.x() - raster_bounds.x,
-            source_point.y() - raster_bounds.y,
+        panel = self._coordinates.layer_local_to_panel(
+            LayerLocalPoint.from_qt(
+                scene.scene_id,
+                layer.layer_id,
+                source_point,
+            )
         )
-        return self._layer_to_panel(scene.scene_id, layer.layer_id, storage_point)
+        return None if panel is None else panel.to_qt()
 
-    def _resolved_layer(self):
+    def _resolved_layer(
+        self,
+    ) -> tuple[SceneDescriptor, LayerDescriptor] | None:
         """Return the active mask's resolved scene and layer descriptor."""
         mask_id = self._active_mask_id()
         scene = self._active_scene()
@@ -91,6 +98,9 @@ class ActiveMaskLayerCoordinates:
             return None
         for layer in scene.layers:
             source = layer.source
-            if isinstance(source, MaskAssetReference) and source.mask_id == mask_id:
+            if (
+                isinstance(source, ProjectResourceReference)
+                and source.resource_id == mask_id
+            ):
                 return scene, layer
         return None

@@ -164,7 +164,7 @@ def test_maybe_start_drag_builds_drag_payload(tmp_path, monkeypatch, caplog):
             self.exec_arg = action
             return action
 
-    monkeypatch.setattr("qpane.ui.dragout.QDrag", _DummyDrag)
+    monkeypatch.setattr("qpane.ui.outbound_drag.QDrag", _DummyDrag)
     caplog.set_level("WARNING", logger="qpane.ui.dragout")
     maybeStartDrag(panel, None)
     assert "aborted" not in caplog.text

@@ -15,14 +15,13 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
-    QLineF,
     QPoint,
     QPointF,
     QRect,
@@ -33,6 +32,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QImage,
+    QMouseEvent,
     QTransform,
 )
 from PySide6.QtWidgets import QWidget
@@ -49,13 +49,13 @@ from qpane import (
     LayerPresentationStyle as LayerPresentationStyle,
 )
 from qpane import (
-    LinkedGroup as LinkedGroup,
-)
-from qpane import (
     PanelHitTest,
 )
-from qpane.sdk.catalog import ImageMap
 from qpane.sdk.concurrency import TaskExecutorProtocol, ThreadPolicy
+from qpane.sdk.ui import (
+    DragSubject,
+    OutboundMimeProvider,
+)
 from typing_extensions import Self
 
 from .composition.geometry_policy import LayerGeometryMode as LayerGeometryMode
@@ -68,6 +68,17 @@ from .core import (
     ToolSignalBinder,
 )
 from .coverage import CoverageShapeOptions as CoverageShapeOptions
+from .document import CanvasComparison as CanvasComparison
+from .document import CanvasContentKind as CanvasContentKind
+from .document import CanvasContentReference as CanvasContentReference
+from .document import CanvasDocument as CanvasDocument
+from .document import CanvasPresentation as CanvasPresentation
+from .document import CanvasPresentationKind as CanvasPresentationKind
+from .document import CanvasSessionSnapshot as CanvasSessionSnapshot
+from .document import CanvasViewSession as CanvasViewSession
+from .document import ResolvedCanvasContent as ResolvedCanvasContent
+from .editor.interaction_policy import CanvasInteractionMode as CanvasInteractionMode
+from .facade.clone_stamp import CloneStampFacade as CloneStampFacade
 from .facade.editor import (
     CoverageFacade as CoverageFacade,
 )
@@ -85,10 +96,10 @@ from .facade.editor import (
 )
 from .facade.effects import EffectsFacade as EffectsFacade
 from .facade.handles import (
-    DocumentCollection as DocumentCollection,
+    CompositionCollection as CompositionCollection,
 )
 from .facade.handles import (
-    DocumentHandle as DocumentHandle,
+    CompositionHandle as CompositionHandle,
 )
 from .facade.handles import (
     LayerEffectHandle as LayerEffectHandle,
@@ -97,28 +108,23 @@ from .facade.handles import (
     LayerHandle as LayerHandle,
 )
 from .facade.persistence import (
-    DocumentPersistenceFacade as DocumentPersistenceFacade,
+    CompositionPersistenceFacade as CompositionPersistenceFacade,
 )
 from .masks.mask_undo import MaskUndoState
 from .masks.workflow import MaskInfo as MaskInfo
+from .presentation import CanvasPresentationContext as CanvasPresentationContext
+from .presentation import CanvasPresentationProvider as CanvasPresentationProvider
+from .presentation import CanvasWorkspace as CanvasWorkspace
+from .projection import CanvasProjectionHandle as CanvasProjectionHandle
+from .projection import CanvasProjectionRequest as CanvasProjectionRequest
+from .projection import CanvasProjectionResult as CanvasProjectionResult
+from .projection import CanvasProjectionStatus as CanvasProjectionStatus
 from .snapping import SnapPolicy as SnapPolicy
-from .types import CatalogSnapshot as CatalogSnapshot
 from .types import MaskSavedPayload as MaskSavedPayload
 
 class CacheMode(str, Enum):
     AUTO = "auto"
     HARD = "hard"
-
-class PlaceholderScaleMode(str, Enum):
-    AUTO = "auto"
-    LOGICAL_FIT = "logical_fit"
-    PHYSICAL_FIT = "physical_fit"
-    RELATIVE_FIT = "relative_fit"
-
-class ZoomMode(str, Enum):
-    FIT = "fit"
-    LOCKED_ZOOM = "locked_zoom"
-    LOCKED_SIZE = "locked_size"
 
 class ControlMode(str, Enum):
     CURSOR = "cursor"
@@ -126,6 +132,7 @@ class ControlMode(str, Enum):
     MOVE = "move"
     TRANSFORM = "transform"
     DRAW_BRUSH = "draw-brush"
+    CLONE_STAMP = "clone-stamp"
     SMART_SELECT = "smart-select"
     SELECT_RECTANGLE = "select-rectangle"
     SELECT_ELLIPSE = "select-ellipse"
@@ -144,12 +151,19 @@ class RasterExtentPolicy(str, Enum):
     EXPAND_ON_WRITE = "expand-on-write"
     UNBOUNDED = "unbounded"
 
+class NonEditablePaintPolicy(str, Enum):
+    REJECT = "reject"
+    CREATE_RASTER_LAYER = "create-raster-layer"
+
 class EditorCapability(str, Enum):
     SELECT_PIXELS = "select-pixels"
     EDIT_PIXELS = "edit-pixels"
     PAINT = "paint"
     MOVE_LAYERS = "move-layers"
     TRANSFORM_LAYERS = "transform-layers"
+    EDIT_VECTORS = "edit-vectors"
+    MANAGE_LAYERS = "manage-layers"
+    EDIT_RESOURCES = "edit-resources"
 
 class EditorIntent(str, Enum):
     SELECT_PIXELS = "select-pixels"
@@ -171,6 +185,41 @@ class CoverageCoordinateSpace(str, Enum):
 class BrushOperation(str, Enum):
     PAINT = "paint"
     ERASE = "erase"
+
+class CloneStampAlignment(str, Enum):
+    ALIGNED = "aligned"
+    UNALIGNED = "unaligned"
+
+class CloneStampSampleMode(str, Enum):
+    ANCHORED_LAYER = "anchored-layer"
+    ANCHORED_LAYER_AND_BELOW = "anchored-layer-and-below"
+    VISIBLE_COMPOSITE = "visible-composite"
+
+@dataclass(frozen=True, slots=True)
+class CloneStampTransform:
+    rotation_degrees: float = ...
+    scale_x: float = ...
+    scale_y: float = ...
+    mirror_horizontal: bool = ...
+    mirror_vertical: bool = ...
+
+@dataclass(frozen=True, slots=True)
+class CloneStampSource:
+    scene_id: uuid.UUID
+    scene_position: tuple[float, float]
+    layer_id: uuid.UUID | None = ...
+    layer_position: tuple[float, float] | None = ...
+    def scene_point(self) -> QPointF: ...
+    def layer_point(self) -> QPointF | None: ...
+
+@dataclass(frozen=True, slots=True)
+class CloneStampState:
+    alignment: CloneStampAlignment = ...
+    sample_mode: CloneStampSampleMode = ...
+    transform: CloneStampTransform = ...
+    source: CloneStampSource | None = ...
+    @property
+    def source_set(self) -> bool: ...
 
 @dataclass(frozen=True, slots=True)
 class BrushDynamics:
@@ -368,10 +417,6 @@ class DiagnosticsDomain(str, Enum):
     RETRY: str
     SAM: str
 
-class CatalogEntry:
-    image: QImage
-    path: Path | None
-
 class OverlayState:
     zoom: float
     qpane_rect: QRect
@@ -386,11 +431,9 @@ class CompositionLayerClip:
 
 class CompositionPolicy:
     removable: bool
-    comparison_enabled: bool
     def __init__(
         self,
         removable: bool = True,
-        comparison_enabled: bool = True,
     ) -> None: ...
 
 class LayerPolicy:
@@ -402,6 +445,12 @@ class LayerPolicy:
 
 class EditorPolicy:
     capabilities: frozenset[EditorCapability]
+    noneditable_paint: NonEditablePaintPolicy
+    def __init__(
+        self,
+        capabilities: frozenset[EditorCapability] = ...,
+        noneditable_paint: NonEditablePaintPolicy = ...,
+    ) -> None: ...
 
 class EditorOperationState:
     intent: EditorIntent
@@ -470,7 +519,8 @@ class FloatingPixelSnapshot:
 
 class LayerSnapshot:
     layer_id: uuid.UUID
-    image_id: uuid.UUID | None
+    source_kind: str
+    source_id: uuid.UUID
     placement: QRectF
     visible: bool
     opacity: float
@@ -480,52 +530,8 @@ class LayerSnapshot:
     role: str
     metadata: Mapping[str, object]
     interaction: LayerPolicy
-    source_kind: str
-    source_id: uuid.UUID | None
     label: str | None
     transform: QTransform
-
-class CatalogLayerRequest:
-    layer_id: uuid.UUID
-    image_id: uuid.UUID
-    placement: QRectF
-    visible: bool
-    opacity: float
-    clip: CompositionLayerClip | None
-    hit_test: bool
-    role: str
-    metadata: Mapping[str, object]
-    interaction: LayerPolicy
-
-class CompositionRequest:
-    composition_id: uuid.UUID | None
-    title: str | None
-    bounds: QRectF
-    layers: tuple[CatalogLayerRequest, ...]
-
-class TemplateLayer:
-    layer_id: uuid.UUID
-    source_slot: str
-    placement: QRectF
-    visible: bool
-    opacity: float
-    clip: CompositionLayerClip | None
-    hit_test: bool
-    role: str
-    metadata: Mapping[str, object]
-    interaction: LayerPolicy
-
-class CompositionTemplate:
-    template_id: uuid.UUID
-    bounds: QRectF
-    layers: tuple[TemplateLayer, ...]
-    title: str | None
-
-class TemplateBindings:
-    composition_id: uuid.UUID | None
-    title: str | None
-    catalog_images: Mapping[str, uuid.UUID]
-    metadata: Mapping[str, Mapping[str, object]]
 
 class SceneSnapshot:
     composition_id: uuid.UUID
@@ -538,7 +544,7 @@ class LayerHit:
     composition_id: uuid.UUID
     scene_id: uuid.UUID
     layer_id: uuid.UUID
-    image_id: uuid.UUID
+    source_id: uuid.UUID
     role: str
     metadata: Mapping[str, object]
     panel_point: QPointF
@@ -565,31 +571,10 @@ class SceneSnapshotOverlayState:
     scene_bounds: QRectF
     layers: tuple[SceneSnapshotOverlayLayer, ...]
 
-class ComparisonState:
-    enabled: bool
-    source_id: uuid.UUID | None
-    source_path: Path | None
-    source_kind: str | None
-    split_position: float
-    orientation: ComparisonOrientation
-
-class ComparisonDividerState:
-    enabled: bool
-    interactive: bool
-    hovered: bool
-    dragging: bool
-    orientation: ComparisonOrientation
-    hit_width: float
-    full_segment: QLineF | None
-    visible_segment: QLineF | None
-
 class CompositionEntry:
     composition_id: uuid.UUID
     kind: str
     title: str
-    source_image_ids: tuple[uuid.UUID, ...]
-    current_image_id: uuid.UUID | None
-    comparison: ComparisonState
     scene_layer_count: int
     scene_bounds: QRectF | None
     layers: tuple[CompositionLayerEntry, ...]
@@ -614,6 +599,7 @@ class CuteCanvas(QWidget):
     CONTROL_MODE_MOVE: str
     CONTROL_MODE_TRANSFORM: str
     CONTROL_MODE_DRAW_BRUSH: str
+    CONTROL_MODE_CLONE_STAMP: str
     CONTROL_MODE_PAINT_BUCKET: str
     CONTROL_MODE_SMART_SELECT: str
     CONTROL_MODE_SELECT_RECTANGLE: str
@@ -627,18 +613,12 @@ class CuteCanvas(QWidget):
     CONTROL_MODE_VECTOR_NODE: str
     CONTROL_MODE_VECTOR_TEXT: str
 
-    imageLoaded: Signal
     zoomChanged: Signal
     viewportRectChanged: Signal
     maskSaved: Signal
     maskUndoStackChanged: Signal
-    currentImageChanged: Signal
-    catalogChanged: Signal
-    catalogSelectionChanged: Signal
-    linkGroupsChanged: Signal
     diagnosticsOverlayToggled: Signal
     diagnosticsDomainToggled: Signal
-    comparisonChanged: Signal
     compositionChanged: Signal
     compositionSelectionChanged: Signal
     sceneChanged: Signal
@@ -647,6 +627,7 @@ class CuteCanvas(QWidget):
     paintTargetChanged: Signal
     brushPresetChanged: Signal
     paintColorChanged: Signal
+    cloneStampChanged: Signal
     vectorSelectionChanged: Signal
     vectorNodeSelectionChanged: Signal
     vectorToolOptionsChanged: Signal
@@ -657,6 +638,8 @@ class CuteCanvas(QWidget):
     editorPolicyChanged: Signal
     rasterBoundsRequestCompleted: Signal
     placedAssetRequestCompleted: Signal
+    layerRasterizationCompleted: Signal
+    projectionCompleted: Signal
     samCheckpointStatusChanged: Signal
     samCheckpointProgress: Signal
 
@@ -665,17 +648,20 @@ class CuteCanvas(QWidget):
         *,
         config: Config | None = ...,
         features: Iterable[str] | None = ...,
+        document: CanvasDocument | None = ...,
+        session: CanvasViewSession | None = ...,
         task_executor: TaskExecutorProtocol | None = ...,
         thread_policy: ThreadPolicy | Mapping[str, Any] | None = ...,
         config_strict: bool = ...,
         **kwargs: Any,
     ) -> None: ...
-    @staticmethod
-    def imageMapFromLists(
-        images: Iterable[QImage],
-        paths: Iterable[Path | None] | None = ...,
-        ids: Iterable[uuid.UUID] | None = ...,
-    ) -> ImageMap: ...
+    def requestProjection(
+        self,
+        reference: CanvasContentReference,
+        *,
+        source_bounds: QRectF | None = ...,
+        pixel_size: QSize | None = ...,
+    ) -> CanvasProjectionHandle: ...
     @staticmethod
     def fitSceneRect(source_size: QSize, target_rect: QRectF) -> QRectF: ...
     @staticmethod
@@ -688,27 +674,15 @@ class CuteCanvas(QWidget):
     def installedFeatures(self) -> tuple[str, ...]: ...
     @property
     def editor(self) -> EditorFacade: ...
-    def placeholderActive(self) -> bool: ...
-    @property
-    def currentImage(self) -> QImage | None: ...
-    @property
-    def currentImagePath(self) -> Path | None: ...
-    @property
-    def allImages(self) -> list[QImage]: ...
-    @property
-    def allImagePaths(self) -> list[Path | None]: ...
-    def imagePath(self, image_id: uuid.UUID | None) -> Path | None: ...
-    def currentImageID(self) -> uuid.UUID | None: ...
-    def imageIDs(self) -> list[uuid.UUID]: ...
-    def hasImages(self) -> bool: ...
-    def linkedGroups(self) -> tuple[LinkedGroup, ...]: ...
     def currentCompositionID(self) -> uuid.UUID | None: ...
     def compositionIDs(self) -> list[uuid.UUID]: ...
     def getCompositionSnapshot(self) -> CompositionSnapshot: ...
     def activeMaskID(self) -> uuid.UUID | None: ...
-    def maskIDsForImage(self, image_id: uuid.UUID | None = ...) -> list[uuid.UUID]: ...
-    def listMasksForImage(
-        self, image_id: uuid.UUID | None = ...
+    def maskIDsForComposition(
+        self, composition_id: uuid.UUID | None = ...
+    ) -> list[uuid.UUID]: ...
+    def listMasksForComposition(
+        self, composition_id: uuid.UUID | None = ...
     ) -> tuple[MaskInfo, ...]: ...
     def getActiveMaskImage(self) -> QImage | None: ...
     def getMaskUndoState(self, mask_id: uuid.UUID) -> MaskUndoState | None: ...
@@ -737,6 +711,23 @@ class CuteCanvas(QWidget):
     ) -> None: ...
     def editorPolicy(self) -> EditorPolicy: ...
     def setEditorPolicy(self, policy: EditorPolicy) -> bool: ...
+    def interactionMode(self) -> CanvasInteractionMode: ...
+    def setInteractionMode(self, mode: CanvasInteractionMode) -> bool: ...
+    def setOutboundMimeProvider(
+        self,
+        provider: OutboundMimeProvider,
+        *,
+        subject_resolver: (
+            Callable[
+                [CuteCanvas, QMouseEvent | None],
+                DragSubject | None,
+            ]
+            | None
+        ) = ...,
+    ) -> None: ...
+    def clearOutboundMimeProvider(self) -> None: ...
+    def document(self) -> CanvasDocument: ...
+    def viewSession(self) -> CanvasViewSession: ...
     def editorOperationState(
         self,
         intent: EditorIntent,
@@ -753,13 +744,6 @@ class CuteCanvas(QWidget):
     ) -> None: ...
     def unregisterOverlay(self, name: str) -> None: ...
     def contentOverlays(self) -> Mapping[str, OverlayDrawFn]: ...
-    def composeScene(
-        self,
-        request: CompositionRequest,
-        *,
-        activate: bool = ...,
-        fit_view: bool = ...,
-    ) -> uuid.UUID: ...
     def createComposition(
         self,
         bounds: QRectF,
@@ -770,34 +754,19 @@ class CuteCanvas(QWidget):
     ) -> uuid.UUID: ...
     def createCompositionFromImage(
         self,
-        image_id: uuid.UUID,
+        image: QImage,
         *,
         title: str | None = None,
+        label: str | None = None,
         interaction: LayerPolicy | None = None,
         policy: CompositionPolicy | None = None,
         fit_view: bool = True,
     ) -> uuid.UUID: ...
-    def addCatalogImageLayer(
-        self,
-        image_id: uuid.UUID,
-        *,
-        placement: QRectF | None = None,
-        label: str | None = None,
-        interaction: LayerPolicy | None = None,
-    ) -> uuid.UUID | None: ...
     def setCompositionPolicy(
         self,
         composition_id: uuid.UUID,
         policy: CompositionPolicy,
     ) -> bool: ...
-    def composeSceneFromTemplate(
-        self,
-        template: CompositionTemplate,
-        bindings: TemplateBindings,
-        *,
-        activate: bool = ...,
-        fit_view: bool = ...,
-    ) -> uuid.UUID: ...
     def currentScene(self) -> SceneSnapshot | None: ...
     def sceneHitTest(self, panel_pos: QPoint) -> LayerHit | None: ...
     def layerTransform(
@@ -854,6 +823,30 @@ class CuteCanvas(QWidget):
         layer_id: uuid.UUID,
     ) -> bool: ...
     def clearSelectedLayer(self) -> bool: ...
+    def duplicateLayer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None: ...
+    def forkLayerResource(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None: ...
+    def rasterizeLayer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixel_size: QSize | None = ...,
+    ) -> uuid.UUID | None: ...
+    def placeComposition(
+        self,
+        composition_id: uuid.UUID,
+        *,
+        placement: QRectF | None = ...,
+        label: str | None = ...,
+        interaction: LayerPolicy | None = ...,
+    ) -> uuid.UUID | None: ...
     def placeEmbeddedAsset(
         self,
         image: QImage,
@@ -870,11 +863,6 @@ class CuteCanvas(QWidget):
         label: str | None = ...,
         interaction: LayerPolicy | None = ...,
         keep_fallback: bool = ...,
-    ) -> uuid.UUID | None: ...
-    def duplicatePlacedAsset(
-        self,
-        scene_id: uuid.UUID,
-        layer_id: uuid.UUID,
     ) -> uuid.UUID | None: ...
     def placedAssetState(
         self,
@@ -897,12 +885,6 @@ class CuteCanvas(QWidget):
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
     ) -> bool: ...
-    def rasterizePlacedAsset(
-        self,
-        scene_id: uuid.UUID,
-        layer_id: uuid.UUID,
-        pixel_size: QSize | None = ...,
-    ) -> uuid.UUID | None: ...
     def setLayerPlacement(
         self,
         scene_id: uuid.UUID,
@@ -1051,12 +1033,6 @@ class CuteCanvas(QWidget):
         object_ids: Iterable[uuid.UUID] | None = ...,
         mode: PixelSelectionMode = ...,
     ) -> uuid.UUID | None: ...
-    def rasterizeVectorLayer(
-        self,
-        scene_id: uuid.UUID,
-        layer_id: uuid.UUID,
-        pixel_size: QSize | None = ...,
-    ) -> uuid.UUID | None: ...
     def addEditableRasterLayer(
         self,
         image: QImage,
@@ -1081,6 +1057,12 @@ class CuteCanvas(QWidget):
     def setBrushPreset(self, preset: BrushPreset) -> bool: ...
     def paintColor(self) -> QColor: ...
     def setPaintColor(self, color: QColor) -> bool: ...
+    def cloneStampState(self) -> CloneStampState: ...
+    def setCloneStampSource(self, scene_position: QPointF) -> bool: ...
+    def clearCloneStampSource(self) -> bool: ...
+    def setCloneStampAlignment(self, alignment: CloneStampAlignment) -> bool: ...
+    def setCloneStampSampleMode(self, mode: CloneStampSampleMode) -> bool: ...
+    def setCloneStampTransform(self, transform: CloneStampTransform) -> bool: ...
     def fillSelection(self) -> bool: ...
     def paintBucketOptions(self) -> tuple[int, bool, bool]: ...
     def configurePaintBucket(
@@ -1231,29 +1213,13 @@ class CuteCanvas(QWidget):
         on_disconnect: ToolSignalBinder | None = ...,
     ) -> None: ...
     def unregisterTool(self, mode: str) -> None: ...
-    def setImagesByID(
-        self,
-        image_map: ImageMap,
-        current_id: uuid.UUID,
-    ) -> None: ...
-    def clearImages(self) -> None: ...
-    def removeImageByID(self, image_id: uuid.UUID) -> None: ...
-    def removeImagesByID(self, image_ids: list[uuid.UUID]) -> None: ...
-    def setCurrentImageID(self, image_id: uuid.UUID | None) -> None: ...
-    def setAllImagesLinked(self, enabled: bool) -> None: ...
-    def setLinkedGroups(self, groups: Iterable[LinkedGroup]) -> None: ...
-    def compose(
-        self,
-        *,
-        images: Iterable[uuid.UUID],
-        title: str | None = ...,
-    ) -> uuid.UUID: ...
     def openComposition(self, composition_id: uuid.UUID) -> None: ...
     def removeComposition(self, composition_id: uuid.UUID) -> None: ...
-    def getCatalogSnapshot(self) -> CatalogSnapshot: ...
     def createBlankMask(self, size: QSize) -> uuid.UUID | None: ...
     def loadMaskFromFile(self, path: str) -> uuid.UUID | None: ...
-    def removeMaskFromImage(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> bool: ...
+    def removeMaskFromComposition(
+        self, composition_id: uuid.UUID, mask_id: uuid.UUID
+    ) -> bool: ...
     def setActiveMaskID(self, mask_id: uuid.UUID | None) -> bool: ...
     def setMaskProperties(
         self,
@@ -1262,7 +1228,7 @@ class CuteCanvas(QWidget):
         opacity: float | None = ...,
     ) -> bool: ...
     def prefetchMaskOverlays(
-        self, image_id: uuid.UUID | None, *, reason: str = ...
+        self, composition_id: uuid.UUID | None, *, reason: str = ...
     ) -> bool: ...
     def cycleMasksForward(self) -> bool: ...
     def cycleMasksBackward(self) -> bool: ...
@@ -1272,14 +1238,3 @@ class CuteCanvas(QWidget):
         self,
         mode: str,
     ) -> None: ...
-    def setComparisonImageID(self, image_id: uuid.UUID) -> None: ...
-    def clearComparisonImage(self) -> None: ...
-    def setComparisonSplit(
-        self,
-        position: float,
-        orientation: ComparisonOrientation | str | None = ...,
-    ) -> None: ...
-    def comparisonState(self) -> ComparisonState: ...
-    def comparisonDividerInteractive(self) -> bool: ...
-    def setComparisonDividerInteractive(self, enabled: bool) -> None: ...
-    def comparisonDividerState(self) -> ComparisonDividerState: ...

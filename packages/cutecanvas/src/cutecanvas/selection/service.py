@@ -47,6 +47,7 @@ class PixelSelectionService:
     ) -> None:
         """Initialize empty selection state with an optional observer."""
         self._documents_by_scene: dict[uuid.UUID, CoverageDocument] = {}
+        self._coverage_by_scene: dict[uuid.UUID, CoverageSnapshot] = {}
         self._revision_by_scene: dict[uuid.UUID, int] = {}
         self._changed = changed
         self._record_edit = record_edit
@@ -54,15 +55,10 @@ class PixelSelectionService:
 
     def state(self, scene_id: uuid.UUID) -> PixelSelectionState:
         """Return immutable selection state for ``scene_id``."""
-        document = self._documents_by_scene.get(scene_id)
         return PixelSelectionState(
             scene_id=scene_id,
             revision=self._revision_by_scene.get(scene_id, 0),
-            coverage=(
-                None
-                if document is None or not document.items
-                else self._evaluator.rasterize(document)
-            ),
+            coverage=self._coverage_by_scene.get(scene_id),
         )
 
     def document(self, scene_id: uuid.UUID) -> CoverageDocument | None:
@@ -93,15 +89,17 @@ class PixelSelectionService:
             normalized: CoverageDocument | None = None
         else:
             normalized = after
-        previous_coverage = (
-            None if previous is None else self._evaluator.rasterize(previous)
-        )
+        previous_coverage = self._coverage_by_scene.get(scene_id)
         normalized_coverage = (
             None if normalized is None else self._evaluator.rasterize(normalized)
         )
         if _coverage_equal(previous_coverage, normalized_coverage):
             return False
-        self._set_document(scene_id, normalized)
+        self._set_document(
+            scene_id,
+            normalized,
+            coverage=normalized_coverage,
+        )
         if self._record_edit is not None:
             self._record_edit(PixelSelectionEdit(scene_id, previous, normalized))
         self._publish(scene_id)
@@ -112,6 +110,7 @@ class PixelSelectionService:
         previous = self._documents_by_scene.pop(scene_id, None)
         if previous is None:
             return False
+        self._coverage_by_scene.pop(scene_id, None)
         if self._record_edit is not None:
             self._record_edit(PixelSelectionEdit(scene_id, previous, None))
         self._publish(scene_id)
@@ -213,12 +212,14 @@ class PixelSelectionService:
     def remove_scene(self, scene_id: uuid.UUID) -> bool:
         """Discard selection and revision state for a removed scene."""
         changed = self._documents_by_scene.pop(scene_id, None) is not None
+        self._coverage_by_scene.pop(scene_id, None)
         self._revision_by_scene.pop(scene_id, None)
         return changed
 
     def clear_all(self) -> None:
         """Discard selections and revisions for every scene."""
         self._documents_by_scene.clear()
+        self._coverage_by_scene.clear()
         self._revision_by_scene.clear()
 
     def _publish(self, scene_id: uuid.UUID) -> None:
@@ -231,12 +232,18 @@ class PixelSelectionService:
         self,
         scene_id: uuid.UUID,
         document: CoverageDocument | None,
+        *,
+        coverage: CoverageSnapshot | None = None,
     ) -> None:
-        """Install or remove one immutable document without publishing."""
+        """Install one immutable document and its evaluated presentation."""
         if document is None or not document.items:
             self._documents_by_scene.pop(scene_id, None)
+            self._coverage_by_scene.pop(scene_id, None)
         else:
             self._documents_by_scene[scene_id] = document
+            self._coverage_by_scene[scene_id] = (
+                self._evaluator.rasterize(document) if coverage is None else coverage
+            )
 
 
 def _with_combine_mode(

@@ -24,6 +24,10 @@ from types import MethodType
 import numpy as np
 import pytest
 from cutecanvas import Config, CuteCanvas
+from cutecanvas.composition.model import (
+    CompositionOrigin,
+    CompositionRecord,
+)
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks.autosave import AutosaveManager
 from cutecanvas.masks.edit_service import MaskEditService
@@ -40,9 +44,9 @@ from cutecanvas.masks.stroke_worker import MaskStrokeWorker
 from cutecanvas.masks.workers import MaskSnippetWorker, PrefetchedOverlay
 from cutecanvas.painting import BrushStrokeSegment
 from cutecanvas.painting.rendering import render_coverage_stroke
-from PySide6.QtCore import QCoreApplication, QPoint, QPointF, QRect, QSize
+from cutecanvas.resources import ProjectResourceReference
+from PySide6.QtCore import QCoreApplication, QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, Qt, QTransform
-from qpane.catalog import NavigationEvent
 from qpane.raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_view_grayscale8,
@@ -64,10 +68,30 @@ def _cleanup_qpane(qpane, qapp):
 
 
 def _current_image_size(qpane):
-    """Return the active image size for tests that prepare a selected image."""
-    image = qpane.currentImage
-    assert image is not None
-    return image.size()
+    """Return the active document canvas size."""
+    composition_id = qpane.currentCompositionID()
+    assert composition_id is not None
+    record = qpane.compositionService().record(composition_id)
+    return QSize(
+        round(record.canvas_bounds.width()),
+        round(record.canvas_bounds.height()),
+    )
+
+
+def _current_source_image(qpane: CuteCanvas) -> QImage:
+    """Return detached pixels from the active document's imported seed."""
+    composition_id = qpane.currentCompositionID()
+    assert composition_id is not None
+    assets = qpane._placed_assets
+    assert assets is not None
+    for instance in qpane.compositionService().layers.layers_for_composition(
+        composition_id
+    ):
+        if isinstance(instance.source, ProjectResourceReference):
+            snapshot = assets.get(instance.source.resource_id)
+            if snapshot is not None and snapshot.image is not None:
+                return QImage(snapshot.image)
+    raise AssertionError("active document has no imported raster source")
 
 
 def _make_test_qpane(qapp):
@@ -76,7 +100,8 @@ def _make_test_qpane(qapp):
     qpane.resize(128, 128)
     base_config = Config()
     mask_config = MaskConfigSlice()
-    mask_manager = MaskAssetStore(undo_limit=mask_config.mask_undo_limit)
+    mask_manager = qpane.document().masks
+    mask_manager.set_undo_limit(mask_config.mask_undo_limit)
     controller = MaskController(
         mask_manager,
         source_to_panel_point=_panel_point,
@@ -99,10 +124,23 @@ def _attach_test_mask(service, manager, mask_id, image_id) -> None:
     """Attach a test mask through the composition-owned layer boundary."""
     layer = manager.get_layer(mask_id)
     assert layer is not None
-    if image_id not in service._catalog.imageIDs():
-        source = layer.mask_image.convertToFormat(QImage.Format_RGB32)
-        service._catalog.addImage(image_id, source, None)
-    assert service.layers.attach(
+    compositions = service._qpane.compositionService()
+    if image_id not in compositions.snapshot().compositions:
+        compositions.restore_document(
+            CompositionRecord(
+                image_id,
+                CompositionOrigin.COMPOSITION,
+                "Mask workflow",
+                QRectF(
+                    0.0,
+                    0.0,
+                    float(layer.mask_image.width()),
+                    float(layer.mask_image.height()),
+                ),
+            ),
+            (),
+        )
+    assert service.layers.attach_to_composition(
         mask_id,
         image_id,
         color=QColor(255, 0, 0),
@@ -145,34 +183,6 @@ def _mask_service(qpane: CuteCanvas):
     service = _masks(qpane).mask_service()
     assert service is not None
     return service
-
-
-def test_mask_workflow_navigation_suspend_resume(qpane_with_mask):
-    qpane, _, image_id = qpane_with_mask
-    masks = _masks(qpane)
-    interaction = qpane.interaction
-    interaction.resume_overlays()
-    event = NavigationEvent(reason="unit-test", target_id=image_id, fit_view=True)
-    masks.on_navigation_started(event)
-    assert interaction.overlays_suspended is True
-    masks.on_swap_applied(image_id, activation_pending=False)
-    assert interaction.overlays_suspended is False
-    assert interaction.overlays_resume_pending is False
-
-
-def test_mask_workflow_activation_ready_resumes_overlays(qpane_with_mask):
-    qpane, _, image_id = qpane_with_mask
-    masks = _masks(qpane)
-    interaction = qpane.interaction
-    interaction.resume_overlays()
-    event = NavigationEvent(reason="pending", target_id=image_id, fit_view=False)
-    masks.on_navigation_started(event)
-    masks.on_swap_applied(image_id, activation_pending=True)
-    assert interaction.overlays_suspended is True
-    assert interaction.overlays_resume_pending is True
-    masks.handle_activation_ready(image_id, resumed_with_update=False)
-    assert interaction.overlays_suspended is False
-    assert interaction.overlays_resume_pending is False
 
 
 def test_mask_workflow_signal_relays(qpane_with_mask):
@@ -273,10 +283,10 @@ def test_mask_cycle_reorders_composition_instances(qpane_with_mask):
     first_id = qpane.createBlankMask(image_size)
     second_id = qpane.createBlankMask(image_size)
     assert first_id is not None and second_id is not None
-    assert qpane.maskIDsForImage(image_id) == [first_id, second_id]
+    assert qpane.maskIDsForComposition(image_id) == [first_id, second_id]
     assert qpane.cycleMasksForward() is True
 
-    assert qpane.maskIDsForImage(image_id) == [second_id, first_id]
+    assert qpane.maskIDsForComposition(image_id) == [second_id, first_id]
 
 
 def test_qpane_brush_wrapper_delegates(monkeypatch, qapp):
@@ -299,7 +309,8 @@ def qpane_with_mask(qapp, monkeypatch):
     manager_box: dict[str, MaskAssetStore] = {}
 
     def install_mask_feature(qpane):
-        mask_manager = MaskAssetStore(undo_limit=qpane.settings.mask_undo_limit)
+        mask_manager = qpane.document().masks
+        mask_manager.set_undo_limit(qpane.settings.mask_undo_limit)
         manager_box["manager"] = mask_manager
         controller = MaskController(
             mask_manager,
@@ -322,15 +333,9 @@ def qpane_with_mask(qapp, monkeypatch):
     qpane.applySettings(mask_autosave_enabled=True)
     image = QImage(8, 8, QImage.Format_ARGB32)
     image.fill(Qt.white)
-    image_id = uuid.uuid4()
-    image_map = CuteCanvas.imageMapFromLists(
-        [image],
-        paths=[None],
-        ids=[image_id],
-    )
-    qpane.catalog().setImagesByID(image_map, image_id)
+    composition_id = qpane.createCompositionFromImage(image)
     try:
-        yield qpane, manager_box["manager"], image_id
+        yield qpane, manager_box["manager"], composition_id
     finally:
         _cleanup_qpane(qpane, qapp)
 
@@ -380,7 +385,7 @@ def test_load_and_update_mask_workflow(monkeypatch, qpane_with_mask, tmp_path):
     )
     mask_id = qpane.loadMaskFromFile(str(mask_path))
     assert mask_id is not None
-    assert mask_id in service.mask_ids_for_image(image_id)
+    assert mask_id in service.mask_ids_for_composition(image_id)
     assert len(invalidations) == 1
     assert invalidations[-1] is mask_manager.get_layer(mask_id)
     updated = QImage(8, 8, QImage.Format_Grayscale8)
@@ -427,8 +432,8 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
             self.blank_calls.append(mask_id)
 
     def install_mask_feature(qpane):
-        catalog = qpane.catalog()
-        mask_manager = MaskAssetStore(undo_limit=qpane.settings.mask_undo_limit)
+        mask_manager = qpane.document().masks
+        mask_manager.set_undo_limit(qpane.settings.mask_undo_limit)
         controller = MaskController(
             mask_manager,
             source_to_panel_point=_panel_point,
@@ -445,7 +450,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
         manager = TrackingAutosaveManager(
             service.getActiveMaskImage,
             qpane.settings,
-            lambda: catalog.currentImagePath(),
+            lambda: None,
             executor=qpane.executor,
             parent=qpane,
         )
@@ -456,19 +461,15 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
     qpane = CuteCanvas(features=("mask",))
     qpane.resize(32, 32)
     qpane.applySettings(mask_autosave_enabled=True)
-    catalog = qpane.catalog()
     try:
         mask_manager = _mask_service(qpane).assets
         assert isinstance(mask_manager, MaskAssetStore)
         image = QImage(8, 8, QImage.Format_ARGB32)
         image.fill(Qt.white)
-        image_id = uuid.uuid4()
-        image_map = CuteCanvas.imageMapFromLists(
-            [image],
-            paths=[None],
-            ids=[image_id],
+        image_id = qpane.createCompositionFromImage(
+            image,
+            title="Autosave",
         )
-        catalog.setImagesByID(image_map, image_id)
         service = _mask_service(qpane)
         mask_id = mask_manager.create_mask(image)
         _attach_test_mask(service, mask_manager, mask_id, image_id)
@@ -505,7 +506,7 @@ def test_mask_region_update_triggers_autosave(qpane_with_mask, monkeypatch):
     monkeypatch.setattr(MaskAssetStore, "commit_mask_patches", tracking_commit_patches)
     monkeypatch.setattr(MaskAssetStore, "commit_mask_image", tracking_commit_image)
     service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -526,7 +527,7 @@ def test_mask_region_update_triggers_autosave(qpane_with_mask, monkeypatch):
     manager = TrackingAutosaveManager(
         service.getActiveMaskImage,
         qpane.settings,
-        lambda: qpane.catalog().currentImagePath(),
+        lambda: None,
         executor=qpane.executor,
         parent=qpane,
     )
@@ -547,7 +548,7 @@ def test_mask_autosave_uses_template_when_no_listener(qpane_with_mask, tmp_path,
         mask_autosave_on_creation=False,
         mask_autosave_path_template=str(tmp_path / "{mask_id}.png"),
     )
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -574,7 +575,7 @@ def test_mask_workflow_generate_and_apply_mask_success(qpane_with_mask, monkeypa
     qpane, _mask_manager, _image_id = qpane_with_mask
     masks = _masks(qpane)
     service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -622,7 +623,7 @@ def test_mask_workflow_generate_and_apply_mask_invalid_bbox(
     qpane, _mask_manager, _image_id = qpane_with_mask
     masks = _masks(qpane)
     service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -703,16 +704,16 @@ def test_mask_workflow_brush_cursor_respects_viewport(qpane_with_mask, qapp):
 def test_set_active_mask_promotes_top(qpane_with_mask):
     qpane, _mask_manager, image_id = qpane_with_mask
     mask_service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     first_id = mask_service.createBlankMask(base_image.size())
     second_id = mask_service.createBlankMask(base_image.size())
     assert first_id is not None and second_id is not None
-    order = mask_service.mask_ids_for_image(image_id)
+    order = mask_service.mask_ids_for_composition(image_id)
     assert len(order) == 2
     assert order[-1] == second_id
     assert qpane.setActiveMaskID(first_id) is True
-    reordered = mask_service.mask_ids_for_image(image_id)
+    reordered = mask_service.mask_ids_for_composition(image_id)
     assert reordered[-1] == first_id
 
 
@@ -720,17 +721,17 @@ def test_remove_active_mask_promotes_next(qpane_with_mask):
     qpane, mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
     assert service is not None
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     first_mask = service.createBlankMask(base_image.size())
     second_mask = service.createBlankMask(base_image.size())
     assert first_mask is not None and second_mask is not None
     assert qpane.setActiveMaskID(first_mask)
-    removed = qpane.removeMaskFromImage(image_id, first_mask)
+    removed = qpane.removeMaskFromComposition(image_id, first_mask)
     assert removed is True
-    mask_ids = service.mask_ids_for_image(image_id)
+    mask_ids = service.mask_ids_for_composition(image_id)
     assert mask_ids == [second_mask]
-    assert mask_manager.get_layer(first_mask) is None
+    assert mask_manager.get_layer(first_mask) is not None
     assert service.getActiveMaskId() == second_mask
 
 
@@ -739,7 +740,7 @@ def test_prepare_apply_stroke_job_merges_pixels(qpane_with_mask, qapp):
     service = _mask_service(qpane)
     assert service is not None
     controller = service.controller
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -782,7 +783,7 @@ def test_apply_stroke_job_rejects_stale_generation(qpane_with_mask, qapp):
     service = _mask_service(qpane)
     assert service is not None
     controller = service.controller
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -822,15 +823,15 @@ def test_apply_stroke_job_rejects_stale_generation(qpane_with_mask, qapp):
 def test_remove_last_mask_clears_active(qpane_with_mask):
     qpane, mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)
-    removed = qpane.removeMaskFromImage(image_id, mask_id)
+    removed = qpane.removeMaskFromComposition(image_id, mask_id)
     assert removed is True
-    assert service.mask_ids_for_image(image_id) == []
-    assert mask_manager.get_layer(mask_id) is None
+    assert service.mask_ids_for_composition(image_id) == []
+    assert mask_manager.get_layer(mask_id) is not None
     assert service.getActiveMaskId() is None
 
 
@@ -872,12 +873,9 @@ def _prepare_qpane_with_mask_feature(
     qpane = CuteCanvas(task_executor=executor, features=active_features)
     qpane.resize(max(32, image_size_px * 2), max(32, image_size_px * 2))
     qpane.applySettings(mask_autosave_enabled=True)
-    catalog = qpane.catalog()
     image = QImage(image_size_px, image_size_px, QImage.Format_ARGB32)
     image.fill(Qt.white)
-    image_id = uuid.uuid4()
-    image_map = CuteCanvas.imageMapFromLists([image], paths=[None], ids=[image_id])
-    catalog.setImagesByID(image_map, image_id)
+    qpane.createCompositionFromImage(image, title="Mask workflow")
     return qpane, image
 
 
@@ -1320,7 +1318,7 @@ def test_mask_feature_reinstall_preserves_stroke_binding(qapp):
 def test_controller_commit_stroke_clears_preview_state(qpane_with_mask, monkeypatch):
     qpane, mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_image = QImage(64, 64, QImage.Format_Grayscale8)
     mask_image.fill(0)
@@ -1392,7 +1390,7 @@ def test_controller_noop_stroke_preserves_revision_and_history(qpane_with_mask):
 def test_mask_service_produces_preview_for_zoomed_out(qpane_with_mask, monkeypatch):
     qpane, mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_array = np.arange(64 * 64, dtype=np.uint8).reshape(64, 64)
     mask_qimage = numpy_to_qimage_grayscale8(mask_array)
@@ -1554,7 +1552,7 @@ def test_update_mask_region_forces_async_colorize_uses_full_res(
 def test_mask_reorder_commit_targets_active_layer(qpane_with_mask):
     qpane, mask_manager, image_id = qpane_with_mask
     service = qpane.mask_service
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_image_a = QImage(64, 64, QImage.Format_Grayscale8)
     mask_image_a.fill(0)
@@ -1577,7 +1575,7 @@ def test_mask_reorder_commit_targets_active_layer(qpane_with_mask):
     )
     assert service.controller.edits.commit_stroke(mask_a)
     mask_a_snapshot = layer_a.mask_image.copy()
-    assert service.layers.reorder_mask_slot(image_id, mask_a, 0)
+    assert service.layers.reorder_mask_slot_in_composition(image_id, mask_a, 0)
     assert qpane.setActiveMaskID(mask_b)
     after_b = before.copy()
     after_b[1, 6] = 255
@@ -1620,7 +1618,7 @@ def test_brush_stroke_commit_groups_segments(qpane_with_mask, qapp, monkeypatch)
     )
     monkeypatch.setattr(MaskAssetStore, "commit_mask_image", tracking_commit_image)
     service = qpane.mask_service
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -1738,7 +1736,7 @@ def test_mask_tool_manager_stroke_undo_sequences(qapp, monkeypatch):
 def test_brush_single_click_undo(qpane_with_mask, qapp):
     qpane, mask_manager, _image_id = qpane_with_mask
     service = qpane.mask_service
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -1763,7 +1761,7 @@ def test_brush_single_click_undo(qpane_with_mask, qapp):
 def test_qpane_emits_mask_undo_signal(qpane_with_mask, qapp):
     qpane, _mask_manager, _image_id = qpane_with_mask
     service = qpane.mask_service
-    base_image = qpane.catalog().currentImage()
+    base_image = _current_source_image(qpane)
     assert base_image is not None
     mask_id = service.createBlankMask(base_image.size())
     assert mask_id is not None
@@ -1789,11 +1787,11 @@ def test_qpane_emits_mask_undo_signal(qpane_with_mask, qapp):
     assert undo_state.undo_depth == 1
 
 
-def test_set_image_preserves_mask_cache(qpane_with_mask):
+def test_opening_another_document_preserves_mask_cache(qpane_with_mask):
     qpane, mask_manager, _image_id = qpane_with_mask
     service = qpane.mask_service
     assert service is not None
-    mask_id = service.createBlankMask(qpane.original_image.size())
+    mask_id = service.createBlankMask(_current_image_size(qpane))
     assert mask_id is not None
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
@@ -1802,27 +1800,25 @@ def test_set_image_preserves_mask_cache(qpane_with_mask):
     assert pixmap is not None
     usage_before = service.controller.renders.cache_usage_bytes
     assert usage_before > 0
-    new_image = qpane.original_image.copy()
-    new_id = uuid.uuid4()
-    new_map = CuteCanvas.imageMapFromLists([new_image], [None], [new_id])
-    qpane.setImagesByID(new_map, new_id)
+    new_image = _current_source_image(qpane)
+    qpane.createCompositionFromImage(new_image, title="Second document")
     usage_after = service.controller.renders.cache_usage_bytes
     assert usage_after == usage_before
     assert usage_after > 0
 
 
-def test_invalidate_mask_caches_for_image(qpane_with_mask):
+def test_invalidate_mask_caches_for_composition(qpane_with_mask):
     qpane, mask_manager, image_id = qpane_with_mask
     service = qpane.mask_service
     assert service is not None
-    mask_id = service.createBlankMask(qpane.original_image.size())
+    mask_id = service.createBlankMask(_current_image_size(qpane))
     assert mask_id is not None
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
     layer.coverage.raster.fill(Qt.white)
     assert service.getColorizedMask(layer) is not None
     assert service.controller.renders.cache_usage_bytes > 0
-    service.invalidateMaskCachesForImage(image_id)
+    service.invalidateMaskCachesForComposition(image_id)
     assert service.controller.renders.cache_usage_bytes == 0
 
 
@@ -1834,7 +1830,7 @@ def test_mask_patch_undo_updates_overlay_cache_in_place(
     service = qpane.mask_service
     assert service is not None
     service.setPrefetchEnabled(False)
-    mask_id = service.createBlankMask(qpane.original_image.size())
+    mask_id = service.createBlankMask(_current_image_size(qpane))
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)
     controller = service.controller
@@ -1894,7 +1890,7 @@ def test_mask_image_command_undo_updates_overlay_cache(qpane_with_mask):
     qpane, mask_manager, _ = qpane_with_mask
     service = qpane.mask_service
     assert service is not None
-    mask_id = service.createBlankMask(qpane.original_image.size())
+    mask_id = service.createBlankMask(_current_image_size(qpane))
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)
     controller = service.controller
@@ -1953,8 +1949,8 @@ def test_mask_activation_signal_timing(qapp, qpane_with_mask):
     small_image.fill(255)
     small_mask_id = mask_manager.create_mask(small_image)
     _attach_test_mask(service, mask_manager, small_mask_id, small_image_id)
-    assert service.mask_ids_for_image(large_image_id) == [large_mask_id]
-    assert service.mask_ids_for_image(small_image_id) == [small_mask_id]
+    assert service.mask_ids_for_composition(large_image_id) == [large_mask_id]
+    assert service.mask_ids_for_composition(small_image_id) == [small_mask_id]
     controller.setActiveMaskID(large_mask_id)
     maskless_image_id = uuid.uuid4()
     emissions: list[tuple[str, uuid.UUID | None]] = []
@@ -1969,7 +1965,7 @@ def test_mask_activation_signal_timing(qapp, qpane_with_mask):
     controller.mask_updated.connect(on_mask)
     try:
         emissions.clear()
-        assert service.ensureTopMaskActiveForImage(small_image_id) is True
+        assert service.ensureTopMaskActiveForComposition(small_image_id) is True
         assert emissions == []
         qapp.processEvents()
         qapp.processEvents()
@@ -1978,13 +1974,13 @@ def test_mask_activation_signal_timing(qapp, qpane_with_mask):
         emissions.clear()
         controller.setActiveMaskID(small_mask_id)
         emissions.clear()
-        assert service.ensureTopMaskActiveForImage(large_image_id) is True
+        assert service.ensureTopMaskActiveForComposition(large_image_id) is True
         assert ("props", large_mask_id) in emissions
         assert ("mask", large_mask_id) in emissions
         emissions.clear()
         controller.setActiveMaskID(large_mask_id)
         emissions.clear()
-        assert service.ensureTopMaskActiveForImage(maskless_image_id) is False
+        assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
         assert ("props", None) in emissions
         assert ("mask", None) in emissions
     finally:
@@ -2016,18 +2012,18 @@ def test_mask_activation_set_active_flags(qapp, qpane_with_mask, monkeypatch):
     monkeypatch.setattr(controller, "setActiveMaskID", capture)
     controller.setActiveMaskID(large_mask_id)
     calls.clear()
-    assert service.ensureTopMaskActiveForImage(small_image_id) is True
+    assert service.ensureTopMaskActiveForComposition(small_image_id) is True
     assert calls
     assert calls[-1] == (small_mask_id, False, False)
     controller.setActiveMaskID(small_mask_id)
     calls.clear()
-    assert service.ensureTopMaskActiveForImage(large_image_id) is True
+    assert service.ensureTopMaskActiveForComposition(large_image_id) is True
     assert calls
     assert calls[-1] == (large_mask_id, True, True)
     controller.setActiveMaskID(large_mask_id)
     calls.clear()
     maskless_image_id = uuid.uuid4()
-    assert service.ensureTopMaskActiveForImage(maskless_image_id) is False
+    assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
     assert calls
     assert calls[-1] == (None, False, True)
 
@@ -2055,7 +2051,7 @@ def test_activation_prefetch_runs_when_pending(qapp, qpane_with_mask, monkeypatc
 
     monkeypatch.setattr(service._activation, "_prefetch", recording_prefetch)
     try:
-        result = service.ensureTopMaskActiveForImage(small_image_id)
+        result = service.ensureTopMaskActiveForComposition(small_image_id)
         assert result is True
         assert calls
         scheduled_image, reason, _scales = calls[-1]
@@ -2084,7 +2080,7 @@ def test_mask_activation_schedule_usage(qapp, qpane_with_mask, monkeypatch):
         mask_id: uuid.UUID | None,
         *,
         warm_cache: bool = False,
-        image_id=None,
+        composition_id=None,
     ) -> None:
         calls.append((mask_id, warm_cache))
 
@@ -2096,15 +2092,15 @@ def test_mask_activation_schedule_usage(qapp, qpane_with_mask, monkeypatch):
     controller = service.controller
     controller.setActiveMaskID(large_mask_id)
     calls.clear()
-    assert service.ensureTopMaskActiveForImage(small_image_id) is True
+    assert service.ensureTopMaskActiveForComposition(small_image_id) is True
     assert calls == [(small_mask_id, True)]
     calls.clear()
-    assert service.ensureTopMaskActiveForImage(large_image_id) is True
+    assert service.ensureTopMaskActiveForComposition(large_image_id) is True
     assert calls == []
     maskless_image_id = uuid.uuid4()
-    assert service.ensureTopMaskActiveForImage(maskless_image_id) is False
+    assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
     assert calls == []
-    assert service.ensureTopMaskActiveForImage(large_image_id) is True
+    assert service.ensureTopMaskActiveForComposition(large_image_id) is True
     assert calls == []
 
 
@@ -2118,9 +2114,9 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
         mask_id: uuid.UUID | None,
         *,
         warm_cache: bool = False,
-        image_id=None,
+        composition_id=None,
     ) -> None:
-        scheduled.append((mask_id, warm_cache, image_id))
+        scheduled.append((mask_id, warm_cache, composition_id))
 
     monkeypatch.setattr(
         service._activation,
@@ -2133,17 +2129,17 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
         lambda image_id: resumed.append(image_id),
     )
     pending_image_id = uuid.uuid4()
-    service._activation._pending_activation_images.add(pending_image_id)
-    assert service.ensureTopMaskActiveForImage(pending_image_id) is False
+    service._activation._pending_compositions.add(pending_image_id)
+    assert service.ensureTopMaskActiveForComposition(pending_image_id) is False
     assert scheduled == [(None, False, pending_image_id)]
     assert resumed == []
     scheduled.clear()
     maskless_image_id = uuid.uuid4()
-    assert service.ensureTopMaskActiveForImage(maskless_image_id) is False
+    assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
     assert scheduled == []
     assert resumed == [maskless_image_id]
-    service._activation._pending_activation_images.discard(pending_image_id)
-    service._activation._pending_activation_images.discard(maskless_image_id)
+    service._activation._pending_compositions.discard(pending_image_id)
+    service._activation._pending_compositions.discard(maskless_image_id)
 
 
 def test_mask_prefetch_warms_masks(qapp):
@@ -2156,7 +2152,6 @@ def test_mask_prefetch_warms_masks(qapp):
         service = qpane.mask_service
         manager = service.assets
         controller = service.controller
-        catalog = qpane.catalog()
         image = QImage(8, 8, QImage.Format_Grayscale8)
         image.fill(255)
         image_id = uuid.uuid4()
@@ -2165,10 +2160,6 @@ def test_mask_prefetch_warms_masks(qapp):
         assert layer is not None
         layer.coverage.raster.fill(128)
         _attach_test_mask(service, manager, mask_id, image_id)
-        source_image = QImage(8, 8, QImage.Format_ARGB32)
-        source_image.fill(Qt.white)
-        catalog.addImage(image_id, source_image, None)
-        catalog.setCurrentImageID(image_id)
         assert service.prefetchColorizedMasks(image_id, reason="test") is True
         executor.drain_all()
         executor.drain_all()
@@ -2363,7 +2354,7 @@ def test_prefetch_deferred_while_mask_busy(qpane_with_mask):
     service = _mask_service(qpane)
     controller = service.controller
     pipeline = service._stroke_pipeline
-    mask_id = service.createBlankMask(qpane.original_image.size())
+    mask_id = service.createBlankMask(_current_image_size(qpane))
     assert mask_id is not None
     layer = mask_manager.get_layer(mask_id)
     assert layer is not None
@@ -2551,13 +2542,13 @@ def test_ensure_top_mask_defers_when_prefetch_active(monkeypatch, qpane_with_mas
         mask_id_arg,
         *,
         warm_cache=False,
-        image_id=None,
+        composition_id=None,
     ):
         scheduled_calls.append((mask_id_arg, warm_cache))
 
     monkeypatch.setattr(service._activation, "_schedule_signals", tracking_schedule)
     try:
-        assert service.ensureTopMaskActiveForImage(image_id) is True
+        assert service.ensureTopMaskActiveForComposition(image_id) is True
     finally:
         service.render_work._prefetch_handles.pop(image_id, None)
     assert captured_call["args"] == (mask_id, False, False)
@@ -2611,135 +2602,57 @@ def test_scaled_mask_cache_populates_scaled_entry_first(qpane_with_mask):
     assert pixmap.size() == expected_size
 
 
-def test_swap_defers_update_until_mask_ready(qapp, monkeypatch):
+def test_document_mask_activation_pending_flag_toggles(qapp, monkeypatch):
     qpane, mask_manager, service = _make_test_qpane(qapp)
     try:
-        catalog = qpane.catalog()
         masks = _masks(qpane)
-        first_image = QImage(128, 128, QImage.Format_ARGB32)
-        first_image.fill(Qt.white)
-        second_image = QImage(48, 48, QImage.Format_ARGB32)
-        second_image.fill(Qt.black)
-        first_id = uuid.uuid4()
-        second_id = uuid.uuid4()
-        image_map = CuteCanvas.imageMapFromLists(
-            [first_image, second_image],
-            paths=[None, None],
-            ids=[first_id, second_id],
+        large_composition_id = uuid.uuid4()
+        small_composition_id = uuid.uuid4()
+        large_mask_image = QImage(192, 192, QImage.Format_Grayscale8)
+        large_mask_image.fill(220)
+        small_mask_image = QImage(48, 48, QImage.Format_Grayscale8)
+        small_mask_image.fill(220)
+        large_mask_id = mask_manager.create_mask(large_mask_image)
+        small_mask_id = mask_manager.create_mask(small_mask_image)
+        _attach_test_mask(
+            service,
+            mask_manager,
+            large_mask_id,
+            large_composition_id,
         )
-        catalog.setImagesByID(image_map, first_id)
-        catalog.setCurrentImageID(first_id)
-        large_mask = QImage(128, 128, QImage.Format_Grayscale8)
-        large_mask.fill(200)
-        small_mask = QImage(48, 48, QImage.Format_Grayscale8)
-        small_mask.fill(200)
-        first_mask_id = mask_manager.create_mask(large_mask)
-        _attach_test_mask(service, mask_manager, first_mask_id, first_id)
-        second_mask_id = mask_manager.create_mask(small_mask)
-        _attach_test_mask(service, mask_manager, second_mask_id, second_id)
-        service.ensureTopMaskActiveForImage(first_id)
-        update_calls: list[int] = []
-        original_update = qpane.update
-
-        def tracking_update():
-            update_calls.append(1)
-            return original_update()
-
-        monkeypatch.setattr(qpane, "update", tracking_update)
-        captured_schedule: dict[str, tuple] = {}
-
-        def fake_schedule(self, mask_id, *, warm_cache=False, image_id=None):
-            captured_schedule["args"] = (
-                mask_id,
-                warm_cache,
-                image_id,
-            )
-            if image_id is not None:
-                self._pending_activation_images.add(image_id)
-
-        monkeypatch.setattr(
-            service._activation,
-            "_schedule_signals",
-            MethodType(fake_schedule, service._activation),
+        _attach_test_mask(
+            service,
+            mask_manager,
+            small_mask_id,
+            small_composition_id,
         )
-        navigation_event = NavigationEvent(
-            reason="unit-test",
-            target_id=second_id,
-            fit_view=None,
-        )
-        masks.on_navigation_started(navigation_event)
-        catalog.setCurrentImageID(second_id)
-        assert service.isActivationPending(second_id) is True
-        assert masks.is_activation_pending(second_id) is True
-        assert qpane.interaction.overlays_suspended is True
-        assert captured_schedule["args"][2] == second_id
-        before_resume = len(update_calls)
-        service._activation._pending_activation_images.discard(second_id)
-        masks.handle_activation_ready(second_id, resumed_with_update=True)
-        assert len(update_calls) >= before_resume
-        assert service.isActivationPending(second_id) is False
-        assert qpane.interaction.overlays_suspended is False
-        assert masks.is_activation_pending(second_id) is False
-    finally:
-        _cleanup_qpane(qpane, qapp)
-
-
-def test_activation_pending_flag_toggles(qapp, monkeypatch):
-    qpane, mask_manager, service = _make_test_qpane(qapp)
-    try:
-        catalog = qpane.catalog()
-        masks = _masks(qpane)
-        image = QImage(96, 96, QImage.Format_ARGB32)
-        image.fill(Qt.white)
-        image_id = uuid.uuid4()
-        image_map = CuteCanvas.imageMapFromLists([image], paths=[None], ids=[image_id])
-        catalog.setImagesByID(image_map, image_id)
-        mask_image = QImage(96, 96, QImage.Format_Grayscale8)
-        mask_image.fill(220)
-        mask_id = mask_manager.create_mask(mask_image)
-        _attach_test_mask(service, mask_manager, mask_id, image_id)
-        service.render_work._prefetch_handles[image_id] = object()
+        service.controller.setActiveMaskID(large_mask_id)
         called: list[tuple] = []
 
-        def fake_schedule(self, mask_id, *, warm_cache=False, image_id=None):
-            called.append((mask_id, warm_cache, image_id))
+        def fake_schedule(
+            self,
+            mask_id,
+            *,
+            warm_cache=False,
+            composition_id=None,
+        ):
+            called.append((mask_id, warm_cache, composition_id))
 
         monkeypatch.setattr(
             service._activation,
             "_schedule_signals",
             MethodType(fake_schedule, service._activation),
         )
-        assert service.ensureTopMaskActiveForImage(image_id) is True
-        assert service.isActivationPending(image_id) is True
-        assert called and called[0][2] == image_id
-        service._activation._pending_activation_images.discard(image_id)
-        masks.handle_activation_ready(image_id, resumed_with_update=False)
-        assert service.isActivationPending(image_id) is False
-    finally:
-        _cleanup_qpane(qpane, qapp)
-
-
-def test_workflow_handles_activation_ready_without_explicit_image(qapp):
-    qpane, _, service = _make_test_qpane(qapp)
-    try:
-        target_id = uuid.uuid4()
-        event = NavigationEvent(
-            reason="unit-test",
-            target_id=target_id,
-            fit_view=None,
+        assert service.ensureTopMaskActiveForComposition(small_composition_id) is True
+        assert service.isActivationPending(small_composition_id) is True
+        assert called and called[0][2] == small_composition_id
+        service._activation._pending_compositions.discard(small_composition_id)
+        masks.handle_activation_ready(
+            small_composition_id,
+            resumed_with_update=False,
         )
-        masks = _masks(qpane)
-        masks.on_navigation_started(event)
-        service._activation._pending_activation_images.add(target_id)
-        masks.on_swap_applied(target_id, activation_pending=True)
-        assert masks.is_activation_pending(target_id) is True
-        assert qpane.interaction.overlays_suspended is True
-        assert qpane.interaction.overlays_resume_pending is True
-        service._activation._pending_activation_images.discard(target_id)
-        masks.handle_activation_ready(None, resumed_with_update=False)
-        assert masks.is_activation_pending(target_id) is False
+        assert service.isActivationPending(small_composition_id) is False
         assert qpane.interaction.overlays_suspended is False
-        assert qpane.interaction.overlays_resume_pending is False
     finally:
         _cleanup_qpane(qpane, qapp)
 
@@ -2747,13 +2660,7 @@ def test_workflow_handles_activation_ready_without_explicit_image(qapp):
 def test_prefetched_masks_avoid_colorize_on_activation(qapp):
     qpane, mask_manager, service = _make_test_qpane(qapp)
     try:
-        catalog = qpane.catalog()
-        image = QImage(64, 64, QImage.Format_ARGB32)
-        image.fill(Qt.white)
         image_id = uuid.uuid4()
-        image_map = CuteCanvas.imageMapFromLists([image], paths=[None], ids=[image_id])
-        catalog.setImagesByID(image_map, image_id)
-        catalog.setCurrentImageID(image_id)
         mask_image = QImage(64, 64, QImage.Format_Grayscale8)
         mask_image.fill(150)
         mask_id = mask_manager.create_mask(mask_image)
@@ -3008,7 +2915,7 @@ def test_cycle_masks_invalidates_pending_jobs(qapp):
     layer_a.coverage.raster.fill(0)
     layer_b.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
-    image_id = qpane.catalog().currentImageID()
+    image_id = qpane.currentCompositionID()
     assert image_id is not None
     try:
         _queue_pending_stroke(qpane, QPoint(2, 2))
@@ -3045,14 +2952,14 @@ def test_remove_mask_cancels_pending_jobs(qapp):
     layer_a.coverage.raster.fill(0)
     layer_b.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
-    image_id = qpane.catalog().currentImageID()
+    image_id = qpane.currentCompositionID()
     assert image_id is not None
     try:
         _queue_pending_stroke(qpane, QPoint(6, 6))
         pending_jobs = service.strokeDebugSnapshot().pending_jobs
         handles = tuple(pending_jobs.get(mask_a, ()))
         assert handles
-        assert qpane.removeMaskFromImage(image_id, mask_a) is True
+        assert qpane.removeMaskFromComposition(image_id, mask_a) is True
         pending_after = service.strokeDebugSnapshot().pending_jobs
         assert not pending_after.get(mask_a)
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
@@ -3061,7 +2968,7 @@ def test_remove_mask_cancels_pending_jobs(qapp):
         cancelled_ids = {handle.task_id for handle in executor.cancelled}
         assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
         manager = service.assets
-        assert manager.get_layer(mask_a) is None
+        assert manager.get_layer(mask_a) is not None
         executor.drain_all()
         assert not list(executor.pending_tasks())
     finally:
@@ -3074,7 +2981,7 @@ def test_concurrent_strokes_survive_mask_reorder(qapp):
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
     assert service is not None
-    image_id = qpane.catalog().currentImageID()
+    image_id = qpane.currentCompositionID()
     assert image_id is not None
     mask_a = service.createBlankMask(image.size())
     mask_b = service.createBlankMask(image.size())

@@ -71,13 +71,13 @@ canvas.setActiveMaskID(mask_id)
 print(canvas.activeMaskID())
 ```
 
-`listMasksForImage()` returns `MaskInfo` rows for the active composition when
-called without an image ID. Each row includes label, overlay color, opacity,
+`listMasksForComposition()` returns `MaskInfo` rows for the active composition
+when called without a document ID. Each row includes label, overlay color, opacity,
 active state, and its scene and layer IDs.
 
-Catalog-oriented applications may pass an image ID to address that image's
-generated document. A document-and-layer tree should instead use
-`getCompositionSnapshot()`, which lists masks beside every other layer type.
+Pass a document ID to inspect another composition. A document-and-layer tree
+can use `getCompositionSnapshot()`, which lists masks beside every other layer
+type.
 
 ## Set the Overlay Color
 
@@ -218,7 +218,11 @@ A painted mask is useful as saved selection coverage. Select its layer, then
 copy its visible coverage into the document selection:
 
 ```python
-mask = next(item for item in canvas.listMasksForImage() if item.mask_id == mask_id)
+mask = next(
+    item
+    for item in canvas.listMasksForComposition()
+    if item.mask_id == mask_id
+)
 if mask.scene_id is not None and mask.layer_id is not None:
     canvas.selectLayerCoverage(mask.scene_id, mask.layer_id)
 ```
@@ -299,8 +303,12 @@ canvas.editor.history.undo()
 canvas.editor.history.redo()
 ```
 
-The mask-named undo methods remain available for catalog-oriented mask hosts,
-but they step the same document history rather than a second mask-only stack.
+The mask-named undo methods are convenient for mask-focused actions, but they
+step the same document history rather than a second mask-only stack.
+
+`CuteCanvas.prefetchMaskOverlays(document_id)` prepares presentation products
+before a host opens a mask-heavy document. Visible work remains higher
+priority.
 
 PNG autosave is disabled by default. Configure it when the host wants a
 processing-ready mask beside the editable document:

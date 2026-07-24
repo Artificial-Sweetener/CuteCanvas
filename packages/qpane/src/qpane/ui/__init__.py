@@ -22,17 +22,35 @@ from .clipboard import copyToClipboard
 from .diagnostics_controller import DiagnosticsOverlayController
 from .dragdrop import drag_out_image, is_drag_out_allowed
 from .dragout import maybeStartDrag
+from .outbound_drag import (
+    DragCancellation,
+    DragCompletion,
+    DragSubject,
+    OutboundDragController,
+    OutboundDragPayload,
+    OutboundMimeItem,
+    OutboundMimeProvider,
+    execute_outbound_drag,
+)
 from .status import create_status_overlay
 from .viewer_diagnostics import ViewerDiagnostics
 from .widget_props import apply_widget_defaults
 
 __all__ = [
     "DiagnosticsOverlayController",
+    "DragCancellation",
+    "DragCompletion",
+    "DragSubject",
+    "OutboundDragController",
+    "OutboundDragPayload",
+    "OutboundMimeItem",
+    "OutboundMimeProvider",
     "ViewerDiagnostics",
     "apply_widget_defaults",
     "copyToClipboard",
     "create_status_overlay",
     "drag_out_image",
+    "execute_outbound_drag",
     "is_drag_out_allowed",
     "maybeStartDrag",
 ]

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from typing import TypeAlias
 
 from qpane.sdk.scene import LayerDescriptor, LayerTransform
@@ -65,6 +66,7 @@ class FloatingPixelResolutionOwner:
         layer_selection: SceneLayerSelectionController,
         selection_projections: LayerSelectionProjectionCache,
         promotions: FloatingLayerPromotionRegistry,
+        origin_session_id: Callable[[], uuid.UUID],
     ) -> None:
         """Bind durable raster, selection, promotion, and history owners."""
         self._targets = targets
@@ -73,6 +75,7 @@ class FloatingPixelResolutionOwner:
         self._layer_selection = layer_selection
         self._selection_projections = selection_projections
         self._promotions = promotions
+        self._origin_session_id = origin_session_id
         self._fragment_projector = RasterFragmentProjector()
         self._coverage_projector = LayerCoverageProjector()
 
@@ -85,6 +88,8 @@ class FloatingPixelResolutionOwner:
         if resolved is None:
             return False
         _scene, layer, owner = resolved
+        if owner.revision_token(layer) != session.source_revision:
+            return False
         if translation is None:
             return self._anchor_affine_to_source(session, layer, owner)
         delta_x, delta_y = translation
@@ -95,9 +100,7 @@ class FloatingPixelResolutionOwner:
             delta_y,
             cut_source=session.cut_source,
         )
-        if transition is None or not owner.transition_matches(
-            layer, transition, use_after=False
-        ):
+        if transition is None:
             return False
         if not owner.restore_transition(layer, transition, use_after=True):
             return False
@@ -287,11 +290,7 @@ class FloatingPixelResolutionOwner:
         scene, source_layer, source_owner = resolved
         if (
             source_layer.transform != session.layer.transform
-            or not source_owner.transition_matches(
-                source_layer,
-                session.lift.source_transition,
-                use_after=False,
-            )
+            or source_owner.revision_token(source_layer) != session.source_revision
         ):
             return None
         applied_source = self._apply_source_cut(session, source_layer, source_owner)
@@ -388,6 +387,7 @@ class FloatingPixelResolutionOwner:
         self._history.record(
             FloatingPixelCommitEdit(
                 scene_id=session.scene_id,
+                origin_session_id=self._origin_session_id(),
                 transitions=transitions,
                 selection_before=session.selection,
                 selection_after=selection_after,
@@ -415,11 +415,7 @@ class FloatingPixelResolutionOwner:
             source_layer.transform == session.layer.transform
             and source_layer.transform is not None
             and target_layer.transform is not None
-            and source_owner.transition_matches(
-                source_layer,
-                session.lift.source_transition,
-                use_after=False,
-            )
+            and source_owner.revision_token(source_layer) == session.source_revision
             and target_owner.accepts_fragment(target_layer, session.lift.fragment)
         )
 

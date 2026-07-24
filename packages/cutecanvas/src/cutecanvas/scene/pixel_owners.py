@@ -39,6 +39,10 @@ class LayerPixelMutationOwner(Protocol):
         """Return the authoritative raster extent policy for ``layer``."""
         ...
 
+    def revision_token(self, layer: LayerDescriptor) -> object | None:
+        """Return an inexpensive token that changes with authoritative pixels."""
+        ...
+
     def content_coverage(
         self,
         layer: LayerDescriptor,

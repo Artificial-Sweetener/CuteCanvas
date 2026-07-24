@@ -18,9 +18,6 @@
 
 from __future__ import annotations
 
-import uuid
-from pathlib import Path
-
 from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage
 
@@ -29,26 +26,10 @@ def _add_image(qpane: CuteCanvas) -> None:
     """Populate the qpane with a single image to disable the placeholder."""
     image = QImage(8, 8, QImage.Format_ARGB32)
     image.fill(0)
-    image_id = uuid.uuid4()
-    qpane.setImagesByID(
-        CuteCanvas.imageMapFromLists([image], [None], [image_id]), image_id
-    )
-
-
-def _placeholder_path(tmp_path: Path) -> Path:
-    image = QImage(8, 8, QImage.Format_ARGB32)
-    image.fill(0)
-    path = tmp_path / "placeholder.png"
-    assert image.save(str(path))
-    return path
+    qpane.createCompositionFromImage(image, title="Cycle tools")
 
 
 def _cycle(qpane: CuteCanvas) -> None:
-    placeholder_active = qpane.placeholderActive()
-    placeholder = getattr(qpane.settings, "placeholder", None)
-    panzoom_allowed = (not placeholder_active) or bool(
-        getattr(placeholder, "panzoom_enabled", False)
-    )
     mask_available = qpane.maskFeatureAvailable()
     sam_available = qpane.samFeatureAvailable()
     preferred_order: list[str] = [
@@ -70,16 +51,12 @@ def _cycle(qpane: CuteCanvas) -> None:
 
     def _mode_allowed(mode: str) -> bool:
         if mode == CuteCanvas.CONTROL_MODE_PANZOOM:
-            return panzoom_allowed
+            return True
         if mode == CuteCanvas.CONTROL_MODE_DRAW_BRUSH:
-            return mask_available and not placeholder_active
+            return mask_available
         if mode == CuteCanvas.CONTROL_MODE_SMART_SELECT:
-            return mask_available and sam_available and not placeholder_active
-        return not (
-            placeholder_active
-            and mode
-            not in {CuteCanvas.CONTROL_MODE_CURSOR, CuteCanvas.CONTROL_MODE_PANZOOM}
-        )
+            return mask_available and sam_available
+        return True
 
     ordered_modes = [mode for mode in preferred_order if _mode_allowed(mode)]
     if not ordered_modes:
@@ -100,9 +77,9 @@ def _cycle(qpane: CuteCanvas) -> None:
         }
         and qpane.activeMaskID() is None
     ):
-        image = qpane.currentImage
-        assert image is not None
-        mask_id = qpane.createBlankMask(image.size())
+        raster = qpane.activeRasterResolver().resolve()
+        assert raster is not None
+        mask_id = qpane.createBlankMask(raster.image.size())
         if mask_id is not None:
             qpane.setActiveMaskID(mask_id)
     qpane.setControlMode(next_mode)
@@ -150,6 +127,7 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
             CuteCanvas.CONTROL_MODE_MASK_RECTANGLE,
             CuteCanvas.CONTROL_MODE_MASK_ELLIPSE,
             CuteCanvas.CONTROL_MODE_MASK_LASSO,
+            CuteCanvas.CONTROL_MODE_CLONE_STAMP,
             CuteCanvas.CONTROL_MODE_VECTOR_SHAPE,
             CuteCanvas.CONTROL_MODE_VECTOR_PATH,
             CuteCanvas.CONTROL_MODE_VECTOR_NODE,
@@ -158,44 +136,6 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
         ):
             _cycle(qpane)
             assert qpane.getControlMode() == expected
-    finally:
-        qpane.deleteLater()
-        qapp.processEvents()
-
-
-def test_cycle_placeholder_panzoom_enabled(qapp, tmp_path: Path):
-    config = Config(
-        placeholder={
-            "source": str(_placeholder_path(tmp_path)),
-            "panzoom_enabled": True,
-        }
-    )
-    qpane = CuteCanvas(config=config, features=())
-    try:
-        qpane.setControlMode(CuteCanvas.CONTROL_MODE_CURSOR)
-        assert qpane.placeholderActive() is True
-        _cycle(qpane)
-        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
-        _cycle(qpane)
-        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_CURSOR
-    finally:
-        qpane.deleteLater()
-        qapp.processEvents()
-
-
-def test_cycle_placeholder_panzoom_disabled_noop(qapp, tmp_path: Path):
-    config = Config(
-        placeholder={
-            "source": str(_placeholder_path(tmp_path)),
-            "panzoom_enabled": False,
-        }
-    )
-    qpane = CuteCanvas(config=config, features=())
-    try:
-        qpane.setControlMode(CuteCanvas.CONTROL_MODE_CURSOR)
-        assert qpane.placeholderActive() is True
-        _cycle(qpane)
-        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_CURSOR
     finally:
         qpane.deleteLater()
         qapp.processEvents()

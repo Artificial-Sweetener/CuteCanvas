@@ -25,7 +25,7 @@ from qpane.sdk.scene import RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageItem, CoverageSnapshot
 
-from ..masks.source_reference import MaskAssetReference
+from ..resources import ProjectResourceReference
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_edits import LayerPixelMutationCoordinator
@@ -199,8 +199,8 @@ class EditorInteractionCoordinator:
             (
                 candidate
                 for candidate in scene.layers
-                if isinstance(candidate.source, MaskAssetReference)
-                and candidate.source.mask_id == mask_id
+                if isinstance(candidate.source, ProjectResourceReference)
+                and candidate.source.resource_id == mask_id
             ),
             None,
         )

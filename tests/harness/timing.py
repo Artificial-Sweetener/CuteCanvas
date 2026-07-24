@@ -19,13 +19,20 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from time import perf_counter, thread_time
+from time import perf_counter, process_time, thread_time
 
 
 def interaction_clock() -> float:
     """Measure synchronous dispatch work without xdist scheduler contention."""
     if os.environ.get("PYTEST_XDIST_WORKER"):
         return thread_time()
+    return perf_counter()
+
+
+def completion_clock() -> float:
+    """Measure asynchronous completion without counting xdist scheduling delay."""
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        return process_time()
     return perf_counter()
 
 

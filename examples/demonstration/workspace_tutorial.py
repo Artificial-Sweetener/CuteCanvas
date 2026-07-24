@@ -16,8 +16,7 @@
 """Teach how host commands open, place, save, and arrange content.
 
 The controller owns file dialogs and background image loading. CuteCanvas owns
-the documents, layers, masks, persistence, and comparison state those commands
-change.
+the compositions, layers, masks, resources, and persistence those commands change.
 """
 
 from __future__ import annotations
@@ -27,13 +26,11 @@ import uuid
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from cutecanvas import ComparisonOrientation, CuteCanvas
-from PySide6.QtCore import QThreadPool
+from cutecanvas import CuteCanvas, LayerPolicy
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QFileDialog, QWidget
 
-from examples.demonstration import scene_composition
-from examples.demonstration.workers import ImageLoaderWorker
+from examples.demonstration.workers import ImageLoadCoordinator
 
 
 class WorkspaceTutorialController:
@@ -45,16 +42,26 @@ class WorkspaceTutorialController:
         parent: QWidget,
         *,
         masks_available: Callable[[], bool],
-        all_images_linked: Callable[[], bool],
         set_status: Callable[[str], None],
     ) -> None:
         """Retain the editor and narrow host policy callbacks."""
         self._canvas = canvas
         self._parent = parent
         self._masks_available = masks_available
-        self._all_images_linked = all_images_linked
         self._set_status = set_status
         self._load_batch_auto_select = False
+        self._image_loads = ImageLoadCoordinator(parent)
+
+    @staticmethod
+    def _ordinary_image_policy() -> LayerPolicy:
+        """Return the demo policy for ordinary imported image layers."""
+        return LayerPolicy(
+            selectable=True,
+            movable=True,
+            pixel_editable=False,
+            reorderable=True,
+            removable=True,
+        )
 
     def open_images_dialog(self) -> None:
         """Choose ordinary images and enqueue worker-side decoding."""
@@ -67,34 +74,34 @@ class WorkspaceTutorialController:
         if files:
             self.load_images(Path(file_path) for file_path in files)
 
-    def open_document_dialog(self) -> None:
+    def open_composition_dialog(self) -> None:
         """Restore one complete editable CuteCanvas archive."""
         file_path, _ = QFileDialog.getOpenFileName(
             self._parent,
-            "Open CuteCanvas Document",
+            "Open CuteCanvas Composition",
             str(Path.home()),
-            "CuteCanvas documents (*.cutecanvas)",
+            "CuteCanvas compositions (*.cutecanvas)",
         )
         if not file_path:
             return
         try:
-            document = self._canvas.editor.persistence.load(file_path)
+            composition = self._canvas.editor.persistence.load(file_path)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            self._set_status(f"Could not open document: {exc}")
+            self._set_status(f"Could not open composition: {exc}")
             return
-        self._set_status(f"Opened {document.state.title}.")
+        self._set_status(f"Opened {composition.state.title}.")
 
-    def save_document_dialog(self) -> None:
-        """Persist the active editable document as one atomic archive."""
-        document = self._canvas.editor.documents.current
-        if document is None:
-            self._set_status("Open a document before saving.")
+    def save_composition_dialog(self) -> None:
+        """Persist the active editable composition as one atomic archive."""
+        composition = self._canvas.editor.compositions.current
+        if composition is None:
+            self._set_status("Open a composition before saving.")
             return
         file_path, _ = QFileDialog.getSaveFileName(
             self._parent,
-            "Save CuteCanvas Document",
-            str(Path.home() / f"{document.state.title}.cutecanvas"),
-            "CuteCanvas documents (*.cutecanvas)",
+            "Save CuteCanvas Composition",
+            str(Path.home() / f"{composition.state.title}.cutecanvas"),
+            "CuteCanvas compositions (*.cutecanvas)",
         )
         if not file_path:
             return
@@ -102,11 +109,11 @@ class WorkspaceTutorialController:
         if not path.suffix:
             path = path.with_suffix(".cutecanvas")
         try:
-            self._canvas.editor.persistence.save(document, path)
+            self._canvas.editor.persistence.save(composition, path)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            self._set_status(f"Could not save document: {exc}")
+            self._set_status(f"Could not save composition: {exc}")
             return
-        self._set_status(f"Saved {document.state.title}.")
+        self._set_status(f"Saved {composition.state.title}.")
 
     def place_embedded_dialog(self) -> None:
         """Decode one image off-thread before placing detached pixels."""
@@ -118,16 +125,15 @@ class WorkspaceTutorialController:
         )
         if not file_path:
             return
-        worker = ImageLoaderWorker((Path(file_path),))
-        worker.signals.image_loaded.connect(self.place_decoded_embedded_asset)
-        worker.signals.finished.connect(
-            lambda count: (
+        self._image_loads.submit(
+            (Path(file_path),),
+            image_loaded=self.place_decoded_embedded_asset,
+            finished=lambda count: (
                 self._set_status("The selected image could not be decoded.")
                 if count == 0
                 else None
-            )
+            ),
         )
-        QThreadPool.globalInstance().start(worker)
         self._set_status(f"Preparing embedded asset {Path(file_path).name}…")
 
     def place_linked_dialog(self) -> None:
@@ -149,11 +155,14 @@ class WorkspaceTutorialController:
             return
         self._set_status(f"Loading linked asset {Path(file_path).name}…")
 
-    def clear_gallery(self) -> None:
-        """Remove every gallery image through the public facade."""
-        if self._canvas.hasImages():
-            self._canvas.clearImages()
-            self._set_status("Cleared all images.")
+    def close_all_compositions(self) -> None:
+        """Remove every removable editor composition through typed handles."""
+        compositions = tuple(self._canvas.editor.compositions)
+        for composition in compositions:
+            if composition.state.policy.removable:
+                composition.remove()
+        if compositions:
+            self._set_status("Closed all removable compositions.")
 
     def add_mask(self) -> uuid.UUID | None:
         """Create and activate a visible blank mask for the current image."""
@@ -173,7 +182,7 @@ class WorkspaceTutorialController:
             self.import_mask_from_path(Path(file_path))
 
     def save_active_mask_dialog(self) -> None:
-        """Export the active mask clipped to the document canvas."""
+        """Export the active mask clipped to the composition canvas."""
         if not self._require_masks():
             return
         mask_image = self._canvas.getActiveMaskImage()
@@ -197,15 +206,15 @@ class WorkspaceTutorialController:
         """Delete the active mask after validating image and mask selection."""
         if not self._require_masks():
             return
-        image_id = self._canvas.currentImageID()
-        if image_id is None:
-            self._set_status("Load an image before deleting masks.")
+        composition_id = self._canvas.currentCompositionID()
+        if composition_id is None:
+            self._set_status("Open a composition before deleting masks.")
             return
         mask_id = self._canvas.activeMaskID()
         if mask_id is None:
             self._set_status("Select a mask to delete.")
             return
-        if not self._canvas.removeMaskFromImage(image_id, mask_id):
+        if not self._canvas.removeMaskFromComposition(composition_id, mask_id):
             self._set_status("Unable to delete the selected mask.")
             return
         self._set_status("Deleted active mask layer.")
@@ -218,59 +227,22 @@ class WorkspaceTutorialController:
         """Select the previous mask in the active image stack."""
         self._canvas.cycleMasksBackward()
 
-    def compare_with_next_image(self) -> None:
-        """Reveal the next catalog image with a centered vertical divider."""
-        image_ids = self._canvas.imageIDs()
-        current_id = self._canvas.currentImageID()
-        if current_id not in image_ids or len(image_ids) < 2:
-            self._set_status("Load at least two images before comparing.")
+    def place_next_composition(self) -> None:
+        """Place another open composition as a reusable nested resource."""
+        composition_ids = self._canvas.compositionIDs()
+        current_id = self._canvas.currentCompositionID()
+        candidates = [value for value in composition_ids if value != current_id]
+        if current_id is None or not candidates:
+            self._set_status("Open at least two compositions before placing one.")
             return
-        next_id = image_ids[(image_ids.index(current_id) + 1) % len(image_ids)]
-        self._canvas.setComparisonImageID(next_id)
-        self._canvas.setComparisonSplit(0.5, ComparisonOrientation.VERTICAL)
-        self._set_status(
-            "Comparison enabled. Drag the image boundary to move the split."
-        )
-
-    def flip_compare_orientation(self) -> None:
-        """Toggle the active comparison between vertical and horizontal."""
-        state = self._canvas.comparisonState()
-        orientation = (
-            ComparisonOrientation.HORIZONTAL
-            if state.orientation == ComparisonOrientation.VERTICAL
-            else ComparisonOrientation.VERTICAL
-        )
-        self._canvas.setComparisonSplit(state.split_position, orientation)
-        self._set_status(f"Comparison split: {orientation.value}.")
-
-    def clear_comparison(self) -> None:
-        """End comparison without changing the selected catalog image."""
-        self._canvas.clearComparisonImage()
-        self._set_status("Comparison cleared.")
-
-    def compose_contact_sheet(self) -> None:
-        """Build a stored contact-sheet composition from current resources."""
-        image_ids = self._canvas.imageIDs()
-        if not image_ids:
-            self._set_status("Load images before composing a contact sheet.")
+        source_id = candidates[0]
+        layer_id = self._canvas.placeComposition(source_id)
+        if layer_id is None:
+            self._set_status("Unable to place the selected composition.")
             return
-        catalog = self._canvas.getCatalogSnapshot()
-        request = scene_composition.build_contact_sheet_request(
-            image_ids,
-            image_sizes={
-                image_id: catalog.catalog[image_id].image.size()
-                for image_id in image_ids
-            },
-            columns=min(3, max(1, len(image_ids))),
-            cell_width=320.0,
-            cell_height=240.0,
-            gap=16.0,
-        )
-        scene_composition.install_contact_sheet_overlay(self._canvas)
-        composition_id = self._canvas.composeScene(request)
-        self._set_status(f"Composed contact-sheet scene {composition_id}.")
+        self._set_status("Placed a live composition resource as a layer.")
 
-    def step_image(self, delta: int) -> None:
+    def step_composition(self, delta: int) -> None:
         """Move through compositions while preserving mask prefetch policy."""
         composition_ids = self._canvas.compositionIDs()
         if not composition_ids:
@@ -284,31 +256,27 @@ class WorkspaceTutorialController:
         next_index = (current_index + delta) % len(composition_ids)
         next_id = composition_ids[next_index]
         snapshot = self._canvas.getCompositionSnapshot()
-        next_entry = snapshot.compositions.get(next_id)
         settings = self._canvas.settings.as_dict()
-        if (
-            next_entry is not None
-            and next_entry.current_image_id is not None
-            and bool(settings.get("mask_prefetch_enabled", False))
+        if next_id in snapshot.compositions and bool(
+            settings.get("mask_prefetch_enabled", False)
         ):
-            self._canvas.prefetchMaskOverlays(
-                next_entry.current_image_id, reason="step"
-            )
+            self._canvas.prefetchMaskOverlays(next_id, reason="step")
         self._canvas.openComposition(next_id)
         self._set_status(
             f"Showing composition {next_index + 1} of {len(composition_ids)}."
         )
 
     def load_images(self, paths: Iterable[Path]) -> None:
-        """Decode image files on QThreadPool before updating the catalog."""
+        """Decode image files off-thread before creating editor compositions."""
         path_list = list(paths)
         if not path_list:
             return
         self.prepare_image_batch(len(path_list))
-        worker = ImageLoaderWorker(path_list)
-        worker.signals.image_loaded.connect(self.accept_decoded_image)
-        worker.signals.finished.connect(self.finish_image_batch)
-        QThreadPool.globalInstance().start(worker)
+        self._image_loads.submit(
+            path_list,
+            image_loaded=self.accept_decoded_image,
+            finished=self.finish_image_batch,
+        )
 
     def prepare_image_batch(self, count: int) -> None:
         """Prepare selection and status before an external decoder starts."""
@@ -316,54 +284,33 @@ class WorkspaceTutorialController:
         self._load_batch_auto_select = True
 
     def accept_decoded_image(self, path: Path, image: QImage) -> None:
-        """Append one decoded image while preserving linked-view policy."""
-        relink_all = self._all_images_linked()
-        new_id = uuid.uuid4()
-        current_id = self._canvas.currentImageID()
-        if self._load_batch_auto_select:
-            current_id = new_id
-            self._load_batch_auto_select = False
-        elif current_id is None:
-            current_id = new_id
-        image_map = CuteCanvas.imageMapFromLists(
-            self._canvas.allImages + [image],
-            self._canvas.allImagePaths + [path],
-            self._canvas.imageIDs() + [new_id],
+        """Create one independent project composition from decoded pixels."""
+        self._load_batch_auto_select = False
+        self._canvas.createCompositionFromImage(
+            image,
+            title=path.name,
+            label=path.stem,
+            interaction=self._ordinary_image_policy(),
         )
-        self._canvas.setImagesByID(image_map, current_id=current_id)
-        if relink_all:
-            self._canvas.setAllImagesLinked(True)
         self._set_status(f"Loaded {path.name}...")
 
     def finish_image_batch(self, count: int) -> None:
         """Announce completion of one background decode batch."""
         self._load_batch_auto_select = False
-        total = len(self._canvas.imageIDs())
+        total = len(self._canvas.compositionIDs())
         self._set_status(
             f"Finished loading {count} images. Total: {total}. "
             "Use Left/Right to navigate compositions."
         )
 
-    def remove_current_image(self) -> None:
-        """Remove the active image and select the nearest surviving neighbor."""
-        image_ids = self._canvas.imageIDs()
-        if not image_ids:
-            self._set_status("No images to remove.")
+    def remove_current_composition(self) -> None:
+        """Close the active editor composition."""
+        composition = self._canvas.editor.compositions.current
+        if composition is None:
+            self._set_status("No composition to close.")
             return
-        current_id = self._canvas.currentImageID() or image_ids[0]
-        try:
-            current_index = image_ids.index(current_id)
-        except ValueError:
-            current_index = 0
-        remaining = image_ids[:current_index] + image_ids[current_index + 1 :]
-        self._canvas.removeImageByID(current_id)
-        if not remaining:
-            self._set_status("Removed final image; viewer cleared.")
-            return
-        self._canvas.setCurrentImageID(
-            remaining[min(current_index, len(remaining) - 1)]
-        )
-        self._set_status("Removed image; showing next entry.")
+        composition.remove()
+        self._set_status("Closed composition.")
 
     def create_mask_for_current_image(
         self,
@@ -373,11 +320,11 @@ class WorkspaceTutorialController:
         """Create a blank image-sized mask and assign a visible demo color."""
         if not self._require_masks():
             return None
-        image = self._canvas.currentImage
-        if image is None or image.isNull():
-            self._set_status("Load an image before creating masks.")
+        scene = self._canvas.currentScene()
+        if scene is None or scene.bounds.isEmpty():
+            self._set_status("Open a composition before creating masks.")
             return None
-        mask_id = self._canvas.createBlankMask(image.size())
+        mask_id = self._canvas.createBlankMask(scene.bounds.size().toSize())
         if mask_id is None:
             self._set_status("Unable to create a mask layer.")
             return None
@@ -394,13 +341,13 @@ class WorkspaceTutorialController:
         """Activate one numbered mask slot when it exists."""
         if not self._masks_available():
             return
-        image_id = self._canvas.currentImageID()
-        if image_id is None:
-            self._set_status("Load an image before selecting masks.")
+        composition_id = self._canvas.currentCompositionID()
+        if composition_id is None:
+            self._set_status("Open a composition before selecting masks.")
             return
-        mask_ids = self._canvas.maskIDsForImage(image_id)
+        mask_ids = self._canvas.maskIDsForComposition(composition_id)
         if not mask_ids:
-            self._set_status("No masks on this image.")
+            self._set_status("No masks in this composition.")
             return
         if index >= len(mask_ids):
             self._set_status(f"Mask slot {index + 1} is empty.")
@@ -413,9 +360,8 @@ class WorkspaceTutorialController:
         """Import and activate a raster mask through the public facade."""
         if not self._require_masks():
             return
-        image = self._canvas.currentImage
-        if image is None or image.isNull():
-            self._set_status("Load an image before importing masks.")
+        if self._canvas.currentCompositionID() is None:
+            self._set_status("Open a composition before importing masks.")
             return
         mask_id = self._canvas.loadMaskFromFile(str(path))
         if mask_id is None:

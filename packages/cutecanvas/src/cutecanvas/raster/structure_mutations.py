@@ -34,11 +34,10 @@ from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 from cutecanvas.types import RasterExtentPolicy
 
 from ..composition.edit_controller import CompositionEditController
-from ..composition.edit_history import CompositionEditCommand
+from ..resources import ProjectResourceReference
 from ..scene.raster_mutations import RasterBoundsCompletion, RasterLayerState
 from .assets import EditableRasterAssetStore
 from .color_surface import ColorRasterSurface
-from .source_reference import EditableRasterReference
 from .sparse_grid import (
     SparseRasterSnapshot,
     reframe_sparse_raster_snapshot,
@@ -101,15 +100,10 @@ class EditableRasterStructureMutationOwner:
         self._pending: dict[uuid.UUID, _PendingColorBoundsRequest] = {}
         self._latest_by_layer: dict[uuid.UUID, uuid.UUID] = {}
         self._closed = False
-        edits.register_handler(
-            ColorRasterStructureEdit,
-            undo=self._undo,
-            redo=self._redo,
-        )
 
     def supports_layer(self, layer: LayerDescriptor) -> bool:
         """Return whether ``layer`` references an editable raster."""
-        return isinstance(layer.source, EditableRasterReference)
+        return self._asset(layer) is not None
 
     def state(
         self,
@@ -153,9 +147,9 @@ class EditableRasterStructureMutationOwner:
     ) -> uuid.UUID | None:
         """Replace prior layer work and prepare reframed pixels off-thread."""
         source = layer.source
-        if self._closed or not isinstance(source, EditableRasterReference):
+        if self._closed or not isinstance(source, ProjectResourceReference):
             return None
-        asset = self._assets.get(source.raster_id)
+        asset = self._assets.get(source.resource_id)
         if asset is None:
             return None
         request_id = uuid.uuid4()
@@ -194,7 +188,7 @@ class EditableRasterStructureMutationOwner:
         self._pending[request_id] = _PendingColorBoundsRequest(
             scene.scene_id,
             layer.layer_id,
-            source.raster_id,
+            source.resource_id,
             is_current,
             worker,
             handle,
@@ -310,25 +304,33 @@ class EditableRasterStructureMutationOwner:
         source = layer.source
         return (
             None
-            if not isinstance(source, EditableRasterReference)
-            else self._assets.get(source.raster_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._assets.get(source.resource_id)
         )
 
-    def _undo(self, command: CompositionEditCommand) -> bool:
+
+class ColorRasterStructureHistoryOwner:
+    """Replay raster structure edits independently of view request state."""
+
+    def __init__(
+        self,
+        assets: EditableRasterAssetStore,
+        changed: Callable[[uuid.UUID], None],
+    ) -> None:
+        """Bind durable raster payloads and document invalidation."""
+        self._assets = assets
+        self._changed = changed
+
+    def undo(self, command: object) -> bool:
         """Restore the earlier complete raster structure."""
         return self._restore(command, use_after=False)
 
-    def _redo(self, command: CompositionEditCommand) -> bool:
+    def redo(self, command: object) -> bool:
         """Restore the later complete raster structure."""
         return self._restore(command, use_after=True)
 
-    def _restore(
-        self,
-        command: CompositionEditCommand,
-        *,
-        use_after: bool,
-    ) -> bool:
-        """Restore one retained state through its source owner."""
+    def _restore(self, command: object, *, use_after: bool) -> bool:
+        """Restore one retained state through its durable source owner."""
         if not isinstance(command, ColorRasterStructureEdit):
             return False
         asset = self._assets.get(command.raster_id)
@@ -337,7 +339,7 @@ class EditableRasterStructureMutationOwner:
         asset.surface.replace_with_sparse_snapshot(
             command.after if use_after else command.before
         )
-        self._changed()
+        self._changed(command.raster_id)
         return True
 
 

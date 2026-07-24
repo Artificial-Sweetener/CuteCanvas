@@ -18,11 +18,8 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
 
 from PySide6.QtCore import (
-    QLineF,
-    QPointF,
     QRect,
     QRectF,
 )
@@ -30,28 +27,21 @@ from PySide6.QtGui import (
     QColor,
     QTransform,
 )
-from qpane.sdk.catalog import CatalogImageReference, CatalogMutationEvent
-from qpane.sdk.compare import (
-    ComparisonChange,
-    ComparisonChangeKind,
-)
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
 )
 from qpane.sdk.rendering import ViewportZoomMode
-from qpane.sdk.scene import LayerDescriptor, RasterLayerRenderItem, SceneDescriptor
-from qpane.sdk.types import (
-    ComparisonOrientation,
-)
+from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from cutecanvas.composition import CompositionRecord
 from cutecanvas.composition.layers import CompositionLayerInstance
 from cutecanvas.composition.public_policy import (
     public_layer_policy,
 )
-from cutecanvas.masks.source_reference import MaskAssetReference
 from cutecanvas.painting import PaintTargetIdentity
 from cutecanvas.placed.workflow import PlacedAssetCompletion
+from cutecanvas.resources import ProjectResourceReference
+from cutecanvas.resources.rasterization import LayerRasterizationCompletion
 from cutecanvas.scene.layer_selection import (
     SceneLayerSelection,
 )
@@ -86,210 +76,29 @@ class DocumentEventsMixin:
         self._last_viewport_rect = rect
         self.viewportRectChanged.emit(rect)
 
-    def _handle_catalog_mutation(self, event: CatalogMutationEvent) -> None:
-        """Relay catalog mutations through the CuteCanvas signal surface."""
-        self.view().invalidate_content_cache()
-        removed_ids = self._removed_catalog_ids(event)
-        compositions_changed = self._sync_compositions_with_catalog()
-        compare = self.compare_service
-        if compare is not None:
-            if removed_ids:
-                compare.remove_catalog_images(removed_ids)
-            compare.reconcile_catalog()
-        affected_ids = set(event.affected_ids)
-        comparison_source_id = (
-            compare.state().source_id if compare is not None else None
-        )
-        if (
-            self.catalog().currentImageID() in affected_ids
-            or comparison_source_id in affected_ids
-        ):
-            self._sync_viewport_content_geometry()
-            self.view().mark_dirty(None)
-            self.update()
-        self.catalogChanged.emit(event)
-        self._maybe_emit_link_groups_changed()
-        if compositions_changed:
-            self._emit_composition_changed()
-
-    @staticmethod
-    def _removed_catalog_ids(event: CatalogMutationEvent) -> set[uuid.UUID]:
-        """Return affected IDs only for catalog mutations that remove entries."""
-        if event.reason in {"removeImageByID", "removeImagesByID", "clearImages"}:
-            return set(event.affected_ids)
-        return set()
-
-    def _handle_comparison_changed(
-        self,
-        change: ComparisonChange | None = None,
-    ) -> None:
-        """Refresh rendering and signals after comparison state changes."""
-        try:
-            self.view().invalidate_content_cache()
-            if change is None or change.kind in {
-                ComparisonChangeKind.SOURCE,
-                ComparisonChangeKind.ENABLED,
-            }:
-                self._sync_viewport_content_geometry()
-            if change is not None and change.kind == ComparisonChangeKind.SPLIT:
-                dirty_rect = self._comparison_split_dirty_rect(change)
-            else:
-                dirty_rect = None
-            self.view().mark_dirty(dirty_rect)
-        except RuntimeError:  # pragma: no cover - deleted Qt object during teardown
-            return
-        state = self._comparison_service().state()
-        if not state.enabled:
-            self.comparisonDividerInteraction().cancel_drag()
-        self.comparisonChanged.emit(state)
-        self.refreshCursor()
-        self.update()
-
-    def _comparison_split_dirty_rect(self, change: ComparisonChange) -> QRect | None:
-        """Return the bounded dirty rect for a pure comparison split change."""
-        previous = change.previous
-        current = change.current
-        if (
-            not previous.enabled
-            or not current.enabled
-            or previous.source_id != current.source_id
-            or previous.orientation != current.orientation
-        ):
-            return None
-        plan = self.view().calculateRenderPlan(
-            is_blank=getattr(self, "_is_blank", False)
-        )
-        if plan is None:
-            return None
-        compare_item = next(
-            (
-                item
-                for item in plan.render_items
-                if isinstance(item, RasterLayerRenderItem)
-                and item.descriptor.hit_test.role == "comparison-image"
-            ),
-            None,
-        )
-        if compare_item is None:
-            return None
-        previous_line = self._comparison_split_line(
-            compare_item,
-            plan.scene_bounds,
-            previous.split_position,
-            current.orientation,
-        )
-        current_line = self._comparison_split_line(
-            compare_item,
-            plan.scene_bounds,
-            current.split_position,
-            current.orientation,
-        )
-        if previous_line is None or current_line is None:
-            return None
-        bounds = QRectF(previous_line.p1(), previous_line.p2()).normalized()
-        bounds = bounds.united(
-            QRectF(current_line.p1(), current_line.p2()).normalized()
-        )
-        hit_width = self.comparisonDividerInteraction().state().hit_width
-        return bounds.adjusted(
-            -hit_width,
-            -hit_width,
-            hit_width,
-            hit_width,
-        ).toAlignedRect()
-
-    @staticmethod
-    def _comparison_split_line(
-        item: RasterLayerRenderItem,
-        scene_bounds,
-        split_position: float,
-        orientation: ComparisonOrientation,
-    ) -> QLineF | None:
-        """Project a normalized comparison split into widget coordinates."""
-        placement = item.placement
-        source_width = item.source_image.width()
-        source_height = item.source_image.height()
-        if (
-            source_width <= 0
-            or source_height <= 0
-            or placement.width <= 0.0
-            or placement.height <= 0.0
-        ):
-            return None
-        if orientation == ComparisonOrientation.HORIZONTAL:
-            scene_y = scene_bounds.y + scene_bounds.height * split_position
-            source_y = (scene_y - placement.y) * source_height / placement.height
-            source_line = QLineF(
-                QPointF(0.0, source_y),
-                QPointF(float(source_width), source_y),
-            )
-        else:
-            scene_x = scene_bounds.x + scene_bounds.width * split_position
-            source_x = (scene_x - placement.x) * source_width / placement.width
-            source_line = QLineF(
-                QPointF(source_x, 0.0),
-                QPointF(source_x, float(source_height)),
-            )
-        return QLineF(
-            item.transform.map(source_line.p1()),
-            item.transform.map(source_line.p2()),
-        )
-
-    def _sync_compositions_with_catalog(self) -> bool:
-        """Ensure composition records match the current catalog inventory."""
-        service = self.compositionService()
-        previous_id = service.current_composition_id()
-        changed = service.sync_catalog(
-            self.catalog().imageIDs(),
-            path_lookup=self.imagePath,
-            size_lookup=lambda image_id: self._image_catalog.getImage(image_id).size(),
-        )
-        active = service.active_record()
-        current_id = self.catalog().currentImageID()
-        if active is None and current_id is not None:
-            try:
-                active = service.open_default_for_image(current_id)
-            except KeyError:
-                return changed
-            self._open_composition_record(active)
-            return True
-        current_composition_id = service.current_composition_id()
-        if current_composition_id != previous_id:
-            if active is not None:
-                self._open_composition_record(active)
-            else:
-                self._emit_composition_selection_changed(current_composition_id)
-                self._emit_scene_changed()
-        return changed
-
-    def _activate_default_composition_for_image(self, image_id: uuid.UUID) -> None:
-        """Open the generated default composition for a catalog image."""
-        service = self.compositionService()
-        previous_id = service.current_composition_id()
-        record = service.open_default_for_image(image_id)
-        if previous_id != record.composition_id:
-            self._emit_composition_selection_changed(record.composition_id)
-            self._handle_comparison_changed()
-            self._emit_scene_changed()
-
     def _open_composition_record(
         self,
         record: CompositionRecord,
         *,
         fit_view: bool = True,
+        force_context_refresh: bool = False,
     ) -> None:
-        """Open one composition document and synchronize legacy navigation state."""
+        """Activate a composition, refreshing only a reconciled successor."""
+        activation_changed = self.viewSession().activate(
+            record.composition_id,
+            available_ids=self.compositionService().composition_ids(),
+        )
+        if not activation_changed and not force_context_refresh:
+            return
         self._cancel_floating_pixels_for_context_change()
-        image_id = record.navigation_image_id
-        if image_id is not None and self.catalog().currentImageID() != image_id:
-            self.interaction.suspend_overlays_for_navigation()
-            self.catalog().setCurrentImageID(image_id)
         self._is_blank = False
         self.view().invalidate_content_cache()
         self._emit_composition_selection_changed(record.composition_id)
-        self._handle_comparison_changed()
         if record.policy.removable:
             self._sync_view_to_scene_bounds(fit_view=fit_view)
+        self._masks_controller.sync_mask_activation_for_composition(
+            record.composition_id
+        )
         self._emit_scene_changed()
 
     def _refresh_active_scene_content(self, *, fit_view: bool) -> None:
@@ -299,8 +108,8 @@ class DocumentEventsMixin:
         self._emit_scene_changed()
 
     def _default_mask_paint_target_available(self) -> bool:
-        """Return whether legacy catalog painting can provision its default mask."""
-        return self._masks is not None and self.catalog().currentImageID() is not None
+        """Return whether the current document can provision a mask target."""
+        return self._masks is not None and self.currentCompositionID() is not None
 
     def _emit_composition_changed(self) -> None:
         """Emit the latest composition snapshot."""
@@ -320,6 +129,7 @@ class DocumentEventsMixin:
         if self._scene_movement is not None:
             self._scene_movement.synchronize_scene(resolved_scene)
         self._scene_selection.validate(resolved_scene)
+        self._reconcile_selected_paint_target()
         if self._vector_editor is not None:
             self._vector_editor.synchronize_selection()
         scene_id = self._active_resolved_scene_id()
@@ -336,6 +146,14 @@ class DocumentEventsMixin:
                 self.sceneEditRedoAvailable(),
             )
 
+    def _reconcile_selected_paint_target(self) -> None:
+        """Resolve a newly paint-capable source without requiring reselection."""
+        selection = self._scene_selection.current
+        painting = self.paintingCoordinator()
+        if selection is None or painting.identity is not None:
+            return
+        painting.select_layer(selection.scene_id, selection.layer_id)
+
     def _handle_raster_structure_changed(self) -> None:
         """Refresh scene geometry and public state after a raster source change."""
         self.view().invalidate_content_cache()
@@ -347,8 +165,17 @@ class DocumentEventsMixin:
         self.view().invalidate_content_cache()
         self._handle_internal_scene_content_changed()
 
-    def _handle_placed_asset_changed(self, _scope_id: uuid.UUID) -> None:
-        """Refresh source products and public state after a placed-asset change."""
+    def _handle_resource_content_changed(
+        self,
+        resource_id: uuid.UUID,
+        dirty_region: object | None = None,
+    ) -> None:
+        """Refresh source products and public state after a resource change."""
+        if isinstance(dirty_region, RasterBounds):
+            self._masks_controller.refresh_mask_resource(
+                resource_id,
+                dirty_region,
+            )
         self.view().invalidate_content_cache()
         self._handle_internal_scene_content_changed()
         self._emit_scene_changed()
@@ -372,6 +199,19 @@ class DocumentEventsMixin:
             completion.message,
         )
 
+    def _handle_layer_rasterization_completion(
+        self,
+        completion: LayerRasterizationCompletion,
+    ) -> None:
+        """Publish one source-neutral layer rasterization completion."""
+        self.layerRasterizationCompleted.emit(
+            completion.request_id,
+            completion.scene_id,
+            completion.layer_id,
+            completion.succeeded,
+            completion.message,
+        )
+
     def _handle_vector_conversion_completion(
         self,
         completion: VectorConversionCompletion,
@@ -385,6 +225,16 @@ class DocumentEventsMixin:
             completion.succeeded,
             completion.message,
         )
+        if completion.kind is VectorConversionKind.EDITABLE_RASTER:
+            self._handle_layer_rasterization_completion(
+                LayerRasterizationCompletion(
+                    completion.request_id,
+                    completion.scene_id,
+                    completion.layer_id,
+                    completion.succeeded,
+                    completion.message,
+                )
+            )
 
     def _handle_raster_bounds_completion(
         self,
@@ -409,8 +259,12 @@ class DocumentEventsMixin:
     ) -> SceneSnapshot | None:
         """Return a public scene snapshot for the active composition."""
         service = self.compositionService()
-        record = service.active_record()
-        if record is None:
+        composition_id = self.viewSession().active_composition_id
+        if composition_id is None:
+            return None
+        try:
+            record = service.record(composition_id)
+        except KeyError:
             return None
         resolved = resolved or self.view().current_scene_descriptor()
         if resolved is None:
@@ -434,17 +288,13 @@ class DocumentEventsMixin:
             ),
         )
 
-    @staticmethod
     def _public_resolved_layer(
+        self,
         layer: LayerDescriptor,
         instance: CompositionLayerInstance | None = None,
     ) -> LayerSnapshot:
         """Convert one resolved source descriptor into a public layer snapshot."""
         source = layer.source
-        if isinstance(source, CatalogImageReference):
-            image_id = source.image_id
-        else:
-            image_id = None
         durable_transform = layer.transform if instance is None else instance.transform
         placement = (
             layer.placement
@@ -453,7 +303,6 @@ class DocumentEventsMixin:
         )
         return LayerSnapshot(
             layer_id=layer.layer_id,
-            image_id=image_id,
             placement=QRectF(
                 placement.x,
                 placement.y,
@@ -484,7 +333,7 @@ class DocumentEventsMixin:
             role=layer.hit_test.role,
             metadata={} if instance is None else instance.metadata,
             interaction=public_layer_policy(layer.interaction),
-            source_kind=source.kind,
+            source_kind=self.compositionService().source_kind(source),
             source_id=source.resource_id,
             label=layer.label,
             transform=(
@@ -608,7 +457,7 @@ class DocumentEventsMixin:
 
     def _publish_vector_content_change(self) -> None:
         """Refresh public scene presentation after vector document mutation."""
-        self._handle_internal_scene_content_changed()
+        self._handle_scene_source_changed()
         self._emit_scene_changed()
 
     def _synchronize_active_mask_layer_selection(self) -> None:
@@ -622,8 +471,8 @@ class DocumentEventsMixin:
             (
                 layer
                 for layer in scene.layers
-                if isinstance(layer.source, MaskAssetReference)
-                and layer.source.mask_id == active_mask_id
+                if isinstance(layer.source, ProjectResourceReference)
+                and layer.source.resource_id == active_mask_id
             ),
             None,
         )
@@ -642,9 +491,12 @@ class DocumentEventsMixin:
             (layer for layer in scene.layers if layer.layer_id == current.layer_id),
             None,
         )
-        if selected_layer is not None and isinstance(
-            selected_layer.source,
-            MaskAssetReference,
+        service = self.mask_service
+        if (
+            selected_layer is not None
+            and service is not None
+            and isinstance(selected_layer.source, ProjectResourceReference)
+            and service.assets.get_layer(selected_layer.source.resource_id) is not None
         ):
             self._scene_selection.clear()
 
@@ -675,13 +527,19 @@ class DocumentEventsMixin:
         snapshot = view.current_content_snapshot()
         if snapshot is None:
             return
-        view.viewport.setContentSize(snapshot.base_image_size)
+        viewport = view.viewport
+        content_size_changed = viewport.content_size != snapshot.base_image_size
+        viewport.setContentSize(snapshot.base_image_size)
         if fit_view:
-            view.viewport.setZoomFit()
+            viewport.setZoomFit()
         self.setMinimumSize(self.minimumSizeHint())
-        view.allocate_buffers()
         view.mark_dirty()
-        view.ensure_view_alignment(force=True)
+        if content_size_changed:
+            view.allocate_buffers()
+            view.ensure_view_alignment(force=True)
+        binding = self._inspection_binding
+        if binding is not None:
+            binding.refresh_target(restore=not fit_view)
         self.update()
 
     def _sync_viewport_content_geometry(self) -> None:
@@ -697,48 +555,9 @@ class DocumentEventsMixin:
         else:
             viewport.setPan(viewport.pan)
         self.setMinimumSize(self.minimumSizeHint())
-
-    def _emit_catalog_mutation(
-        self, reason: str, *, affected_ids: Iterable[uuid.UUID] | None = None
-    ) -> None:
-        """Emit a catalog mutation event through the CuteCanvas surface."""
-        current_id: uuid.UUID | None
-        try:
-            current_id = self.catalog().currentImageID()
-        except RuntimeError:
-            current_id = None
-        event = CatalogMutationEvent(
-            reason=reason,
-            affected_ids=tuple(affected_ids or ()),
-            current_id=current_id,
-        )
-        self._handle_catalog_mutation(event)
-
-    def _normalized_link_groups(
-        self,
-    ) -> tuple[tuple[uuid.UUID, tuple[uuid.UUID, ...]], ...]:
-        """Return normalized link-group definitions for change detection."""
-        normalized: list[tuple[uuid.UUID, tuple[uuid.UUID, ...]]] = []
-        for group in self.linkedGroups():
-            normalized.append((group.group_id, tuple(sorted(group.members))))
-        normalized.sort(key=lambda item: item[0].hex)
-        return tuple(normalized)
-
-    def _maybe_emit_link_groups_changed(self) -> None:
-        """Emit link-group changes when the current definition differs."""
-        groups = self._normalized_link_groups()
-        if groups == self._last_link_groups:
-            return
-        self._last_link_groups = groups
-        self.linkGroupsChanged.emit()
-
-    def _emit_catalog_selection_changed(self, image_id: uuid.UUID | None) -> None:
-        """Emit catalog selection changes for the active image."""
-        self.catalogSelectionChanged.emit(image_id)
-
-    def _handle_current_image_changed_signal(self, image_id: uuid.UUID) -> None:
-        """Emit selection updates when the active image changes."""
-        self._emit_catalog_selection_changed(image_id)
+        binding = self._inspection_binding
+        if binding is not None:
+            binding.refresh_target()
 
     def _handle_diagnostics_overlay_toggled(self, enabled: bool) -> None:
         """Emit overlay toggle changes while avoiding duplicate signals."""

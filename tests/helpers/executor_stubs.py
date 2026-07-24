@@ -26,6 +26,7 @@ from typing import Any
 
 from PySide6.QtCore import QRunnable
 from qpane.concurrency import (
+    BaseWorker,
     ExecutorSnapshot,
     TaskExecutorProtocol,
     TaskHandle,
@@ -196,7 +197,11 @@ class StubExecutor(TaskExecutorProtocol):
         if record.runnable is not None:
             record.runnable.run()
             still_known = self._tasks.get(task_id)
-            if still_known is not None and still_known.state == "active":
+            if (
+                still_known is not None
+                and still_known.state == "active"
+                and not isinstance(record.runnable, BaseWorker)
+            ):
                 self.mark_finished(
                     record.handle,
                     TaskOutcome(success=True, payload=None, error=None),

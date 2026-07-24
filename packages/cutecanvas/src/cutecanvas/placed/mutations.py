@@ -30,12 +30,13 @@ from qpane.sdk.scene import (
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import CompositionLayerStore
+from ..resources import ProjectResourceReference
 from ..scene.mutations import (
     BaseSceneMutationOwner,
     SceneMutationResult,
     SceneMutationStatus,
 )
-from .source_reference import PlacedAssetReference
+from .store import PlacedAssetStore
 
 
 class PlacedAssetSceneMutationOwner(BaseSceneMutationOwner):
@@ -47,11 +48,13 @@ class PlacedAssetSceneMutationOwner(BaseSceneMutationOwner):
         self,
         layers: CompositionLayerStore,
         edits: CompositionLayerEditService,
+        assets: PlacedAssetStore,
         current_scope_id: Callable[[], uuid.UUID | None],
     ) -> None:
         """Bind authoritative composition instance owners."""
         self._layers = layers
         self._edits = edits
+        self._assets = assets
         self._current_scope_id = current_scope_id
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
@@ -59,7 +62,8 @@ class PlacedAssetSceneMutationOwner(BaseSceneMutationOwner):
         scope_id = self._current_scope_id()
         return bool(
             scope_id is not None
-            and isinstance(layer.source, PlacedAssetReference)
+            and isinstance(layer.source, ProjectResourceReference)
+            and self._assets.get(layer.source.resource_id) is not None
             and self._layers.layer(scope_id, layer.layer_id) is not None
         )
 

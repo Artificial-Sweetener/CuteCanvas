@@ -235,7 +235,7 @@ Effects are temporary presentation. They do not alter source pixels, scene
 values, or exported content. Use an overlay instead when the host already knows
 exactly what it wants to paint.
 
-## Hit Test Through the Viewer
+## Project Coordinates Through the Viewer
 
 `panelHitTest()` converts a widget position through the active viewport. It
 reports scene coordinates and the resolved source hit when available:
@@ -246,9 +246,31 @@ if hit is not None:
     print(hit.raw_point, hit.inside_image)
 ```
 
-Do not duplicate device-pixel-ratio, zoom, pan, or layer-transform math in a
-tool. Use the public hit result and the prepared geometry supplied to scene
-overlays.
+Use `coordinateSystem()` when an interaction needs reversible scene or layer
+projection. Its point values carry their coordinate domain and scene/layer
+identity:
+
+```python
+from qpane import PanelPoint
+
+coordinates = viewer.coordinateSystem()
+scene_point = coordinates.panel_to_scene(PanelPoint.from_qt(mouse_position))
+if scene_point is not None:
+    panel_point = coordinates.scene_to_panel(scene_point)
+```
+
+`PanelPoint`, `ScenePoint`, `LayerLocalPoint`, and `LayerSourcePoint` are
+distinct values. Layer-local coordinates retain authored geometry, while
+layer-source coordinates begin at the source's storage origin. The coordinate
+system projects between them through the same viewport, scene, layer transform,
+and raster bounds used for rendering. Identity mismatches return `None`;
+passing a point from the wrong coordinate domain raises `TypeError`.
+`SceneCoordinateProjection` and `LayerCoordinateProjection` are immutable
+snapshots for consumers that need to retain one resolved frame's geometry.
+
+Do not duplicate device-pixel-ratio, zoom, pan, raster-origin, or layer-transform
+math in a tool. Use the coordinate system, the public hit result, and prepared
+overlay geometry.
 
 ## Keep Interactive Sources Smooth
 
@@ -263,6 +285,48 @@ For a live source:
 Those rules let QPane preserve unaffected tiles and reject stale work. A broad
 or changing identity throws useful cached work away; a reused revision for new
 pixels can display stale content.
+
+## Sample a Bounded Scene Region
+
+Renderer-backed products sometimes need exact pixels from a small transformed
+scene window without flattening a complete canvas. `SceneRegionRasterizer`
+provides that advanced operation through `qpane.sdk.rendering`:
+
+```python
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QTransform
+from qpane.sdk.rendering import SceneLayerRenderScope, SceneRegionRasterizer
+
+rasterizer = SceneRegionRasterizer(source_capabilities)
+sample = rasterizer.rasterize(
+    scene_descriptor,
+    QSize(128, 128),
+    scene_to_output_pixels,
+    layer_scope=SceneLayerRenderScope(frozenset(layer_ids)),
+)
+```
+
+The rasterizer preserves layer order, affine placement, visibility, opacity,
+clips, and raster, vector, and hybrid presentation while allocating only the
+requested output. Omit `layer_scope` to render the complete visible scene.
+When supplied, `SceneLayerRenderScope` includes only those layer identities
+while retaining their existing stack order and visibility. A
+`RasterLayerRegionOverride` may replace selected raster regions for
+revision-stable editing or comparison without changing the authoritative
+source owner.
+
+This is an advanced integration primitive. Ordinary viewer applications submit
+`RenderScene` values to `QPane.setScene()` and let the viewport renderer own
+tiling, caching, scheduling, and frame publication.
+
+Sources that produce their own sampled tiles implement `RenderTileBatchSource`.
+QPane supplies immutable `RenderTileRequest` values and the source returns a
+complete tuple of `RenderTileProduct` values for that revision. Implement
+`RegionSampleSource` as well when the source can answer arbitrary bounded
+samples for nested scene rendering. These protocols keep expensive sampling on
+workers while QPane retains cache keys, scheduling, cancellation, and frame
+publication. `RegionRasterizationWorker` executes one such bounded sample
+through the shared task system and validates the returned dimensions.
 
 ## Related Docs
 

@@ -20,18 +20,22 @@ import uuid
 from dataclasses import replace
 
 import pytest
-from cutecanvas import (
-    CatalogLayerRequest,
-    CompositionLayerClip,
-    CompositionRequest,
-    CuteCanvas,
-)
-from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas import CuteCanvas
+from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage, Qt
+from qpane import (
+    ClipCoordinateSpace,
+    LayerClip,
+    LayerTransform,
+    QPane,
+    RasterSource,
+    RenderLayer,
+    RenderScene,
+)
 from qpane.rendering.render import Renderer
 from qpane.scene.identity import scene_image_asset_key, source_render_asset_key
-from qpane.scene.model import ClipCoordinateSpace, LayerClip, LayerKind
+from qpane.scene.model import LayerKind
 from qpane.scene.render_plan import (
     RenderStrategy,
     TileRenderData,
@@ -52,9 +56,7 @@ def qpane_with_image(qapp):
     qpane.resize(128, 128)
     image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.black)
-    image_id = uuid.uuid4()
-    image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
-    qpane.setImagesByID(image_map, image_id)
+    qpane.createCompositionFromImage(image)
     yield qpane
     qpane.deleteLater()
     qapp.processEvents()
@@ -70,7 +72,7 @@ def _make_mask_plan(qpane_rect: QRect):
         base_item.descriptor,
         layer_id=uuid.uuid4(),
         kind=LayerKind.MASK,
-        source=MaskAssetReference(mask_id=mask_id),
+        source=ProjectResourceReference(mask_id),
     )
     mask_item = replace(
         base_item,
@@ -154,10 +156,7 @@ def _make_qpane_with_checker_image(
     image = checker_image(QRect(0, 0, size, size).size())
     if image_format is not None:
         image = image.convertToFormat(image_format)
-    image_id = uuid.uuid4()
-    qpane.setImagesByID(
-        CuteCanvas.imageMapFromLists([image], [None], [image_id]), image_id
-    )
+    qpane.createCompositionFromImage(image)
     qpane.setZoom1To1()
     qapp.processEvents()
     return qpane
@@ -617,41 +616,26 @@ def test_scroll_repair_failure_restores_original_buffer(qapp, monkeypatch) -> No
 
 def test_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
     """Multi-layer public scenes should bypass single-raster scroll reuse."""
-    qpane = CuteCanvas(features=())
+    qpane = QPane()
     try:
         qpane.resize(96, 96)
-        first_id = uuid.uuid4()
-        second_id = uuid.uuid4()
         first = checker_image(QRect(0, 0, 128, 128).size())
         second = checker_image(QRect(0, 0, 128, 128).size())
-        qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists(
-                [first, second],
-                [None, None],
-                [first_id, second_id],
-            ),
-            first_id,
-        )
-        request = CompositionRequest(
-            composition_id=None,
-            title="Scroll repair scene",
-            bounds=QRectF(0.0, 0.0, 256.0, 128.0),
+        first_source = RasterSource.from_image(first)
+        second_source = RasterSource.from_image(second)
+        scene = RenderScene(
+            canvas=QRectF(0.0, 0.0, 256.0, 128.0),
             layers=(
-                CatalogLayerRequest(
-                    layer_id=uuid.uuid4(),
-                    image_id=first_id,
-                    placement=QRectF(0.0, 0.0, 128.0, 128.0),
-                ),
-                CatalogLayerRequest(
-                    layer_id=uuid.uuid4(),
-                    image_id=second_id,
-                    placement=QRectF(128.0, 0.0, 128.0, 128.0),
+                RenderLayer(source=first_source),
+                RenderLayer(
+                    source=second_source,
+                    transform=LayerTransform(dx=128.0),
                 ),
             ),
         )
-        qpane.composeScene(request)
+        qpane.setScene(scene)
         qpane.setZoom1To1()
-        presenter = qpane.view().presenter
+        presenter = qpane._rendering.presenter
         presenter.paint(
             is_blank=False,
             content_overlays={},
@@ -659,7 +643,7 @@ def test_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
             overlays_suspended=False,
             draw_tool_overlay=None,
         )
-        renderer = qpane.view().renderer
+        renderer = qpane._rendering.presenter.renderer
         before = renderer.snapshot_metrics()
         target_pan = QPointF(9.0, 4.0)
         qpane.setPan(target_pan)
@@ -680,46 +664,31 @@ def test_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
 
 def test_clipped_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
     """Clipped public scenes should bypass translation-only scroll reuse."""
-    qpane = CuteCanvas(features=())
+    qpane = QPane()
     try:
         qpane.resize(96, 96)
-        first_id = uuid.uuid4()
-        second_id = uuid.uuid4()
         first = checker_image(QRect(0, 0, 128, 128).size())
         second = checker_image(QRect(0, 0, 128, 128).size())
         second.invertPixels()
-        qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists(
-                [first, second],
-                [None, None],
-                [first_id, second_id],
-            ),
-            first_id,
-        )
-        request = CompositionRequest(
-            composition_id=None,
-            title="Clipped scroll repair scene",
-            bounds=QRectF(0.0, 0.0, 256.0, 128.0),
+        scene = RenderScene(
+            canvas=QRectF(0.0, 0.0, 256.0, 128.0),
             layers=(
-                CatalogLayerRequest(
-                    layer_id=uuid.uuid4(),
-                    image_id=first_id,
-                    placement=QRectF(0.0, 0.0, 128.0, 128.0),
-                ),
-                CatalogLayerRequest(
-                    layer_id=uuid.uuid4(),
-                    image_id=second_id,
-                    placement=QRectF(0.0, 0.0, 128.0, 128.0),
-                    clip=CompositionLayerClip(
-                        "scene",
-                        QRectF(48.0, 0.0, 80.0, 128.0),
+                RenderLayer(source=RasterSource.from_image(first)),
+                RenderLayer(
+                    source=RasterSource.from_image(second),
+                    clip=LayerClip(
+                        coordinate_space=ClipCoordinateSpace.SCENE,
+                        x=48.0,
+                        y=0.0,
+                        width=80.0,
+                        height=128.0,
                     ),
                 ),
             ),
         )
-        qpane.composeScene(request)
+        qpane.setScene(scene)
         qpane.setZoom1To1()
-        presenter = qpane.view().presenter
+        presenter = qpane._rendering.presenter
         presenter.paint(
             is_blank=False,
             content_overlays={},
@@ -727,7 +696,7 @@ def test_clipped_public_scene_pan_falls_back_to_full_redraw(qapp) -> None:
             overlays_suspended=False,
             draw_tool_overlay=None,
         )
-        renderer = qpane.view().renderer
+        renderer = qpane._rendering.presenter.renderer
         before = renderer.snapshot_metrics()
         target_pan = QPointF(8.0, 0.0)
         qpane.setPan(target_pan)

@@ -76,10 +76,14 @@ class CompositionLayerStore:
         self,
         lifetime: CompositionResourceLifetime,
         changed: Callable[[uuid.UUID], None] | None = None,
+        validate_stack: (
+            Callable[[uuid.UUID, tuple[CompositionLayerInstance, ...]], None] | None
+        ) = None,
     ) -> None:
         """Initialize empty stacks backed by the shared resource lifetime owner."""
         self._lifetime = lifetime
         self._changed = changed
+        self._validate_stack = validate_stack
         self._layers_by_composition: dict[uuid.UUID, list[CompositionLayerInstance]] = (
             {}
         )
@@ -88,7 +92,6 @@ class CompositionLayerStore:
             set[tuple[uuid.UUID, uuid.UUID]],
         ] = {}
         self._instance_revisions: dict[tuple[uuid.UUID, uuid.UUID], int] = {}
-        self._source_revisions: dict[tuple[str, uuid.UUID], int] = {}
         self._revision = 0
 
     @property
@@ -106,6 +109,7 @@ class CompositionLayerStore:
             return
         if len({layer.layer_id for layer in initial_layers}) != len(initial_layers):
             raise ValueError("composition layer IDs must be unique")
+        self._validate(composition_id, initial_layers)
         self._layers_by_composition[composition_id] = list(initial_layers)
         for instance in initial_layers:
             self._index_instance(composition_id, instance)
@@ -136,6 +140,7 @@ class CompositionLayerStore:
         previous = self._layers_by_composition.get(composition_id, [])
         if tuple(previous) == instances:
             return False
+        self._validate(composition_id, instances)
         for instance in instances:
             for source in instance_resources(instance):
                 self._lifetime.acquire(source, ResourceLeaseKind.SESSION)
@@ -214,18 +219,6 @@ class CompositionLayerStore:
         """Return the presentation revision for one layer instance."""
         return self._instance_revisions.get((composition_id, layer_id), 0)
 
-    def source_revision(self, source: LayerSourceReference) -> int:
-        """Return the shared content revision observed for one source."""
-        return self._source_revisions.get(_source_key(source), 0)
-
-    def advance_source_revision(self, source: LayerSourceReference) -> int:
-        """Advance and return one shared source's composition revision."""
-        key = _source_key(source)
-        revision = self._source_revisions.get(key, 0) + 1
-        self._source_revisions[key] = revision
-        self._revision += 1
-        return revision
-
     def add_layer(
         self, composition_id: uuid.UUID, instance: CompositionLayerInstance
     ) -> bool:
@@ -235,6 +228,7 @@ class CompositionLayerStore:
         layers = self._layers_by_composition[composition_id]
         if any(candidate.layer_id == instance.layer_id for candidate in layers):
             return False
+        self._validate(composition_id, (*layers, instance))
         layers.append(instance)
         self._index_instance(composition_id, instance)
         self._revision += 1
@@ -268,6 +262,13 @@ class CompositionLayerStore:
             instance is None or current_index == min(max(0, index), len(layers) - 1)
         ):
             return False
+        candidate = list(layers)
+        if current_index is not None:
+            candidate.pop(current_index)
+        if instance is not None:
+            insertion_index = min(max(0, int(index)), len(candidate))
+            candidate.insert(insertion_index, instance)
+        self._validate(composition_id, tuple(candidate))
         if instance is not None:
             for source in instance_resources(instance):
                 self._lifetime.acquire(source, ResourceLeaseKind.SESSION)
@@ -318,6 +319,10 @@ class CompositionLayerStore:
         )
         if instance is None:
             return False
+        self._validate(
+            composition_id,
+            tuple(candidate for candidate in layers if candidate is not instance),
+        )
         layers.remove(instance)
         self._unindex_instance(composition_id, instance)
         self._revision += 1
@@ -465,6 +470,9 @@ class CompositionLayerStore:
         replacement = replacement_factory(layers[index])
         if replacement == layers[index]:
             return False
+        candidate = list(layers)
+        candidate[index] = replacement
+        self._validate(composition_id, tuple(candidate))
         layers[index] = replacement
         self._advance_instance_revision(composition_id, layer_id)
         self._revision += 1
@@ -476,6 +484,15 @@ class CompositionLayerStore:
         if self._changed is not None:
             self._changed(composition_id)
 
+    def _validate(
+        self,
+        composition_id: uuid.UUID,
+        layers: tuple[CompositionLayerInstance, ...],
+    ) -> None:
+        """Validate a complete candidate stack before mutating owned state."""
+        if self._validate_stack is not None:
+            self._validate_stack(composition_id, layers)
+
     def _index_instance(
         self, composition_id: uuid.UUID, instance: CompositionLayerInstance
     ) -> None:
@@ -484,7 +501,6 @@ class CompositionLayerStore:
         instance_key = (composition_id, instance.layer_id)
         self._instances_by_source.setdefault(key, set()).add(instance_key)
         self._instance_revisions.setdefault(instance_key, 0)
-        self._source_revisions.setdefault(key, 0)
         for source in instance_resources(instance):
             self._lifetime.acquire(source, ResourceLeaseKind.LIVE)
 

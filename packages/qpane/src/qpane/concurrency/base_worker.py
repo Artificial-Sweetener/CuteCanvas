@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -50,6 +51,8 @@ class BaseWorker:
         self._handle: TaskHandle | None = None
         self._logger = logger or logging.getLogger(__name__)
         self._signal_disposal_scheduled = False
+        self._executor_completion_lock = threading.Lock()
+        self._executor_completion_reported = False
 
     @property
     def logger(self) -> logging.Logger:
@@ -80,6 +83,8 @@ class BaseWorker:
         success: bool,
         payload: Any | None = None,
         error: BaseException | None = None,
+        *,
+        defer_executor_completion: bool = False,
     ) -> None:
         """Notify Qt listeners and the executor about a worker outcome.
 
@@ -87,18 +92,44 @@ class BaseWorker:
             success: True when the runnable completed successfully.
             payload: Optional payload forwarded to the finished signal.
             error: Optional exception captured for diagnostics.
+            defer_executor_completion: Keep the scheduler slot occupied until
+                ``complete_executor`` is called by the result owner.
 
         Side effects:
             Emits the finished/error Qt signal, schedules the worker-owned Qt
-            signal bridge for disposal on its affinity thread, and calls
-            mark_finished on the bound executor.
+            signal bridge for disposal on its affinity thread, and releases
+            the bound executor unless completion was explicitly deferred.
         """
         target_signal = "finished" if success else "error"
         self._emit_signal(target_signal, payload)
         self._schedule_signal_disposal()
-        if self._executor is not None and self._handle is not None:
-            outcome = TaskOutcome(success=success, payload=payload, error=error)
-            self._executor.mark_finished(self._handle, outcome)
+        if not defer_executor_completion:
+            self.complete_executor(success, payload=payload, error=error)
+
+    def complete_executor(
+        self,
+        success: bool,
+        payload: Any | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        """Release this worker's scheduler slot exactly once.
+
+        Args:
+            success: True when the deferred result was accepted successfully.
+            payload: Optional result retained in executor diagnostics.
+            error: Optional exception retained in executor diagnostics.
+        """
+        with self._executor_completion_lock:
+            if self._executor_completion_reported:
+                return
+            self._executor_completion_reported = True
+            executor = self._executor
+            handle = self._handle
+        if executor is not None and handle is not None:
+            executor.mark_finished(
+                handle,
+                TaskOutcome(success=success, payload=payload, error=error),
+            )
 
     @staticmethod
     def connect_queued(signal: Any, slot: Callable[..., None]) -> None:

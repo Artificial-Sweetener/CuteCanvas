@@ -74,14 +74,6 @@ def _canvas_view(canvas: CuteCanvas):
         return None
 
 
-def _canvas_catalog(canvas: CuteCanvas):
-    """Return ``qpane.catalog()`` if available, otherwise ``None``."""
-    try:
-        return canvas.catalog()
-    except AttributeError:
-        return None
-
-
 class CuteCanvasState:
     """Own CuteCanvas configuration, features, caches, and executors."""
 
@@ -148,7 +140,6 @@ class CuteCanvasState:
         self._compose_settings_view()
         self._missing_view_logged = False
         self._missing_presenter_logged = False
-        self._missing_swap_delegate_logged = False
         self._headroom_timer: QTimer | None = None
         self._headroom_psutil_module = None
         self._headroom_psutil_missing = False
@@ -287,7 +278,7 @@ class CuteCanvasState:
                 inactive feature namespaces.
 
         Side effects:
-            Pushes configuration into the view, catalog, masks, and cache coordinator.
+            Pushes configuration into rendering, masks, and cache coordination.
             Resets the brush size to the configured default when the user has not
             customized it.
         """
@@ -568,10 +559,8 @@ class CuteCanvasState:
 
     def _resolve_view_collaborators(
         self,
-    ) -> tuple[
-        object | None, object | None, object | None, object | None, object | None
-    ]:
-        """Return view, presenter, viewport, tile manager, and swap delegate via the facade."""
+    ) -> tuple[object | None, object | None, object | None, object | None]:
+        """Return view, presenter, viewport, and tile manager via the facade."""
         try:
             view = self._qpane.view()
         except AttributeError:
@@ -580,7 +569,7 @@ class CuteCanvasState:
                     "Skipping settings application because the view is unavailable"
                 )
                 self._missing_view_logged = True
-            return None, None, None, None, None
+            return None, None, None, None
         try:
             presenter = self._qpane.presenter()
         except AttributeError:
@@ -596,36 +585,21 @@ class CuteCanvasState:
         tile_manager = (
             getattr(presenter, "tile_manager", None) if presenter is not None else None
         )
-        try:
-            swap_delegate = self._qpane.swapDelegate
-        except AttributeError:
-            swap_delegate = None
-        if swap_delegate is None and not self._missing_swap_delegate_logged:
-            logger.warning(
-                "Skipping swap delegate settings because it is unavailable on the view"
-            )
-            self._missing_swap_delegate_logged = True
-        return view, presenter, viewport, tile_manager, swap_delegate
+        return view, presenter, viewport, tile_manager
 
     def _apply_settings_to_components(self, old_settings: FeatureAwareConfig) -> None:
         """Push updated settings to collaborators and refresh default brush size when used."""
         qpane = self._qpane
-        catalog = _canvas_catalog(qpane)
-        if catalog is not None:
-            catalog.applyConfig(self.settings)
         (
             _view,
             _presenter,
             viewport,
             tile_manager,
-            swap_delegate,
         ) = self._resolve_view_collaborators()
         if viewport is not None:
             viewport.applyConfig(self.settings)
         if tile_manager is not None:
             tile_manager.apply_config(self.settings)
-        if swap_delegate is not None:
-            swap_delegate.apply_config(self.settings)
         masks = qpane._masks_controller
         masks.apply_config(self.settings)
         if qpane.interaction.brush_size == old_settings.default_brush_size:
@@ -718,7 +692,7 @@ class CuteCanvasState:
         view = canvas.view()
         return {
             "tiles": getattr(view, "tile_manager", None),
-            "pyramid": canvas.catalog().pyramidManager(),
+            "pyramid": view.pyramid_manager,
             "autosave": canvas.autosaveManager(),
             "sam": canvas.samManager(),
         }

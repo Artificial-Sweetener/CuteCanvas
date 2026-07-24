@@ -48,8 +48,10 @@ from PySide6.QtWidgets import (
 
 from examples.demo_settings import load_demo_settings, save_demo_settings
 from examples.demonstration import demo_text
-from examples.demonstration.catalog_tutorial import CatalogTutorialController
 from examples.demonstration.command_tutorial import CommandTutorialController
+from examples.demonstration.composition_tutorial import (
+    CompositionTutorialController,
+)
 from examples.demonstration.config.spec import (
     build_sections_for_features,
     field_sets_for_sections,
@@ -59,6 +61,9 @@ from examples.demonstration.configuration_tutorial import (
 )
 from examples.demonstration.extension_tutorial import ExtensionTutorialController
 from examples.demonstration.input_tutorial import ApplicationInputTutorial
+from examples.demonstration.presentation_tutorial import (
+    PresentationTutorialController,
+)
 from examples.demonstration.status_tutorial import StatusTutorialController
 from examples.demonstration.tool_mode_tutorial import ToolModeTutorialController
 from examples.demonstration.welcome_document import seed_welcome_document
@@ -107,13 +112,13 @@ class ExampleWindow(QMainWindow):
     Tutorial flow:
     - Configure settings and create the CuteCanvas (``_build_qpane``).
     - Wire CuteCanvas signals into UI updates (``_connect_qpane_signals``).
-    - Build the layout, status bar, and catalog panel (``_build_layout``,
-      ``_build_status_bar``, ``_build_catalog_panel``).
+    - Build the layout, status bar, and document panel (``_build_layout``,
+      ``_build_status_bar``, ``_build_document_panel``).
     - Create actions, menus, and toolbars (``_create_actions``,
       ``_create_menus``, ``_build_toolbars``).
     - Finalize startup state (``_finalize_startup``).
 
-    The builders below show how a host can wire catalog snapshots, menus,
+    The builders below show how a host can wire document snapshots, menus,
     status labels, masks, SAM actions, diagnostics, overlays, cursors, and
     custom tools around a CuteCanvas instance.
     """
@@ -142,7 +147,6 @@ class ExampleWindow(QMainWindow):
             self.qpane,
             self,
             masks_available=self._mask_tools_available,
-            all_images_linked=self._all_images_linked,
             set_status=self.status_ui.show_message,
         )
         self.tools = ToolModeTutorialController(
@@ -152,9 +156,9 @@ class ExampleWindow(QMainWindow):
             sam_available=self._sam_tools_available,
             create_mask=self.workspace.create_mask_for_current_image,
             show_status=self.status_ui.show_message,
-            catalog_refresh=lambda: (
-                self.catalog_ui.refresh_selection()
-                if hasattr(self, "catalog_ui")
+            document_refresh=lambda: (
+                self.composition_ui.refresh_selection()
+                if hasattr(self, "composition_ui")
                 else None
             ),
             extension_actions=lambda: (
@@ -179,34 +183,33 @@ class ExampleWindow(QMainWindow):
             set_status=self.status_ui.show_message,
             refresh_tools=lambda: self.commands.refresh_tools(),
         )
-        self.catalog_ui = CatalogTutorialController(
+        self.composition_ui = CompositionTutorialController(
             self.qpane,
             self,
-            container=self._catalog_container,
-            container_layout=self._catalog_container_layout,
+            container=self._document_container,
+            container_layout=self._document_container_layout,
             splitter=self._splitter,
-            container_default_maximum=self._catalog_container_default_max,
-            show_mask_selection=self.tools.catalog_prefers_mask_selection,
-            focus_requested=self.tools.apply_catalog_focus,
+            container_default_maximum=self._document_container_default_max,
+            focus_requested=self.tools.apply_document_focus,
             show_status=self.status_ui.show_message,
-            set_delete_mask_enabled=lambda enabled: (
-                self.commands.set_delete_mask_enabled(enabled)
-                if hasattr(self, "commands")
-                else None
-            ),
         )
-        self._build_catalog_panel()
+        self.presentations = PresentationTutorialController(
+            self.qpane,
+            self,
+            show_status=self.status_ui.show_message,
+        )
+        self._build_document_panel()
         self.commands = CommandTutorialController(
             self.qpane,
             self,
             workspace=self.workspace,
             tools=self.tools,
-            catalog=self.catalog_ui,
+            compositions=self.composition_ui,
             configuration=self.configuration,
             extensions=self.extensions,
             masks_available=self._mask_tools_available,
-            all_images_linked=self._all_images_linked,
             show_reference=self._show_reference_popover,
+            show_presentations=self.presentations.show,
             show_status=self.status_ui.show_message,
             refresh_mask_status=self.status_ui.update_mask_stack,
         )
@@ -350,17 +353,6 @@ class ExampleWindow(QMainWindow):
         """Return True when SAM tooling is available."""
         return self.qpane.samFeatureAvailable()
 
-    def _all_images_linked(self) -> bool:
-        """Return True when every loaded image participates in a single link group."""
-        image_ids = self.qpane.imageIDs()
-        raw_groups = [group.members for group in self.qpane.linkedGroups()]
-        return (
-            bool(raw_groups)
-            and len(raw_groups) == 1
-            and len(image_ids) >= 2
-            and set(raw_groups[0]) == set(image_ids)
-        )
-
     def _build_qpane(self) -> None:
         """Create the public CuteCanvas facade and capture feature state."""
         feature_names = self._feature_names(self.options.feature_set)
@@ -387,27 +379,27 @@ class ExampleWindow(QMainWindow):
         self._qpane_container_layout.setContentsMargins(0, 0, 0, 0)
         self._qpane_container_layout.setSpacing(0)
         self._qpane_container_layout.addWidget(self.qpane)
-        self._catalog_container = QWidget(self)
-        self._catalog_container_default_max = self._catalog_container.maximumWidth()
-        self._catalog_container_layout = QVBoxLayout(self._catalog_container)
-        self._catalog_container_layout.setContentsMargins(0, 0, 0, 0)
-        self._catalog_container_layout.setSpacing(0)
+        self._document_container = QWidget(self)
+        self._document_container_default_max = self._document_container.maximumWidth()
+        self._document_container_layout = QVBoxLayout(self._document_container)
+        self._document_container_layout.setContentsMargins(0, 0, 0, 0)
+        self._document_container_layout.setSpacing(0)
         self._splitter = QSplitter(Qt.Horizontal, self)
-        self._splitter.addWidget(self._catalog_container)
+        self._splitter.addWidget(self._document_container)
         self._splitter.addWidget(self._qpane_container)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
         self._splitter.setCollapsible(0, True)
         self.setCentralWidget(self._splitter)
-        self._catalog_container.hide()
+        self._document_container.hide()
         self.installEventFilter(self)
 
     def _finalize_startup(self) -> None:
         """Complete the final step of demo initialization."""
-        if not self.qpane.imageIDs():
+        if not self.qpane.compositionIDs():
             seed_welcome_document(self.qpane)
         self.commands.prime()
-        self.catalog_ui.show_initially()
+        self.composition_ui.show_initially()
         self.tools.sync_mode(self.qpane.getControlMode())
         self.status_ui.show_message(
             "Starter document ready · select a layer, then move, transform, or paint."
@@ -426,15 +418,15 @@ class ExampleWindow(QMainWindow):
 
         _add_shortcut(
             QKeySequence(Qt.Key_A),
-            partial(self.workspace.step_image, -1),
+            partial(self.workspace.step_composition, -1),
         )
         _add_shortcut(
             QKeySequence(Qt.Key_D),
-            partial(self.workspace.step_image, 1),
+            partial(self.workspace.step_composition, 1),
         )
         _add_shortcut(
             QKeySequence(Qt.Key_Backspace),
-            self.workspace.remove_current_image,
+            self.workspace.remove_current_composition,
         )
         _add_shortcut(
             QKeySequence(Qt.Key_M),
@@ -456,15 +448,9 @@ class ExampleWindow(QMainWindow):
             self.configuration.sync_detail_toggle
         )
 
-    def _build_catalog_panel(self) -> None:
-        """Create or refresh the catalog panel embedded in the splitter.
-
-        Extend by swapping the dock implementation or layering widgets that consume
-        ``CatalogSnapshot`` from CuteCanvas signals (``catalogChanged``, ``catalogSelectionChanged``)
-        and link toggles via
-        ``qpane.setLinkedGroups()``.
-        """
-        self.catalog_ui.build()
+    def _build_document_panel(self) -> None:
+        """Create or refresh the document-and-layer panel."""
+        self.composition_ui.build()
 
     def _build_reference_hints(
         self, mask_enabled: bool, sam_enabled: bool
@@ -492,6 +478,7 @@ class ExampleWindow(QMainWindow):
             self._reference_dialog.close()
         self.application_input.close()
         self.extensions.close()
+        self.presentations.close()
         self.status_ui.show_message(demo_text.EXIT_MESSAGE)
         super().closeEvent(event)
         if event.isAccepted():

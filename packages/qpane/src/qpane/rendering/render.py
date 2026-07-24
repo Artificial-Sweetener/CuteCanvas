@@ -286,6 +286,10 @@ class Renderer:
         """Return the most recent scene render plan captured during painting."""
         return self._current_render_plan
 
+    def invalidate_current_render_plan(self) -> None:
+        """Retire the painted plan after authoritative scene state changes."""
+        self._current_render_plan = None
+
     def get_base_buffer(self) -> QImage | None:
         """Return the current base image buffer used for painting."""
         return self._base_image_buffer

@@ -52,12 +52,12 @@ def test_affine_layer_move_survives_hostile_updates_space_pan_and_replay(
         cache_budget_mb=96,
     )
     viewer = harness.viewer
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     mask_id = harness.mask_ids[0]
     try:
         assert info.scene_id is not None
         assert info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -66,7 +66,8 @@ def test_affine_layer_move_survives_hostile_updates_space_pan_and_replay(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
         layer = viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
 
@@ -309,11 +310,11 @@ def test_whole_layer_transform_is_cumulative_suspendable_atomic_and_fast(
         cache_budget_mb=96,
     )
     viewer = harness.viewer
-    info = viewer.listMasksForImage()[0]
+    info = viewer.listMasksForComposition()[0]
     mask_id = harness.mask_ids[0]
     try:
         assert info.scene_id is not None and info.layer_id is not None
-        assert viewer.setLayerInteractionPolicy(
+        viewer.setLayerInteractionPolicy(
             info.scene_id,
             info.layer_id,
             LayerPolicy(
@@ -322,7 +323,8 @@ def test_whole_layer_transform_is_cumulative_suspendable_atomic_and_fast(
                 pixel_editable=True,
             ),
         )
-        assert viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
         layer = viewer.mask_service.assets.get_layer(mask_id)
         assert layer is not None
 

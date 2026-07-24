@@ -97,8 +97,8 @@ def test_editable_raster_deletes_soft_selection_and_undoes_chronologically(
     )
     assert public_layer.source_kind == "raster"
     assert public_layer.source_id is not None
-    assert public_layer.image_id is None
-    assert qpane.setSelectedLayer(scene.scene_id, layer_id)
+    qpane.setSelectedLayer(scene.scene_id, layer_id)
+    assert qpane.selectedLayer().layer_id == layer_id
     coverage = QImage(4, 8, QImage.Format_Grayscale8)
     coverage.fill(128)
     assert qpane.setPixelSelection(coverage, QRect(0, 0, 4, 8))
@@ -232,8 +232,8 @@ def test_editable_raster_bounds_are_async_and_undoable(qapp, qpane_with_mask) ->
     assert redone.bounds == requested
 
 
-def test_editable_raster_assets_are_pruned_with_catalog_scene(qpane_with_mask) -> None:
-    """Removing catalog scenes should not retain orphaned RGBA authoring assets."""
+def test_editable_raster_assets_are_pruned_with_document(qpane_with_mask) -> None:
+    """Removing a document should not retain orphaned RGBA authoring resources."""
     qpane, _manager, _image_id = qpane_with_mask
     layer_id = qpane.addEditableRasterLayer(_opaque_image(8, 8), label="Paint")
     assert layer_id is not None
@@ -245,7 +245,9 @@ def test_editable_raster_assets_are_pruned_with_catalog_scene(qpane_with_mask) -
     assert layer.source_id is not None
     assert qpane._editable_raster_assets.get(layer.source_id) is not None
 
-    qpane.clearImages()
+    composition_id = qpane.currentCompositionID()
+    assert composition_id is not None
+    qpane.removeComposition(composition_id)
 
     assert qpane._editable_raster_assets.get(layer.source_id) is None
 

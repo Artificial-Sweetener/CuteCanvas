@@ -24,8 +24,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QToolBar
 
-from examples.demonstration.catalog.builders import build_catalog_snapshot
-from examples.demonstration.catalog_tutorial import CatalogTutorialController
+from examples.demonstration.composition_tutorial import (
+    CompositionTutorialController,
+)
 from examples.demonstration.configuration_tutorial import (
     ConfigurationTutorialController,
 )
@@ -44,12 +45,12 @@ class CommandTutorialController:
         *,
         workspace: WorkspaceTutorialController,
         tools: ToolModeTutorialController,
-        catalog: CatalogTutorialController,
+        compositions: CompositionTutorialController,
         configuration: ConfigurationTutorialController,
         extensions: ExtensionTutorialController,
         masks_available: Callable[[], bool],
-        all_images_linked: Callable[[], bool],
         show_reference: Callable[[], None],
+        show_presentations: Callable[[], None],
         show_status: Callable[[str], None],
         refresh_mask_status: Callable[[], None],
     ) -> None:
@@ -58,12 +59,12 @@ class CommandTutorialController:
         self._parent = parent
         self._workspace = workspace
         self._tools = tools
-        self._catalog = catalog
+        self._compositions = compositions
         self._configuration = configuration
         self._extensions = extensions
         self._masks_available = masks_available
-        self._all_images_linked = all_images_linked
         self._show_reference = show_reference
+        self._show_presentations = show_presentations
         self._show_status = show_status
         self._refresh_mask_status = refresh_mask_status
         self._create_actions()
@@ -74,27 +75,19 @@ class CommandTutorialController:
 
     def connect_signals(self) -> None:
         """Refresh command presentation from public editor notifications."""
-        self._canvas.catalogChanged.connect(self.handle_catalog_event)
         self._canvas.compositionChanged.connect(
-            lambda _snapshot: self.handle_catalog_event(None)
+            lambda _snapshot: self.handle_composition_event()
         )
         self._canvas.compositionChanged.connect(
-            lambda _snapshot: self.refresh_document_actions()
+            lambda _snapshot: self.refresh_composition_actions()
         )
         self._canvas.compositionSelectionChanged.connect(
             lambda _composition_id: self.refresh_tools()
         )
-        self._canvas.catalogChanged.connect(lambda _event: self.refresh_tools())
-        self._canvas.catalogSelectionChanged.connect(
-            lambda _image_id: self.refresh_tools()
-        )
-        self._canvas.currentImageChanged.connect(lambda _image_id: self.refresh_tools())
-        self._canvas.imageLoaded.connect(lambda _path: self.refresh_tools())
-        self._canvas.comparisonChanged.connect(self.handle_comparison_changed)
 
     def prime(self) -> None:
-        """Populate command state after the starter document is available."""
-        self.handle_catalog_event(None)
+        """Populate command state after the starter composition is available."""
+        self.handle_composition_event()
         self.refresh_tools()
 
     def build_toolbar(self) -> None:
@@ -121,17 +114,12 @@ class CommandTutorialController:
                     added = True
             return added
 
-        navigation_added = add_group([self.prev_image_action, self.next_image_action])
-        compare_added = add_group(
-            [
-                self.compare_next_action,
-                self.compose_contact_sheet_action,
-                self.compare_flip_action,
-                self.compare_clear_action,
-            ]
+        navigation_added = add_group(
+            [self.previous_composition_action, self.next_composition_action]
         )
+        composition_added = add_group([self.place_composition_action])
         mode_actions = self._tools.mode_actions()
-        if (navigation_added or compare_added) and any(
+        if (navigation_added or composition_added) and any(
             action is not None for action in mode_actions
         ):
             self.toolbar.addSeparator()
@@ -152,9 +140,11 @@ class CommandTutorialController:
         add_group(mask_actions)
 
     def refresh_tools(self) -> None:
-        """Apply placeholder and feature policy to editor and mask actions."""
+        """Apply composition and feature policy to editor and mask actions."""
         self._tools.refresh_availability()
-        mask_enabled = self._masks_available() and not self._canvas.placeholderActive()
+        mask_enabled = (
+            self._masks_available() and self._canvas.currentCompositionID() is not None
+        )
         for action in (
             self.add_mask_action,
             self.delete_mask_action,
@@ -169,36 +159,26 @@ class CommandTutorialController:
                     self._set_checked(action, False)
         self._refresh_mask_status()
 
-    def handle_catalog_event(self, _event: object) -> None:
-        """Refresh all command state derived from the catalog snapshot."""
-        snapshot = build_catalog_snapshot(self._canvas)
-        self.update_action_states(snapshot.image_count)
-        self._catalog.handle_snapshot(snapshot)
+    def handle_composition_event(self) -> None:
+        """Refresh command state from authoritative composition snapshots."""
+        count = len(self._canvas.editor.compositions)
+        self.update_action_states(count)
+        self.set_delete_mask_enabled(bool(self._canvas.maskIDsForComposition()))
         self.refresh_tools()
 
-    def handle_comparison_changed(self, _state: object) -> None:
-        """Refresh comparison commands after the comparison state changes."""
-        self.update_action_states(len(self._canvas.imageIDs()))
-
     def update_action_states(self, count: int) -> None:
-        """Enable gallery actions from image count and comparison state."""
-        has_images = count > 0
-        for action, base_enabled in self._gallery_actions:
-            action.setEnabled(base_enabled and has_images)
-        comparison_enabled = self._canvas.comparisonState().enabled
-        self.compare_next_action.setEnabled(count > 1)
-        self.compare_flip_action.setEnabled(comparison_enabled)
-        self.compare_clear_action.setEnabled(comparison_enabled)
-        if count < 2 and self._all_images_linked():
-            self._canvas.setAllImagesLinked(False)
-            self._show_status("Pan/zoom linking disabled.")
-        self._catalog.maybe_auto_show(count)
-        self.refresh_document_actions()
+        """Enable composition actions from the number of open compositions."""
+        has_compositions = count > 0
+        for action, base_enabled in self._composition_actions:
+            action.setEnabled(base_enabled and has_compositions)
+        self.place_composition_action.setEnabled(count > 1)
+        self._compositions.maybe_auto_show(count)
+        self.refresh_composition_actions()
 
-    def refresh_document_actions(self) -> None:
-        """Enable saving only while an editable document is open."""
-        self.save_document_action.setEnabled(
-            self._canvas.editor.documents.current is not None
+    def refresh_composition_actions(self) -> None:
+        """Enable saving only while an editable composition is open."""
+        self.save_composition_action.setEnabled(
+            self._canvas.editor.compositions.current is not None
         )
 
     def set_delete_mask_enabled(self, enabled: bool) -> None:
@@ -207,19 +187,19 @@ class CommandTutorialController:
             self.delete_mask_action.setEnabled(enabled)
 
     def _create_actions(self) -> None:
-        """Create file, gallery, mask, view, and extension commands."""
+        """Create file, composition, mask, view, and extension commands."""
         self.open_images_action = QAction("Open Images...", self._parent)
         self.open_images_action.setShortcut(QKeySequence.StandardKey.Open)
         self.open_images_action.triggered.connect(self._workspace.open_images_dialog)
-        self.open_document_action = QAction("Open Document…", self._parent)
-        self.open_document_action.setShortcut(QKeySequence("Ctrl+Alt+O"))
-        self.open_document_action.triggered.connect(
-            self._workspace.open_document_dialog
+        self.open_composition_action = QAction("Open Composition…", self._parent)
+        self.open_composition_action.setShortcut(QKeySequence("Ctrl+Alt+O"))
+        self.open_composition_action.triggered.connect(
+            self._workspace.open_composition_dialog
         )
-        self.save_document_action = QAction("Save Document…", self._parent)
-        self.save_document_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
-        self.save_document_action.triggered.connect(
-            self._workspace.save_document_dialog
+        self.save_composition_action = QAction("Save Composition…", self._parent)
+        self.save_composition_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.save_composition_action.triggered.connect(
+            self._workspace.save_composition_dialog
         )
         self.place_embedded_action = QAction("Place Embedded…", self._parent)
         self.place_embedded_action.triggered.connect(
@@ -227,37 +207,31 @@ class CommandTutorialController:
         )
         self.place_linked_action = QAction("Place Linked…", self._parent)
         self.place_linked_action.triggered.connect(self._workspace.place_linked_dialog)
-        self.clear_action = QAction("Clear", self._parent)
-        self.clear_action.triggered.connect(self._workspace.clear_gallery)
-        self.prev_image_action = QAction("◀ Prev", self._parent)
-        self.prev_image_action.setShortcut(Qt.Key_Left)
-        self.prev_image_action.triggered.connect(lambda: self._workspace.step_image(-1))
-        self.next_image_action = QAction("Next ▶", self._parent)
-        self.next_image_action.setShortcut(Qt.Key_Right)
-        self.next_image_action.triggered.connect(lambda: self._workspace.step_image(1))
-        self.compare_next_action = QAction("Compare Next", self._parent)
-        self.compare_next_action.triggered.connect(
-            self._workspace.compare_with_next_image
+        self.clear_action = QAction("Close All", self._parent)
+        self.clear_action.triggered.connect(self._workspace.close_all_compositions)
+        self.presentations_action = QAction("Multi-view Inspection…", self._parent)
+        self.presentations_action.triggered.connect(self._show_presentations)
+        self.previous_composition_action = QAction("◀ Prev", self._parent)
+        self.previous_composition_action.setShortcut(Qt.Key_Left)
+        self.previous_composition_action.triggered.connect(
+            lambda: self._workspace.step_composition(-1)
         )
-        self.compose_contact_sheet_action = QAction(
-            "Compose Contact Sheet", self._parent
+        self.next_composition_action = QAction("Next ▶", self._parent)
+        self.next_composition_action.setShortcut(Qt.Key_Right)
+        self.next_composition_action.triggered.connect(
+            lambda: self._workspace.step_composition(1)
         )
-        self.compose_contact_sheet_action.triggered.connect(
-            self._workspace.compose_contact_sheet
+        self.place_composition_action = QAction("Place Composition", self._parent)
+        self.place_composition_action.triggered.connect(
+            self._workspace.place_next_composition
         )
-        self.compare_flip_action = QAction("Flip Compare", self._parent)
-        self.compare_flip_action.triggered.connect(
-            self._workspace.flip_compare_orientation
-        )
-        self.compare_clear_action = QAction("Clear Compare", self._parent)
-        self.compare_clear_action.triggered.connect(self._workspace.clear_comparison)
         self._create_mask_actions()
         self.config_action = QAction("Config", self._parent)
         self.config_action.triggered.connect(self._configuration.open_dialog)
-        self.catalog_panel_action = QAction(
-            "Browser Panel", self._parent, checkable=True
+        self.composition_panel_action = QAction(
+            "Layers Panel", self._parent, checkable=True
         )
-        self._catalog.bind_toggle_action(self.catalog_panel_action)
+        self._compositions.bind_toggle_action(self.composition_panel_action)
         self.quick_reference_action = QAction("Quick Reference", self._parent)
         self.quick_reference_action.triggered.connect(self._show_reference)
         self.overlay_hook_action = QAction(
@@ -276,15 +250,15 @@ class CommandTutorialController:
             "Custom Cursor + Overlay", self._parent, checkable=True
         )
         self.lens_hook_action.toggled.connect(self._extensions.handle_lens_toggled)
-        self._gallery_actions = [
+        self._composition_actions = [
             (self.clear_action, True),
-            (self.prev_image_action, True),
-            (self.next_image_action, True),
-            (self.compose_contact_sheet_action, True),
+            (self.previous_composition_action, True),
+            (self.next_composition_action, True),
+            (self.place_composition_action, True),
             (self.place_embedded_action, True),
             (self.place_linked_action, True),
         ]
-        self._gallery_actions.extend(
+        self._composition_actions.extend(
             (action, True)
             for action in (
                 self.add_mask_action,
@@ -331,8 +305,8 @@ class CommandTutorialController:
         menu_bar = self._parent.menuBar()
         menu_bar.clear()
         file_menu = menu_bar.addMenu("&File")
-        file_menu.addAction(self.open_document_action)
-        file_menu.addAction(self.save_document_action)
+        file_menu.addAction(self.open_composition_action)
+        file_menu.addAction(self.save_composition_action)
         file_menu.addSeparator()
         file_menu.addAction(self.open_images_action)
         file_menu.addSeparator()
@@ -352,13 +326,12 @@ class CommandTutorialController:
         self._tools.editor_controls.populate_layer_menu(layer_menu)
         self._tools.vector_controls.populate_layer_menu(layer_menu)
         view_menu = menu_bar.addMenu("&View")
-        view_menu.addAction(self.catalog_panel_action)
+        view_menu.addAction(self.presentations_action)
+        view_menu.addSeparator()
+        view_menu.addAction(self.composition_panel_action)
         view_menu.addAction(self.quick_reference_action)
         view_menu.addSeparator()
-        view_menu.addAction(self.compare_next_action)
-        view_menu.addAction(self.compose_contact_sheet_action)
-        view_menu.addAction(self.compare_flip_action)
-        view_menu.addAction(self.compare_clear_action)
+        view_menu.addAction(self.place_composition_action)
         view_menu.addSeparator()
         self._configuration.build_diagnostics_menu(
             view_menu.addMenu("Diagnostics Overlay")

@@ -17,14 +17,12 @@
 
 from ..compare import (
     CompareDividerInteraction,
-    CompareService,
     ComparisonChange,
     ComparisonChangeKind,
 )
 
 __all__ = (
     "CompareDividerInteraction",
-    "CompareService",
     "ComparisonChange",
     "ComparisonChangeKind",
 )

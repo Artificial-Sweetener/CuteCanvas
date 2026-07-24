@@ -430,7 +430,7 @@ class VectorControls(QObject):
         target = self._vector_target()
         if target is None:
             return
-        request_id = self._qpane.rasterizeVectorLayer(*target)
+        request_id = self._qpane.rasterizeLayer(*target)
         if request_id is not None:
             self._show_status("Rasterizing vector artwork...")
 

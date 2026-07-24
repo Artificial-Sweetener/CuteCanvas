@@ -72,7 +72,7 @@ class PlacedAssetControls(QGroupBox):
         self._relink.clicked.connect(self._relink_target)
         self._embed.clicked.connect(self._embed_target)
         self._rasterize.clicked.connect(self._rasterize_target)
-        self._qpane.placedAssetRequestCompleted.connect(self._request_completed)
+        self._qpane.layerRasterizationCompleted.connect(self._request_completed)
         self.setVisible(False)
 
     def set_target(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> None:
@@ -114,7 +114,7 @@ class PlacedAssetControls(QGroupBox):
         """Duplicate the current instance while sharing its source."""
         if self._target is None:
             return
-        layer_id = self._qpane.duplicatePlacedAsset(*self._target)
+        layer_id = self._qpane.duplicateLayer(*self._target)
         if layer_id is not None:
             self._qpane.setSelectedLayer(self._target[0], layer_id)
 
@@ -146,7 +146,7 @@ class PlacedAssetControls(QGroupBox):
         target = self._target
         if target is None:
             return
-        request_id = self._qpane.rasterizePlacedAsset(*target)
+        request_id = self._qpane.rasterizeLayer(*target)
         if request_id is None:
             self._show_status("The selected layer could not be rasterized.")
             return

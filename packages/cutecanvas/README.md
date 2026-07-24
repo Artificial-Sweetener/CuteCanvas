@@ -18,10 +18,14 @@ tiled, CPU-first treatment as images in the QPane viewer.
 
 * **A real editor in a Qt widget:** Put `CuteCanvas` in any layout and build the
   surrounding application with ordinary Qt actions, docks, and signals.
-* **Independent documents:** Start with an empty canvas or seed a document from
-  an image. Every image in the document is an ordinary layer.
+* **Independent compositions:** Start with an empty canvas or seed a composition
+  from an image. Every image in a composition is an ordinary layer.
+* **One document, many views:** Mount the same document in an editor, linked
+  native-size tabs, a responsive grid, or an independent-target comparison.
 * **Raster and vector layers:** Paint pixels, draw shapes and paths, edit text,
   and keep each kind of content editable.
+* **Clone Stamp:** Retouch editable raster layers from one anchored layer, its
+  visible backdrop, or the complete visible composition.
 * **Masks and soft selections:** Paint or draw mask shapes, reuse mask coverage
   as a selection, and combine soft raster coverage with crisp retained shapes.
 * **Move and transform:** Move whole layers or selected pixels, then scale,
@@ -33,6 +37,9 @@ tiled, CPU-first treatment as images in the QPane viewer.
   floating pixels follow one chronological undo and redo path.
 * **Host-controlled behavior:** Keep a background fixed, allow only mask
   editing, or expose the complete editor without changing the document model.
+* **Host-controlled drag-out:** Resolve a composition or layer into file URLs,
+  companion files, text, or custom MIME data without hard-coding storage into
+  the canvas.
 * **Optional AI-assisted selection:** The `sam` extra adds MobileSAM and its
   model runtime. Every ordinary mask and selection feature ships with
   CuteCanvas itself.
@@ -59,19 +66,20 @@ import sys
 
 from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QApplication, QMainWindow
-from cutecanvas import CuteCanvas
+from cutecanvas import CanvasDocument, CuteCanvas
 
 app = QApplication(sys.argv)
 
-window = QMainWindow()
-canvas = CuteCanvas(features=("mask",))
-window.setCentralWidget(canvas)
-
-document = canvas.editor.documents.create(
+document = CanvasDocument()
+composition_id = document.create_composition(
     QRectF(0.0, 0.0, 1920.0, 1080.0),
     title="My first canvas",
 )
-document.open()
+
+window = QMainWindow()
+canvas = CuteCanvas(document=document, features=("mask",))
+canvas.openComposition(composition_id)
+window.setCentralWidget(canvas)
 
 window.resize(1200, 760)
 window.show()
@@ -109,20 +117,24 @@ canvas.paintTargetChanged.connect(lambda target: print(target))
 
 ## Documents and Layers
 
-A document owns its canvas, layer order, policies, selection, and edit history.
-It can begin empty or be seeded from an image. Seeding is a convenience: the
-image becomes a normal layer that the host may lock, move, hide, reorder, or
-remove.
+A `CanvasDocument` is a headless host-owned project. It owns reusable resources,
+independent compositions, layer stacks, selections, and one chronological edit
+history. It can exist before any widget and can be mounted by more than one
+view.
 
-`canvas.editor.documents` returns lightweight handles for ordinary application
+A composition is one canvas-sized coordinate space inside that document. It
+can begin empty or be seeded from an image. Seeding is a convenience: the image
+becomes a normal layer that the host may lock, move, hide, reorder, or remove.
+
+`canvas.editor.compositions` returns lightweight handles for ordinary application
 code:
 
 ```python
 from PySide6.QtCore import QPointF
 
-document = canvas.editor.documents.current
-if document is not None and document.layers:
-    layer = document.layers[-1]
+composition = canvas.editor.compositions.current
+if composition is not None and composition.layers:
+    layer = composition.layers[-1]
     layer.select()
     layer.translate(QPointF(24.0, 0.0))
     layer.center(vertically=False)
@@ -131,6 +143,52 @@ if document is not None and document.layers:
 Handles keep stable identity and always ask the document for current state.
 They do not leave a stale private copy behind after undo, reordering, removal,
 or document restoration.
+
+## Show the Same Work More Than One Way
+
+`CanvasWorkspace` arranges independent composition views without flattening
+them into one artificial coordinate space:
+
+```python
+from cutecanvas import CanvasWorkspace
+
+workspace = CanvasWorkspace(document=canvas.document())
+workspace.setTabbedPresentation(document.composition_ids(), linked=True)
+window.setCentralWidget(workspace)
+```
+
+Linked tabs preserve the inspected normalized region while each composition
+keeps its own native dimensions and local 100% zoom. The same workspace can
+show a responsive grid or a two-target comparison:
+
+```python
+workspace.setGridPresentation(document.composition_ids())
+
+first, second = document.composition_ids()[:2]
+workspace.setComparisonPresentation(first, second)
+```
+
+Built-in multi-view presentations are read-only by default. Use
+`setInteractionMode()` when a host deliberately wants mask authoring or full
+editing in those views.
+
+Outbound dragging is equally host-owned. Install one `OutboundMimeProvider` on
+the workspace and return file URLs, a compressed companion file, text, or
+application-specific MIME values for the stable content reference in each
+`DragSubject`.
+
+When the payload needs freshly rendered pixels, ask the mounted canvas for a
+cancellable projection. It uses the same scene renderer as the visible canvas
+and refuses to publish a result if the referenced content changes while work
+is running:
+
+```python
+from PySide6.QtCore import QSize
+
+reference = document.content_reference(first)
+canvas.projectionCompleted.connect(handle_projection)
+request = canvas.requestProjection(reference, pixel_size=QSize(1920, 1080))
+```
 
 ## Selections, Masks, and Painting
 
@@ -149,6 +207,13 @@ The brush system is shared by mask and color painting. A `BrushPreset` controls
 size, hardness, opacity, flow, spacing, smoothing, pressure, tilt, texture, and
 jitter without creating separate brush behavior for each target.
 
+Clone Stamp uses that same brush feel and history path. Alt-click chooses a
+rendered source independently from the paint destination. Each stroke samples
+the anchored layer, that layer and visible layers below it, or the complete
+visible composition. Overlapping strokes cannot feed their freshly written
+pixels back into themselves. Rotation, scale, and reflection are applied around
+the source anchor, with an on-canvas outline showing the exact sampled area.
+
 ## Move, Transform, and Snap
 
 Move selected pixels without immediately rewriting their source. The lifted
@@ -164,14 +229,14 @@ meaningful.
 ## Save the Editable Work
 
 A flattened image and an editable document solve different problems. Image
-export clips the visible result to the document canvas. A `.cutecanvas` archive
+export clips the visible result to the composition canvas. A `.cutecanvas` archive
 retains layers, transforms, masks, selections, linked-image information,
 policies, and off-canvas content:
 
 ```python
-document = canvas.editor.documents.current
-if document is not None:
-    canvas.editor.persistence.save(document, "example.cutecanvas")
+composition = canvas.editor.compositions.current
+if composition is not None:
+    canvas.editor.persistence.save(composition, "example.cutecanvas")
 ```
 
 Restore validates the complete archive before changing the mounted document,
@@ -187,7 +252,7 @@ small editor and a source-code tutorial for host applications:
 python examples\cutecanvas_demo.py
 ```
 
-The demo creates and opens documents, manages a composition-and-layer tree,
+The demo creates and opens compositions, manages a composition-and-layer tree,
 draws and edits raster, mask, vector, and placed-image layers, exercises Move
 and Transform, and saves complete editable documents using only public APIs.
 
@@ -195,8 +260,11 @@ and Transform, and saves complete editable documents using only public APIs.
 
 * **[Getting Started](docs/getting-started.md):** Build the widget and your first
   editable document.
-* **[Catalog and Navigation](docs/catalog-and-navigation.md):** Reuse source
-  images across documents and build image-review navigation.
+* **[Documents and Presentations](docs/documents-and-presentations.md):** Own
+  documents outside widgets; mount linked tabs, grids, and comparisons; and
+  provide drag-out MIME data.
+* **[Project Resources](docs/project-resources.md):** Share or fork content,
+  nest live documents, and persist the complete dependency graph.
 * **[Documents and Layers](docs/scenes.md):** Create documents, add layers, set
   policies, arrange the stack, and inspect state.
 * **[Painting](docs/painting.md):** Create sparse raster layers, configure the

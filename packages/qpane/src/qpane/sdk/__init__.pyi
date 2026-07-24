@@ -21,11 +21,12 @@ from . import concurrency as concurrency
 from . import configuration as configuration
 from . import diagnostics as diagnostics
 from . import features as features
+from . import inspection as inspection
+from . import layout as layout
 from . import overlays as overlays
 from . import raster as raster
 from . import rendering as rendering
 from . import scene as scene
-from . import swap as swap
 from . import system as system
 from . import types as types
 from . import ui as ui

@@ -479,31 +479,3 @@ class VectorApiMixin:
             values,
             CoverageCombineMode(mode.value),
         )
-
-    def rasterizeVectorLayer(
-        self,
-        scene_id: uuid.UUID,
-        layer_id: uuid.UUID,
-        pixel_size: QSize | None = None,
-    ) -> uuid.UUID | None:
-        """Begin atomic conversion of a vector layer to editable pixels.
-
-        Args:
-            scene_id: Public identifier of the active scene.
-            layer_id: Vector layer instance to replace.
-            pixel_size: Explicit output dimensions or the document dimensions.
-
-        Returns:
-            A request UUID, or ``None`` when the layer is not current vector content.
-
-        Side effects:
-            Emits ``vectorRequestCompleted`` exactly once for accepted work.
-        """
-        self._validate_vector_ids(scene_id, layer_id)
-        if pixel_size is not None and not isinstance(pixel_size, QSize):
-            raise TypeError("pixel_size must be a QSize or None")
-        return self._vector_editor_controller().rasterize_layer(
-            scene_id,
-            layer_id,
-            None if pixel_size is None else QSize(pixel_size),
-        )

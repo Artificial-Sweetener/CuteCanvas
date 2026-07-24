@@ -24,7 +24,7 @@ from math import hypot
 from PySide6.QtCore import QLineF, QPointF, QRectF
 
 from ..scene.model import ClipCoordinateSpace, LayerClip, LayerPlacement
-from ..scene.render_plan import RasterLayerRenderItem, SceneRenderPlan
+from ..scene.render_plan import SceneRenderItem, SceneRenderPlan
 from ..types import ComparisonOrientation
 
 
@@ -33,7 +33,7 @@ class ProjectedClipBoundary:
     """Projected comparison clip boundary owned by render geometry."""
 
     orientation: ComparisonOrientation
-    item: RasterLayerRenderItem
+    item: SceneRenderItem
     scene_bounds: LayerPlacement
     full_segment: QLineF
     visible_segment: QLineF | None
@@ -53,8 +53,8 @@ class ProjectedClipBoundary:
         if not invertible:
             return None
         source_point = inverse.map(point)
-        source_width = self.item.source_image.width()
-        source_height = self.item.source_image.height()
+        source_width = self.item.source_size.width()
+        source_height = self.item.source_size.height()
         placement = self.item.placement
         if (
             source_width <= 0
@@ -85,12 +85,22 @@ def projected_comparison_boundary(
     *,
     orientation: ComparisonOrientation,
     hit_width: float,
+    source_id: object | None = None,
+    split_position: float | None = None,
 ) -> ProjectedClipBoundary | None:
     """Return the projected boundary for the active comparison render item."""
-    item = _comparison_item(plan)
+    item = _comparison_item(plan, source_id=source_id)
     if item is None or item.clip is None:
         return None
-    scene_clip = _clip_to_scene_rect(plan, item.clip)
+    scene_clip = (
+        _normalized_comparison_clip(
+            plan,
+            split_position,
+            orientation=orientation,
+        )
+        if split_position is not None
+        else _clip_to_scene_rect(plan, item.clip)
+    )
     if scene_clip is None:
         return None
     source_line = _scene_boundary_to_source_line(
@@ -121,16 +131,45 @@ def projected_comparison_boundary(
     )
 
 
-def _comparison_item(plan: SceneRenderPlan) -> RasterLayerRenderItem | None:
-    """Return the active comparison raster item from ``plan``."""
+def _comparison_item(
+    plan: SceneRenderPlan,
+    *,
+    source_id: object | None,
+) -> SceneRenderItem | None:
+    """Return the active comparison item from ``plan``."""
     for item in plan.render_items:
-        if not isinstance(item, RasterLayerRenderItem):
-            continue
         if item.clip is None or not item.descriptor.visible:
             continue
-        if item.descriptor.hit_test.role == "comparison-image":
+        if source_id is not None:
+            if item.descriptor.source.resource_id == source_id:
+                return item
+            continue
+        if item.descriptor.hit_test.role in {"comparison", "comparison-image"}:
             return item
     return None
+
+
+def _normalized_comparison_clip(
+    plan: SceneRenderPlan,
+    split_position: float,
+    *,
+    orientation: ComparisonOrientation,
+) -> QRectF:
+    """Return one normalized comparison reveal in scene coordinates."""
+    normalized = min(1.0, max(0.0, float(split_position)))
+    if orientation == ComparisonOrientation.HORIZONTAL:
+        return QRectF(
+            plan.scene_bounds.x,
+            plan.scene_bounds.y + normalized * plan.scene_bounds.height,
+            plan.scene_bounds.width,
+            (1.0 - normalized) * plan.scene_bounds.height,
+        )
+    return QRectF(
+        plan.scene_bounds.x + normalized * plan.scene_bounds.width,
+        plan.scene_bounds.y,
+        (1.0 - normalized) * plan.scene_bounds.width,
+        plan.scene_bounds.height,
+    )
 
 
 def _clip_to_scene_rect(plan: SceneRenderPlan, clip: LayerClip) -> QRectF | None:
@@ -148,15 +187,15 @@ def _clip_to_scene_rect(plan: SceneRenderPlan, clip: LayerClip) -> QRectF | None
 
 
 def _scene_boundary_to_source_line(
-    item: RasterLayerRenderItem,
+    item: SceneRenderItem,
     scene_clip: QRectF,
     *,
     orientation: ComparisonOrientation,
 ) -> QLineF | None:
     """Convert the comparison clip boundary from scene to source coordinates."""
     placement = item.placement
-    source_width = item.source_image.width()
-    source_height = item.source_image.height()
+    source_width = item.source_size.width()
+    source_height = item.source_size.height()
     if (
         source_width <= 0
         or source_height <= 0

@@ -29,8 +29,8 @@ from cutecanvas.coverage import (
 )
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
-from cutecanvas.masks.source_reference import MaskAssetReference
 from cutecanvas.masks.source_resolver import MaskSourceCapabilities
+from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage
 from qpane import HybridPresentationStyle, HybridSource, LayerTransform
@@ -43,7 +43,7 @@ def test_scaled_mask_render_does_not_materialize_full_surface(
     qapp, monkeypatch
 ) -> None:
     """Fit-scale rendering should copy only decimated authoritative pixels."""
-    assets = MaskAssetStore()
+    assets = MaskAssetStore(ProjectResourceStore())
     image = QImage(64, 48, QImage.Format.Format_Grayscale8)
     image.fill(255)
     mask_id = assets.create_mask(image)
@@ -62,7 +62,7 @@ def test_scaled_mask_render_does_not_materialize_full_surface(
 
     monkeypatch.setattr(layer.coverage.raster, "snapshot_qimage", reject_full_snapshot)
 
-    assert resolver.source_size(MaskAssetReference(mask_id)) == QSize(64, 48)
+    assert resolver.source_size(ProjectResourceReference(mask_id)) == QSize(64, 48)
     pixmap = controller.renders.get(layer, scale=0.25)
 
     assert pixmap is not None
@@ -71,7 +71,7 @@ def test_scaled_mask_render_does_not_materialize_full_surface(
 
 def test_live_preview_reuses_nearest_cache_during_scale_transition(qapp) -> None:
     """A stroke stays visible while the requested viewport scale changes."""
-    assets = MaskAssetStore()
+    assets = MaskAssetStore(ProjectResourceStore())
     image = QImage(64, 48, QImage.Format.Format_Grayscale8)
     image.fill(0)
     mask_id = assets.create_mask(image)
@@ -107,7 +107,7 @@ def test_retained_mask_publishes_hybrid_source_without_visible_patch_evaluation(
     monkeypatch,
 ) -> None:
     """Frame planning must not synchronously rasterize retained mask geometry."""
-    assets = MaskAssetStore()
+    assets = MaskAssetStore(ProjectResourceStore())
     image = QImage(2048, 2048, QImage.Format.Format_Grayscale8)
     image.fill(0)
     mask_id = assets.create_mask(image)
@@ -126,7 +126,7 @@ def test_retained_mask_publishes_hybrid_source_without_visible_patch_evaluation(
         mask_config=MaskConfigSlice(),
     )
     resolver = MaskSourceCapabilities(assets=assets, renders=controller.renders)
-    source = MaskAssetReference(mask_id)
+    source = ProjectResourceReference(mask_id)
 
     monkeypatch.setattr(
         layer.coverage,
@@ -154,7 +154,7 @@ def test_retained_mask_publishes_hybrid_source_without_visible_patch_evaluation(
 
 def test_qpane_hybrid_evaluation_matches_authoritative_mask_algebra(qapp) -> None:
     """The shared renderer must preserve transforms, feather, and combine order."""
-    assets = MaskAssetStore()
+    assets = MaskAssetStore(ProjectResourceStore())
     image = QImage(96, 72, QImage.Format.Format_Grayscale8)
     image.fill(0)
     for y in range(14, 52):

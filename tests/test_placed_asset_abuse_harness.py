@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 from cutecanvas import CuteCanvas, LayerPolicy
-from cutecanvas.placed.source_reference import PlacedAssetReference
+from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
 from PySide6.QtWidgets import QApplication
@@ -67,7 +67,7 @@ def test_mounted_placed_instances_stay_exact_responsive_and_cache_shared(
             interaction=LayerPolicy(selectable=True, movable=True),
         )
         assert layer_id is not None
-        duplicate_id = viewer.duplicatePlacedAsset(scene.scene_id, layer_id)
+        duplicate_id = viewer.duplicateLayer(scene.scene_id, layer_id)
         assert duplicate_id is not None
         assert viewer.setLayerTransform(
             scene.scene_id,
@@ -79,7 +79,7 @@ def test_mounted_placed_instances_stay_exact_responsive_and_cache_shared(
         placed_items = [
             item
             for item in plan.render_items
-            if item.descriptor.source.kind == "placed-asset"
+            if item.descriptor.layer_id in {layer_id, duplicate_id}
         ]
         assert len(placed_items) == 2
         assert placed_items[0].asset_key != placed_items[1].asset_key
@@ -123,8 +123,11 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
     executor = StubExecutor(name="placed-abuse")
     viewer = CuteCanvas(features=(), task_executor=executor)
     base = _image(QColor("white"), QSize(64, 64))
-    image_id = uuid.uuid4()
-    viewer.setImagesByID(viewer.imageMapFromLists((base,), ids=(image_id,)), image_id)
+    viewer.createCompositionFromImage(
+        base,
+        title="Linked abuse",
+        label="Background",
+    )
     completions: list[tuple] = []
     viewer.placedAssetRequestCompleted.connect(
         lambda *values: completions.append(tuple(values))
@@ -201,7 +204,9 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
         assert len(completions) == before_shutdown + 1
         assert sum(item[0] == pending_id for item in completions) == 1
     finally:
-        viewer.clearImages()
+        for document in tuple(viewer.editor.compositions):
+            if document.state.policy.removable:
+                document.remove()
         viewer.deleteLater()
         qapp.processEvents()
 
@@ -213,12 +218,18 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
     """Inactive scenes and deleted layers must reject late work without resurrection."""
     executor = StubExecutor(name="placed-navigation-abuse")
     viewer = CuteCanvas(features=(), task_executor=executor)
-    first_id, second_id = uuid.uuid4(), uuid.uuid4()
     base = _image(QColor("black"), QSize(1200, 900))
-    viewer.setImagesByID(
-        viewer.imageMapFromLists((base, base), ids=(first_id, second_id)),
-        first_id,
+    first_id = viewer.createCompositionFromImage(
+        base,
+        title="First",
+        label="Background",
     )
+    second_id = viewer.createCompositionFromImage(
+        base,
+        title="Second",
+        label="Background",
+    )
+    viewer.openComposition(first_id)
     source_path = tmp_path / "shared.png"
     assert _image(QColor("red"), QSize(1024, 1024)).save(str(source_path))
     completions: list[tuple] = []
@@ -234,13 +245,13 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
         qapp.processEvents()
         layer_id = next(item for item in completions if item[0] == create_id)[2]
         assert isinstance(layer_id, uuid.UUID)
-        duplicate_id = viewer.duplicatePlacedAsset(first_scene.scene_id, layer_id)
+        duplicate_id = viewer.duplicateLayer(first_scene.scene_id, layer_id)
         assert duplicate_id is not None
 
         assert _image(QColor("blue"), QSize(1024, 1024)).save(str(source_path))
         refresh_id = viewer.refreshPlacedAsset(first_scene.scene_id, layer_id)
         assert refresh_id is not None
-        viewer.setCurrentImageID(second_id)
+        viewer.openComposition(second_id)
         second_scene = viewer.currentScene()
         assert (
             second_scene is not None and second_scene.scene_id != first_scene.scene_id
@@ -251,19 +262,19 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
         assert refreshed[1:4] == (first_scene.scene_id, layer_id, True)
         assert viewer.currentScene().scene_id == second_scene.scene_id
 
-        viewer.setCurrentImageID(first_id)
+        viewer.openComposition(first_id)
         first_state = viewer.placedAssetState(first_scene.scene_id, layer_id)
         duplicate_state = viewer.placedAssetState(first_scene.scene_id, duplicate_id)
         assert first_state is not None and duplicate_state is not None
         assert first_state.asset_id == duplicate_state.asset_id
         shared_pixels = viewer.layerSourceCapabilities().rasters.source_image(
-            PlacedAssetReference(first_state.asset_id)
+            ProjectResourceReference(first_state.asset_id)
         )
         assert shared_pixels is not None
         assert shared_pixels.pixelColor(500, 500) == QColor("blue")
 
         started = interaction_clock()
-        raster_id = viewer.rasterizePlacedAsset(first_scene.scene_id, duplicate_id)
+        raster_id = viewer.rasterizeLayer(first_scene.scene_id, duplicate_id)
         submission_ms = (interaction_clock() - started) * 1000.0
         assert raster_id is not None
         assert submission_ms < _MEDIAN_UPDATE_BUDGET_MS
@@ -282,6 +293,5 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
         )
         assert viewer.placedAssetState(first_scene.scene_id, layer_id) is not None
     finally:
-        viewer.clearImages()
         viewer.deleteLater()
         qapp.processEvents()

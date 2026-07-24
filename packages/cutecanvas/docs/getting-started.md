@@ -35,12 +35,13 @@ other `QWidget`:
 import sys
 
 from PySide6.QtWidgets import QApplication, QMainWindow
-from cutecanvas import CuteCanvas
+from cutecanvas import CanvasDocument, CuteCanvas
 
 app = QApplication(sys.argv)
 
+document = CanvasDocument()
 window = QMainWindow()
-canvas = CuteCanvas(features=("mask",))
+canvas = CuteCanvas(document=document, features=("mask",))
 window.setCentralWidget(canvas)
 window.resize(1200, 760)
 window.show()
@@ -55,8 +56,7 @@ to the tuple after installing the optional extra.
 
 ## Start a Document with an Image
 
-First load the image into CuteCanvas's source catalog. The catalog keeps one
-reusable copy of the source even when several documents or layers use it:
+Load the image, then create an independent document from its pixels:
 
 ```python
 from pathlib import Path
@@ -68,27 +68,13 @@ image = QImage(str(image_path))
 if image.isNull():
     raise RuntimeError(f"Could not open {image_path}")
 
-image_map = CuteCanvas.imageMapFromLists(
-    [image],
-    paths=[image_path],
-)
-image_id = next(iter(image_map))
-canvas.setImagesByID(image_map, current_id=image_id)
-```
-
-Now create an editable document from that source:
-
-```python
-document_id = canvas.createCompositionFromImage(
-    image_id,
+document_id = document.create_composition_from_image(
+    image,
     title="Example document",
+    label="Background",
 )
 
-document = canvas.editor.documents.get(document_id)
-if document is None:
-    raise RuntimeError("The document was not created")
-
-document.open()
+canvas.openComposition(document_id)
 ```
 
 The image is now an ordinary layer. CuteCanvas does not turn the first image
@@ -100,38 +86,40 @@ You can also begin with an empty canvas:
 ```python
 from PySide6.QtCore import QRectF
 
-document = canvas.editor.documents.create(
+document_id = document.create_composition(
     QRectF(0.0, 0.0, 1920.0, 1080.0),
     title="Empty document",
 )
-document.open()
+canvas.openComposition(document_id)
 ```
 
 ## Work with Documents and Layers
 
-`canvas.editor.documents` is the friendly entry point for document UI. It can
-create a document, find one by ID, report the current document, and iterate in
-browser order.
+The headless `CanvasDocument` creates and retains compositions independently of
+the widget. `canvas.editor.compositions` adds view-focused handles for layer-tree
+UI and editing commands.
 
-Each document exposes its layers from bottom to top:
+Each composition exposes its layers from bottom to top:
 
 ```python
 from PySide6.QtCore import QPointF
 
-document = canvas.editor.documents.current
-if document is not None and document.layers:
-    top_layer = document.layers[-1]
+composition = canvas.editor.compositions.current
+if composition is not None and composition.layers:
+    top_layer = composition.layers[-1]
     top_layer.select()
     top_layer.translate(QPointF(24.0, 0.0))
     top_layer.center(vertically=False)
 ```
 
-Document and layer handles keep identity, not a private copy of mutable state.
-If undo or another action changes the document, the next handle operation sees
-the latest state. A removed document or layer fails clearly when accessed.
+Composition and layer handles keep identity, not a private copy of mutable
+state. If undo or another action changes the composition, the next handle
+operation sees the latest state. A removed composition or layer fails clearly
+when accessed.
 
-Layer changes apply to the open document. Call `document.open()` before using
-one of its layer handles when your application keeps several documents.
+Layer changes apply to the open composition. Call `composition.open()` before
+using one of its layer handles when your application keeps several
+compositions.
 
 ## Add a Paint Layer
 
@@ -242,15 +230,15 @@ the editable work: layers, masks, vectors, transforms, linked-image details,
 policies, and content outside the canvas.
 
 ```python
-document = canvas.editor.documents.current
-if document is not None:
-    canvas.editor.persistence.save(document, "example.cutecanvas")
+composition = canvas.editor.compositions.current
+if composition is not None:
+    canvas.editor.persistence.save(composition, "example.cutecanvas")
 ```
 
 Load it later with:
 
 ```python
-document = canvas.editor.persistence.load("example.cutecanvas")
+composition = canvas.editor.persistence.load("example.cutecanvas")
 ```
 
 Loading validates the complete archive before replacing live state. A damaged
@@ -263,6 +251,9 @@ needs next:
 
 * **Build the layer tree:** [Documents and Layers](scenes.md) covers layer
   order, visibility, policies, geometry, and source types.
+* **Build inspection layouts:** [Documents and Presentations](documents-and-presentations.md)
+  covers host-owned documents, linked tabs, grids, comparison, interaction
+  profiles, and outbound MIME data.
 * **Paint color:** [Painting](painting.md) covers sparse raster layers, brush
   presets, target selection, erasing, and fill.
 * **Place images:** [Placed Images](placed-images.md) covers embedded and linked

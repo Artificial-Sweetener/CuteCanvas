@@ -17,17 +17,15 @@
 
 from pathlib import Path
 
-import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage
-from qpane.sdk.raster import qimage_to_numpy_argb32
 from qpane.sdk.scene import (
     LayerSourceReference,
     RasterPresentation,
     RasterProductPolicy,
 )
 
-from .source_reference import PlacedAssetReference
+from ..resources import ProjectResourceReference
 from .store import PlacedAssetStore
 
 
@@ -37,12 +35,17 @@ class PlacedAssetSourceCapabilities:
     def __init__(self, assets: PlacedAssetStore) -> None:
         """Bind the authoritative placed-asset store."""
         self._assets = assets
-        self._content_bounds_cache: dict[tuple[object, int], QRectF | None] = {}
 
-    @property
-    def presentation(self) -> RasterPresentation:
-        """Return ordinary image-raster presentation."""
-        return RasterPresentation.IMAGE
+    def presentation_for(
+        self,
+        source: LayerSourceReference,
+    ) -> RasterPresentation | None:
+        """Return ordinary image-raster presentation for placed pixels."""
+        return (
+            RasterPresentation.IMAGE
+            if isinstance(source, ProjectResourceReference)
+            else None
+        )
 
     def product_policy(self, source: LayerSourceReference) -> RasterProductPolicy:
         """Return the stable shared-product policy for decoded asset pixels."""
@@ -83,28 +86,9 @@ class PlacedAssetSourceCapabilities:
 
     def content_bounds(self, source: LayerSourceReference) -> QRectF | None:
         """Return alpha-tight bounds cached by immutable content revision."""
-        snapshot = self._snapshot(source)
-        if snapshot is None or snapshot.image is None:
+        if not isinstance(source, ProjectResourceReference):
             return None
-        key = (source.resource_id, snapshot.content_revision)
-        if key in self._content_bounds_cache:
-            cached = self._content_bounds_cache[key]
-            return None if cached is None else QRectF(cached)
-        alpha = qimage_to_numpy_argb32(snapshot.image)[:, :, 3]
-        occupied = np.argwhere(alpha > 0)
-        if occupied.size == 0:
-            bounds = None
-        else:
-            top, left = occupied.min(axis=0)
-            bottom, right = occupied.max(axis=0) + 1
-            bounds = QRectF(
-                float(left),
-                float(top),
-                float(right - left),
-                float(bottom - top),
-            )
-        self._content_bounds_cache[key] = None if bounds is None else QRectF(bounds)
-        return None if bounds is None else QRectF(bounds)
+        return self._assets.content_bounds(source.resource_id)
 
     def storage_bounds(self, source: LayerSourceReference) -> QRectF | None:
         """Return decoded image storage bounds."""
@@ -119,6 +103,6 @@ class PlacedAssetSourceCapabilities:
         """Resolve one typed source through its owning store."""
         return (
             None
-            if not isinstance(source, PlacedAssetReference)
-            else self._assets.get(source.asset_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._assets.get(source.resource_id)
         )

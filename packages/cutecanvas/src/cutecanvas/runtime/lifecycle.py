@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -43,6 +42,7 @@ from cutecanvas.core import (
     FeatureFailure,
     FeatureFallbacks,
 )
+from cutecanvas.document import DocumentChange, DocumentChangeKind
 from cutecanvas.editor.composition_root import (
     EditorCompositionRoot,
     EditorRootCallbacks,
@@ -55,11 +55,11 @@ from cutecanvas.masks.pixel_edits import (
     MaskLayerPixelMutationOwner,
     MaskPixelRenderSynchronizer,
 )
-from cutecanvas.masks.resource_lifecycle import MaskResourceLifecycleOwner
-from cutecanvas.masks.source_reference import MaskAssetReference
 from cutecanvas.masks.source_resolver import MaskSourceCapabilities
 from cutecanvas.masks.workflow import MaskActivationSyncResult
 from cutecanvas.persistence import CompositionPersistenceService
+from cutecanvas.resources import ProjectResourceKind
+from cutecanvas.resources.layer_operations import ResourceForkOwner
 from cutecanvas.types import DiagnosticsDomain
 from cutecanvas.vector.facade import VectorHostFacade
 
@@ -79,9 +79,13 @@ class CanvasLifecycleMixin:
         """Build and install the always-on viewer and editor collaboration graph."""
         self._state.cache_coordinator = self._state.build_cache_coordinator()
         self._state.cache_registry = CacheRegistry(self._state.cache_coordinator)
+        self._document_unsubscribe = self.document().events.subscribe(
+            self._handle_document_change
+        )
         components = EditorCompositionRoot().build(
             EditorRootInputs(
                 qpane=self,
+                document=self.document(),
                 state=self._state,
                 settings=self.settings,
                 executor=self.executor,
@@ -107,17 +111,23 @@ class CanvasLifecycleMixin:
                     scene_content_changed=lambda _bounds: (
                         self._handle_internal_scene_content_changed()
                     ),
-                    placed_asset_changed=self._handle_placed_asset_changed,
+                    resource_content_changed=self._handle_resource_content_changed,
                     pixel_move_preview_changed=(
                         self._refresh_selected_pixel_move_preview
                     ),
-                    comparison_changed=self._handle_comparison_changed,
                     active_mask_id=lambda: (
                         None if self._masks is None else self._masks.active_mask_id()
                     ),
                     placed_asset_completed=self._handle_placed_asset_completion,
+                    layer_rasterization_completed=(
+                        self._handle_layer_rasterization_completion
+                    ),
+                    current_composition_id=(
+                        lambda: self.viewSession().active_composition_id
+                    ),
                     current_edit_scope_id=self._active_resolved_scene_id,
                     paint_target_changed=self._handle_paint_target_changed,
+                    clone_stamp_changed=self.cloneStampChanged.emit,
                     default_paint_target_available=(
                         self._default_mask_paint_target_available
                     ),
@@ -137,13 +147,21 @@ class CanvasLifecycleMixin:
         self._scene_provider_registry = components.scene_providers
         self._source_capabilities = components.render_source_capabilities
         self._editor_source_capabilities = components.editor_source_capabilities
-        self._image_catalog = components.image_catalog
+        self._project_resources = components.project_resources
+        self._project_resource_descriptors = components.project_resource_descriptors
+        self._project_resource_capabilities = components.project_resource_capabilities
+        self._project_resource_lifecycle = components.project_resource_lifecycle
         self._composition_service = components.compositions
         self._editable_raster_assets = components.editable_raster_assets
         self._editable_raster_layers = components.editable_raster_layers
         self._placed_assets = components.placed_assets
+        self._image_documents = components.image_documents
+        self._active_raster = components.active_raster
+        self._layer_resource_operations = components.layer_resource_operations
         self._placed_asset_workflow = components.placed_asset_workflow
         self._placed_asset_rasterization = components.placed_asset_rasterization
+        self._composition_rasterization = components.composition_rasterization
+        self._resource_rasterization = components.resource_rasterization
         self.destroyed.connect(
             lambda _obj=None, workflow=components.placed_asset_workflow: (
                 workflow.shutdown()
@@ -155,13 +173,20 @@ class CanvasLifecycleMixin:
             )
         )
         self.destroyed.connect(
+            lambda _obj=None, service=components.composition_rasterization: (
+                service.shutdown()
+            )
+        )
+        self.destroyed.connect(
             lambda _obj=None, service=components.vector.conversions: (
                 service.shutdown()
             )
         )
         self._pixel_selection = components.pixel_selection
         self._layer_geometry = components.layer_geometry
+        self._scene_rasterizer = components.scene_rasterizer
         self._painting = components.painting
+        self._clone_stamp = components.clone_stamp
         self._paint_bucket = components.paint_bucket
         self._selection_fill = components.selection_fill
         self._snap_configuration = components.snap_configuration
@@ -179,6 +204,7 @@ class CanvasLifecycleMixin:
             selection=components.vector.selection,
             current_scene=components.view.current_scene_descriptor,
             current_public_scene_id=self._active_public_scene_id,
+            current_composition_id=lambda: self.viewSession().active_composition_id,
             changed=self._publish_vector_content_change,
             conversions=components.vector.conversions,
             masks=components.vector.masks,
@@ -211,13 +237,16 @@ class CanvasLifecycleMixin:
         self._editor_interaction = components.editor_interaction
         self._raster_floating_layer_owner = components.raster_floating_owner
         self._selected_pixel_movement = components.selected_pixel_movement
+        self.destroyed.connect(
+            lambda _obj=None, movement=components.selected_pixel_movement: (
+                movement.shutdown()
+            )
+        )
         self._editor_movement_interaction = components.editor_movement_interaction
         self._operation_resolver = components.operation_resolver
+        self._paint_destination = components.paint_destination
         self._active_mask_coordinates = components.active_mask_coordinates
-        self._catalog = components.catalog
         self._composition_scene_adapter = components.composition_scene_adapter
-        self.compare_service = components.compare_service
-        self._compare_interaction = components.compare_interaction
         self._tools = components.tools
         tool_signals = components.tools.signals
         tool_signals.stroke_applied.connect(components.painting.apply)
@@ -230,17 +259,38 @@ class CanvasLifecycleMixin:
         self.mask_controller = None
         self._sam_manager = None
         self._autosave_manager = None
+        self.destroyed.connect(lambda _obj=None: self._document_unsubscribe())
+
+    def _handle_document_change(self, change: DocumentChange) -> None:
+        """Refresh this mounted view after one shared durable document change."""
+        if change.kind is DocumentChangeKind.HISTORY:
+            if change.composition_id is not None:
+                self._handle_composition_edit_history_changed(change.composition_id)
+            return
+        if change.kind is DocumentChangeKind.LAYERS:
+            if change.composition_id is not None:
+                self._handle_composition_layers_changed(change.composition_id)
+                if change.composition_id == self.viewSession().active_composition_id:
+                    self._refresh_active_scene_content(fit_view=False)
+            return
+        if change.kind is DocumentChangeKind.SELECTION:
+            if change.payload is not None:
+                self._handle_pixel_selection_changed(change.payload)
+            return
+        if (
+            change.kind is DocumentChangeKind.RESOURCE
+            and change.resource_id is not None
+        ):
+            self._handle_resource_content_changed(
+                change.resource_id,
+                change.payload,
+            )
 
     def _wire_facade_signals(self) -> None:
-        """Connect facade-level signals for catalog, link, and diagnostics events."""
-        catalog = self.catalog()
-        catalog.setMutationListener(self._handle_catalog_mutation)
-        self.currentImageChanged.connect(self._handle_current_image_changed_signal)
+        """Connect facade-level diagnostics signals."""
         controller = self.diagnosticsOverlayController()
         controller.setOverlayChangedCallback(self._handle_diagnostics_overlay_toggled)
         controller.setDetailChangedCallback(self._handle_diagnostics_detail_toggled)
-        self._last_link_groups = self._normalized_link_groups()
-        self._emit_catalog_selection_changed(self.catalog().currentImageID())
 
     def _schedule_initial_view_signals(self) -> None:
         """Ensure the first zoom/viewport signals emit once Qt shows the widget."""
@@ -339,39 +389,31 @@ class CanvasLifecycleMixin:
         """Attach the mask service facade and refresh autosave hooks.
 
         Side effects:
-            Emits ``catalogChanged`` with ``maskServiceAttached``.
+            Registers coverage rendering, editing, and resource capabilities.
         """
         self._masks_controller.attachMaskService(service)
         service.bindCompositionEdits(self.compositionService().edit_controller)
+        self.destroyed.connect(lambda _obj=None, attached=service: attached.shutdown())
         service.setStrokeConstraintProvider(
             self.editorInteraction().mask_stroke_constraint
         )
         factory = MaskLayerDescriptorFactory(
             assets=service.assets,
             renders=service.controller.renders,
-            dynamic_revision=service.scene_provider_revision,
         )
-        assembler = self._composition_layer_assembler
-        if assembler is None:
-            raise RuntimeError("composition layer assembler is unavailable")
-        assembler.register_factory(factory)
+        descriptors = self._project_resource_descriptors
+        if descriptors is None:
+            raise RuntimeError("project resource descriptor registry is unavailable")
+        descriptors.register(ProjectResourceKind.COVERAGE, factory)
         self._mask_descriptor_factory = factory
         capabilities = MaskSourceCapabilities(
             assets=service.assets,
             renders=service.controller.renders,
         )
-        sources = self.layerSourceCapabilities()
-        sources.metadata.register(MaskAssetReference, capabilities)
-        sources.rasters.register(MaskAssetReference, capabilities)
-        sources.raster_patches.register(MaskAssetReference, capabilities)
-        sources.hybrids.register(MaskAssetReference, capabilities)
-        sources.hit_tests.register(MaskAssetReference, capabilities)
-        editor_sources = self.editorSourceCapabilities()
-        editor_sources.coverage.register(MaskAssetReference, capabilities)
-        editor_sources.content_bounds.register(MaskAssetReference, capabilities)
-        editor_sources.storage_bounds.register(MaskAssetReference, capabilities)
-        editor_sources.authored_bounds.register(MaskAssetReference, capabilities)
-        editor_sources.pixel_presentation.register(MaskAssetReference, capabilities)
+        resource_capabilities = self._project_resource_capabilities
+        if resource_capabilities is None:
+            raise RuntimeError("project resource capability registry is unavailable")
+        resource_capabilities.register(ProjectResourceKind.COVERAGE, capabilities)
         self._mask_source_capabilities = capabilities
         from cutecanvas.masks.raster_mutations import MaskRasterMutationOwner
 
@@ -404,14 +446,30 @@ class CanvasLifecycleMixin:
         mask_floating_owner = MaskFloatingLayerOwner(
             assets=service.assets,
             layers=self.compositionService().layers,
-            current_composition_id=self.compositionService().current_composition_id,
+            current_composition_id=lambda: self.viewSession().active_composition_id,
             changed=lambda _mask_id: self._handle_raster_structure_changed(),
         )
         self._floating_layer_promotions.register(mask_floating_owner)
         self._mask_floating_layer_owner = mask_floating_owner
-        resource_owner = MaskResourceLifecycleOwner(service.assets)
-        self.compositionService().resource_lifetime.register_owner(resource_owner)
-        self._mask_resource_lifecycle_owner = resource_owner
+        resource_lifecycle = self._project_resource_lifecycle
+        if resource_lifecycle is None:
+            raise RuntimeError("project resource lifecycle registry is unavailable")
+        resource_lifecycle.register(
+            ProjectResourceKind.COVERAGE,
+            service.assets.delete_mask,
+        )
+        resource_operations = self._layer_resource_operations
+        if resource_operations is None:
+            raise RuntimeError("project resource operations are unavailable")
+        fork_owner = ResourceForkOwner(
+            fork=service.assets.fork,
+            remove=service.assets.delete_mask,
+        )
+        resource_operations.register_fork_owner(
+            ProjectResourceKind.COVERAGE,
+            fork_owner,
+        )
+        self._mask_resource_fork_owner = fork_owner
         paint_owner = MaskCoveragePaintTargetOwner(service)
         self.paintingCoordinator().registry.register(paint_owner)
         self.paintingCoordinator().registry.register_idle_feedback(
@@ -419,13 +477,12 @@ class CanvasLifecycleMixin:
             paint_owner.idle_preview_color,
         )
         self._mask_paint_target_owner = paint_owner
-        self._emit_catalog_mutation("maskServiceAttached", affected_ids=())
 
     def detachMaskService(self) -> None:
         """Detach the mask service and tear down autosave wiring.
 
         Side effects:
-            Emits ``catalogChanged`` with ``maskServiceDetached``.
+            Removes coverage rendering, editing, and resource capabilities.
         """
         service = self.mask_service
         if service is not None:
@@ -442,38 +499,39 @@ class CanvasLifecycleMixin:
         if floating_owner is not None:
             self._floating_layer_promotions.unregister(floating_owner)
         self._mask_floating_layer_owner = None
-        resource_owner = self._mask_resource_lifecycle_owner
-        if resource_owner is not None:
-            self.compositionService().resource_lifetime.unregister_owner(resource_owner)
-        self._mask_resource_lifecycle_owner = None
+        resource_lifecycle = self._project_resource_lifecycle
+        if resource_lifecycle is not None and service is not None:
+            resource_lifecycle.unregister(
+                ProjectResourceKind.COVERAGE,
+                service.assets.delete_mask,
+            )
+        fork_owner = self._mask_resource_fork_owner
+        resource_operations = self._layer_resource_operations
+        if fork_owner is not None and resource_operations is not None:
+            resource_operations.unregister_fork_owner(
+                ProjectResourceKind.COVERAGE,
+                fork_owner,
+            )
+        self._mask_resource_fork_owner = None
         paint_owner = self._mask_paint_target_owner
         if paint_owner is not None:
             self.paintingCoordinator().registry.unregister(paint_owner)
         self._mask_paint_target_owner = None
         factory = self._mask_descriptor_factory
-        assembler = self._composition_layer_assembler
-        if factory is not None and assembler is not None:
-            assembler.unregister_factory(factory)
+        descriptors = self._project_resource_descriptors
+        if factory is not None and descriptors is not None:
+            descriptors.unregister(ProjectResourceKind.COVERAGE, factory)
         self._mask_descriptor_factory = None
         capabilities = self._mask_source_capabilities
         if capabilities is not None:
-            sources = self.layerSourceCapabilities()
-            sources.metadata.unregister(MaskAssetReference, capabilities)
-            sources.rasters.unregister(MaskAssetReference, capabilities)
-            sources.raster_patches.unregister(MaskAssetReference, capabilities)
-            sources.hybrids.unregister(MaskAssetReference, capabilities)
-            sources.hit_tests.unregister(MaskAssetReference, capabilities)
-            editor_sources = self.editorSourceCapabilities()
-            editor_sources.coverage.unregister(MaskAssetReference, capabilities)
-            editor_sources.content_bounds.unregister(MaskAssetReference, capabilities)
-            editor_sources.storage_bounds.unregister(MaskAssetReference, capabilities)
-            editor_sources.authored_bounds.unregister(MaskAssetReference, capabilities)
-            editor_sources.pixel_presentation.unregister(
-                MaskAssetReference, capabilities
-            )
+            resource_capabilities = self._project_resource_capabilities
+            if resource_capabilities is not None:
+                resource_capabilities.unregister(
+                    ProjectResourceKind.COVERAGE,
+                    capabilities,
+                )
             self._mask_source_capabilities = None
         self._masks_controller.detachMaskService()
-        self._emit_catalog_mutation("maskServiceDetached", affected_ids=())
 
     def attachSamManager(self, sam_manager: SamManager) -> None:
         """Attach a SamManager instance and wire its signals."""
@@ -490,26 +548,6 @@ class CanvasLifecycleMixin:
     def _set_sam_manager(self, manager: SamManager | None) -> None:
         """Internal helper for workflow/hooks to track SAM managers."""
         self._sam_manager = manager
-
-    def addImage(self, image_id: uuid.UUID, image: QImage, path: Path | None):
-        """Add or replace a single catalog entry without changing the selection."""
-        catalog = self.catalog()
-        catalog.addImage(image_id, image, path)
-
-    def _display_current_catalog_image(self, *, fit_view: bool = True) -> None:
-        """Render the catalog's current image if present; otherwise blank the qpane."""
-        catalog = self.catalog()
-        catalog.displayCurrentCatalogImage(fit_view=fit_view)
-
-    @property
-    def imageCount(self) -> int:
-        """Return the total number of images managed by this CuteCanvas."""
-        catalog = self.catalog()
-        return catalog.imageCount()
-
-    def linkedViewGroupID(self, image_id: uuid.UUID) -> uuid.UUID | None:
-        """Return the linked-view group identifier that contains ``image_id`` when linked."""
-        return self.catalog().linkedViewGroupID(image_id)
 
     def updateMaskFromFile(self, mask_id: uuid.UUID, file_path: str) -> bool:
         """Replace a mask layer's pixels from ``file_path`` while preserving metadata.
@@ -562,15 +600,17 @@ class CanvasLifecycleMixin:
             bbox, erase_mode=erase_mode
         )
 
-    def _sync_mask_activation_for_image(
-        self, image_id: uuid.UUID | None
+    def _sync_mask_activation_for_composition(
+        self, composition_id: uuid.UUID | None
     ) -> MaskActivationSyncResult:
-        """Synchronize mask activation for `image_id` and surface workflow status."""
-        return self._masks_controller.sync_mask_activation_for_image(image_id)
+        """Synchronize mask activation for a composition."""
+        return self._masks_controller.sync_mask_activation_for_composition(
+            composition_id
+        )
 
-    def isMaskActivationPending(self, image_id: uuid.UUID | None = None) -> bool:
+    def isMaskActivationPending(self, composition_id: uuid.UUID | None = None) -> bool:
         """Return True while deferred mask activation remains outstanding."""
-        return self._masks_controller.is_activation_pending(image_id)
+        return self._masks_controller.is_activation_pending(composition_id)
 
     def refreshMaskAutosavePolicy(self) -> None:
         """Re-evaluate mask autosave wiring after feature state changes."""
@@ -618,14 +658,6 @@ class CanvasLifecycleMixin:
         Passing ``None`` marks the entire qpane dirty.
         """
         self.view().mark_dirty(dirty_rect)
-
-    def _save_zoom_pan_for_current_image(self):
-        """Persist the current viewport transform through the swap delegate."""
-        self.view().swap_delegate.save_zoom_pan_for_current_image()
-
-    def _restore_zoom_pan_for_new_image(self, image_id):
-        """Restore the saved viewport transform for ``image_id`` when present."""
-        self.view().swap_delegate.restore_zoom_pan_for_new_image(image_id)
 
     def _apply_zoom_interpolated(
         self,
@@ -687,27 +719,12 @@ class CanvasLifecycleMixin:
             return
         self.view().viewport.setZoom1To1Interpolated(anchor=anchor)
 
-    def saveCurrentViewState(self) -> None:
-        """Persist the current pan/zoom state for the active image."""
-        self._save_zoom_pan_for_current_image()
-
-    def restoreViewStateForImage(self, image_id: uuid.UUID) -> None:
-        """Reapply a saved pan/zoom state for ``image_id`` when available."""
-        self._restore_zoom_pan_for_new_image(image_id)
-
     def nativeZoom(self) -> float:
         """Return the zoom level where one image pixel equals one device pixel."""
         return self.view().viewport.nativeZoom()
 
     def isDragOutAllowed(self) -> bool:
         """Return True when drag-out is enabled and the image fits the viewport."""
-        catalog = self.catalog()
-        if catalog.placeholderActive():
-            policy = catalog.placeholderPolicy()
-            if policy is None or not getattr(policy, "drag_out_enabled", False):
-                return False
-            if not self.view().has_renderable_content():
-                return False
         if not getattr(self.settings, "drag_out_enabled", True):
             return False
         content_snapshot = self.view().current_content_snapshot()

@@ -81,9 +81,22 @@ class PointerInputController(QObject):
         self._pen_last_seen_at: float | None = None
         self._pen_contact_active = False
         self._pen_in_proximity = False
+        self._application_filter_installed = False
+
+    def set_application_observation(self, enabled: bool) -> None:
+        """Observe global pen proximity only while the owning pane is visible."""
+        requested = bool(enabled)
+        if requested == self._application_filter_installed:
+            return
         application = QApplication.instance()
-        if application is not None:
+        if application is None:
+            return
+        if requested:
             application.installEventFilter(self)
+        else:
+            application.removeEventFilter(self)
+            self._pen_in_proximity = False
+        self._application_filter_installed = requested
 
     @property
     def active_device(self) -> PointerDeviceKind:
@@ -275,7 +288,10 @@ class PointerInputController(QObject):
 
     def pen_suppresses_touch_tool(self) -> bool:
         """Return whether recent active-pen activity should reject a palm contact."""
-        if self._pen_contact_active:
+        if self._pen_contact_active or (
+            self._pen_in_proximity
+            and self._active_device in {PointerDeviceKind.PEN, PointerDeviceKind.ERASER}
+        ):
             return True
         if self._pen_last_seen_at is None:
             return False
@@ -312,9 +328,7 @@ class PointerInputController(QObject):
     def shutdown(self) -> None:
         """Release active sequences and the application-wide proximity filter."""
         self.cancel_active_sequences()
-        application = QApplication.instance()
-        if application is not None:
-            application.removeEventFilter(self)
+        self.set_application_observation(False)
 
     def handle_widget_leave(self) -> None:
         """Clear direct feedback when its position leaves the pane."""

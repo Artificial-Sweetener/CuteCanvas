@@ -15,6 +15,5 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from ..compare import CompareDividerInteraction as CompareDividerInteraction
-from ..compare import CompareService as CompareService
 from ..compare import ComparisonChange as ComparisonChange
 from ..compare import ComparisonChangeKind as ComparisonChangeKind

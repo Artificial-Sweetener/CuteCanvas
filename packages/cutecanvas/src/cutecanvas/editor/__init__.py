@@ -26,6 +26,7 @@ from .operation_resolution import (
     EditorOperationResolver,
     EditorOperationTarget,
 )
+from .paint_destination import InteractivePaintDestinationCoordinator
 from .pixel_movement import SelectedPixelMovementController
 from .policy import EditorPolicyController
 from .selection_projection import LayerSelectionProjectionCache
@@ -41,6 +42,7 @@ __all__ = [
     "EditorOperationTarget",
     "EditorPolicyController",
     "FloatingLayerPromotionRegistry",
+    "InteractivePaintDestinationCoordinator",
     "LayerSelectionProjectionCache",
     "SelectedPixelMovementController",
 ]

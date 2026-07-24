@@ -111,7 +111,7 @@ raster coverage needed for drawing and hit testing.
 ## Rasterize When Needed
 
 ```python
-raster_layer_id = canvas.rasterizeVectorLayer(
+raster_layer_id = canvas.rasterizeLayer(
     scene.scene_id,
     layer_id,
 )

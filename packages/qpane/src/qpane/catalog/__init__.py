@@ -21,19 +21,6 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .catalog import (
-        Catalog as Catalog,
-    )
-    from .catalog import (
-        CatalogMutationEvent as CatalogMutationEvent,
-    )
-    from .catalog import (
-        NavigationEvent as NavigationEvent,
-    )
-    from .controller import CatalogController as CatalogController
-    from .image_catalog import ImageCatalog as ImageCatalog
-    from .image_map import ImageMap as ImageMap
-    from .link import LinkManager as LinkManager
     from .viewer_catalog import ViewerCatalog as ViewerCatalog
     from .viewer_catalog import ViewerCatalogEntry as ViewerCatalogEntry
     from .viewer_content import ViewerContent as ViewerContent
@@ -44,13 +31,6 @@ if TYPE_CHECKING:
     from .viewer_prefetch import ViewerPrefetchSnapshot as ViewerPrefetchSnapshot
 
 _EXPORTS = {
-    "Catalog": (".catalog", "Catalog"),
-    "CatalogController": (".controller", "CatalogController"),
-    "CatalogMutationEvent": (".catalog", "CatalogMutationEvent"),
-    "ImageCatalog": (".image_catalog", "ImageCatalog"),
-    "ImageMap": (".image_map", "ImageMap"),
-    "LinkManager": (".link", "LinkManager"),
-    "NavigationEvent": (".catalog", "NavigationEvent"),
     "ViewerCatalog": (".viewer_catalog", "ViewerCatalog"),
     "ViewerCatalogEntry": (".viewer_catalog", "ViewerCatalogEntry"),
     "ViewerContent": (".viewer_content", "ViewerContent"),

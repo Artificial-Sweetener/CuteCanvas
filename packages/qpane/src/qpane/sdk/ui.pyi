@@ -15,9 +15,17 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from ..ui import DiagnosticsOverlayController as DiagnosticsOverlayController
+from ..ui import DragCancellation as DragCancellation
+from ..ui import DragCompletion as DragCompletion
+from ..ui import DragSubject as DragSubject
+from ..ui import OutboundDragController as OutboundDragController
+from ..ui import OutboundDragPayload as OutboundDragPayload
+from ..ui import OutboundMimeItem as OutboundMimeItem
+from ..ui import OutboundMimeProvider as OutboundMimeProvider
 from ..ui import apply_widget_defaults as apply_widget_defaults
 from ..ui import copyToClipboard as copyToClipboard
 from ..ui import create_status_overlay as create_status_overlay
 from ..ui import drag_out_image as drag_out_image
+from ..ui import execute_outbound_drag as execute_outbound_drag
 from ..ui import is_drag_out_allowed as is_drag_out_allowed
 from ..ui import maybeStartDrag as maybeStartDrag

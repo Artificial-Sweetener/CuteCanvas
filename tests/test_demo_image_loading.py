@@ -19,15 +19,46 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from pathlib import Path
 
 from cutecanvas import Config
 from cutecanvas.sam.manager import SamManager
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QColor, QImage
 
 from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
-from examples.demonstration.workers import ImageLoaderWorker
+from examples.demonstration.workers import ImageLoadCoordinator
+
+
+def test_image_loader_pool_lifecycle_returns_callbacks_to_gui_thread(
+    qapp, tmp_path
+) -> None:
+    """Thread-pool image loads must deliver and dispose Qt state on the GUI thread."""
+    image_path = tmp_path / "threaded-large.png"
+    source = QImage(4096, 2048, QImage.Format_RGBA8888)
+    source.fill(QColor("#2f80ed"))
+    assert source.save(str(image_path))
+
+    callback_threads: list[QThread] = []
+    finished_counts: list[int] = []
+    coordinator = ImageLoadCoordinator()
+    coordinator.submit(
+        [image_path],
+        image_loaded=lambda _path, _image: callback_threads.append(
+            QThread.currentThread()
+        ),
+        finished=lambda count: finished_counts.append(count),
+    )
+    deadline = time.monotonic() + 10.0
+    while finished_counts != [1] and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.005)
+
+    assert finished_counts == [1]
+    assert callback_threads == [qapp.thread()]
+    assert coordinator.active_count == 0
 
 
 def test_demo_loads_image_with_pending_sam_and_zero_cache_budget(
@@ -73,18 +104,23 @@ def test_demo_loads_image_with_pending_sam_and_zero_cache_budget(
     caplog.set_level(logging.WARNING)
     window = ExampleWindow(ExampleOptions(feature_set="masksam"), config=config)
     try:
-        initial_image_ids = set(window.qpane.imageIDs())
-        window.workspace.prepare_image_batch(1)
-        worker = ImageLoaderWorker([image_path])
-        worker.signals.image_loaded.connect(window.workspace.accept_decoded_image)
-        worker.signals.finished.connect(window.workspace.finish_image_batch)
-
-        worker.run()
+        initial_document_ids = set(window.qpane.compositionIDs())
+        window.workspace.load_images([image_path])
+        deadline = time.monotonic() + 5.0
+        while (
+            set(window.qpane.compositionIDs()) == initial_document_ids
+            or not window.statusBar().currentMessage().startswith("Finished loading")
+        ) and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.005)
         qapp.processEvents()
 
-        loaded_image_ids = set(window.qpane.imageIDs()) - initial_image_ids
-        assert len(loaded_image_ids) == 1
-        assert window.qpane.currentImage.size() == source.size()
+        loaded_document_ids = set(window.qpane.compositionIDs()) - initial_document_ids
+        assert len(loaded_document_ids) == 1
+        current_scene = window.qpane.currentScene()
+        assert current_scene is not None
+        assert current_scene.bounds.width() == source.width()
+        assert current_scene.bounds.height() == source.height()
         assert "Finished loading 1 images" in window.statusBar().currentMessage()
         assert predictor_id_queries == 0
         assert "failed to trim below target" not in caplog.text

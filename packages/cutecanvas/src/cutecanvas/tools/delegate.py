@@ -57,8 +57,6 @@ class ToolInteractionDelegate:
         self._preview_inline_pen = QPen(Qt.white, 1, Qt.DashLine)
         self._shift_key_held = False
         self._overlays = EditorOverlayController(qpane.update)
-        self._drag_request_handler = None
-        self._copy_image_handler = None
         self._pointer_input = PointerInputController(self._pointer_port())
         self._cursor = EditorCursorController(
             qpane,
@@ -68,7 +66,6 @@ class ToolInteractionDelegate:
     def _pointer_port(self) -> PointerInputPort:
         """Build QPane's source-neutral pointer boundary for this editor host."""
         qpane = self._qpane
-        divider = qpane.comparisonDividerInteraction
         return PointerInputPort(
             widget=qpane,
             active_tool=lambda: qpane._tools_manager.get_active_tool(),
@@ -87,14 +84,6 @@ class ToolInteractionDelegate:
                 qpane.settings.touch_inertia_deceleration
             ),
             palm_rejection_ms=lambda: int(qpane.settings.palm_rejection_ms),
-            claim_external_touch=lambda position: divider().handle_touch_begin(
-                position
-            ),
-            update_external_touch=lambda position: divider().handle_touch_update(
-                position
-            ),
-            finish_external_touch=lambda position: divider().handle_touch_end(position),
-            cancel_external_touch=lambda: divider().cancel_drag(),
             pointer_state_changed=self._handle_pointer_state_changed,
         )
 
@@ -178,11 +167,7 @@ class ToolInteractionDelegate:
         apply_widget_defaults(qpane)
 
     def connect_signals(self) -> None:
-        """Wire viewport, catalog, and tool-manager callbacks to the CuteCanvas.
-
-        Hooks viewChanged, caches catalog drag/copy helpers, and relays tool-manager
-        signals so initialization only needs to happen once.
-        """
+        """Wire viewport and tool-manager callbacks to the CuteCanvas."""
         qpane = self._qpane
         viewport = self._viewport()
         viewport.viewChanged.connect(qpane.onViewChanged)
@@ -191,9 +176,6 @@ class ToolInteractionDelegate:
         tm_signals.pan_requested.connect(viewport.setPan)
         tm_signals.zoom_requested.connect(qpane._apply_zoom_interpolated)
         tm_signals.zoom_snap_requested.connect(qpane._apply_zoom_interpolated_with_mode)
-        catalog = qpane.catalog()
-        self._drag_request_handler = catalog.handleDragRequest
-        self._copy_image_handler = catalog.copyCurrentImageToClipboard
         tm_signals.drag_out_requested.connect(self.handle_drag_start_request)
         tm_signals.cursor_update_requested.connect(self.update_cursor)
         tm_signals.repaint_overlay_requested.connect(qpane.update)
@@ -251,15 +233,7 @@ class ToolInteractionDelegate:
         """Allow the UI helpers to resume overlays when pending."""
         if not (self._overlays.suspended and self._overlays.resume_pending):
             return
-        current_id = None
-        try:
-            current_id = self._qpane.catalog().currentImageID()
-        except AttributeError:
-            logger.warning("Overlay resume could not read the current catalog image.")
-        except Exception:
-            logger.exception(
-                "Overlay resume failed to read image context; resuming defensively."
-            )
+        current_id = self._qpane.currentCompositionID()
         try:
             activation_pending = self._qpane._masks_controller.is_activation_pending(
                 current_id
@@ -299,36 +273,30 @@ class ToolInteractionDelegate:
             to the tool manager.
         """
         qpane = self._qpane
-        catalog = qpane.catalog()
-        placeholder_policy = catalog.placeholderPolicy()
-        if catalog.placeholderActive():
-            panzoom_enabled = bool(
-                getattr(placeholder_policy, "panzoom_enabled", False)
-            )
-            mask_modes = {
-                Tools.CONTROL_MODE_DRAW_BRUSH,
-                Tools.CONTROL_MODE_SMART_SELECT,
-            }
-            if not panzoom_enabled:
-                mode = Tools.CONTROL_MODE_CURSOR
-            elif mode in mask_modes:
-                mode = Tools.CONTROL_MODE_PANZOOM
         tools = qpane._tools_manager
-        if mode == Tools.CONTROL_MODE_DRAW_BRUSH:
+        if mode in (
+            Tools.CONTROL_MODE_DRAW_BRUSH,
+            Tools.CONTROL_MODE_CLONE_STAMP,
+        ):
             resolution = qpane.editorOperationResolver().resolve(EditorOperation.PAINT)
             mask_service = getattr(qpane, "mask_service", None)
             if (
-                resolution.target is EditorOperationTarget.DEFAULT_PAINT_TARGET
+                mode == Tools.CONTROL_MODE_DRAW_BRUSH
+                and resolution.target is EditorOperationTarget.DEFAULT_PAINT_TARGET
                 and mask_service is not None
             ):
-                current_image_id = qpane.catalog().currentImageID()
-                if mask_service.ensureTopMaskActiveForImage(current_image_id):
+                composition_id = qpane.currentCompositionID()
+                if mask_service.ensureTopMaskActiveForComposition(composition_id):
                     mask_service.prepareBrushInteraction()
                     qpane.view().coordinate_scene_descriptor()
                     resolution = qpane.editorOperationResolver().resolve(
                         EditorOperation.PAINT
                     )
-            if resolution.allowed and mask_service is not None:
+            if (
+                mode == Tools.CONTROL_MODE_DRAW_BRUSH
+                and resolution.allowed
+                and mask_service is not None
+            ):
                 mask_service.prepareBrushInteraction()
         elif mode == Tools.CONTROL_MODE_SMART_SELECT:
             if not qpane.samFeatureAvailable():
@@ -367,12 +335,9 @@ class ToolInteractionDelegate:
         self._cursor.update_for_modifiers()
 
     def handle_drag_start_request(self, event: QMouseEvent | None) -> None:
-        """Trigger and cache the catalog drag handler for the current image."""
-        handler = self._drag_request_handler
-        if handler is None:
-            handler = self._qpane.catalog().handleDragRequest
-            self._drag_request_handler = handler
-        handler(event)
+        """Delegate source selection and MIME policy to the host-facing facade."""
+        if not self._qpane._start_outbound_drag(event) and event is not None:
+            event.ignore()
 
     def _forward_tool_event(
         self,
@@ -416,9 +381,6 @@ class ToolInteractionDelegate:
         if not self._pointer_input.observe_mouse_event(event):
             event.accept()
             return
-        if self._qpane.comparisonDividerInteraction().handle_mouse_press(event):
-            self._synchronize_effective_cursor()
-            return
         self._forward_tool_event(self._qpane._tools_manager.mousePressEvent, event)
         self._synchronize_effective_cursor()
 
@@ -427,14 +389,6 @@ class ToolInteractionDelegate:
         if not self._pointer_input.observe_mouse_event(event):
             event.accept()
             return
-        divider = self._qpane.comparisonDividerInteraction()
-        had_divider_cursor = divider.owns_cursor()
-        if divider.handle_mouse_move(event):
-            self.update_cursor()
-            self._synchronize_effective_cursor()
-            return
-        if had_divider_cursor or divider.owns_cursor():
-            self.update_cursor()
         self._forward_tool_event(self._qpane._tools_manager.mouseMoveEvent, event)
         self._synchronize_effective_cursor()
 
@@ -442,10 +396,6 @@ class ToolInteractionDelegate:
         """Forward mouse release events to the active tool."""
         if not self._pointer_input.observe_mouse_event(event):
             event.accept()
-            return
-        if self._qpane.comparisonDividerInteraction().handle_mouse_release(event):
-            self.update_cursor()
-            self._synchronize_effective_cursor()
             return
         self._forward_tool_event(self._qpane._tools_manager.mouseReleaseEvent, event)
         self._synchronize_effective_cursor()
@@ -472,8 +422,6 @@ class ToolInteractionDelegate:
     def handle_leave_event(self, event) -> None:
         """Notify the active tool that the cursor left the widget."""
         self._pointer_input.handle_widget_leave()
-        self._qpane.comparisonDividerInteraction().cancel_drag()
-        self._qpane.update()
         self._forward_tool_event(
             self._qpane._tools_manager.leaveEvent, event, guard_blank=False
         )
@@ -488,10 +436,20 @@ class ToolInteractionDelegate:
 
     def handle_show_event(self) -> None:
         """Ensure pan/zoom is active on first show and force view alignment."""
+        self._pointer_input.set_application_observation(True)
         if not self._tools_activated:
             self.set_control_mode(Tools.CONTROL_MODE_PANZOOM)
             self._tools_activated = True
         self._qpane.view().ensure_view_alignment(force=True)
+
+    def handle_hide_event(self) -> None:
+        """Release application-wide pointer observation while hidden."""
+        self._pointer_input.set_application_observation(False)
+        self._pointer_input.cancel_active_sequences()
+
+    def shutdown(self) -> None:
+        """Release application-level input hooks owned by this delegate."""
+        self._pointer_input.shutdown()
 
     def handle_key_press(self, event) -> bool:
         """Handle copy, modifier, and temporary pan shortcuts before delegating to Qt.
@@ -508,14 +466,11 @@ class ToolInteractionDelegate:
         focused_widget = QApplication.focusWidget()
         if event.matches(QKeySequence.StandardKey.Copy):
             if qpane.isAncestorOf(focused_widget):
-                handler = self._copy_image_handler
-                if handler is None:
-                    handler = qpane.catalog().copyCurrentImageToClipboard
-                    self._copy_image_handler = handler
-                handler()
+                event.ignore()
+                qpane._tools_manager.keyPressEvent(event)
             else:
                 super(type(qpane), qpane).keyPressEvent(event)
-            return True
+            return event.isAccepted()
         if event.key() == Qt.Key_Shift:
             if not event.isAutoRepeat():
                 self._shift_key_held = True
@@ -538,6 +493,13 @@ class ToolInteractionDelegate:
             if not event.isAutoRepeat():
                 current_mode = self.get_control_mode()
                 if current_mode != Tools.CONTROL_MODE_PANZOOM:
+                    suspend = getattr(
+                        active_tool,
+                        "suspend_for_temporary_navigation",
+                        None,
+                    )
+                    if callable(suspend):
+                        suspend()
                     self._mode_before_pan = current_mode
                     self.set_control_mode(Tools.CONTROL_MODE_PANZOOM)
             event.accept()

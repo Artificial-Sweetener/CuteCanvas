@@ -29,20 +29,16 @@ from qpane.sdk.concurrency import (
     TaskHandle,
     TaskRejected,
 )
-from qpane.sdk.scene import (
-    LayerInteractionPolicy,
-    LayerPlacement,
-    LayerTransform,
-    RasterBounds,
-)
+from qpane.sdk.scene import LayerInteractionPolicy, LayerPlacement
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.layer_edits import CompositionLayerEditService
-from ..composition.layers import CompositionLayerInstance, CompositionLayerStore
+from ..composition.layers import CompositionLayerStore
+from ..resources import ProjectResourceReference
+from ..resources.raster_instances import imported_raster_instance
 from .history import PlacedAssetEdit
 from .model import PlacedAssetSnapshot
 from .reload import PlacedAssetDecodeWorker
-from .source_reference import PlacedAssetReference
 from .store import PlacedAssetStore
 
 
@@ -143,14 +139,13 @@ class PlacedAssetWorkflow:
         ):
             return None
         asset_id = self._assets.create_embedded(image)
-        instance = self._instance(
-            scope_id,
-            uuid.uuid4(),
+        instance = imported_raster_instance(
             asset_id,
-            image,
-            placement,
-            interaction,
-            label,
+            image.size(),
+            layer_id=uuid.uuid4(),
+            placement=placement,
+            interaction=interaction,
+            label=label,
         )
         if not self._layer_edits.add(
             scope_id,
@@ -241,7 +236,6 @@ class PlacedAssetWorkflow:
         self._edits.record_applied(
             PlacedAssetEdit(history_scope_id, asset_id, before, after)
         )
-        self._layers.advance_source_revision(PlacedAssetReference(asset_id))
         self._changed(scope_id)
         return True
 
@@ -359,14 +353,13 @@ class PlacedAssetWorkflow:
             keep_fallback=request.keep_fallback,
             asset_id=request.asset_id,
         )
-        instance = self._instance(
-            request.scope_id,
-            request.layer_id,
+        instance = imported_raster_instance(
             request.asset_id,
-            worker.image,
-            request.placement,
-            request.interaction,
-            request.label,
+            worker.image.size(),
+            layer_id=request.layer_id,
+            placement=request.placement,
+            interaction=request.interaction,
+            label=request.label,
         )
         if not self._layer_edits.add(
             request.scope_id,
@@ -402,7 +395,7 @@ class PlacedAssetWorkflow:
         if self._latest_by_asset.get(request.asset_id) != worker.request_id:
             return
         self._latest_by_asset.pop(request.asset_id, None)
-        source = PlacedAssetReference(request.asset_id)
+        source = ProjectResourceReference(request.asset_id)
         if not self._layers.composition_ids_for_source(source):
             self._assets.restore(request.asset_id, request.before)
             self._completed(
@@ -457,7 +450,6 @@ class PlacedAssetWorkflow:
                     after,
                 )
             )
-        self._layers.advance_source_revision(source)
         self._changed(request.scope_id)
         self._completed(
             PlacedAssetCompletion(
@@ -516,31 +508,9 @@ class PlacedAssetWorkflow:
         """Resolve a placed asset from one exact composition instance."""
         instance = self._layers.layer(scope_id, layer_id)
         source = None if instance is None else instance.source
-        return source.asset_id if isinstance(source, PlacedAssetReference) else None
-
-    @staticmethod
-    def _instance(
-        scope_id: uuid.UUID,
-        layer_id: uuid.UUID,
-        asset_id: uuid.UUID,
-        image: QImage,
-        placement: LayerPlacement | None,
-        interaction: LayerInteractionPolicy,
-        label: str | None,
-    ) -> CompositionLayerInstance:
-        """Build one placed instance from source-local bounds and destination."""
-        bounds = RasterBounds.from_size(image.size())
-        destination = placement or LayerPlacement(
-            float(bounds.x),
-            float(bounds.y),
-            float(bounds.width),
-            float(bounds.height),
-        )
-        return CompositionLayerInstance(
-            layer_id=layer_id,
-            source=PlacedAssetReference(asset_id),
-            transform=LayerTransform.from_placement(bounds, destination),
-            interaction=interaction,
-            role="placed",
-            label=label,
+        return (
+            source.resource_id
+            if isinstance(source, ProjectResourceReference)
+            and self._assets.get(source.resource_id) is not None
+            else None
         )

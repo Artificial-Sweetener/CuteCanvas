@@ -96,17 +96,26 @@ class EditorMovementInteraction:
 
     def update_hover(self, panel_point: QPointF) -> bool:
         """Refresh target feedback without changing durable selection state."""
-        candidate = self._layers.candidate_at(panel_point)
         scene_point = self._panel_to_scene(panel_point)
         resolution = self._operations.resolve(
             EditorOperation.MOVE,
             scene_point=scene_point,
-            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+            candidate_layer_id=None,
         )
         pixel_target = resolution.target in {
             EditorOperationTarget.FLOATING_PIXELS,
             EditorOperationTarget.SELECTED_PIXELS,
         }
+        candidate = None
+        if not pixel_target:
+            candidate = self._layers.candidate_at(panel_point)
+            resolution = self._operations.resolve(
+                EditorOperation.MOVE,
+                scene_point=scene_point,
+                candidate_layer_id=(
+                    None if candidate is None else candidate.hit.layer_id
+                ),
+            )
         valid = resolution.allowed and pixel_target
         changed = valid != self._selection_hover_valid
         self._selection_hover_valid = valid
@@ -133,12 +142,11 @@ class EditorMovementInteraction:
         if self._active is not None:
             return False
         self.clear_hover()
-        candidate = self._layers.candidate_at(panel_point)
         scene_point = self._panel_to_scene(panel_point)
         resolution = self._operations.resolve(
             EditorOperation.MOVE,
             scene_point=scene_point,
-            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+            candidate_layer_id=None,
         )
         if resolution.target in {
             EditorOperationTarget.FLOATING_PIXELS,
@@ -157,6 +165,12 @@ class EditorMovementInteraction:
             self._active = "pixels"
             self._snapping.begin(self._pixels.transform_box_state(), scene_point)
             return True
+        candidate = self._layers.candidate_at(panel_point)
+        resolution = self._operations.resolve(
+            EditorOperation.MOVE,
+            scene_point=scene_point,
+            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+        )
         if (
             not resolution.allowed
             or resolution.target is not EditorOperationTarget.LAYER

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
@@ -39,6 +40,9 @@ from cutecanvas.coverage.surface import CoverageSurface
 
 from .mask import MaskLayer
 
+_PRIMITIVE_CACHE_LIMIT = 4096
+_HybridPrimitive = HybridRasterPrimitive | HybridVectorPrimitive
+
 
 class MaskHybridSourceFactory:
     """Build lightweight render snapshots from authoritative mask coverage."""
@@ -46,6 +50,10 @@ class MaskHybridSourceFactory:
     def __init__(self) -> None:
         """Create one reusable bounds evaluator for retained items."""
         self._evaluator = CoverageDocumentEvaluator()
+        self._primitive_cache: OrderedDict[
+            uuid.UUID,
+            tuple[CoverageItem, _HybridPrimitive | None],
+        ] = OrderedDict()
 
     def source(
         self,
@@ -57,7 +65,7 @@ class MaskHybridSourceFactory:
         bounds = layer.coverage.source_bounds()
         if bounds is None:
             return None
-        primitives: list[HybridRasterPrimitive | HybridVectorPrimitive] = []
+        primitives: list[_HybridPrimitive] = []
         raster_bounds = layer.coverage.raster.content_bounds()
         if raster_bounds is not None:
             primitives.append(
@@ -68,30 +76,9 @@ class MaskHybridSourceFactory:
                 )
             )
         for item in layer.coverage.retained.items:
-            item_bounds = self._evaluator.item_bounds(item)
-            if item_bounds is None:
-                continue
-            combine = HybridCombineMode(item.combine_mode.value)
-            if isinstance(item, VectorCoverageItem):
-                primitives.append(
-                    HybridVectorPrimitive(
-                        item.item_id,
-                        item.geometry,
-                        item_bounds,
-                        combine,
-                        item.transform,
-                        item.feather_radius,
-                    )
-                )
-            else:
-                primitives.append(
-                    HybridRasterPrimitive(
-                        item.item_id,
-                        item_bounds,
-                        _RetainedItemSampler(item),
-                        combine,
-                    )
-                )
+            primitive = self._retained_primitive(item)
+            if primitive is not None:
+                primitives.append(primitive)
         raster_revision, retained_revision = layer.coverage.revision
         document_revision = _pair_revisions(raster_revision, retained_revision)
         return HybridSource(
@@ -104,6 +91,38 @@ class MaskHybridSourceFactory:
             style,
             presentation_revision,
         )
+
+    def _retained_primitive(self, item: CoverageItem) -> _HybridPrimitive | None:
+        """Return one bounded cached projection of immutable retained authorship."""
+        cached = self._primitive_cache.get(item.item_id)
+        if cached is not None and cached[0] == item:
+            self._primitive_cache.move_to_end(item.item_id)
+            return cached[1]
+        item_bounds = self._evaluator.item_bounds(item)
+        primitive: _HybridPrimitive | None
+        if item_bounds is None:
+            primitive = None
+        elif isinstance(item, VectorCoverageItem):
+            primitive = HybridVectorPrimitive(
+                item.item_id,
+                item.geometry,
+                item_bounds,
+                HybridCombineMode(item.combine_mode.value),
+                item.transform,
+                item.feather_radius,
+            )
+        else:
+            primitive = HybridRasterPrimitive(
+                item.item_id,
+                item_bounds,
+                _RetainedItemSampler(item),
+                HybridCombineMode(item.combine_mode.value),
+            )
+        self._primitive_cache[item.item_id] = (item, primitive)
+        self._primitive_cache.move_to_end(item.item_id)
+        if len(self._primitive_cache) > _PRIMITIVE_CACHE_LIMIT:
+            self._primitive_cache.popitem(last=False)
+        return primitive
 
 
 @dataclass(frozen=True, slots=True)

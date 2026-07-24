@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING
 
 from ..core.config_features import require_mask_config
 from .autosave_coordination import should_enable_mask_autosave
-from .mask import MaskAssetStore
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_service import MaskService
@@ -40,7 +39,11 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
     """Install mask management subsystems and tool wiring for a CuteCanvas."""
     mask_config = require_mask_config(qpane.settings)
     diagnostics_manager = qpane.diagnostics()
-    mask_manager = MaskAssetStore(undo_limit=mask_config.mask_undo_limit)
+    resources = qpane._project_resources
+    if resources is None:
+        raise RuntimeError("project resource store is unavailable")
+    mask_manager = qpane.document().masks
+    mask_manager.set_undo_limit(mask_config.mask_undo_limit)
     diagnostics_tracker = MaskStrokeDiagnostics(
         enabled=False,
         dirty_callback=lambda domain="mask": diagnostics_manager.set_dirty(domain),

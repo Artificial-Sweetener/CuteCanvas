@@ -13,28 +13,14 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Supported catalog contracts for renderer-backed host collections."""
+"""Supported viewer-catalog contracts."""
 
 from ..catalog import (
-    Catalog,
-    CatalogMutationEvent,
-    ImageCatalog,
-    ImageMap,
-    LinkManager,
-    NavigationEvent,
     ViewerCatalog,
+    ViewerCatalogEntry,
 )
-from ..catalog.source_capabilities import CatalogSourceCapabilities
-from ..catalog.source_reference import CatalogImageReference
 
 __all__ = (
-    "Catalog",
-    "CatalogImageReference",
-    "CatalogMutationEvent",
-    "CatalogSourceCapabilities",
-    "ImageCatalog",
-    "ImageMap",
-    "LinkManager",
-    "NavigationEvent",
     "ViewerCatalog",
+    "ViewerCatalogEntry",
 )

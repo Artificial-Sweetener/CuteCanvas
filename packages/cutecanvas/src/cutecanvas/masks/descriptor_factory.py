@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -33,7 +32,11 @@ from qpane.sdk.scene import (
 )
 
 from ..composition.layers import CompositionLayerInstance
-from .source_reference import MaskAssetReference
+from ..resources import (
+    ProjectResourceKind,
+    ProjectResourceRecord,
+    ProjectResourceReference,
+)
 
 
 class MaskDescriptorAsset(Protocol):
@@ -67,29 +70,30 @@ class MaskLayerDescriptorFactory:
 
     assets: MaskDescriptorAssets
     renders: MaskDescriptorRenders
-    dynamic_revision: Callable[[], object]
-    source_type = MaskAssetReference
-
-    def revision(self) -> object:
-        """Return mask-domain state affecting descriptors."""
-        return self.dynamic_revision()
 
     def descriptor(
         self,
         scene: SceneDescriptor,
         instance: CompositionLayerInstance,
+        resource: ProjectResourceRecord,
     ) -> LayerDescriptor | None:
         """Resolve one mask instance into a complete scene descriptor."""
-        if not isinstance(instance.source, MaskAssetReference):
+        if (
+            not isinstance(instance.source, ProjectResourceReference)
+            or resource.kind is not ProjectResourceKind.COVERAGE
+        ):
             return None
-        mask_id = instance.source.mask_id
+        mask_id = instance.source.resource_id
         asset = self.assets.get_layer(mask_id)
         if asset is None:
             return None
         raster_bounds: RasterBounds | None = asset.coverage.source_bounds()
         if raster_bounds is None:
             return None
-        revision = max(0, int(self.renders.render_revision(mask_id)))
+        revision = max(
+            resource.revision,
+            int(self.renders.render_revision(mask_id)),
+        )
         return LayerDescriptor(
             scene_id=scene.scene_id,
             layer_id=instance.layer_id,

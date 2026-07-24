@@ -15,7 +15,6 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from ..types import CacheMode as CacheMode
-from ..types import CatalogEntry as CatalogEntry
 from ..types import ComparisonDividerState as ComparisonDividerState
 from ..types import ComparisonOrientation as ComparisonOrientation
 from ..types import ComparisonState as ComparisonState

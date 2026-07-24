@@ -80,7 +80,7 @@ class BrushControls(QObject):
         toolbar.addWidget(self._preset)
         self._color = QPushButton("Color", toolbar)
         self._color.clicked.connect(self._choose_color)
-        toolbar.addWidget(self._color)
+        self._color_action = toolbar.addWidget(self._color)
         self._operation = QLabel(toolbar)
         toolbar.addWidget(self._operation)
         self._size = self._scalar("Size", 1, 2000, " px")
@@ -96,7 +96,13 @@ class BrushControls(QObject):
 
     def sync_mode(self, mode: str) -> None:
         """Show the contextual bar only while the shared brush tool is active."""
-        self._toolbar.setVisible(mode == CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
+        self._toolbar.setVisible(
+            mode
+            in {
+                CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
+                CuteCanvas.CONTROL_MODE_CLONE_STAMP,
+            }
+        )
         if self._toolbar.isVisible():
             self.refresh()
 
@@ -107,6 +113,9 @@ class BrushControls(QObject):
             target = self._qpane.paintTargetState()
             kind = PaintTargetKind.LAYER if target is None else target.kind
             self._target.setCurrentIndex(self._target.findData(kind))
+            self._target.setEnabled(
+                self._qpane.getControlMode() != CuteCanvas.CONTROL_MODE_CLONE_STAMP
+            )
             preset = self._qpane.brushPreset()
             self._size.setValue(round(preset.size))
             self._hardness.setValue(round(preset.hardness * 100.0))
@@ -200,6 +209,26 @@ class BrushControls(QObject):
         """Resolve exact target identity and its distinct color semantics."""
         target = self._qpane.paintTargetState()
         if target is None:
+            selection = self._qpane.selectedLayer()
+            layer = (
+                None if selection is None else self._target_layer(selection.layer_id)
+            )
+            if layer is not None:
+                label = self._layer_label(layer)
+                operation = (
+                    "Alt-click a source · Painting creates the layer"
+                    if self._qpane.getControlMode()
+                    == CuteCanvas.CONTROL_MODE_CLONE_STAMP
+                    else "First stroke creates and selects the layer"
+                )
+                return _BrushContext(
+                    target_text=f"New paint layer above: {label}",
+                    target_tooltip=(
+                        "The first stroke creates a real editable raster layer "
+                        "above the selected layer."
+                    ),
+                    operation_text=operation,
+                )
             return _BrushContext(
                 target_text="No target",
                 target_tooltip="Select an editable raster or mask layer.",
@@ -220,6 +249,12 @@ class BrushControls(QObject):
             )
         label = self._layer_label(layer)
         target_tooltip = f"{label} · {layer.source_kind} · {layer.layer_id}"
+        if self._qpane.getControlMode() == CuteCanvas.CONTROL_MODE_CLONE_STAMP:
+            return _BrushContext(
+                target_text=f"Editing: {label}",
+                target_tooltip=target_tooltip,
+                operation_text="Clone pixels · Alt-click sets source",
+            )
         if layer.source_kind == "raster":
             return _BrushContext(
                 target_text=f"Editing: {label}",
@@ -229,7 +264,7 @@ class BrushControls(QObject):
                 color_tooltip="Foreground color for strokes on this raster layer",
                 color=self._qpane.paintColor(),
             )
-        if layer.source_kind == "mask" and layer.source_id is not None:
+        if layer.source_kind == "coverage" and layer.source_id is not None:
             return _BrushContext(
                 target_text=f"Editing: {label}",
                 target_tooltip=target_tooltip,
@@ -271,6 +306,7 @@ class BrushControls(QObject):
         """Present the active target's color role without conflating state owners."""
         color = context.color
         visible = color is not None and context.color_label is not None
+        self._color_action.setVisible(visible)
         self._color.setVisible(visible)
         if not visible or color is None or context.color_label is None:
             self._color.setStyleSheet("")

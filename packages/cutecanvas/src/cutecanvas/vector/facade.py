@@ -54,7 +54,6 @@ from .public import (
     VectorTextEditSnapshot,
 )
 from .selection import VectorObjectSelectionController
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 from .targets import VectorAuthoringTargetResolver
 from .text_edit import VectorTextEditController
@@ -73,6 +72,7 @@ class VectorHostFacade:
         selection: VectorObjectSelectionController,
         current_scene: Callable[[], SceneDescriptor | None],
         current_public_scene_id: Callable[[], uuid.UUID | None],
+        current_composition_id: Callable[[], uuid.UUID | None],
         changed: Callable[[], None],
         conversions: VectorConversionService,
         masks: VectorMaskController,
@@ -89,6 +89,7 @@ class VectorHostFacade:
         self._selection = selection
         self._current_scene = current_scene
         self._current_public_scene_id = current_public_scene_id
+        self._current_composition_id = current_composition_id
         self._changed = changed
         self._conversions = conversions
         self._masks = masks
@@ -486,7 +487,7 @@ class VectorHostFacade:
             else VectorMaskSnapshot(
                 scene_id,
                 target_layer_id,
-                effect.source.vector_id,
+                effect.source.resource_id,
                 effect.object_ids,
                 effect.transform.to_qtransform(),
                 effect.inverted,
@@ -530,31 +531,6 @@ class VectorHostFacade:
             mode=mode,
         )
 
-    def rasterize_layer(
-        self,
-        scene_id: uuid.UUID,
-        layer_id: uuid.UUID,
-        pixel_size: QSize | None,
-    ) -> uuid.UUID | None:
-        """Begin an atomic vector-instance conversion to editable pixels."""
-        context = self._context(scene_id, layer_id)
-        if context is None:
-            return None
-        scope_id, _vector_id, resolved_scene_id = context
-        instance = self._compositions.layers.layer(scope_id, layer_id)
-        if instance is None or not isinstance(
-            instance.source,
-            VectorDocumentReference,
-        ):
-            return None
-        return self._conversions.request_rasterization(
-            composition_id=scope_id,
-            history_scope_id=resolved_scene_id,
-            public_scene_id=scene_id,
-            layer_id=layer_id,
-            pixel_size=pixel_size,
-        )
-
     def synchronize_selection(self) -> bool:
         """Clear object selection when its scene, layer, or objects disappeared."""
         text_changed = self._texts.synchronize()
@@ -588,7 +564,7 @@ class VectorHostFacade:
         """Resolve public and internal scene identities to one vector source."""
         scene = self._current_scene()
         public_scene_id = self._current_public_scene_id()
-        scope_id = self._compositions.current_composition_id()
+        scope_id = self._current_composition_id()
         if (
             scene is None
             or scope_id is None
@@ -607,7 +583,7 @@ class VectorHostFacade:
         """Resolve a public active-scene identifier into composition context."""
         scene = self._current_scene()
         public_scene_id = self._current_public_scene_id()
-        scope_id = self._compositions.current_composition_id()
+        scope_id = self._current_composition_id()
         if (
             scene is None
             or scope_id is None

@@ -58,11 +58,19 @@ class SnapSession:
             raise ValueError("snap thresholds must be positive and non-negative")
         self._source_owner_id = str(source_owner_id)
         self._source_bounds = QRectF(source_bounds).normalized()
-        self._candidates = tuple(
+        candidates = tuple(
             candidate
             for candidate in candidates
             if candidate.owner_id != self._source_owner_id
         )
+        self._candidates_by_axis = {
+            SnapAxis.X: tuple(
+                candidate for candidate in candidates if candidate.axis is SnapAxis.X
+            ),
+            SnapAxis.Y: tuple(
+                candidate for candidate in candidates if candidate.axis is SnapAxis.Y
+            ),
+        }
         self._threshold_pixels = float(threshold_device_pixels)
         self._release_pixels = float(release_device_pixels)
         self._grid = grid
@@ -131,11 +139,12 @@ class SnapSession:
                 resolved = raw_delta + correction
                 return resolved, locked
         matches = []
-        candidates = (*self._candidates, *self._grid_candidates(axis, features))
+        candidates = (
+            *self._candidates_by_axis[axis],
+            *self._grid_candidates(axis, features),
+        )
         for moving_kind, moving_position in features:
             for candidate in candidates:
-                if candidate.axis is not axis:
-                    continue
                 relationship_rank = _relationship_rank(moving_kind, candidate.kind)
                 if relationship_rank is None:
                     continue

@@ -18,11 +18,9 @@
 
 from __future__ import annotations
 
-import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen
@@ -40,11 +38,7 @@ from cutecanvas.tools.ports import PaintingInteractionPort
 
 from .brush_preview import BrushPreview, BrushPreviewRenderer
 
-if TYPE_CHECKING:
-    from cutecanvas.tools.tools import ToolManagerSignals
-logger = logging.getLogger(__name__)
-
-__all__ = ("BrushTool", "connect_brush_signals", "disconnect_brush_signals")
+__all__ = ("BrushTool",)
 
 
 @dataclass(slots=True)
@@ -94,6 +88,7 @@ class BrushTool(BaseTool):
         self._is_alt_held: Callable[[], bool] = lambda: False
         self._is_shift_held: Callable[[], bool] = lambda: False
         self._can_paint: Callable[[], bool] = lambda: True
+        self._prepare_paint: Callable[[], bool] = lambda: True
         self._get_brush_size: Callable[[], int] = lambda: 20
         self._get_preview_pens: Callable[[], tuple[QPen, QPen]] = (
             self._default_preview_pens
@@ -148,6 +143,7 @@ class BrushTool(BaseTool):
         self._is_alt_held = dependencies.is_alt_held
         self._is_shift_held = dependencies.is_shift_held
         self._can_paint = dependencies.can_paint
+        self._prepare_paint = dependencies.prepare_paint
         self._get_brush_size = dependencies.get_brush_size
         self._get_preview_pens = (
             dependencies.get_preview_pens or self._default_preview_pens
@@ -191,7 +187,7 @@ class BrushTool(BaseTool):
         """Begin a brush stroke or execute a straight-line stroke when shift is held."""
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        if not self._can_paint():
+        if not self._can_paint() or not self._prepare_paint():
             return
         panel_point = event.position().toPoint()
         stroke_point = self._resolve_stroke_point(panel_point)
@@ -305,6 +301,11 @@ class BrushTool(BaseTool):
             stroke_cancelled = self.cancel_pointer_stroke()
             preview_cleared = self.clear_pointer_preview()
             return stroke_cancelled or preview_cleared
+        if sample.phase is PointerPhase.BEGIN and (
+            not self._can_paint() or not self._prepare_paint()
+        ):
+            self.clear_pointer_preview()
+            return False
         stroke_point = self._resolve_stroke_point(sample.position)
         if stroke_point is None:
             self.clear_pointer_preview()
@@ -318,9 +319,6 @@ class BrushTool(BaseTool):
             contact=True,
         )
         if sample.phase is PointerPhase.BEGIN:
-            if not self._can_paint():
-                self.clear_pointer_preview()
-                return False
             if self._pointer_stroke.active:
                 return False
             self._pending_undo_push = True
@@ -415,6 +413,24 @@ class BrushTool(BaseTool):
         if not self._pointer_stroke.active:
             return False
         return self._cancel_active_stroke()
+
+    def suspend_for_temporary_navigation(self) -> bool:
+        """Commit active brush work before a temporary navigation tool takes focus."""
+        active = self.is_drawing or self._pointer_stroke.active
+        if not active:
+            return False
+        self._pointer_stroke.cancel()
+        if self._stroke_has_content:
+            self.signals.stroke_completed.emit()
+            if self.last_draw_point is not None:
+                self.last_paint_anchor_point = self.last_draw_point
+        self._stroke_has_content = False
+        self.is_drawing = False
+        self.last_draw_point = None
+        self.current_preview_point = None
+        if not self.clear_pointer_preview():
+            self.signals.repaint_overlay_requested.emit()
+        return True
 
     def _cancel_active_stroke(self) -> bool:
         """Cancel mouse or direct-pointer work through one target transaction."""
@@ -654,84 +670,3 @@ class BrushTool(BaseTool):
             return
         self.signals.undo_state_push_requested.emit()
         self._pending_undo_push = False
-
-
-_BRUSH_SIGNAL_MAPPINGS: tuple[tuple[str, str], ...] = (
-    ("stroke_applied", "stroke_applied"),
-    ("brush_size_changed", "brush_size_changed"),
-    ("stroke_completed", "stroke_completed"),
-    ("stroke_cancelled", "stroke_cancelled"),
-    ("undo_state_push_requested", "undo_state_push_requested"),
-)
-
-
-def _wire_brush_tool_signals(
-    tool: BaseTool,
-    manager_signals: ToolManagerSignals,
-    mapping: tuple[tuple[str, str], ...],
-    *,
-    tool_name: str,
-) -> None:
-    """Connect a mask-aware tool's signals to the ToolManager bus."""
-    for tool_attr, manager_attr in mapping:
-        signal = getattr(tool.signals, tool_attr, None)
-        if signal is None:
-            raise AttributeError(
-                f"{tool_name} is missing required signal '{tool_attr}'. Update its signal contract before wiring."
-            )
-        target = getattr(manager_signals, manager_attr, None)
-        if target is None:
-            raise AttributeError(
-                f"ToolManagerSignals no longer expose '{manager_attr}'. Update the signal mapping to match."
-            )
-        signal.connect(target)
-
-
-def _unwire_brush_tool_signals(
-    tool: BaseTool,
-    manager_signals: ToolManagerSignals,
-    mapping: tuple[tuple[str, str], ...],
-    *,
-    tool_name: str,
-) -> None:
-    """Disconnect mask-aware tool signals with diagnostics."""
-    for tool_attr, manager_attr in mapping:
-        signal = getattr(tool.signals, tool_attr, None)
-        target = getattr(manager_signals, manager_attr, None)
-        if signal is None or target is None:
-            logger.warning(
-                "Skipping disconnect for '%s' -> '%s'; signal contract drift detected.",
-                tool_attr,
-                manager_attr,
-            )
-            continue
-        try:
-            signal.disconnect(target)
-        except (TypeError, RuntimeError) as exc:
-            logger.warning(
-                "Failed to disconnect brush signal '%s': %s",
-                tool_attr,
-                exc,
-            )
-
-
-def connect_brush_signals(manager_signals: ToolManagerSignals, tool: BaseTool) -> None:
-    """Bridge BrushTool emissions into ToolManagerSignals using the shared contract."""
-    _wire_brush_tool_signals(
-        tool,
-        manager_signals,
-        _BRUSH_SIGNAL_MAPPINGS,
-        tool_name=type(tool).__name__,
-    )
-
-
-def disconnect_brush_signals(
-    manager_signals: ToolManagerSignals, tool: BaseTool
-) -> None:
-    """Tear down BrushTool wiring using the shared contract mapping."""
-    _unwire_brush_tool_signals(
-        tool,
-        manager_signals,
-        _BRUSH_SIGNAL_MAPPINGS,
-        tool_name=type(tool).__name__,
-    )

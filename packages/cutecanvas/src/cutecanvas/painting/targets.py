@@ -19,17 +19,17 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF
 from PySide6.QtGui import QColor
-from qpane.sdk.scene import (
-    LayerDescriptor,
-    LayerSourceReference,
-    RasterBounds,
-    SceneDescriptor,
+from qpane.sdk.rendering import (
+    LayerSourcePoint,
+    PanelPoint,
+    SceneCoordinateSystem,
+    ScenePoint,
 )
+from qpane.sdk.scene import LayerSourceReference
 
 from ..composition.resource_lifetime import (
     CompositionResourceLifetime,
@@ -40,175 +40,21 @@ from ..types import PaintTargetKind
 from .compositor import BrushCompositor
 from .configuration import BrushStrokeCompiler
 from .model import BrushPreset, BrushStrokeSegment
+from .operations import BrushStrokeOperation, DirectBrushStrokeOperation
+from .target_contracts import (
+    CoverageFillTargetOwner,
+    FloodFillSource,
+    FloodFillTargetOwner,
+    PaintTargetContext,
+    PaintTargetIdentity,
+    PaintTargetOwner,
+    PaintTargetRegistry,
+    RetainedCoverageTargetOwner,
+)
 
 if TYPE_CHECKING:
     from cutecanvas.coverage import CoverageItem, CoverageSnapshot
     from cutecanvas.coverage.operations import CoverageCombineMode
-    from cutecanvas.fill.sources import FloodFillPixelSource
-
-
-@dataclass(frozen=True, slots=True)
-class PaintTargetIdentity:
-    """Identify one composition-local destination selected for painting."""
-
-    scene_id: uuid.UUID
-    layer_id: uuid.UUID | None
-    kind: PaintTargetKind = PaintTargetKind.LAYER
-
-    def __post_init__(self) -> None:
-        """Reject contradictory target identities."""
-        kind = PaintTargetKind(self.kind)
-        if kind is PaintTargetKind.LAYER and self.layer_id is None:
-            raise ValueError("layer paint targets require a layer_id")
-        if kind is not PaintTargetKind.LAYER and self.layer_id is not None:
-            raise ValueError("scene paint targets must not include a layer_id")
-        object.__setattr__(self, "kind", kind)
-
-
-@dataclass(frozen=True, slots=True)
-class PaintTargetContext:
-    """Resolve one paint identity to its scene and optional layer snapshot."""
-
-    identity: PaintTargetIdentity
-    scene: SceneDescriptor
-    layer: LayerDescriptor | None
-
-
-@runtime_checkable
-class PaintTargetOwner(Protocol):
-    """Implement paint transactions for one typed layer source domain."""
-
-    def supports(self, target: PaintTargetContext) -> bool:
-        """Return whether this owner exclusively handles ``target``."""
-        ...
-
-    def begin(self, target: PaintTargetContext) -> bool:
-        """Begin one atomic paint history transaction."""
-        ...
-
-    def apply(
-        self,
-        target: PaintTargetContext,
-        segment: BrushStrokeSegment,
-        preset: BrushPreset,
-        color: QColor,
-    ) -> bool:
-        """Apply one deterministic segment to the active transaction."""
-        ...
-
-    def commit(self, target: PaintTargetContext) -> bool:
-        """Commit the active transaction as one history command."""
-        ...
-
-    def cancel(self, target: PaintTargetContext) -> bool:
-        """Restore pixels captured before the active transaction."""
-        ...
-
-    def preview_color(self, target: PaintTargetContext, fallback: QColor) -> QColor:
-        """Return the target-appropriate brush feedback color."""
-        ...
-
-
-@runtime_checkable
-class RetainedCoverageTargetOwner(Protocol):
-    """Commit semantic coverage items to a compatible paint destination."""
-
-    def commit_coverage_item(
-        self,
-        target: PaintTargetContext,
-        item: CoverageItem,
-    ) -> bool:
-        """Commit one target-local retained coverage contribution."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class FloodFillSource:
-    """Carry immutable target-local sampling pixels and stale-work identity."""
-
-    pixels: FloodFillPixelSource
-    bounds: RasterBounds
-    revision: object
-
-
-@runtime_checkable
-class FloodFillTargetOwner(Protocol):
-    """Sample and atomically commit paint-bucket coverage for one target."""
-
-    def flood_fill_source(self, target: PaintTargetContext) -> FloodFillSource | None:
-        """Return detached target-local pixels and their content revision."""
-        ...
-
-    def commit_flood_fill(
-        self,
-        target: PaintTargetContext,
-        coverage: CoverageSnapshot,
-        mode: CoverageCombineMode,
-        expected_revision: object,
-        color: QColor,
-    ) -> bool:
-        """Commit only when sampled authority still has ``expected_revision``."""
-        ...
-
-
-@runtime_checkable
-class CoverageFillTargetOwner(Protocol):
-    """Apply bounded coverage to one paint destination atomically."""
-
-    def commit_fill_coverage(
-        self,
-        target: PaintTargetContext,
-        coverage: CoverageSnapshot,
-        mode: CoverageCombineMode,
-        color: QColor,
-    ) -> bool:
-        """Commit one target-local coverage fill as a single history step."""
-        ...
-
-
-class PaintTargetRegistry:
-    """Route paint operations to one authoritative owner per source type."""
-
-    def __init__(self) -> None:
-        """Initialize an empty ordered owner collection."""
-        self._owners: list[PaintTargetOwner] = []
-        self._idle_feedback: dict[object, Callable[[QColor], QColor | None]] = {}
-
-    def register(self, owner: PaintTargetOwner) -> PaintTargetOwner:
-        """Register one owner exactly once."""
-        if owner not in self._owners:
-            self._owners.append(owner)
-        return owner
-
-    def unregister(self, owner: PaintTargetOwner) -> None:
-        """Remove one owner without disturbing other domains."""
-        self._owners = [
-            candidate for candidate in self._owners if candidate is not owner
-        ]
-        self._idle_feedback.pop(owner, None)
-
-    def register_idle_feedback(
-        self,
-        owner: object,
-        provider: Callable[[QColor], QColor | None],
-    ) -> None:
-        """Register optional brush feedback shown before a target exists."""
-        self._idle_feedback[owner] = provider
-
-    def idle_preview_color(self, fallback: QColor) -> QColor | None:
-        """Return the first available passive brush-feedback color."""
-        for provider in self._idle_feedback.values():
-            color = provider(QColor(fallback))
-            if isinstance(color, QColor) and color.isValid():
-                return QColor(color)
-        return None
-
-    def owner_for(self, target: PaintTargetContext) -> PaintTargetOwner | None:
-        """Return the sole owner that advertises ``target`` support."""
-        matches = [owner for owner in self._owners if owner.supports(target)]
-        if len(matches) > 1:
-            raise RuntimeError("multiple paint target owners support one layer")
-        return None if not matches else matches[0]
 
 
 class PaintingCoordinator:
@@ -218,14 +64,7 @@ class PaintingCoordinator:
         self,
         *,
         scenes: SceneMutationCoordinator,
-        panel_to_source: Callable[
-            [uuid.UUID, uuid.UUID, QPoint | QPointF], QPointF | None
-        ],
-        source_to_panel: Callable[
-            [uuid.UUID, uuid.UUID, QPoint | QPointF], QPointF | None
-        ],
-        panel_to_scene: Callable[[QPoint | QPointF], QPointF | None],
-        scene_to_panel: Callable[[QPoint | QPointF], QPointF | None],
+        coordinates: SceneCoordinateSystem,
         preset: BrushPreset | None = None,
         changed: Callable[[PaintTargetIdentity | None], None] | None = None,
         compositor: BrushCompositor | None = None,
@@ -234,13 +73,9 @@ class PaintingCoordinator:
         """Bind scene resolution and coordinate adapters."""
         self.registry = PaintTargetRegistry()
         self._scenes = scenes
-        self._panel_to_source = panel_to_source
-        self._source_to_panel = source_to_panel
-        self._panel_to_scene = panel_to_scene
-        self._scene_to_panel = scene_to_panel
+        self._coordinates = coordinates
         self._changed = changed
         self._identity: PaintTargetIdentity | None = None
-        self._active_owner: PaintTargetOwner | None = None
         self._stroke_context: PaintTargetContext | None = None
         self._stroke_source: LayerSourceReference | None = None
         self._requires_policy = True
@@ -250,6 +85,9 @@ class PaintingCoordinator:
         self._compiler = BrushStrokeCompiler()
         self._compositor = BrushCompositor() if compositor is None else compositor
         self._resource_lifetime = resource_lifetime
+        self._direct_operation = DirectBrushStrokeOperation(self.registry)
+        self._stroke_operation: BrushStrokeOperation = self._direct_operation
+        self._transaction_operation: BrushStrokeOperation | None = None
 
     @property
     def identity(self) -> PaintTargetIdentity | None:
@@ -289,6 +127,22 @@ class PaintingCoordinator:
         self._color = QColor(color)
         return True
 
+    def set_stroke_operation(self, operation: BrushStrokeOperation) -> bool:
+        """Replace the injected brush behavior used by subsequent strokes."""
+        if not isinstance(operation, BrushStrokeOperation):
+            raise TypeError("operation must implement BrushStrokeOperation")
+        if operation is self._stroke_operation:
+            return False
+        self.cancel()
+        self._stroke_operation = operation
+        self._resolved_identity()
+        self._publish()
+        return True
+
+    def use_direct_stroke_operation(self) -> bool:
+        """Restore ordinary paint/erase behavior for the shared brush tool."""
+        return self.set_stroke_operation(self._direct_operation)
+
     def select_layer(
         self,
         scene_id: uuid.UUID,
@@ -298,21 +152,38 @@ class PaintingCoordinator:
     ) -> bool:
         """Select one policy-enabled paint-capable active layer."""
         identity = PaintTargetIdentity(scene_id, layer_id)
-        resolved = self._resolve(identity)
-        if resolved is None:
+        target = self._resolve_context(identity)
+        if target is None:
             return False
-        target, owner = resolved
         layer = target.layer
-        if layer is None or require_policy and not layer.interaction.pixel_editable:
+        if (
+            layer is None
+            or require_policy
+            and not layer.interaction.pixel_editable
+            or not self._stroke_operation.supports(target)
+        ):
             return False
         if identity == self._identity:
             return True
         self.cancel()
         self._identity = identity
-        self._active_owner = owner
         self._requires_policy = bool(require_policy)
         self._publish()
         return True
+
+    def supports_context(
+        self,
+        target: PaintTargetContext,
+        *,
+        require_policy: bool = True,
+    ) -> bool:
+        """Return whether the current operation accepts one layer context."""
+        layer = target.layer
+        return bool(
+            layer is not None
+            and (not require_policy or layer.interaction.pixel_editable)
+            and self._stroke_operation.supports(target)
+        )
 
     def select_pixel_selection(self, scene_id: uuid.UUID) -> bool:
         """Select composition pixel-selection coverage as the paint target."""
@@ -321,14 +192,13 @@ class PaintingCoordinator:
             None,
             PaintTargetKind.PIXEL_SELECTION,
         )
-        resolved = self._resolve(identity)
-        if resolved is None:
+        target = self._resolve_context(identity)
+        if target is None or not self._stroke_operation.supports(target):
             return False
         if identity == self._identity:
             return True
         self.cancel()
         self._identity = identity
-        self._active_owner = resolved[1]
         self._requires_policy = False
         self._publish()
         return True
@@ -339,7 +209,6 @@ class PaintingCoordinator:
             return False
         self.cancel()
         self._identity = None
-        self._active_owner = None
         self._requires_policy = True
         self._publish()
         return True
@@ -348,13 +217,13 @@ class PaintingCoordinator:
         """Begin one target-owned atomic stroke transaction."""
         if self._stroke_open:
             return True
-        resolved = self._current()
-        if resolved is None:
+        target = self.current_context()
+        if target is None:
             return False
-        target, owner = resolved
-        self._stroke_open = owner.begin(target)
+        operation = self._stroke_operation
+        self._stroke_open = operation.begin(target)
         self._stroke_context = target if self._stroke_open else None
-        self._active_owner = owner if self._stroke_open else self._active_owner
+        self._transaction_operation = operation if self._stroke_open else None
         source = None if target.layer is None else target.layer.source
         if (
             self._stroke_open
@@ -371,27 +240,31 @@ class PaintingCoordinator:
             return False
         if not self._stroke_open and not self.begin():
             return False
-        resolved = self._current()
-        if resolved is None:
+        target = self.current_context()
+        if target is None:
             self._cancel_open_transaction()
             return False
-        target, owner = resolved
-        return owner.apply(target, segment, self._preset, self._color)
+        operation = self._transaction_operation
+        return bool(
+            operation is not None
+            and operation.apply(target, segment, self._preset, self._color)
+        )
 
     def commit(self) -> bool:
         """Commit active target work exactly once."""
         if not self._stroke_open:
             return False
-        resolved = self._current()
-        if resolved is None:
+        target = self.current_context()
+        if target is None:
             self._cancel_open_transaction()
             return False
-        target, owner = resolved
+        operation = self._transaction_operation
         try:
-            return owner.commit(target)
+            return bool(operation is not None and operation.commit(target))
         finally:
             self._stroke_open = False
             self._stroke_context = None
+            self._transaction_operation = None
             self._release_stroke_resource()
 
     def cancel(self) -> bool:
@@ -405,11 +278,18 @@ class PaintingCoordinator:
         identity = self._resolved_identity()
         if identity is None:
             return None
+        panel_point = PanelPoint.from_qt(point)
         if identity.kind is PaintTargetKind.PIXEL_SELECTION:
-            return self._panel_to_scene(point)
+            scene_point = self._coordinates.panel_to_scene(panel_point)
+            return None if scene_point is None else scene_point.to_qt()
         if identity.layer_id is None:
             return None
-        return self._panel_to_source(identity.scene_id, identity.layer_id, point)
+        source_point = self._coordinates.panel_to_layer_source(
+            identity.scene_id,
+            identity.layer_id,
+            panel_point,
+        )
+        return None if source_point is None else source_point.to_qt()
 
     def target_to_panel(self, point: QPoint | QPointF) -> QPointF | None:
         """Map selected target source geometry into panel coordinates."""
@@ -417,18 +297,30 @@ class PaintingCoordinator:
         if identity is None:
             return None
         if identity.kind is PaintTargetKind.PIXEL_SELECTION:
-            return self._scene_to_panel(point)
+            panel_point = self._coordinates.scene_to_panel(
+                ScenePoint.from_qt(identity.scene_id, point)
+            )
+            return None if panel_point is None else panel_point.to_qt()
         if identity.layer_id is None:
             return None
-        return self._source_to_panel(identity.scene_id, identity.layer_id, point)
+        panel_point = self._coordinates.layer_source_to_panel(
+            LayerSourcePoint.from_qt(
+                identity.scene_id,
+                identity.layer_id,
+                point,
+            )
+        )
+        return None if panel_point is None else panel_point.to_qt()
 
     def preview_color(self) -> QColor | None:
         """Return target-appropriate feedback color when a target is current."""
         resolved = self._current()
         if resolved is None:
             return self.registry.idle_preview_color(self._color)
-        target, owner = resolved
-        return QColor(owner.preview_color(target, self._color))
+        target, _owner = resolved
+        if not self._stroke_operation.supports(target):
+            return None
+        return QColor(self._stroke_operation.preview_color(target, self._color))
 
     def can_commit_coverage_item(self) -> bool:
         """Return whether the selected destination accepts retained coverage."""
@@ -464,8 +356,7 @@ class PaintingCoordinator:
 
     def current_context(self) -> PaintTargetContext | None:
         """Return the current resolved target context for editor coordinators."""
-        resolved = self._current()
-        return None if resolved is None else resolved[0]
+        return self._validated_context()
 
     def can_fill_coverage(self) -> bool:
         """Return whether the selected destination accepts bounded coverage fills."""
@@ -524,20 +415,28 @@ class PaintingCoordinator:
 
     def _resolved_identity(self) -> PaintTargetIdentity | None:
         """Clear stale identity when its scene, layer, policy, or owner disappears."""
+        context = self._validated_context()
+        return None if context is None else context.identity
+
+    def _validated_context(self) -> PaintTargetContext | None:
+        """Resolve and validate the selected target once for one hot-path query."""
         identity = self._identity
         if identity is None:
             return None
-        resolved = self._resolve(identity)
-        layer = None if resolved is None else resolved[0].layer
-        if resolved is not None and (
-            not self._requires_policy
-            or layer is not None
-            and layer.interaction.pixel_editable
+        context = self._resolve_context(identity)
+        layer = None if context is None else context.layer
+        if (
+            context is not None
+            and self._stroke_operation.supports(context)
+            and (
+                not self._requires_policy
+                or layer is not None
+                and layer.interaction.pixel_editable
+            )
         ):
-            return identity
+            return context
         self._cancel_open_transaction()
         self._identity = None
-        self._active_owner = None
         self._requires_policy = True
         self._publish()
         return None
@@ -546,12 +445,17 @@ class PaintingCoordinator:
         """Cancel through the captured transaction even after scene invalidation."""
         if not self._stroke_open:
             return False
-        owner = self._active_owner
+        operation = self._transaction_operation
         target = self._stroke_context
         self._stroke_open = False
         self._stroke_context = None
+        self._transaction_operation = None
         try:
-            return False if owner is None or target is None else owner.cancel(target)
+            return (
+                False
+                if operation is None or target is None
+                else operation.cancel(target)
+            )
         finally:
             self._release_stroke_resource()
 
@@ -566,16 +470,17 @@ class PaintingCoordinator:
         self,
     ) -> tuple[PaintTargetContext, PaintTargetOwner] | None:
         """Resolve the selected identity and retain its current owner."""
-        identity = self._resolved_identity()
-        if identity is None:
+        context = self._validated_context()
+        if context is None:
             return None
-        return self._resolve(identity)
+        owner = self.registry.owner_for(context)
+        return None if owner is None else (context, owner)
 
-    def _resolve(
+    def _resolve_context(
         self,
         identity: PaintTargetIdentity,
-    ) -> tuple[PaintTargetContext, PaintTargetOwner] | None:
-        """Resolve one exact active-scene destination and its sole owner."""
+    ) -> PaintTargetContext | None:
+        """Resolve one exact active-scene destination without choosing an operation."""
         scene = self._scenes.active_scene()
         if scene is None or scene.scene_id != identity.scene_id:
             return None
@@ -591,9 +496,7 @@ class PaintingCoordinator:
             )
             if layer is None:
                 return None
-        target = PaintTargetContext(identity, scene, layer)
-        owner = self.registry.owner_for(target)
-        return None if owner is None else (target, owner)
+        return PaintTargetContext(identity, scene, layer)
 
     def _publish(self) -> None:
         """Notify presentation after active target identity changes."""

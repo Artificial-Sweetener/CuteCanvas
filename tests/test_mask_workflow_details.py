@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 from cutecanvas import LayerPolicy
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QImage
 
 pytest_plugins = ("tests.test_mask_workflows",)
@@ -36,16 +36,14 @@ def _masks(qpane):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_mask_workflow_resolve_image_id_prefers_navigation(qpane_with_mask):
-    """Navigation events should provide stable image ids for fallbacks."""
-    qpane, _, image_id = qpane_with_mask
+def test_mask_workflow_resolves_current_composition_fallback(qpane_with_mask):
+    """Mask operations should resolve the current document when no id is supplied."""
+    qpane, _, composition_id = qpane_with_mask
     masks = _masks(qpane)
     target_id = uuid.uuid4()
-    masks._last_navigation_event = SimpleNamespace(target_id=target_id)
-    assert masks._resolve_image_id(None) == target_id
-    masks._last_navigation_event = SimpleNamespace(target_id="bad")
-    assert masks._resolve_image_id(None) == image_id
-    assert masks._resolve_image_id(None, use_fallback=False) is None
+    assert masks._resolve_composition_id(target_id) == target_id
+    assert masks._resolve_composition_id(None) == composition_id
+    assert masks._resolve_composition_id(None, use_fallback=False) is None
 
 
 @pytest.mark.usefixtures("qapp")
@@ -57,24 +55,26 @@ def test_mask_info_normalizes_label_and_reads_layer_opacity(qpane_with_mask):
     mask_id = manager.create_mask(QImage(4, 4, QImage.Format_Grayscale8))
     layer = manager.get_layer(mask_id)
     assert layer is not None
-    assert service.layers.attach(
+    assert service.layers.attach_to_composition(
         mask_id, image_id, color=QColor(255, 0, 0), opacity=0.5
     )
     instance = service.layer_instance_for_mask(mask_id)
     assert instance is not None
     composition_id = qpane.currentCompositionID()
     assert composition_id is not None
-    assert not service.layers.store.update_label(
-        composition_id, instance.layer_id, "   "
-    )
+    assert service.layers.store.update_label(composition_id, instance.layer_id, "   ")
     info = masks.maskInfo(mask_id)
     assert info is not None
     assert info.label is None
     assert info.opacity == 0.5
-    assert image_id in info.image_ids
+    assert image_id in info.composition_ids
     assert info.scene_id is not None
     assert info.layer_id == instance.layer_id
-    assert info.interaction == LayerPolicy()
+    assert info.interaction == LayerPolicy(
+        selectable=True,
+        movable=True,
+        pixel_editable=True,
+    )
     movable = LayerPolicy(selectable=True, movable=True)
     assert qpane.setLayerInteractionPolicy(
         info.scene_id,
@@ -119,7 +119,9 @@ def test_moved_mask_uses_layer_transform_for_edit_coordinates(
     mask_image.fill(255)
     mask_id = manager.create_mask(mask_image)
     manager.set_mask_image(mask_id, mask_image)
-    assert service.layers.attach(mask_id, image_id, color=QColor(255, 0, 0))
+    assert service.layers.attach_to_composition(
+        mask_id, image_id, color=QColor(255, 0, 0)
+    )
     assert service.controller.setActiveMaskID(mask_id)
     info = _masks(qpane).maskInfo(mask_id)
     assert info is not None
@@ -189,24 +191,25 @@ def test_moved_mask_uses_layer_transform_for_edit_coordinates(
 
 
 @pytest.mark.usefixtures("qapp")
-def test_mask_ids_and_listing_filter_by_image(qpane_with_mask):
-    """Mask listings should only include masks associated with the target image."""
+def test_mask_ids_and_listing_filter_by_composition(qpane_with_mask):
+    """Mask listings should only include masks associated with the target document."""
     qpane, manager, image_id = qpane_with_mask
     masks = _masks(qpane)
     service = qpane.mask_service
-    other_id = uuid.uuid4()
-    other_image = QImage(4, 4, QImage.Format_ARGB32_Premultiplied)
-    other_image.fill(Qt.transparent)
-    qpane.catalog().addImage(other_id, other_image, None)
+    other_id = qpane.createComposition(QRectF(0.0, 0.0, 4.0, 4.0))
     first = manager.create_mask(QImage(4, 4, QImage.Format_Grayscale8))
     second = manager.create_mask(QImage(4, 4, QImage.Format_Grayscale8))
     first_layer = manager.get_layer(first)
     second_layer = manager.get_layer(second)
     assert first_layer is not None and second_layer is not None
-    assert service.layers.attach(first, image_id, color=QColor(255, 0, 0))
-    assert service.layers.attach(second, other_id, color=QColor(255, 0, 0))
-    assert masks.maskIDsForImage(image_id) == [first]
-    listed = masks.listMasksForImage(image_id)
+    assert service.layers.attach_to_composition(
+        first, image_id, color=QColor(255, 0, 0)
+    )
+    assert service.layers.attach_to_composition(
+        second, other_id, color=QColor(255, 0, 0)
+    )
+    assert masks.maskIDsForComposition(image_id) == [first]
+    listed = masks.listMasksForComposition(image_id)
     assert [info.mask_id for info in listed] == [first]
 
 

@@ -18,13 +18,12 @@
 
 from __future__ import annotations
 
+from .contracts import ComparisonChange, ComparisonChangeKind
 from .interaction import CompareDividerInteraction
-from .service import CompareService, ComparisonChange, ComparisonChangeKind
 from .viewer_comparison import ViewerComparison
 
 __all__ = [
     "CompareDividerInteraction",
-    "CompareService",
     "ComparisonChange",
     "ComparisonChangeKind",
     "ViewerComparison",

@@ -36,9 +36,9 @@ from cutecanvas.scene.pixel_fragments import (
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.types import RasterExtentPolicy
 
+from ..resources import ProjectResourceReference
 from .mask import MaskLayer
 from .pixel_translation import MaskPixelTranslator
-from .source_reference import MaskAssetReference
 
 
 class MaskPixelAssetLookup(Protocol):
@@ -46,6 +46,10 @@ class MaskPixelAssetLookup(Protocol):
 
     def get_layer(self, mask_id: uuid.UUID) -> MaskLayer | None:
         """Return one mask asset when it exists."""
+        ...
+
+    def touch(self, mask_id: uuid.UUID) -> None:
+        """Advance the shared project-resource revision after direct mutation."""
         ...
 
 
@@ -100,12 +104,20 @@ class MaskLayerPixelMutationOwner:
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
         """Return whether ``layer`` references a mask asset owned here."""
-        return isinstance(layer.source, MaskAssetReference)
+        return (
+            isinstance(layer.source, ProjectResourceReference)
+            and self._assets.get_layer(layer.source.resource_id) is not None
+        )
 
     def extent_policy(self, layer: LayerDescriptor) -> RasterExtentPolicy | None:
         """Return the mask surface's authoritative extent policy."""
         mask = self._mask_layer(layer)
         return None if mask is None else mask.coverage.raster.extent_policy
+
+    def revision_token(self, layer: LayerDescriptor) -> object | None:
+        """Return the synchronized coverage-surface revision tuple."""
+        mask = self._mask_layer(layer)
+        return None if mask is None else mask.coverage.raster.revisions()
 
     def content_coverage(
         self,
@@ -181,6 +193,7 @@ class MaskLayerPixelMutationOwner:
             np.copyto(destination, replacement)
 
         mask.coverage.raster.mutate_storage_region(storage, mutate)
+        self._assets.touch(mask.mask_id)
         self._changed(mask.mask_id, bounds)
         return True
 
@@ -203,6 +216,7 @@ class MaskLayerPixelMutationOwner:
             np.copyto(destination, pixels)
 
         mask.coverage.raster.mutate_storage_region(storage, mutate)
+        self._assets.touch(mask.mask_id)
         self._changed(mask.mask_id, bounds)
         return True
 
@@ -348,6 +362,7 @@ class MaskLayerPixelMutationOwner:
         transition: RasterPixelTransition,
     ) -> None:
         """Publish pixel and optional structure changes exactly once."""
+        self._assets.touch(mask_id)
         self._changed(mask_id, transition.patch_bounds)
         if (
             transition.before_surface_bounds != transition.after_surface_bounds
@@ -360,8 +375,8 @@ class MaskLayerPixelMutationOwner:
         source = layer.source
         return (
             None
-            if not isinstance(source, MaskAssetReference)
-            else self._assets.get_layer(source.mask_id)
+            if not isinstance(source, ProjectResourceReference)
+            else self._assets.get_layer(source.resource_id)
         )
 
 

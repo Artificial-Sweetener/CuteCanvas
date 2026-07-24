@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -90,6 +92,60 @@ def test_load_predictor_forwards_device(monkeypatch):
     assert isinstance(predictor, DummyPredictor)
     assert predictor.model == "model:cuda:0"
     assert load_calls == [("cuda:0", checkpoint_path)]
+
+
+def test_predictors_sharing_cached_model_serialize_image_encoding(
+    monkeypatch, tmp_path
+) -> None:
+    """Predictor image encoding must never overlap on one cached model."""
+    checkpoint_path = tmp_path / "shared-model.pt"
+    checkpoint_path.write_bytes(b"checkpoint")
+    active = 0
+    maximum_active = 0
+    state_lock = threading.Lock()
+    start = threading.Event()
+
+    class DummyPredictor:
+        def __init__(self, model):
+            self.model = model
+
+        def set_image(self, _image: np.ndarray) -> None:
+            nonlocal active, maximum_active
+            with state_lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(0.05)
+            with state_lock:
+                active -= 1
+
+    monkeypatch.setattr(
+        service,
+        "_import_dependencies",
+        lambda: (object(), DummyPredictor, object()),
+    )
+    monkeypatch.setattr(service, "_load_model", lambda **_kwargs: object())
+    first = service.load_predictor(checkpoint_path, device="cpu")
+    second = service.load_predictor(checkpoint_path, device="cpu")
+
+    def prepare(predictor: DummyPredictor) -> None:
+        start.wait()
+        service.set_predictor_image(
+            predictor,
+            np.zeros((8, 8, 3), dtype=np.uint8),
+        )
+
+    threads = [
+        threading.Thread(target=prepare, args=(predictor,))
+        for predictor in (first, second)
+    ]
+    for thread in threads:
+        thread.start()
+    start.set()
+    for thread in threads:
+        thread.join(timeout=2.0)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert maximum_active == 1
 
 
 def test_load_predictor_rejects_missing_checkpoint_path(monkeypatch):

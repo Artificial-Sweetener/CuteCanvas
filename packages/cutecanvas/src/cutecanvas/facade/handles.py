@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Typed document and layer handles over CuteCanvas's authoritative facade."""
+"""Typed composition and layer handles over CuteCanvas's authoritative facade."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Protocol
 
-from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QTransform
 from qpane import LayerPresentationEffect, LayerPresentationStyle
 
@@ -40,11 +40,15 @@ class EditorHandleHost(Protocol):
     """Describe existing facade operations consumed by typed editor handles."""
 
     def getCompositionSnapshot(self) -> CompositionSnapshot:
-        """Return detached document browser state."""
+        """Return detached composition browser state."""
         ...
 
     def currentScene(self) -> SceneSnapshot | None:
         """Return the active scene snapshot."""
+        ...
+
+    def currentCompositionID(self) -> uuid.UUID | None:
+        """Return the active composition identity."""
         ...
 
     def createComposition(
@@ -55,15 +59,51 @@ class EditorHandleHost(Protocol):
         policy: CompositionPolicy | None = None,
         fit_view: bool = True,
     ) -> uuid.UUID:
-        """Create one independent document."""
+        """Create one independent composition."""
         ...
 
     def openComposition(self, composition_id: uuid.UUID) -> None:
-        """Open one existing document."""
+        """Open one existing composition."""
         ...
 
     def removeComposition(self, composition_id: uuid.UUID) -> None:
-        """Remove one document when host policy permits it."""
+        """Remove one composition when host policy permits it."""
+        ...
+
+    def duplicateLayer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        """Duplicate one layer instance while sharing its resource."""
+        ...
+
+    def forkLayerResource(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        """Redirect one layer to an independent resource copy."""
+        ...
+
+    def rasterizeLayer(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixel_size: QSize | None = None,
+    ) -> uuid.UUID | None:
+        """Convert one renderable layer resource into editable pixels."""
+        ...
+
+    def placeComposition(
+        self,
+        composition_id: uuid.UUID,
+        *,
+        placement: QRectF | None = None,
+        label: str | None = None,
+        interaction: LayerPolicy | None = None,
+    ) -> uuid.UUID | None:
+        """Place one composition resource in the active composition."""
         ...
 
     def setCompositionPolicy(
@@ -71,7 +111,7 @@ class EditorHandleHost(Protocol):
         composition_id: uuid.UUID,
         policy: CompositionPolicy,
     ) -> bool:
-        """Replace host structural policy for one document."""
+        """Replace host structural policy for one composition."""
         ...
 
     def setSelectedLayer(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
@@ -184,34 +224,34 @@ class EditorHandleHost(Protocol):
         ...
 
 
-class DocumentCollection:
-    """Resolve typed document handles without retaining parallel document state."""
+class CompositionCollection:
+    """Resolve composition handles without retaining parallel content state."""
 
     def __init__(self, host: EditorHandleHost) -> None:
         """Bind the authoritative host facade."""
         self._host = host
 
-    def __iter__(self) -> Iterator[DocumentHandle]:
+    def __iter__(self) -> Iterator[CompositionHandle]:
         """Iterate handles in browser order from one detached snapshot."""
         snapshot = self._host.getCompositionSnapshot()
-        return iter(DocumentHandle(self._host, value) for value in snapshot.order)
+        return iter(CompositionHandle(self._host, value) for value in snapshot.order)
 
     def __len__(self) -> int:
-        """Return the current document count."""
+        """Return the current composition count."""
         return len(self._host.getCompositionSnapshot().order)
 
     @property
-    def current(self) -> DocumentHandle | None:
-        """Return the active document handle, if any."""
+    def current(self) -> CompositionHandle | None:
+        """Return the active composition handle, if any."""
         value = self._host.getCompositionSnapshot().current_composition_id
-        return None if value is None else DocumentHandle(self._host, value)
+        return None if value is None else CompositionHandle(self._host, value)
 
-    def get(self, document_id: uuid.UUID) -> DocumentHandle | None:
-        """Return a handle only when ``document_id`` currently exists."""
+    def get(self, composition_id: uuid.UUID) -> CompositionHandle | None:
+        """Return a handle only when ``composition_id`` currently exists."""
         snapshot = self._host.getCompositionSnapshot()
         return (
-            DocumentHandle(self._host, document_id)
-            if document_id in snapshot.compositions
+            CompositionHandle(self._host, composition_id)
+            if composition_id in snapshot.compositions
             else None
         )
 
@@ -222,83 +262,114 @@ class DocumentCollection:
         title: str = "Untitled",
         policy: CompositionPolicy | None = None,
         fit_view: bool = True,
-    ) -> DocumentHandle:
-        """Create, activate, and return one independent document handle."""
-        document_id = self._host.createComposition(
+    ) -> CompositionHandle:
+        """Create, activate, and return one independent composition handle."""
+        composition_id = self._host.createComposition(
             bounds,
             title=title,
             policy=policy,
             fit_view=fit_view,
         )
-        return DocumentHandle(self._host, document_id)
+        return CompositionHandle(self._host, composition_id)
 
 
-class DocumentHandle:
-    """Identify one document while resolving all state from its sole owner."""
+class CompositionHandle:
+    """Identify one composition while resolving all state from its sole owner."""
 
-    def __init__(self, host: EditorHandleHost, document_id: uuid.UUID) -> None:
-        """Bind stable document identity without caching mutable state."""
+    def __init__(self, host: EditorHandleHost, composition_id: uuid.UUID) -> None:
+        """Bind stable composition identity without caching mutable state."""
         self._host = host
-        self._document_id = document_id
+        self._composition_id = composition_id
 
     @property
     def id(self) -> uuid.UUID:
-        """Return stable document identity."""
-        return self._document_id
+        """Return stable composition identity."""
+        return self._composition_id
 
     @property
     def state(self) -> CompositionEntry:
-        """Return the latest detached document state or fail if it was removed."""
-        entry = self._host.getCompositionSnapshot().compositions.get(self._document_id)
+        """Return current detached composition state or fail after removal."""
+        entry = self._host.getCompositionSnapshot().compositions.get(
+            self._composition_id
+        )
         if entry is None:
-            raise LookupError(f"document {self._document_id} no longer exists")
+            raise LookupError(f"composition {self._composition_id} no longer exists")
         return entry
 
     @property
     def is_open(self) -> bool:
-        """Return whether this document owns the active scene."""
+        """Return whether this composition owns the active scene."""
         return (
             self._host.getCompositionSnapshot().current_composition_id
-            == self._document_id
+            == self._composition_id
         )
 
     @property
     def layers(self) -> tuple[LayerHandle, ...]:
         """Return typed layer handles in bottom-to-top stack order."""
         return tuple(
-            LayerHandle(self._host, self._document_id, layer.layer_id)
+            LayerHandle(self._host, self._composition_id, layer.layer_id)
             for layer in self.state.layers
         )
 
     def open(self) -> None:
-        """Make this document active without changing its contents."""
-        self._host.openComposition(self._document_id)
+        """Make this composition active without changing its contents."""
+        self._host.openComposition(self._composition_id)
 
     def remove(self) -> None:
-        """Remove this document when its host policy permits removal."""
-        self._host.removeComposition(self._document_id)
+        """Remove this composition when its host policy permits removal."""
+        self._host.removeComposition(self._composition_id)
 
     def set_policy(self, policy: CompositionPolicy) -> bool:
-        """Replace host structural policy for this document."""
-        return self._host.setCompositionPolicy(self._document_id, policy)
+        """Replace host structural policy for this composition."""
+        return self._host.setCompositionPolicy(self._composition_id, policy)
 
     def layer(self, layer_id: uuid.UUID) -> LayerHandle | None:
         """Return a child handle only when the layer currently exists."""
         return next((layer for layer in self.layers if layer.id == layer_id), None)
 
+    def place_composition(
+        self,
+        source: CompositionHandle,
+        *,
+        placement: QRectF | None = None,
+        label: str | None = None,
+        interaction: LayerPolicy | None = None,
+    ) -> LayerHandle | None:
+        """Place ``source`` as a live layer in this open composition."""
+        if not isinstance(source, CompositionHandle):
+            raise TypeError("source must be a CompositionHandle")
+        if source._host is not self._host:
+            raise ValueError("source must belong to the same CuteCanvas")
+        if not self.is_open:
+            raise RuntimeError(
+                "open the destination composition before placing content"
+            )
+        layer_id = self._host.placeComposition(
+            source.id,
+            placement=placement,
+            label=label,
+            interaction=interaction,
+        )
+        return (
+            None
+            if layer_id is None
+            else LayerHandle(self._host, self._composition_id, layer_id)
+        )
+
 
 class LayerHandle:
-    """Identify one document layer and route edits through the active scene."""
+    """Identify one composition layer and route edits through the active scene."""
 
     def __init__(
         self,
         host: EditorHandleHost,
-        document_id: uuid.UUID,
+        composition_id: uuid.UUID,
         layer_id: uuid.UUID,
     ) -> None:
-        """Bind stable document and layer identities without caching state."""
+        """Bind stable composition and layer identities without caching state."""
         self._host = host
-        self._document_id = document_id
+        self._composition_id = composition_id
         self._layer_id = layer_id
 
     @property
@@ -307,9 +378,14 @@ class LayerHandle:
         return self._layer_id
 
     @property
-    def document_id(self) -> uuid.UUID:
-        """Return the document containing this layer instance."""
-        return self._document_id
+    def composition_id(self) -> uuid.UUID:
+        """Return the composition containing this layer instance."""
+        return self._composition_id
+
+    @property
+    def resource_id(self) -> uuid.UUID:
+        """Return the project resource referenced by this layer."""
+        return self.state.source_id
 
     @property
     def scene_id(self) -> uuid.UUID:
@@ -319,9 +395,9 @@ class LayerHandle:
     @property
     def state(self) -> CompositionLayerEntry:
         """Return the latest detached layer state or fail after removal."""
-        document = DocumentHandle(self._host, self._document_id).state
+        composition = CompositionHandle(self._host, self._composition_id).state
         entry = next(
-            (layer for layer in document.layers if layer.layer_id == self._layer_id),
+            (layer for layer in composition.layers if layer.layer_id == self._layer_id),
             None,
         )
         if entry is None:
@@ -329,7 +405,7 @@ class LayerHandle:
         return entry
 
     def select(self) -> bool:
-        """Select this layer in its open document."""
+        """Select this layer in its open composition."""
         return self._host.setSelectedLayer(self._scene_id(), self._layer_id)
 
     def set_transform(self, transform: QTransform) -> bool:
@@ -341,7 +417,7 @@ class LayerHandle:
         )
 
     def set_visible(self, visible: bool) -> bool:
-        """Set whether this layer renders and hit-tests in its document."""
+        """Set whether this layer renders and hit-tests in its composition."""
         return self._host.setLayerVisible(
             self._scene_id(),
             self._layer_id,
@@ -362,7 +438,7 @@ class LayerHandle:
         horizontally: bool = True,
         vertically: bool = True,
     ) -> bool:
-        """Center this layer on selected axes of its document canvas."""
+        """Center this layer on selected axes of its composition canvas."""
         return self._host.centerLayer(
             self._scene_id(),
             self._layer_id,
@@ -371,7 +447,7 @@ class LayerHandle:
         )
 
     def move_to(self, index: int) -> bool:
-        """Move this layer to ``index`` in the open document stack."""
+        """Move this layer to ``index`` in the open composition stack."""
         return self._host.setLayerIndex(self._scene_id(), self._layer_id, index)
 
     def set_policy(self, policy: LayerPolicy) -> bool:
@@ -391,11 +467,32 @@ class LayerHandle:
         )
 
     def remove(self) -> bool:
-        """Remove this layer from its open document as one history edit."""
+        """Remove this layer from its open composition as one history edit."""
         return self._host.removeLayer(self._scene_id(), self._layer_id)
 
+    def duplicate(self) -> LayerHandle | None:
+        """Create another layer instance sharing this layer's resource."""
+        layer_id = self._host.duplicateLayer(self._scene_id(), self._layer_id)
+        return (
+            None
+            if layer_id is None
+            else LayerHandle(self._host, self._composition_id, layer_id)
+        )
+
+    def fork_resource(self) -> uuid.UUID | None:
+        """Redirect this layer to an independent copy of its resource."""
+        return self._host.forkLayerResource(self._scene_id(), self._layer_id)
+
+    def rasterize(self, pixel_size: QSize | None = None) -> uuid.UUID | None:
+        """Convert this layer's renderable resource into editable pixels."""
+        return self._host.rasterizeLayer(
+            self._scene_id(),
+            self._layer_id,
+            pixel_size,
+        )
+
     def add_effect(self, style: LayerPresentationStyle) -> LayerEffectHandle:
-        """Add a transient visual treatment without changing document state."""
+        """Add a transient visual treatment without changing composition content."""
         effect_id = self._host.addLayerPresentationEffect(
             self._scene_id(),
             self._layer_id,
@@ -404,11 +501,10 @@ class LayerHandle:
         return LayerEffectHandle(self._host, effect_id)
 
     def _scene_id(self) -> uuid.UUID:
-        """Return the active scene ID and reject edits to an inactive document."""
-        scene = self._host.currentScene()
-        if scene is None or scene.composition_id != self._document_id:
-            raise RuntimeError("open the layer's document before editing it")
-        return scene.scene_id
+        """Return the active scene ID and reject edits to an inactive composition."""
+        if self._host.currentCompositionID() != self._composition_id:
+            raise RuntimeError("open the layer's composition before editing it")
+        return self._composition_id
 
 
 class LayerEffectHandle:

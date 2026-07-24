@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from qpane.sdk.scene import SceneDescriptor, SceneLayerHitTestResult
+from qpane.sdk.scene import LayerDescriptor, SceneDescriptor, SceneLayerHitTestResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +71,16 @@ class SceneLayerSelectionController:
         self._selection = None
         self._publish()
         return True
+
+    def resolve(self, scene: SceneDescriptor | None) -> LayerDescriptor | None:
+        """Return the selected descriptor when it belongs to ``scene``."""
+        selection = self._selection
+        if scene is None or selection is None or selection.scene_id != scene.scene_id:
+            return None
+        return next(
+            (layer for layer in scene.layers if layer.layer_id == selection.layer_id),
+            None,
+        )
 
     def validate(self, scene: SceneDescriptor | None) -> bool:
         """Clear selection when its scene or layer is no longer resolved."""

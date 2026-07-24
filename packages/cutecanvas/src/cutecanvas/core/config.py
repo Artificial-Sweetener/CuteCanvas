@@ -63,7 +63,7 @@ _EDITOR_CONCURRENCY: dict[str, Any] = {
         "sam": 5,
     },
     "device_limits": {
-        "cpu": {"sam": 2},
+        "cpu": {"sam": 1},
         "cuda": {"sam": 1},
     },
 }
@@ -115,6 +115,7 @@ class Config(RenderConfig):
         defaults = {
             key: deepcopy(value)
             for key, value in RenderConfig.config_defaults().items()
+            if key != "placeholder"
         }
         defaults["concurrency"] = _combined_concurrency_defaults()
         defaults["cache"] = _editor_cache_defaults()
@@ -126,4 +127,13 @@ class Config(RenderConfig):
     @classmethod
     def config_keys(cls) -> tuple[str, ...]:
         """Return renderer fields followed by editor-owned fields."""
-        return (*RenderConfig.config_keys(), *_EDITOR_DEFAULTS)
+        return (
+            *(key for key in RenderConfig.config_keys() if key != "placeholder"),
+            *_EDITOR_DEFAULTS,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the editor-visible configuration as primitive values."""
+        data = RenderConfig.as_dict(self)
+        data.pop("placeholder", None)
+        return data

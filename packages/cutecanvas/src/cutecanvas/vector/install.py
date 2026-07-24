@@ -21,9 +21,10 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRect, QRectF
+from PySide6.QtCore import QRect, QRectF
 from qpane.sdk.cache import CacheRegistry
 from qpane.sdk.concurrency import TaskExecutorProtocol
+from qpane.sdk.rendering import SceneCoordinateSystem
 from qpane.sdk.scene import (
     LayerEffectRenderRegistry,
     LayerSourceCapabilities,
@@ -33,6 +34,10 @@ from qpane.sdk.vector import SemanticTextLayoutCache
 
 from ..composition import CompositionService
 from ..raster.assets import EditableRasterAssetStore
+from ..resources import ProjectResourceKind, ProjectResourceStore
+from ..resources.descriptor_factory import ProjectResourceLayerDescriptorFactory
+from ..resources.lifecycle import ProjectResourceLifecycleOwner
+from ..resources.source_capabilities import ProjectResourceSourceCapabilities
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
@@ -40,6 +45,7 @@ from ..scene.source_capabilities import EditorSourceCapabilities
 from ..selection import PixelSelectionService
 from .conversion import VectorConversionCompletion, VectorConversionService
 from .descriptor_factory import VectorLayerDescriptorFactory
+from .document_core import VectorDocumentCore
 from .editing import VectorEditService
 from .effects import VectorMaskController, VectorMaskEffect, VectorMaskRenderOwner
 from .interaction import VectorInteractionController
@@ -47,10 +53,8 @@ from .layers import VectorLayerController, VectorSceneMutationOwner
 from .mask_cache import VectorMaskPathCache
 from .node_edit import VectorNodeEditController
 from .projection import VectorDocumentProjection
-from .resource_lifecycle import VectorResourceLifecycleOwner
 from .selection import VectorObjectSelectionController
 from .source_capabilities import VectorSourceCapabilities
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 from .targets import VectorAuthoringTargetResolver
 from .text_edit import VectorTextEditController
@@ -81,10 +85,16 @@ class VectorDomainInstaller:
         self,
         *,
         compositions: CompositionService,
+        document: VectorDocumentCore,
+        resources: ProjectResourceStore,
+        resource_descriptors: ProjectResourceLayerDescriptorFactory,
+        resource_capabilities: ProjectResourceSourceCapabilities,
+        resource_lifecycle: ProjectResourceLifecycleOwner,
         layer_assembler: CompositionLayerSceneAssembler,
         source_capabilities: LayerSourceCapabilities,
         editor_source_capabilities: EditorSourceCapabilities,
         scene_mutations: SceneMutationCoordinator,
+        current_composition_id: Callable[[], uuid.UUID | None],
         current_history_scope_id: Callable[[], uuid.UUID | None],
         changed: Callable[[QRect | QRectF | None], None],
         selection_changed: Callable[[], None],
@@ -93,14 +103,7 @@ class VectorDomainInstaller:
         options_changed: Callable[[], None],
         layer_selection: SceneLayerSelectionController,
         current_scene: Callable[[], SceneDescriptor | None],
-        panel_to_source: Callable[
-            [uuid.UUID, uuid.UUID, QPointF],
-            QPointF | None,
-        ],
-        source_to_panel: Callable[
-            [uuid.UUID, uuid.UUID, QPointF],
-            QPointF | None,
-        ],
+        coordinates: SceneCoordinateSystem,
         raster_assets: EditableRasterAssetStore,
         pixel_selection: PixelSelectionService,
         executor: TaskExecutorProtocol,
@@ -109,66 +112,42 @@ class VectorDomainInstaller:
         cache_registry: CacheRegistry | None,
     ) -> VectorDomainComponents:
         """Create vector owners and register each focused external capability."""
-        assets = VectorAssetStore()
-        projection = VectorDocumentProjection(assets)
-        text_layouts = SemanticTextLayoutCache()
+        assets = document.assets
+        projection = document.projection
+        text_layouts = document.text_layouts
         if cache_registry is not None:
             cache_registry.attach_text_layout_cache(text_layouts)
-        compositions.resource_lifetime.register_owner(
-            VectorResourceLifecycleOwner(assets)
-        )
         layers = VectorLayerController(
             assets=assets,
             layers=compositions.layers,
             layer_edits=compositions.layer_edits,
-            current_composition_id=compositions.current_composition_id,
+            current_composition_id=current_composition_id,
             current_history_scope_id=current_history_scope_id,
         )
-        layer_assembler.register_factory(VectorLayerDescriptorFactory(projection))
+        resource_descriptors.register(
+            ProjectResourceKind.VECTOR,
+            VectorLayerDescriptorFactory(projection),
+        )
         capabilities = VectorSourceCapabilities(assets, projection, text_layouts)
-        source_capabilities.metadata.register(
-            VectorDocumentReference,
-            capabilities,
-        )
-        source_capabilities.vectors.register(
-            VectorDocumentReference,
-            capabilities,
-        )
-        source_capabilities.hit_tests.register(
-            VectorDocumentReference,
-            capabilities,
-        )
-        editor_source_capabilities.content_bounds.register(
-            VectorDocumentReference,
-            capabilities,
-        )
-        editor_source_capabilities.storage_bounds.register(
-            VectorDocumentReference,
-            capabilities,
-        )
-        editor_source_capabilities.authored_bounds.register(
-            VectorDocumentReference,
+        resource_capabilities.register(
+            ProjectResourceKind.VECTOR,
             capabilities,
         )
         scene_mutations.register_owner(
             VectorSceneMutationOwner(
+                assets,
                 compositions.layers,
-                compositions.current_composition_id,
+                current_composition_id,
             )
         )
-        edits = VectorEditService(
-            assets=assets,
-            edits=compositions.edit_controller,
-            changed=lambda _vector_id: changed(None),
-        )
+        edits = document.edits
         selection = VectorObjectSelectionController(selection_changed)
         targets = VectorAuthoringTargetResolver(
             assets=assets,
             layers=compositions.layers,
-            current_composition_id=compositions.current_composition_id,
+            current_composition_id=current_composition_id,
             current_scene=current_scene,
-            panel_to_source=panel_to_source,
-            source_to_panel=source_to_panel,
+            coordinates=coordinates,
         )
         nodes = VectorNodeEditController(
             assets=assets,
@@ -198,7 +177,6 @@ class VectorDomainInstaller:
             layer_selection=layer_selection,
             object_selection=selection,
             current_scene=current_scene,
-            panel_to_source=panel_to_source,
             options_changed=options_changed,
             targets=targets,
         )
@@ -225,11 +203,7 @@ class VectorDomainInstaller:
             VectorMaskEffect,
             VectorMaskRenderOwner(projection, mask_paths),
         )
-        masks = VectorMaskController(
-            assets=assets,
-            layers=compositions.layers,
-            layer_edits=compositions.layer_edits,
-        )
+        masks = document.masks
         return VectorDomainComponents(
             assets=assets,
             layers=layers,

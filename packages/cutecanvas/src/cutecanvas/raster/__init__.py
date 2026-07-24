@@ -16,6 +16,5 @@
 """Editable raster assets and layer-domain adapters."""
 
 from .assets import EditableRasterAssetStore
-from .source_reference import EditableRasterReference
 
-__all__ = ["EditableRasterAssetStore", "EditableRasterReference"]
+__all__ = ["EditableRasterAssetStore"]

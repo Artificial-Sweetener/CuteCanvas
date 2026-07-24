@@ -167,6 +167,10 @@ class CoverageAsset:
         revision = self.revision
         if revision == self._bounds_revision:
             return self._content_bounds
+        if not self.retained.items:
+            self._bounds_revision = revision
+            self._content_bounds = self.raster.content_bounds()
+            return self._content_bounds
         candidate = self.candidate_bounds()
         occupied: list[RasterBounds] = []
         if candidate is not None:

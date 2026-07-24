@@ -52,13 +52,13 @@ class LayerApiMixin:
         resolved_scene_id = self._resolve_public_scene_id(scene_id)
         service = self.compositionService()
         instance = service.layers.layer(resolved_scene_id, layer_id)
-        if instance is None or not service.layer_edits.replace_instance(
-            resolved_scene_id,
-            replace(instance, visible=visible),
-        ):
-            return False
-        self._publish_scene_layer_change()
-        return True
+        return bool(
+            instance is not None
+            and service.layer_edits.replace_instance(
+                resolved_scene_id,
+                replace(instance, visible=visible),
+            )
+        )
 
     def translateLayer(
         self,
@@ -79,9 +79,12 @@ class LayerApiMixin:
         _validate_layer_ids(scene_id, layer_id)
         if not isinstance(offset, QPointF):
             raise TypeError("offset must be a QPointF")
-        transform = self.layerTransform(scene_id, layer_id)
-        if transform is None:
+        if self.currentCompositionID() != scene_id:
             return False
+        instance = self.compositionService().layers.layer(scene_id, layer_id)
+        if instance is None:
+            return False
+        transform = instance.transform.to_qtransform()
         translated = transform * QTransform.fromTranslate(offset.x(), offset.y())
         return self.setLayerTransform(scene_id, layer_id, translated)
 
@@ -109,19 +112,44 @@ class LayerApiMixin:
             raise TypeError("centering axis flags must be bool values")
         if not horizontally and not vertically:
             return False
-        scene = self.currentScene()
-        transform = self.layerTransform(scene_id, layer_id)
-        local_bounds = self.layerLocalBounds(scene_id, layer_id)
-        if scene is None or transform is None or local_bounds is None:
+        if self.currentCompositionID() != scene_id:
             return False
+        service = self.compositionService()
+        try:
+            record = service.record(scene_id)
+        except KeyError:
+            return False
+        instance = service.layers.layer(scene_id, layer_id)
+        active_scene = self.sceneMutationCoordinator().active_scene()
+        layer = (
+            None
+            if active_scene is None or active_scene.scene_id != scene_id
+            else next(
+                (
+                    candidate
+                    for candidate in active_scene.layers
+                    if candidate.layer_id == layer_id
+                ),
+                None,
+            )
+        )
+        local_bounds = (
+            None
+            if layer is None
+            else self.layerGeometryResolver().resolved_local_bounds(layer)
+        )
+        if instance is None or local_bounds is None:
+            return False
+        transform = instance.transform.to_qtransform()
         mapped_bounds = transform.mapRect(local_bounds)
-        canvas_center = scene.bounds.center()
+        canvas_center = record.canvas_bounds.center()
         layer_center = mapped_bounds.center()
         offset = QPointF(
             canvas_center.x() - layer_center.x() if horizontally else 0.0,
             canvas_center.y() - layer_center.y() if vertically else 0.0,
         )
-        return self.translateLayer(scene_id, layer_id, offset)
+        translated = transform * QTransform.fromTranslate(offset.x(), offset.y())
+        return self.setLayerTransform(scene_id, layer_id, translated)
 
 
 def _validate_layer_ids(scene_id: uuid.UUID, layer_id: uuid.UUID) -> None:

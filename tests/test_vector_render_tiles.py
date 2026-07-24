@@ -63,9 +63,7 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
             device_pixel_ratio=1.0,
         ).pending
         assert coordinator.pending_count == 3
-        executor.run_category("render_refinement")
-        qapp.processEvents()
-        _settle_refinement(qapp)
+        _run_all_refinement(executor, qapp)
         refinement = coordinator.request(
             source=VectorRenderTileSource(document, (document.revision, 0)),
             source_to_panel=transform,
@@ -140,10 +138,8 @@ def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> N
             source=VectorRenderTileSource(changed, changed.revision),
             **request_args,
         ).pending
-        assert len(executor.cancelled) == 2
-        executor.run_category("render_refinement")
-        qapp.processEvents()
-        _settle_refinement(qapp)
+        assert len(executor.cancelled) == 1
+        _run_all_refinement(executor, qapp)
         refinement = coordinator.request(
             source=VectorRenderTileSource(changed, changed.revision),
             **request_args,
@@ -179,13 +175,14 @@ def test_rejection_and_shutdown_remain_bounded(qapp: QApplication) -> None:
         "panel_rect": QRectF(0.0, 0.0, 256.0, 192.0),
         "device_pixel_ratio": 1.0,
     }
-    assert not coordinator.request(**args).pending
+    assert coordinator.request(**args).pending
+    _run_refinement_turn(executor, qapp)
     assert not coordinator.request(**args).pending
     assert len(executor.rejections) == 1
     coordinator.shutdown()
     executor.drain_all()
     qapp.processEvents()
-    assert ready_count == 0
+    assert ready_count == 1
     assert coordinator.pending_count == 0
 
     disabled = RenderTileWorkCoordinator(
@@ -221,9 +218,7 @@ def test_fallback_is_atomic_and_limited_to_compatible_source_geometry(
             source=VectorRenderTileSource(original, 0),
             **request_args,
         ).pending
-        executor.run_category("render_refinement")
-        qapp.processEvents()
-        _settle_refinement(qapp)
+        _run_all_refinement(executor, qapp)
         exact = coordinator.request(
             source=VectorRenderTileSource(original, 0),
             **request_args,
@@ -284,9 +279,7 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
         assert initial.pending and initial.products is None
         initial_tile_count = coordinator.pending_tile_count
         assert initial_tile_count > 1
-        executor.run_category("render_refinement")
-        qapp.processEvents()
-        _settle_refinement(qapp)
+        _run_all_refinement(executor, qapp)
         assert request_at(0.0).exact
 
         first_exposed = request_at(-520.0)
@@ -300,8 +293,7 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
         assert 0 < coordinator.pending_tile_count < initial_tile_count
         assert not executor.cancelled
 
-        executor.run_category("render_refinement")
-        qapp.processEvents()
+        _run_all_refinement(executor, qapp)
         third_exposed = request_at(-1560.0)
         assert third_exposed.exact
         assert third_exposed.products
@@ -337,8 +329,8 @@ def test_overview_fallback_covers_an_arbitrary_high_zoom_pan(
             panel_rect=panel_rect,
             device_pixel_ratio=1.0,
         ).pending
-        executor.run_category("render_refinement")
-        qapp.processEvents()
+        _run_refinement_turn(executor, qapp)
+        _run_refinement_turn(executor, qapp)
 
         distant = coordinator.request(
             source=source,
@@ -407,8 +399,8 @@ def test_pan_storm_cannot_cancel_whole_source_continuity_work(
         assert coordinator.pending_count == 3
         assert len(executor.cancelled) < 16
 
-        executor.run_category("render_refinement")
-        qapp.processEvents()
+        _run_refinement_turn(executor, qapp)
+        _run_refinement_turn(executor, qapp)
         distant = request_at(-6400.0)
         assert distant.products
         assert not distant.exact
@@ -447,9 +439,7 @@ def test_pan_storm_keeps_one_fallback_density_until_viewport_settles(
 
     try:
         assert request_at(0.0).pending
-        executor.run_category("render_refinement")
-        qapp.processEvents()
-        _settle_refinement(qapp)
+        _run_all_refinement(executor, qapp)
         exact = request_at(0.0)
         assert exact.exact and exact.products
         assert {product.key.scale for product in exact.products} == {4.0}
@@ -503,9 +493,7 @@ def test_partial_previous_view_is_never_presented_as_fallback(
 
     try:
         assert request_at(0.0).pending
-        executor.run_category("render_refinement")
-        qapp.processEvents()
-        _settle_refinement(qapp)
+        _run_all_refinement(executor, qapp)
         assert request_at(0.0).exact
 
         distant = request_at(-6400.0)
@@ -548,6 +536,27 @@ def _settle_refinement(qapp: QApplication) -> None:
     """Cross the production idle boundary before asserting exact promotion."""
     QTest.qWait(100)
     qapp.processEvents()
+
+
+def _run_all_refinement(executor: StubExecutor, qapp: QApplication) -> None:
+    """Run staged continuity and detail jobs through their queued publications."""
+    for _ in range(6):
+        pending = tuple(
+            record
+            for record in executor.pending_tasks()
+            if record.handle.category == "render_refinement"
+        )
+        if not pending:
+            return
+        _run_refinement_turn(executor, qapp)
+    raise AssertionError("render refinement did not settle")
+
+
+def _run_refinement_turn(executor: StubExecutor, qapp: QApplication) -> None:
+    """Run one queued dispatch or worker generation and publish its result."""
+    executor.run_category("render_refinement")
+    qapp.processEvents()
+    _settle_refinement(qapp)
 
 
 def _transparent_image(width: int, height: int) -> QImage:

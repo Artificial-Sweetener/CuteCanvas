@@ -53,16 +53,12 @@ def public_layer_policy(
 
 def internal_document_policy(
     policy: CompositionPolicy,
-    *,
-    remove_if_catalog_resource_missing: bool = False,
 ) -> CompositionDocumentPolicy:
     """Convert validated host document permissions to domain policy."""
     if not isinstance(policy, CompositionPolicy):
         raise TypeError("policy must be CompositionPolicy")
     return CompositionDocumentPolicy(
         removable=bool(policy.removable),
-        comparison_enabled=bool(policy.comparison_enabled),
-        remove_if_catalog_resource_missing=remove_if_catalog_resource_missing,
     )
 
 
@@ -72,5 +68,4 @@ def public_document_policy(
     """Detach host-visible document permissions from domain policy."""
     return CompositionPolicy(
         removable=policy.removable,
-        comparison_enabled=policy.comparison_enabled,
     )

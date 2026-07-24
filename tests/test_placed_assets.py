@@ -18,11 +18,10 @@
 from __future__ import annotations
 
 import time
-import uuid
 from pathlib import Path
 
 from cutecanvas import CuteCanvas, LayerPolicy
-from cutecanvas.placed.source_reference import PlacedAssetReference
+from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 
@@ -69,7 +68,7 @@ def test_embedded_placement_duplicates_source_and_replays_lifecycle(
     assert first_state.mode == "embedded"
     assert first_state.status == "ready"
 
-    second_id = qpane.duplicatePlacedAsset(scene.scene_id, first_id)
+    second_id = qpane.duplicateLayer(scene.scene_id, first_id)
     assert second_id is not None
     updated = qpane.currentScene()
     assert updated is not None
@@ -148,7 +147,7 @@ def test_linked_refresh_is_async_and_failure_retains_last_valid_pixels(
     state = qpane.placedAssetState(scene.scene_id, layer_id)
     assert state is not None
     assert state.mode == "linked"
-    source = PlacedAssetReference(state.asset_id)
+    source = ProjectResourceReference(state.asset_id)
     before = qpane.layerSourceCapabilities().rasters.source_image(source)
     assert before is not None
 
@@ -186,8 +185,7 @@ def test_rejected_async_work_returns_correlatable_terminal_request(
     )
     qpane = CuteCanvas(features=(), task_executor=executor)
     base = _image(QColor("black"))
-    image_id = uuid.uuid4()
-    qpane.setImagesByID(qpane.imageMapFromLists((base,), ids=(image_id,)), image_id)
+    qpane.createCompositionFromImage(base, title="Async rejection")
     completions: list[tuple] = []
     qpane.placedAssetRequestCompleted.connect(
         lambda *values: completions.append(tuple(values))
@@ -202,12 +200,11 @@ def test_rejected_async_work_returns_correlatable_terminal_request(
         assert scene is not None
         layer_id = qpane.placeEmbeddedAsset(_image(QColor("cyan")))
         assert layer_id is not None
-        raster_id = qpane.rasterizePlacedAsset(scene.scene_id, layer_id)
+        raster_id = qpane.rasterizeLayer(scene.scene_id, layer_id)
         assert raster_id is not None
         assert [item[0] for item in completions] == [linked_id, raster_id]
         assert completions[-1][1:4] == (scene.scene_id, layer_id, False)
     finally:
-        qpane.clearImages()
         qpane.deleteLater()
         qapp.processEvents()
 
@@ -263,7 +260,7 @@ def test_rasterize_atomically_swaps_source_and_preserves_display_geometry(
         lambda *values: completions.append(tuple(values))
     )
 
-    request_id = qpane.rasterizePlacedAsset(
+    request_id = qpane.rasterizeLayer(
         scene.scene_id,
         layer_id,
         QSize(24, 16),
@@ -284,7 +281,7 @@ def test_rasterize_atomically_swaps_source_and_preserves_display_geometry(
     placed = next(
         item for item in qpane.currentScene().layers if item.layer_id == layer_id
     )
-    assert placed.source_kind == "placed-asset"
+    assert placed.source_kind == "imported-raster"
     assert placed.placement == QRectF(7.0, 9.0, 30.0, 20.0)
     assert qpane.redoSceneEdit()
     redone = next(

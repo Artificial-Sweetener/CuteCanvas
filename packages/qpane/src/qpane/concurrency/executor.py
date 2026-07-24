@@ -129,6 +129,13 @@ class TaskRejected(RuntimeError):
         self.pending_category = pending_category
 
 
+class _RunnablePoolProtocol(Protocol):
+    """Minimum backend contract consumed by QPane's bounded scheduler."""
+
+    def start(self, runnable: QRunnable, priority: int = 0) -> None:
+        """Schedule one runnable after QPane resolves queue priority."""
+
+
 @runtime_checkable
 class TaskExecutorProtocol(Protocol):
     """Interface required by QPane managers to schedule QRunnables."""
@@ -222,13 +229,13 @@ class _MainThreadInvoker(QObject):
 
 
 class QThreadPoolExecutor(TaskExecutorProtocol):
-    """Executor implementation backed by :class:`QThreadPool`."""
+    """Bounded executor using a Qt thread pool or compatible runnable backend."""
 
     def __init__(
         self,
         policy: ThreadPolicy | None = None,
         *,
-        pool: QThreadPool | None = None,
+        pool: QThreadPool | _RunnablePoolProtocol | None = None,
         name: str | None = None,
     ) -> None:
         """Configure the executor with a concurrency policy and Qt pool.
@@ -236,8 +243,8 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         Args:
             policy: ThreadPolicy describing priorities and limits. Defaults to
                 the host configuration.
-            pool: Optional QThreadPool to wrap; defaults to a dedicated pool
-                rather than the global instance.
+            pool: Optional runnable pool backend; defaults to a dedicated
+                ``QThreadPool`` rather than the global instance.
             name: Optional diagnostics label shown in metrics.
         """
         self._policy = policy or build_thread_policy()
@@ -597,7 +604,13 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
                     self._decrement_active_locked(entry.handle)
             self._pending_condition.notify_all()
             # Active workers continue running; late UI dispatches are rejected.
-        if wait and hasattr(self._pool, "waitForDone") and self._is_pool_available():
+        pool_shutdown = getattr(self._pool, "shutdown", None)
+        if callable(pool_shutdown):
+            try:
+                pool_shutdown(wait=wait)
+            except Exception:  # pragma: no cover - defensive guard
+                logger.debug("pool shutdown failed for %s", self._pool, exc_info=True)
+        elif wait and hasattr(self._pool, "waitForDone") and self._is_pool_available():
             try:
                 self._pool.waitForDone()
             except Exception:  # pragma: no cover - defensive guard
@@ -776,6 +789,15 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         if pool is None:
             self._pool_unavailable = True
             return False
+        availability = getattr(pool, "is_available", None)
+        if callable(availability):
+            try:
+                alive = bool(availability())
+            except Exception:  # noqa: BLE001 - injected pool availability boundary
+                alive = False
+            if not alive:
+                self._pool_unavailable = True
+            return alive
         try:
             alive = isValid(pool)
         except (RuntimeError, TypeError):
@@ -1073,7 +1095,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         self._pending_condition.notify_all()
 
     @staticmethod
-    def _describe_pool(pool: QThreadPool) -> str:
+    def _describe_pool(pool: QThreadPool | _RunnablePoolProtocol) -> str:
         """Return a readable descriptor for ``pool`` useful in logging."""
         base = getattr(pool, "objectName", None)
         if callable(base):  # PySide exposes objectName() callable
@@ -1084,7 +1106,7 @@ class QThreadPoolExecutor(TaskExecutorProtocol):
         else:
             name = base
         identifier = hex(id(pool))
-        return name or f"QThreadPool@{identifier}"
+        return name or f"{type(pool).__name__}@{identifier}"
 
     def _apply_pool_max_threads_locked(self, max_workers: int | None = None) -> None:
         """Apply the configured worker cap to the underlying pool."""

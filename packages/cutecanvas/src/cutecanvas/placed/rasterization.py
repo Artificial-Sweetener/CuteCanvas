@@ -29,13 +29,15 @@ from qpane.sdk.concurrency import (
     TaskRejected,
 )
 from qpane.sdk.rendering import LayerRasterizationWorker
-from qpane.sdk.scene import LayerTransform
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import CompositionLayerInstance, CompositionLayerStore
 from ..raster.assets import EditableRasterAssetStore
-from ..raster.source_reference import EditableRasterReference
-from .source_reference import PlacedAssetReference
+from ..resources import ProjectResourceReference
+from ..resources.rasterization import (
+    LayerRasterizationCompletion,
+    retarget_raster_transform,
+)
 from .store import PlacedAssetStore
 from .workflow import PlacedAssetCompletion
 
@@ -48,6 +50,7 @@ class _PendingRasterization:
 
     composition_id: uuid.UUID
     history_scope_id: uuid.UUID
+    public_scene_id: uuid.UUID
     layer: CompositionLayerInstance
     source_size: QSize
     worker: LayerRasterizationWorker
@@ -67,6 +70,7 @@ class PlacedAssetRasterizationService:
         executor: TaskExecutorProtocol,
         changed: Callable[[uuid.UUID], None],
         completed: Callable[[PlacedAssetCompletion], None],
+        resource_completed: Callable[[LayerRasterizationCompletion], None],
     ) -> None:
         """Bind source, instance, worker, and publication owners."""
         self._placed_assets = placed_assets
@@ -76,6 +80,7 @@ class PlacedAssetRasterizationService:
         self._executor = executor
         self._changed = changed
         self._completed = completed
+        self._resource_completed = resource_completed
         self._pending: dict[uuid.UUID, _PendingRasterization] = {}
         self._latest_by_layer: dict[uuid.UUID, uuid.UUID] = {}
         self._closed = False
@@ -84,6 +89,7 @@ class PlacedAssetRasterizationService:
         self,
         composition_id: uuid.UUID,
         history_scope_id: uuid.UUID,
+        public_scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         pixel_size: QSize | None,
     ) -> uuid.UUID | None:
@@ -92,9 +98,9 @@ class PlacedAssetRasterizationService:
             return None
         layer = self._layers.layer(composition_id, layer_id)
         source = None if layer is None else layer.source
-        if layer is None or not isinstance(source, PlacedAssetReference):
+        if layer is None or not isinstance(source, ProjectResourceReference):
             return None
-        snapshot = self._placed_assets.get(source.asset_id)
+        snapshot = self._placed_assets.get(source.resource_id)
         if snapshot is None:
             return None
         if snapshot.image is None:
@@ -124,10 +130,20 @@ class PlacedAssetRasterizationService:
                     str(exc),
                 )
             )
+            self._resource_completed(
+                LayerRasterizationCompletion(
+                    request_id,
+                    public_scene_id,
+                    layer_id,
+                    False,
+                    str(exc),
+                )
+            )
             return request_id
         self._pending[request_id] = _PendingRasterization(
             composition_id,
             history_scope_id,
+            public_scene_id,
             layer,
             source_size,
             worker,
@@ -171,8 +187,8 @@ class PlacedAssetRasterizationService:
         raster = self._raster_assets.create(worker.result)
         replacement = replace(
             pending.layer,
-            source=EditableRasterReference(raster.raster_id),
-            transform=_retarget_transform(
+            source=ProjectResourceReference(raster.raster_id),
+            transform=retarget_raster_transform(
                 pending.layer.transform,
                 pending.source_size,
                 worker.result.size(),
@@ -225,21 +241,12 @@ class PlacedAssetRasterizationService:
                 message,
             )
         )
-
-
-def _retarget_transform(
-    transform: LayerTransform,
-    source_size: QSize,
-    target_size: QSize,
-) -> LayerTransform:
-    """Preserve the displayed affine quadrilateral across new local dimensions."""
-    scale_x = source_size.width() / target_size.width()
-    scale_y = source_size.height() / target_size.height()
-    return LayerTransform(
-        m11=transform.m11 * scale_x,
-        m12=transform.m12 * scale_x,
-        m21=transform.m21 * scale_y,
-        m22=transform.m22 * scale_y,
-        dx=transform.dx,
-        dy=transform.dy,
-    )
+        self._resource_completed(
+            LayerRasterizationCompletion(
+                request_id,
+                pending.public_scene_id,
+                pending.layer.layer_id,
+                succeeded,
+                message,
+            )
+        )

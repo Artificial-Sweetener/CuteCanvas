@@ -31,11 +31,9 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:  # pragma: no cover
 
     from qpane.sdk.cache import CacheRegistry
-    from qpane.sdk.swap import SwapDelegate
 
     from ..canvas import CuteCanvas
     from ..sam import SamManager
-    from ..sam.navigation import SamNavigationWarmup
 
 
 class SamDelegate:
@@ -45,21 +43,17 @@ class SamDelegate:
         self,
         *,
         qpane: CuteCanvas,
-        swap_delegate: SwapDelegate,
         cache_registry: CacheRegistry | None,
     ) -> None:
         """Store collaborators used to manage the SAM manager lifecycle.
 
         Args:
             qpane: Owning qpane used for UI updates and mask dispatch.
-            swap_delegate: Swap delegate notified when the SAM manager attaches or detaches.
             cache_registry: Optional cache registry that should receive the manager.
         """
         self._qpane = qpane
-        self._swap_delegate = swap_delegate
         self._cache_registry = cache_registry
         self._manager: SamManager | None = None
-        self._navigation_warmup: SamNavigationWarmup | None = None
         self._active_predictor = None
         self._warned_missing_mask_service = False
 
@@ -86,7 +80,8 @@ class SamDelegate:
             RuntimeError: When a SAM manager is already attached.
 
         Side effects:
-            Registers the manager with swap/caches, resets predictors, and reapplies CuteCanvas cache settings.
+            Registers the manager with caches, resets predictors, and reapplies
+            CuteCanvas cache settings.
         """
         if self._manager is not None:
             logger.error(
@@ -96,11 +91,6 @@ class SamDelegate:
             )
             raise RuntimeError("SAM manager already attached")
         self._manager = sam_manager
-        from .navigation import SamNavigationWarmup
-
-        navigation_warmup = SamNavigationWarmup(sam_manager)
-        self._navigation_warmup = navigation_warmup
-        self._swap_delegate.on_source_warmup_attached(navigation_warmup)
         self.resetActivePredictor()
         sam_manager.predictorReady.connect(self._on_predictor_ready)
         sam_manager.maskReady.connect(self._on_sam_mask_ready)
@@ -122,8 +112,6 @@ class SamDelegate:
             manager.predictorLoadFailed.disconnect(self._on_sam_predictor_failed)
         except (TypeError, RuntimeError):
             pass
-        self._swap_delegate.on_source_warmup_detached()
-        self._navigation_warmup = None
         self._manager = None
         self.resetActivePredictor()
         qpane = self._qpane
@@ -172,9 +160,16 @@ class SamDelegate:
         return predict_mask_from_box(predictor, bbox)
 
     def _on_predictor_ready(self, predictor, image_id: uuid.UUID) -> None:
-        """Activate the predictor when it aligns with the current image and refresh the view."""
+        """Activate a predictor that matches the active raster resource."""
         qpane = self._qpane
-        if image_id == qpane.currentImageID():
+        raster = qpane.activeRasterResolver().resolve(
+            preferred_layer_id=(
+                None
+                if qpane.selectedLayer() is None
+                else qpane.selectedLayer().layer_id
+            )
+        )
+        if raster is not None and image_id == raster.resource_id:
             self._active_predictor = predictor
             qpane.refreshCursor()
             qpane.update()
@@ -196,7 +191,14 @@ class SamDelegate:
         """Log predictor failures and clear the active predictor for the displayed image."""
         qpane = self._qpane
         logger.error("SAM predictor failed for %s: %s", image_id, message)
-        if image_id == qpane.currentImageID():
+        raster = qpane.activeRasterResolver().resolve(
+            preferred_layer_id=(
+                None
+                if qpane.selectedLayer() is None
+                else qpane.selectedLayer().layer_id
+            )
+        )
+        if raster is not None and image_id == raster.resource_id:
             self.resetActivePredictor()
             qpane.refreshCursor()
             qpane.update()

@@ -83,11 +83,8 @@ class StatusTutorialController:
     def connect_signals(self) -> None:
         """Connect status readouts to public editor signals once."""
         self._canvas.zoomChanged.connect(self.update_zoom)
-        self._canvas.currentImageChanged.connect(
-            lambda _image_id: self.update_image_size()
-        )
-        self._canvas.imageLoaded.connect(self.handle_image_loaded)
-        self._canvas.catalogSelectionChanged.connect(self.handle_catalog_selection)
+        self._canvas.compositionSelectionChanged.connect(self.handle_document_selection)
+        self._canvas.sceneChanged.connect(lambda _scene: self.update_image_size())
         self._canvas.maskSaved.connect(self.handle_mask_saved)
         if self._mask_stack_label is not None:
             self._canvas.maskUndoStackChanged.connect(self.update_mask_stack)
@@ -115,23 +112,20 @@ class StatusTutorialController:
         self.update_mask_stack()
         self._prime_sam_status()
 
-    def handle_image_loaded(self, path: Path | None) -> None:
-        """Show the loaded image name and refresh its dimensions."""
-        self.update_image_size()
-        name = path.name if path else "<memory>"
-        self.show_message(f"Loaded image: {name}")
-
     def handle_mask_saved(self, path: str, mask_id: str) -> None:
         """Confirm successful mask persistence without blocking the editor."""
         self.show_message(f"Autosaved mask {mask_id} to {path}")
 
     def update_image_size(self) -> None:
         """Display current raster dimensions or an empty placeholder."""
-        image = self._canvas.currentImage
-        if image is None or image.isNull():
+        scene = self._canvas.currentScene()
+        if scene is None or scene.bounds.isEmpty():
             self._image_size_label.setText("-- x --px")
         else:
-            self._image_size_label.setText(f"{image.width()} x {image.height()}px")
+            size = scene.bounds.size()
+            self._image_size_label.setText(
+                f"{round(size.width())} x {round(size.height())}px"
+            )
 
     def update_zoom(self, zoom: float) -> None:
         """Mirror settled zoom while preserving active text editing."""
@@ -221,16 +215,22 @@ class StatusTutorialController:
         else:
             label.setText(f"Undo: {state.undo_depth} / Redo: {state.redo_depth}")
 
-    def handle_catalog_selection(self, image_id: uuid.UUID | None) -> None:
-        """Describe catalog selection and refresh dependent readouts."""
+    def handle_document_selection(
+        self,
+        composition_id: uuid.UUID | None,
+    ) -> None:
+        """Describe document selection and refresh dependent readouts."""
         self.update_mask_stack()
         self.update_image_size()
-        if image_id is None:
-            self.show_message("No image selected.")
-        elif self._canvas.currentImagePath is None:
-            self.show_message("Selected image has no file path.")
-        else:
-            self.show_message(f"Selected image path: {self._canvas.currentImagePath}")
+        if composition_id is None:
+            self.show_message("No document selected.")
+            return
+        entry = self._canvas.getCompositionSnapshot().compositions.get(composition_id)
+        self.show_message(
+            "Selected document."
+            if entry is None or entry.title is None
+            else f"Selected document: {entry.title}"
+        )
 
     def handle_sam_checkpoint_status(self, status: str, path: Path) -> None:
         """Mirror SAM checkpoint lifecycle in one compact label."""

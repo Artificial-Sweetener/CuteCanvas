@@ -33,7 +33,6 @@ from qpane.sdk.scene import (
 )
 
 from ..composition.edit_controller import CompositionEditController
-from ..composition.edit_history import CompositionEditCommand
 from .transform_edit import LayerTransformEdit
 
 
@@ -221,12 +220,6 @@ class SceneMutationCoordinator:
         self._scene_provider = scene_provider
         self._owners: list[SceneMutationOwner] = list(owners)
         self._edit_controller = edit_controller
-        if edit_controller is not None:
-            edit_controller.register_handler(
-                LayerTransformEdit,
-                undo=self._undo_transform,
-                redo=self._redo_transform,
-            )
 
     def register_owner(self, owner: SceneMutationOwner) -> SceneMutationOwner:
         """Register ``owner`` for future mutation routing."""
@@ -482,30 +475,6 @@ class SceneMutationCoordinator:
             if owner.supports_layer(scene, layer):
                 return owner
         return None
-
-    def _restore_transform(
-        self,
-        command: LayerTransformEdit,
-        transform: LayerTransform,
-    ) -> SceneMutationResult:
-        """Apply a history transform without recording another command."""
-        resolved = self._layer_for_ids(command.scene_id, command.layer_id)
-        if isinstance(resolved, SceneMutationResult):
-            return resolved
-        scene, layer, owner = resolved
-        return owner.set_transform(scene, layer, transform)
-
-    def _undo_transform(self, command: CompositionEditCommand) -> bool:
-        """Restore a transform command's previous domain-owned value."""
-        if not isinstance(command, LayerTransformEdit):
-            return False
-        return self._restore_transform(command, command.before).accepted
-
-    def _redo_transform(self, command: CompositionEditCommand) -> bool:
-        """Restore a transform command's subsequent domain-owned value."""
-        if not isinstance(command, LayerTransformEdit):
-            return False
-        return self._restore_transform(command, command.after).accepted
 
     @staticmethod
     def _invalid_request(

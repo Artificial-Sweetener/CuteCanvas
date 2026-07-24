@@ -31,12 +31,12 @@ from qpane.sdk.scene import (
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import CompositionLayerInstance, CompositionLayerStore
+from ..resources import ProjectResourceReference
 from ..scene.mutations import (
     BaseSceneMutationOwner,
     SceneMutationResult,
     SceneMutationStatus,
 )
-from .source_reference import VectorDocumentReference
 from .store import VectorAssetStore
 
 
@@ -75,7 +75,7 @@ class VectorLayerController:
         layer_id = uuid.uuid4()
         instance = CompositionLayerInstance(
             layer_id=layer_id,
-            source=VectorDocumentReference(document.vector_id),
+            source=ProjectResourceReference(document.vector_id),
             transform=LayerTransform.from_placement(bounds, placement),
             interaction=interaction,
             role="vector",
@@ -98,16 +98,21 @@ class VectorSceneMutationOwner(BaseSceneMutationOwner):
 
     def __init__(
         self,
+        assets: VectorAssetStore,
         layers: CompositionLayerStore,
         current_composition_id: Callable[[], uuid.UUID | None],
     ) -> None:
         """Bind the unified composition instance store."""
+        self._assets = assets
         self._layers = layers
         self._current_composition_id = current_composition_id
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
         """Return whether this owner handles the layer's typed source."""
-        return isinstance(layer.source, VectorDocumentReference)
+        return (
+            isinstance(layer.source, ProjectResourceReference)
+            and self._assets.get(layer.source.resource_id) is not None
+        )
 
     def remove_layer(
         self,

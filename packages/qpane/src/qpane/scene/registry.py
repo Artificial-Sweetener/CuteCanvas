@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import Protocol
 
 from .model import SceneDescriptor
@@ -31,7 +30,6 @@ class SceneContributionProvider(Protocol):
     def scene_contribution(
         self,
         base_scene: SceneDescriptor,
-        image_id: uuid.UUID | None,
     ) -> SceneContribution | None:
         """Return scene content for ``base_scene`` or None when inactive."""
         ...
@@ -51,7 +49,6 @@ class SceneGeometryAdapter(Protocol):
     def adapt_base_scene(
         self,
         base_scene: SceneDescriptor,
-        image_id: uuid.UUID | None,
     ) -> SceneDescriptor:
         """Return the base scene geometry that feature contributions should target."""
         ...
@@ -193,24 +190,21 @@ class SceneProviderRegistry:
             if (contribution := provider.scene_contribution()) is not None
         )
 
-    def adapt_base_scene(
-        self, base_scene: SceneDescriptor, image_id: uuid.UUID | None
-    ) -> SceneDescriptor:
+    def adapt_base_scene(self, base_scene: SceneDescriptor) -> SceneDescriptor:
         """Return ``base_scene`` after registered geometry adapters have run."""
         adapted = base_scene
         for provider in self._geometry_adapters:
-            adapted = provider.adapt_base_scene(adapted, image_id)
+            adapted = provider.adapt_base_scene(adapted)
         return adapted
 
     def contributions_for(
-        self, base_scene: SceneDescriptor, image_id: uuid.UUID | None
+        self, base_scene: SceneDescriptor
     ) -> tuple[SceneContribution, ...]:
         """Return active feature contributions for ``base_scene``."""
         return tuple(
             contribution
             for provider in self._contribution_providers
-            if (contribution := provider.scene_contribution(base_scene, image_id))
-            is not None
+            if (contribution := provider.scene_contribution(base_scene)) is not None
         )
 
     @staticmethod

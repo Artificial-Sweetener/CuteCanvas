@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
-from cutecanvas.masks.source_reference import MaskAssetReference
+from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.scene.identity import mask_layer_id
 from cutecanvas.scene.mutations import (
     BaseSceneMutationOwner,
@@ -29,8 +29,6 @@ from cutecanvas.scene.mutations import (
     SceneMutationResult,
     SceneMutationStatus,
 )
-from PySide6.QtCore import QSize
-from qpane.scene.default_scene import build_default_catalog_scene
 from qpane.scene.model import (
     BlendMode,
     LayerDescriptor,
@@ -39,6 +37,7 @@ from qpane.scene.model import (
     LayerKind,
     LayerPlacement,
     SceneDescriptor,
+    SceneKind,
 )
 
 
@@ -122,15 +121,10 @@ class RecordingMaskOwner(BaseSceneMutationOwner):
         )
 
 
-def test_scene_mutation_rejects_unowned_default_catalog_layer() -> None:
-    """Default catalog layers should not be mutable without a domain owner."""
+def test_scene_mutation_rejects_unowned_raster_layer() -> None:
+    """Raster layers should not be mutable without a domain owner."""
     image_id = uuid.uuid4()
-    scene = build_default_catalog_scene(
-        image_id=image_id,
-        image_size=QSize(10, 8),
-        source_path=None,
-        revision=0,
-    )
+    scene = _base_scene(image_id)
     coordinator = SceneMutationCoordinator(lambda: scene)
 
     result = coordinator.set_opacity(scene.scene_id, scene.layers[0].layer_id, 0.5)
@@ -216,21 +210,35 @@ def test_scene_mutation_enforces_movement_policy_before_owner_dispatch() -> None
     assert owner.calls == [("placement", movable_layer.layer_id, placement)]
 
 
+def _base_scene(image_id: uuid.UUID) -> SceneDescriptor:
+    """Build one source-neutral explicit raster scene."""
+    scene_id = uuid.uuid5(image_id, "mutation-scene")
+    placement = LayerPlacement(0.0, 0.0, 10.0, 8.0)
+    layer = LayerDescriptor(
+        scene_id=scene_id,
+        layer_id=uuid.uuid5(image_id, "mutation-raster-layer"),
+        kind=LayerKind.IMAGE,
+        source=ProjectResourceReference(image_id),
+        placement=placement,
+    )
+    return SceneDescriptor(
+        scene_id=scene_id,
+        kind=SceneKind.EXPLICIT,
+        bounds=placement,
+        layers=(layer,),
+    )
+
+
 def _scene_with_mask_layer() -> tuple[SceneDescriptor, LayerDescriptor]:
-    """Build a default scene plus one mask layer descriptor."""
+    """Build an explicit raster scene plus one mask layer descriptor."""
     image_id = uuid.uuid4()
     mask_id = uuid.uuid4()
-    base_scene = build_default_catalog_scene(
-        image_id=image_id,
-        image_size=QSize(10, 8),
-        source_path=None,
-        revision=0,
-    )
+    base_scene = _base_scene(image_id)
     mask_layer = LayerDescriptor(
         scene_id=base_scene.scene_id,
         layer_id=mask_layer_id(base_scene.scene_id, mask_id),
         kind=LayerKind.MASK,
-        source=MaskAssetReference(mask_id=mask_id),
+        source=ProjectResourceReference(mask_id),
         placement=LayerPlacement(0.0, 0.0, 10.0, 8.0),
         visible=True,
         opacity=0.75,

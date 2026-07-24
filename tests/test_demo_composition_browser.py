@@ -17,20 +17,13 @@
 
 from __future__ import annotations
 
-import uuid
-
-from cutecanvas import (
-    CatalogLayerRequest,
-    CompositionRequest,
-    CuteCanvas,
-    LayerPolicy,
-)
-from PySide6.QtCore import QRectF, QSize, Qt
+from cutecanvas import CuteCanvas
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 
 from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
-from examples.demonstration.catalog.composition_browser import CompositionBrowser
+from examples.demonstration.compositions.browser import CompositionBrowser
 
 
 def _image(color: str, size: QSize | None = None) -> QImage:
@@ -44,42 +37,33 @@ def _image(color: str, size: QSize | None = None) -> QImage:
 def test_browser_nests_all_inactive_layers_and_selects_exact_child(qapp) -> None:
     """The browser must project inactive stacks and route child selection once."""
     viewer = CuteCanvas(features=())
-    first_id = uuid.uuid4()
-    second_id = uuid.uuid4()
-    bottom_id = uuid.uuid4()
-    top_id = uuid.uuid4()
     focused: list[str] = []
-    viewer.setImagesByID(
-        CuteCanvas.imageMapFromLists(
-            [_image("red"), _image("blue")],
-            ids=[first_id, second_id],
-        ),
-        first_id,
+    first_id = viewer.createCompositionFromImage(
+        _image("red"),
+        title="Red",
+        label="Red",
     )
-    layered_id = viewer.composeScene(
-        CompositionRequest(
-            composition_id=uuid.uuid4(),
-            title="Inactive Layers",
-            bounds=QRectF(0.0, 0.0, 40.0, 20.0),
-            layers=(
-                CatalogLayerRequest(
-                    layer_id=bottom_id,
-                    image_id=first_id,
-                    placement=QRectF(0.0, 0.0, 20.0, 20.0),
-                    interaction=LayerPolicy(selectable=True),
-                    role="bottom",
-                ),
-                CatalogLayerRequest(
-                    layer_id=top_id,
-                    image_id=second_id,
-                    placement=QRectF(20.0, 0.0, 20.0, 20.0),
-                    interaction=LayerPolicy(selectable=True),
-                    role="top",
-                ),
-            ),
-        )
+    viewer.createCompositionFromImage(
+        _image("blue"),
+        title="Blue",
+        label="Blue",
     )
-    viewer.setCurrentImageID(first_id)
+    layered_id = viewer.createComposition(
+        QRectF(0.0, 0.0, 40.0, 20.0),
+        title="Inactive Layers",
+    )
+    bottom_id = viewer.addEditableRasterLayer(
+        _image("red"),
+        placement=QRectF(0.0, 0.0, 20.0, 20.0),
+        label="Bottom",
+    )
+    top_id = viewer.addEditableRasterLayer(
+        _image("blue"),
+        placement=QRectF(20.0, 0.0, 20.0, 20.0),
+        label="Top",
+    )
+    assert bottom_id is not None and top_id is not None
+    viewer.openComposition(first_id)
     browser = CompositionBrowser(
         viewer,
         on_focus_requested=focused.append,
@@ -102,7 +86,7 @@ def test_browser_nests_all_inactive_layers_and_selects_exact_child(qapp) -> None
         assert selected is not None
         assert selected.layer_id == top_id
         assert browser.currentItem() is layered.child(0)
-        assert focused == ["image"]
+        assert focused == ["raster"]
     finally:
         browser.deleteLater()
         viewer.deleteLater()
@@ -110,29 +94,50 @@ def test_browser_nests_all_inactive_layers_and_selects_exact_child(qapp) -> None
 
 
 def test_layer_properties_request_opens_one_focused_modal(qapp) -> None:
-    """The composition tree should route properties into an uncluttered modal."""
+    """Layer properties must open without disturbing the active viewport."""
     window = ExampleWindow(ExampleOptions(feature_set="core"))
     try:
-        image_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([_image("green")], ids=[image_id]),
-            image_id,
+        window.resize(900, 700)
+        window.show()
+        window.qpane.createCompositionFromImage(
+            _image("green", QSize(1600, 1200)),
+            title="Green",
+            label="Background",
         )
-        editable = QImage(20, 20, QImage.Format.Format_ARGB32_Premultiplied)
+        editable = QImage(
+            QSize(800, 600),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
         editable.fill(Qt.GlobalColor.transparent)
         layer_id = window.qpane.addEditableRasterLayer(editable, label="Editable")
         scene = window.qpane.currentScene()
         composition_id = window.qpane.currentCompositionID()
         assert scene is not None and composition_id is not None and layer_id is not None
         assert window.qpane.setSelectedLayer(scene.scene_id, layer_id)
+        qapp.processEvents()
+        fitted_zoom = window.qpane.currentZoom()
+        window.qpane.applyZoom(2.25)
+        window.qpane.setPan(QPointF(185.0, 130.0))
+        qapp.processEvents()
+        zoom_before = window.qpane.currentZoom()
+        pan_before = QPointF(window.qpane.view().viewport.pan)
+        assert zoom_before != fitted_zoom
 
-        assert window.catalog_ui.dock is not None
-        window.catalog_ui.dock.layerPropertiesRequested.emit(composition_id, layer_id)
+        assert window.composition_ui.dock is not None
+        browser = window.composition_ui.dock._browser
+        layer_item = browser._layer_items[(composition_id, layer_id)]
+        browser._activate_item(layer_item, 0)
+        window.composition_ui.dock.layerPropertiesRequested.emit(
+            composition_id,
+            layer_id,
+        )
         qapp.processEvents()
 
-        dialog = window.catalog_ui._layer_properties_dialog
+        dialog = window.composition_ui._layer_properties_dialog
         assert dialog is not None and dialog.isVisible() and dialog.isModal()
         assert dialog.raster_storage._target == (scene.scene_id, layer_id)
+        assert window.qpane.currentZoom() == zoom_before
+        assert window.qpane.view().viewport.pan == pan_before
     finally:
         window.close()
         window.deleteLater()
@@ -144,7 +149,7 @@ def test_layer_row_checkbox_changes_visibility_and_history(qapp) -> None:
     viewer = CuteCanvas(features=())
     browser = CompositionBrowser(viewer, on_focus_requested=lambda _focus: None)
     try:
-        document = viewer.editor.documents.create(QRectF(0.0, 0.0, 80.0, 60.0))
+        document = viewer.editor.compositions.create(QRectF(0.0, 0.0, 80.0, 60.0))
         layer_id = viewer.addEditableRasterLayer(_image("green"), label="Subject")
         assert layer_id is not None
         browser.refresh()
@@ -166,10 +171,85 @@ def test_layer_row_checkbox_changes_visibility_and_history(qapp) -> None:
         qapp.processEvents()
 
 
+def test_hiding_only_raster_clears_immediately_and_keeps_canvas_navigation(
+    qapp,
+) -> None:
+    """A semantic mask and empty raster frame must retain the composition canvas."""
+    viewer = CuteCanvas(features=("mask",))
+    browser = CompositionBrowser(viewer, on_focus_requested=lambda _focus: None)
+    try:
+        viewer.resize(320, 240)
+        viewer.show()
+        viewer.createCompositionFromImage(
+            _image("red", QSize(160, 120)),
+            title="Red",
+            label="Background",
+        )
+        assert viewer.createBlankMask(QSize(160, 120)) is not None
+        qapp.processEvents()
+        browser.refresh()
+        qapp.processEvents()
+
+        scene = viewer.currentScene()
+        composition_id = viewer.currentCompositionID()
+        assert scene is not None and composition_id is not None
+        raster = next(
+            layer for layer in scene.layers if layer.source_kind == "imported-raster"
+        )
+        root = browser._composition_items[composition_id]
+        row = next(
+            root.child(index)
+            for index in range(root.childCount())
+            if root.child(index).data(0, Qt.ItemDataRole.UserRole)[2] == raster.layer_id
+        )
+        renderer = viewer.view().presenter.renderer
+        viewer.grab()
+        visible_buffer = renderer.get_base_buffer()
+        assert visible_buffer is not None
+        assert (
+            visible_buffer.pixelColor(
+                visible_buffer.width() // 2,
+                visible_buffer.height() // 2,
+            ).red()
+            > 0
+        )
+
+        row.setCheckState(0, Qt.CheckState.Unchecked)
+        qapp.processEvents()
+
+        plan = viewer.view().calculateRenderPlan()
+        assert plan is not None
+        assert plan.render_items == ()
+        viewer.grab()
+        hidden_buffer = renderer.get_base_buffer()
+        assert hidden_buffer is not None
+        assert (
+            hidden_buffer.pixelColor(
+                hidden_buffer.width() // 2,
+                hidden_buffer.height() // 2,
+            ).alpha()
+            == 0
+        )
+
+        viewer.applyZoom(3.0)
+        viewer.setPan(QPointF(25.0, 15.0))
+        qapp.processEvents()
+
+        assert viewer.view().viewport.pan == QPointF(25.0, 15.0)
+        navigated_plan = renderer.get_current_render_plan()
+        assert navigated_plan is not None
+        assert navigated_plan.render_items == ()
+        assert navigated_plan.current_pan == QPointF(25.0, 15.0)
+    finally:
+        browser.deleteLater()
+        viewer.deleteLater()
+        qapp.processEvents()
+
+
 def test_browser_selection_and_hover_use_transient_content_effects(qapp) -> None:
     """The polished browser lesson highlights layers without editor mutations."""
     viewer = CuteCanvas(features=())
-    document = viewer.editor.documents.create(QRectF(0.0, 0.0, 80.0, 60.0))
+    document = viewer.editor.compositions.create(QRectF(0.0, 0.0, 80.0, 60.0))
     layer_id = viewer.addEditableRasterLayer(_image("green"), label="Subject")
     assert layer_id is not None
     layer = document.layer(layer_id)
@@ -217,46 +297,55 @@ def test_demo_composition_creation_placement_and_policy_are_intentional(qapp) ->
     """The compact browser should expose complete composition-first workflows."""
     window = ExampleWindow(ExampleOptions(feature_set="core"))
     try:
-        image_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists([_image("blue")], ids=[image_id]),
-            image_id,
+        seeded_id = window.qpane.createCompositionFromImage(
+            _image("blue"),
+            title="Blue",
+            label="Background",
         )
-        dock = window.catalog_ui.dock
+        dock = window.composition_ui.dock
         assert dock is not None
 
-        dock._handle_new_composition()
+        dock._create_composition()
         empty_id = window.qpane.currentCompositionID()
         empty_scene = window.qpane.currentScene()
         assert empty_id is not None and empty_scene is not None
         assert empty_scene.layers == ()
 
-        dock._add_catalog_image_to_composition(image_id)
+        placed_id = window.qpane.placeComposition(seeded_id)
         placed_scene = window.qpane.currentScene()
-        assert placed_scene is not None and len(placed_scene.layers) == 1
+        assert (
+            placed_id is not None
+            and placed_scene is not None
+            and len(placed_scene.layers) == 1
+        )
         placed = placed_scene.layers[0]
-        assert placed.source_id == image_id
+        assert placed.source_id == seeded_id
         assert placed.interaction.selectable
-        assert not placed.interaction.movable
+        assert placed.interaction.movable
         assert placed.interaction.removable
 
-        dock._create_from_catalog_image(image_id)
-        seeded_id = window.qpane.currentCompositionID()
+        window.qpane.openComposition(seeded_id)
         seeded_scene = window.qpane.currentScene()
         assert seeded_id is not None and seeded_id != empty_id
         assert seeded_scene is not None and len(seeded_scene.layers) == 1
         assert seeded_scene.layers[0].layer_id != placed.layer_id
+        assert window.qpane.setSelectedLayer(
+            seeded_scene.scene_id,
+            seeded_scene.layers[0].layer_id,
+        )
+        window.tools.editor_controls.layer_policy.reconcile()
+        seeded_layer = window.qpane.currentScene().layers[0]
+        assert seeded_layer.interaction.movable
+        assert not seeded_layer.interaction.pixel_editable
 
         dock.compositionPropertiesRequested.emit(seeded_id)
         qapp.processEvents()
-        dialog = window.catalog_ui._composition_properties_dialog
+        dialog = window.composition_ui._composition_properties_dialog
         assert dialog is not None and dialog.isVisible() and dialog.isModal()
         dialog.removable.setChecked(False)
-        dialog.comparison_enabled.setChecked(False)
         dialog._save()
         entry = window.qpane.getCompositionSnapshot().compositions[seeded_id]
         assert not entry.policy.removable
-        assert not entry.policy.comparison_enabled
     finally:
         window.close()
         window.deleteLater()
@@ -266,38 +355,21 @@ def test_demo_composition_creation_placement_and_policy_are_intentional(qapp) ->
 def test_browser_drag_reorders_one_stack_and_history_restores_it(qapp) -> None:
     """A visible tree drag must use the public chronological stack mutation."""
     viewer = CuteCanvas(features=())
-    first_id = uuid.uuid4()
-    second_id = uuid.uuid4()
-    bottom_id = uuid.uuid4()
-    top_id = uuid.uuid4()
-    viewer.setImagesByID(
-        CuteCanvas.imageMapFromLists(
-            [_image("red"), _image("blue")],
-            ids=[first_id, second_id],
-        ),
-        first_id,
+    composition_id = viewer.createComposition(
+        QRectF(0.0, 0.0, 40.0, 20.0),
+        title="Reorder",
     )
-    composition_id = viewer.composeScene(
-        CompositionRequest(
-            composition_id=uuid.uuid4(),
-            title="Reorder",
-            bounds=QRectF(0.0, 0.0, 40.0, 20.0),
-            layers=(
-                CatalogLayerRequest(
-                    layer_id=bottom_id,
-                    image_id=first_id,
-                    placement=QRectF(0.0, 0.0, 20.0, 20.0),
-                    interaction=LayerPolicy(selectable=True),
-                ),
-                CatalogLayerRequest(
-                    layer_id=top_id,
-                    image_id=second_id,
-                    placement=QRectF(20.0, 0.0, 20.0, 20.0),
-                    interaction=LayerPolicy(selectable=True),
-                ),
-            ),
-        )
+    bottom_id = viewer.addEditableRasterLayer(
+        _image("red"),
+        placement=QRectF(0.0, 0.0, 20.0, 20.0),
+        label="Bottom",
     )
+    top_id = viewer.addEditableRasterLayer(
+        _image("blue"),
+        placement=QRectF(20.0, 0.0, 20.0, 20.0),
+        label="Top",
+    )
+    assert bottom_id is not None and top_id is not None
     viewer.openComposition(composition_id)
     assert viewer.currentCompositionID() == composition_id
     browser = CompositionBrowser(viewer, on_focus_requested=lambda _focus: None)
@@ -338,19 +410,19 @@ def test_browser_refreshes_each_composition_immediately_after_layer_lifecycle(
     """Each composition row must reflect layer additions without incidental refreshes."""
     window = ExampleWindow(ExampleOptions(feature_set="core"))
     try:
-        first_id = uuid.uuid4()
-        second_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists(
-                [_image("red"), _image("blue")],
-                ids=[first_id, second_id],
-            ),
-            first_id,
+        first_composition = window.qpane.createCompositionFromImage(
+            _image("red"),
+            title="Red",
+            label="Background",
         )
-        assert window.catalog_ui.dock is not None
-        browser = window.catalog_ui.dock._composition_browser
-        first_composition = window.qpane.currentCompositionID()
-        assert first_composition is not None
+        second_composition = window.qpane.createCompositionFromImage(
+            _image("blue"),
+            title="Blue",
+            label="Background",
+        )
+        window.qpane.openComposition(first_composition)
+        assert window.composition_ui.dock is not None
+        browser = window.composition_ui.dock._browser
         qapp.processEvents()
         composition_events = []
         window.qpane.compositionChanged.connect(composition_events.append)
@@ -363,11 +435,6 @@ def test_browser_refreshes_each_composition_immediately_after_layer_lifecycle(
         assert composition_events
         first_event_count = len(composition_events)
 
-        second_composition = next(
-            entry.composition_id
-            for entry in window.qpane.getCompositionSnapshot().compositions.values()
-            if entry.current_image_id == second_id
-        )
         window.qpane.openComposition(second_composition)
         second_layer = window.qpane.addEditableRasterLayer(
             _image("yellow"),
@@ -401,24 +468,21 @@ def test_demo_browser_survives_repeated_cross_composition_layer_activation(
     """Repeated tree activation must never retain deleted rows or lose child stacks."""
     window = ExampleWindow(ExampleOptions(feature_set="mask"))
     try:
-        first_id = uuid.uuid4()
-        second_id = uuid.uuid4()
-        window.qpane.setImagesByID(
-            CuteCanvas.imageMapFromLists(
-                [
-                    _image("red", QSize(2048, 1536)),
-                    _image("blue", QSize(2048, 1536)),
-                ],
-                ids=[first_id, second_id],
-            ),
-            first_id,
+        first_id = window.qpane.createCompositionFromImage(
+            _image("red", QSize(2048, 1536)),
+            title="Red",
+            label="Background",
         )
-        composition_ids = tuple(window.qpane.compositionIDs())
-        assert len(composition_ids) == 2
-        assert window.catalog_ui.dock is not None
-        browser = window.catalog_ui.dock._composition_browser
+        second_id = window.qpane.createCompositionFromImage(
+            _image("blue", QSize(2048, 1536)),
+            title="Blue",
+            label="Background",
+        )
+        composition_ids = (first_id, second_id)
+        assert window.composition_ui.dock is not None
+        browser = window.composition_ui.dock._browser
         window.show()
-        window.catalog_ui.dock.show()
+        window.composition_ui.dock.show()
         browser.show()
         qapp.processEvents()
         for composition_id, color in zip(composition_ids, ("green", "yellow")):

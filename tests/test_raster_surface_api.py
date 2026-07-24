@@ -33,7 +33,7 @@ pytest_plugins = ("tests.test_mask_workflows",)
 def _attached_mask(qpane, manager, image_id):
     """Create and attach one mask, returning its public workflow metadata."""
     mask_id = manager.create_mask(QImage(8, 8, QImage.Format_Grayscale8))
-    assert qpane.mask_service.layers.attach(
+    assert qpane.mask_service.layers.attach_to_composition(
         mask_id,
         image_id,
         color=QColor(255, 0, 0),
@@ -90,7 +90,7 @@ def test_mask_coverage_can_select_and_delete_through_generic_layer_editing(
     layer = manager.get_layer(mask_id)
     assert layer is not None
     layer.coverage.raster.fill(255)
-    assert qpane.setLayerInteractionPolicy(
+    qpane.setLayerInteractionPolicy(
         info.scene_id,
         info.layer_id,
         LayerPolicy(
@@ -179,7 +179,7 @@ def test_mask_delete_projects_through_scaled_transform_and_offset_bounds(
     assert request_id is not None
     _wait_for(qapp, lambda: bool(completions))
     assert completions[-1][3] is True
-    assert qpane.setLayerInteractionPolicy(
+    qpane.setLayerInteractionPolicy(
         info.scene_id,
         info.layer_id,
         LayerPolicy(
@@ -253,7 +253,7 @@ def test_transformed_mask_brush_preview_and_commit_share_scene_selection(
     service = qpane.mask_service
     assert layer is not None
     assert service is not None
-    assert qpane.setLayerInteractionPolicy(
+    qpane.setLayerInteractionPolicy(
         info.scene_id,
         info.layer_id,
         LayerPolicy(selectable=True, movable=True),
@@ -410,7 +410,7 @@ def test_bounds_request_rejects_result_after_layer_removal(
     qpane_with_mask,
     qapp,
 ):
-    """Detached layer work should terminate without restoring deleted source state."""
+    """Detached layer work should terminate while retaining its project resource."""
     qpane, manager, image_id = qpane_with_mask
     mask_id, info = _attached_mask(qpane, manager, image_id)
     completions: list[tuple] = []
@@ -424,7 +424,7 @@ def test_bounds_request_rejects_result_after_layer_removal(
         QRect(-8, -8, 32, 32),
     )
     assert request_id is not None
-    assert qpane.removeMaskFromImage(image_id, mask_id)
+    assert qpane.removeMaskFromComposition(image_id, mask_id)
     _wait_for(qapp, lambda: bool(completions))
 
     assert completions[0][:4] == (
@@ -433,4 +433,4 @@ def test_bounds_request_rejects_result_after_layer_removal(
         info.layer_id,
         False,
     )
-    assert manager.get_layer(mask_id) is None
+    assert manager.get_layer(mask_id) is not None

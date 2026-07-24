@@ -65,6 +65,7 @@ class Tools(ToolManager):
     CONTROL_MODE_MOVE = "move"
     CONTROL_MODE_TRANSFORM = "transform"
     CONTROL_MODE_DRAW_BRUSH = "draw-brush"
+    CONTROL_MODE_CLONE_STAMP = "clone-stamp"
     CONTROL_MODE_PAINT_BUCKET = "paint-bucket"
     CONTROL_MODE_SMART_SELECT = "smart-select"
     CONTROL_MODE_SELECT_RECTANGLE = "select-rectangle"
@@ -82,6 +83,7 @@ class Tools(ToolManager):
         self._activation_ports = ToolActivationPorts()
         from ..painting.tools import (
             BrushTool,
+            CloneStampTool,
             connect_brush_signals,
             disconnect_brush_signals,
         )
@@ -100,6 +102,12 @@ class Tools(ToolManager):
         self.registerTool(
             self.CONTROL_MODE_DRAW_BRUSH,
             BrushTool,
+            on_connect=connect_brush_signals,
+            on_disconnect=disconnect_brush_signals,
+        )
+        self.registerTool(
+            self.CONTROL_MODE_CLONE_STAMP,
+            CloneStampTool,
             on_connect=connect_brush_signals,
             on_disconnect=disconnect_brush_signals,
         )

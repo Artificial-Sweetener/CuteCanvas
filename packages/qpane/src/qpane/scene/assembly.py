@@ -14,18 +14,12 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Assemble complete ordered scenes before rendering begins."""
+"""Assemble complete provider-owned scenes before rendering begins."""
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
-from pathlib import Path
 
-from PySide6.QtCore import QSize
-
-from ..catalog.source_reference import CatalogImageReference
-from .default_scene import DefaultCatalogSceneProvider
 from .model import SceneDescriptor
 from .providers import SceneContribution, SceneResolver
 from .registry import SceneProviderRegistry
@@ -49,51 +43,14 @@ class SceneAssembly:
         """Capture the provider registry used for scene construction."""
         self._providers = providers
 
-    def resolve_catalog_image(
-        self,
-        *,
-        image_id: uuid.UUID,
-        image_size: QSize,
-        source_path: Path | None,
-        source_revision: int,
-    ) -> SceneDescriptor | None:
-        """Build the complete scene for one active catalog image."""
-        replacements = self.resolve_replacement()
-        if replacements is not None:
-            return replacements
-        contribution = DefaultCatalogSceneProvider(
-            image_id=image_id,
-            image_size=image_size,
-            source_path=source_path,
-            revision=source_revision,
-        ).scene_contribution()
-        if contribution is None:
-            return None
-        base_scene = self._providers.adapt_base_scene(
-            contribution.scene,
-            image_id,
-        )
-        contributions = [SceneContribution(base_scene, order=0)]
-        contributions.extend(self._providers.contributions_for(base_scene, image_id))
-        scene = self._resolve(tuple(contributions))
-        return None if scene is None else self._providers.process_scene(scene)
-
-    def resolve_replacement(self) -> SceneDescriptor | None:
-        """Resolve a replacement document through shared scene extension stages."""
+    def resolve_scene(self) -> SceneDescriptor | None:
+        """Resolve the active document through shared scene extension stages."""
         base_scene = self._resolve(self._providers.replacement_contributions())
         if base_scene is None:
             return None
-        image_id = next(
-            (
-                layer.source.image_id
-                for layer in base_scene.layers
-                if layer.visible and isinstance(layer.source, CatalogImageReference)
-            ),
-            None,
-        )
-        adapted = self._providers.adapt_base_scene(base_scene, image_id)
+        adapted = self._providers.adapt_base_scene(base_scene)
         contributions = [SceneContribution(adapted, order=0)]
-        contributions.extend(self._providers.contributions_for(adapted, image_id))
+        contributions.extend(self._providers.contributions_for(adapted))
         scene = self._resolve(tuple(contributions))
         return None if scene is None else self._providers.process_scene(scene)
 

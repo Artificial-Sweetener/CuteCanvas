@@ -45,6 +45,17 @@ class VectorObject:
     shape_kind: VectorShapeKind | None = None
     path: tuple[VectorPathCommand, ...] = ()
     text: VectorTextContent | None = None
+    _retained_bytes: int = field(default=-1, repr=False, compare=False)
+    _retained_path: tuple[VectorPathCommand, ...] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _retained_text: VectorTextContent | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         """Validate semantic geometry and detach mutable style values."""
@@ -89,6 +100,18 @@ class VectorObject:
         object.__setattr__(self, "shape_kind", shape_kind)
         object.__setattr__(self, "path", path)
         object.__setattr__(self, "text", text)
+        retained_bytes = self._retained_bytes
+        if (
+            retained_bytes < 0
+            or self._retained_path is not path
+            or self._retained_text is not text
+        ):
+            retained_bytes = sum(len(command.points) for command in path) * 32
+            if text is not None:
+                retained_bytes += len(text.text.encode("utf-8")) + len(text.spans) * 192
+        object.__setattr__(self, "_retained_bytes", retained_bytes)
+        object.__setattr__(self, "_retained_path", path)
+        object.__setattr__(self, "_retained_text", text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,18 +133,10 @@ class VectorDocument:
         if self.revision < 0:
             raise ValueError("vector document revision must be non-negative")
         object.__setattr__(self, "objects", objects)
-        point_count = sum(
-            len(command.points) for item in objects for command in item.path
-        )
-        text_bytes = sum(
-            len(item.text.text.encode("utf-8")) + len(item.text.spans) * 192
-            for item in objects
-            if item.text is not None
-        )
         object.__setattr__(
             self,
             "retained_bytes",
-            len(objects) * 384 + point_count * 32 + text_bytes,
+            len(objects) * 384 + sum(item._retained_bytes for item in objects),
         )
 
     def object(self, object_id: uuid.UUID) -> VectorObject | None:

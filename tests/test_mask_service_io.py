@@ -30,6 +30,7 @@ from cutecanvas.masks.combiner import MaskCombiner
 from cutecanvas.masks.component_adjustment import MaskComponentAdjustmentTool
 from cutecanvas.masks.layer_workflows import random_mask_color
 from cutecanvas.masks.mask import MaskAssetStore
+from cutecanvas.resources import ProjectResourceStore
 from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QImage, Qt
 from qpane.raster.image_conversion import numpy_to_qimage_grayscale8
@@ -57,7 +58,7 @@ def test_mask_service_load_mask_records_success(qpane_with_mask, tmp_path):
     assert grayscale.save(str(mask_path))
     mask_id = service.loadMaskFromPath(str(mask_path))
     assert mask_id is not None
-    assert mask_id in service.mask_ids_for_image(image_id)
+    assert mask_id in service.mask_ids_for_composition(image_id)
     label, message = service._status_messages[-1]
     assert label == "Mask"
     assert str(mask_path) in message
@@ -108,10 +109,10 @@ def test_random_mask_color_is_deterministic():
 def test_createBlankMask_assigns_sequential_colors(qpane_with_mask):
     qpane, _mask_manager, _ = qpane_with_mask
     service = _mask_service(qpane)
-    base_image = qpane.catalog().currentImage()
-    assert base_image is not None
-    first_id = service.createBlankMask(base_image.size())
-    second_id = service.createBlankMask(base_image.size())
+    raster = qpane.activeRasterResolver().resolve()
+    assert raster is not None
+    first_id = service.createBlankMask(raster.image.size())
+    second_id = service.createBlankMask(raster.image.size())
     assert first_id is not None and second_id is not None
     first_instance = service.layer_instance_for_mask(first_id)
     second_instance = service.layer_instance_for_mask(second_id)
@@ -122,7 +123,7 @@ def test_createBlankMask_assigns_sequential_colors(qpane_with_mask):
 
 
 def test_combine_with_numpy_mask_resizes_mismatched_shapes():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     base_image = QImage(8, 8, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -137,7 +138,7 @@ def test_combine_with_numpy_mask_resizes_mismatched_shapes():
 
 
 def test_combine_resize_preserves_nearest_sampling_contract():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     base_image = QImage(5, 4, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -160,7 +161,7 @@ def test_combine_resize_preserves_nearest_sampling_contract():
 
 
 def test_combine_with_numpy_mask_coerces_bool_arrays():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     base_image = QImage(4, 4, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -177,7 +178,7 @@ def test_combine_with_numpy_mask_coerces_bool_arrays():
 
 
 def test_combine_with_numpy_mask_erase_clears_null_layer():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     base_image = QImage(4, 4, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -199,7 +200,7 @@ def test_combine_with_numpy_mask_erase_clears_null_layer():
 
 
 def test_adjust_component_out_of_bounds_guard():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     base_image = QImage(8, 8, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -217,7 +218,7 @@ def test_adjust_component_out_of_bounds_guard():
 
 
 def test_adjust_component_uses_eight_connectivity_and_cross_dilation():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     base_image = QImage(7, 7, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -240,7 +241,7 @@ def test_adjust_component_uses_eight_connectivity_and_cross_dilation():
 
 
 def test_adjust_component_shrinks_only_selected_component():
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     base_image = QImage(8, 6, QImage.Format_Grayscale8)
     base_image.fill(Qt.black)
     mask_id = manager.create_mask(base_image)
@@ -261,7 +262,7 @@ def test_adjust_component_shrinks_only_selected_component():
 
 def test_adjust_component_grows_storage_only_when_extent_policy_allows() -> None:
     """Edge morphology should expand touched edges for expanding surfaces only."""
-    manager = MaskAssetStore()
+    manager = MaskAssetStore(ProjectResourceStore())
     image = QImage(4, 4, QImage.Format_Grayscale8)
     image.fill(Qt.black)
     mask_id = manager.create_mask(image)

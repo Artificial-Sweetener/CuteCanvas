@@ -26,9 +26,10 @@ from qpane.rendering.coordinates import (
     LogicalPoint,
     PhysicalPoint,
 )
-from qpane.scene.identity import default_catalog_asset_key, default_scene_id
 from qpane.scene.model import LayerPlacement
 from qpane.scene.render_plan import SceneContentSnapshot
+
+from tests.helpers.render_plan import make_tile_key
 
 
 class _StubViewport:
@@ -79,13 +80,10 @@ class _StubQPane:
             width=float(self.original_image.width()),
             height=float(self.original_image.height()),
         )
+        tile_key = make_tile_key(image_id)
         return SceneContentSnapshot(
-            scene_id=default_scene_id(image_id),
-            base_asset_key=default_catalog_asset_key(
-                image_id,
-                revision=0,
-                source_path=None,
-            ),
+            scene_id=tile_key.asset_key.scene_id,
+            base_asset_key=tile_key.asset_key,
             base_image_size=self.original_image.size(),
             scene_bounds=bounds,
             active_content_bounds=bounds,

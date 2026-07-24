@@ -18,9 +18,7 @@
 
 from __future__ import annotations
 
-import uuid
-
-from cutecanvas import Config, CuteCanvas
+from cutecanvas import Config, CuteCanvas, LayerPolicy
 from PySide6.QtGui import QImage
 
 
@@ -40,10 +38,11 @@ def build_touch_mask_editor(image: QImage) -> CuteCanvas:
         touch_inertia_enabled=True,
     )
     viewer = CuteCanvas(config=config, features=("mask",))
-    image_id = uuid.uuid4()
-    viewer.setImagesByID(
-        CuteCanvas.imageMapFromLists([image], ids=[image_id]),
-        image_id,
+    viewer.createCompositionFromImage(
+        image,
+        title="Touch and pen",
+        label="Image",
+        interaction=LayerPolicy(selectable=True),
     )
     mask_id = viewer.createBlankMask(image.size())
     if mask_id is None:

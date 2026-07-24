@@ -38,8 +38,7 @@ def rendering_retry_provider(qpane: QPane) -> Iterable[DiagnosticRecord]:
         tile_row = _format_retry_row(manager=tile_manager, expected_category="tiles")
         if tile_row:
             rows.append(DiagnosticRecord("Retry|Tiles", tile_row))
-    catalog = _call_accessor(qpane, "catalog")
-    pyramid_manager = _call_accessor(catalog, "pyramidManager")
+    pyramid_manager = getattr(view, "pyramid_manager", None)
     pyramid_row = _format_retry_row(
         manager=pyramid_manager,
         expected_category="pyramid",

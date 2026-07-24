@@ -24,6 +24,11 @@ import numpy as np
 from cutecanvas.composition.edit_controller import CompositionEditController
 from cutecanvas.composition.edit_history import CompositionEditHistory
 from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.editor.floating_history import (
+    FloatingPixelHistory,
+    LayerPixelTransition,
+)
+from cutecanvas.editor.floating_layers import FloatingLayerPromotionRegistry
 from cutecanvas.editor.movement import EditorMovementInteraction
 from cutecanvas.editor.operation_resolution import (
     EditorOperation,
@@ -35,10 +40,13 @@ from cutecanvas.editor.pixel_movement import SelectedPixelMovementController
 from cutecanvas.editor.selection_projection import LayerSelectionProjectionCache
 from cutecanvas.raster.assets import EditableRasterAssetStore
 from cutecanvas.raster.pixel_edits import EditableRasterPixelMutationOwner
-from cutecanvas.raster.source_reference import EditableRasterReference
+from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.scene.layer_selection import SceneLayerSelectionController
 from cutecanvas.scene.mutations import SceneMutationCoordinator
-from cutecanvas.scene.pixel_owners import LayerPixelOwnerRegistry
+from cutecanvas.scene.pixel_owners import (
+    LayerPixelMutationOwner,
+    LayerPixelOwnerRegistry,
+)
 from cutecanvas.selection import PixelSelectionService
 from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QPointF
@@ -63,6 +71,87 @@ from qpane.scene.transform_geometry import (
 )
 
 
+class _FixtureTransitionOwner:
+    """Replay fixture transitions through the same source-owned pixel registry."""
+
+    def __init__(
+        self,
+        scene: SceneDescriptor,
+        owners: LayerPixelOwnerRegistry,
+    ) -> None:
+        """Bind the immutable fixture scene and generic pixel owner registry."""
+        self._scene = scene
+        self._owners = owners
+
+    def matches(
+        self,
+        item: LayerPixelTransition,
+        *,
+        use_after: bool,
+    ) -> bool:
+        """Return whether the fixture layer equals one transition side."""
+        resolved = self._resolve(item)
+        return bool(
+            resolved is not None
+            and resolved[0].transition_matches(
+                resolved[1],
+                item.raster,
+                use_after=use_after,
+            )
+        )
+
+    def restore(
+        self,
+        item: LayerPixelTransition,
+        *,
+        use_after: bool,
+    ) -> bool:
+        """Restore one retained transition through its source owner."""
+        resolved = self._resolve(item)
+        return bool(
+            resolved is not None
+            and resolved[0].restore_transition(
+                resolved[1],
+                item.raster,
+                use_after=use_after,
+            )
+        )
+
+    def _resolve(
+        self,
+        item: LayerPixelTransition,
+    ) -> tuple[LayerPixelMutationOwner, LayerDescriptor] | None:
+        """Return the fixture pixel owner and layer for one transition."""
+        layer = next(
+            (
+                candidate
+                for candidate in self._scene.layers
+                if candidate.scene_id == item.scene_id
+                and candidate.layer_id == item.layer_id
+            ),
+            None,
+        )
+        if layer is None:
+            return None
+        owner = self._owners.owner_for(self._scene, layer)
+        return None if owner is None else (owner, layer)
+
+
+def _floating_history(
+    edits: CompositionEditController,
+    selection: PixelSelectionService,
+    scene: SceneDescriptor,
+    owners: LayerPixelOwnerRegistry,
+) -> FloatingPixelHistory:
+    """Build document-style floating history for an isolated movement fixture."""
+    return FloatingPixelHistory(
+        edits=edits,
+        transitions=_FixtureTransitionOwner(scene, owners),
+        pixel_selection=selection,
+        promotions=FloatingLayerPromotionRegistry(),
+    )
+
+
 def _movement_fixture(
     *,
     placement: LayerPlacement | None = None,
@@ -83,7 +172,7 @@ def _movement_fixture(
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.RASTER,
-        source=EditableRasterReference(asset.raster_id),
+        source=ProjectResourceReference(asset.raster_id),
         placement=placement,
         interaction=LayerInteractionPolicy(selectable=True, pixel_editable=True),
         capabilities=LayerContentCapabilities(raster_editable=True),
@@ -119,7 +208,8 @@ def _movement_fixture(
         layer_selection=layer_selection,
         pixel_selection=selection,
         pixel_owners=registry,
-        edits=edits,
+        history=_floating_history(edits, selection, scene, registry),
+        session_id=uuid.uuid4(),
         selection_projections=LayerSelectionProjectionCache(),
         preview_changed=lambda: previews.append(object()),
     )
@@ -152,7 +242,7 @@ def _cross_layer_fixture():
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.RASTER,
-        source=EditableRasterReference(source_asset.raster_id),
+        source=ProjectResourceReference(source_asset.raster_id),
         placement=LayerPlacement(0.0, 0.0, 6.0, 2.0),
         interaction=policy,
         capabilities=capabilities,
@@ -163,7 +253,7 @@ def _cross_layer_fixture():
         scene_id=scene_id,
         layer_id=uuid.uuid4(),
         kind=LayerKind.RASTER,
-        source=EditableRasterReference(target_asset.raster_id),
+        source=ProjectResourceReference(target_asset.raster_id),
         placement=LayerPlacement(0.0, 0.0, 6.0, 2.0),
         interaction=policy,
         capabilities=capabilities,
@@ -198,7 +288,8 @@ def _cross_layer_fixture():
         layer_selection=layer_selection,
         pixel_selection=selection,
         pixel_owners=registry,
-        edits=edits,
+        history=_floating_history(edits, selection, scene, registry),
+        session_id=uuid.uuid4(),
         selection_projections=LayerSelectionProjectionCache(),
         preview_changed=lambda: None,
     )

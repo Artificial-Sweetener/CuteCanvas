@@ -18,10 +18,8 @@
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
-from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas import CuteCanvas
 from cutecanvas.tools.input import PointerInputController
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import (
@@ -40,6 +38,7 @@ from qpane import (
     PointerDeviceKind,
     PointerPhase,
     ToolInputProfile,
+    ViewerTool,
 )
 
 from tests.harness import PointerTransitionProbe
@@ -153,13 +152,9 @@ def test_qtest_touchscreen_drag_reaches_qpane_navigation(qpane_core, qapp) -> No
     qpane_core.show()
     image = QImage(800, 800, QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.white)
-    image_id = uuid.uuid4()
-    qpane_core.setImagesByID(
-        qpane_core.imageMapFromLists([image], [None], [image_id]),
-        image_id,
-    )
+    qpane_core.setImage(image)
     qapp.processEvents()
-    viewport = qpane_core.view().viewport
+    viewport = qpane_core.viewport
     viewport.apply_direct_manipulation(1.0, QPointF())
     device = QTest.createTouchDevice()
 
@@ -172,42 +167,6 @@ def test_qtest_touchscreen_drag_reaches_qpane_navigation(qpane_core, qapp) -> No
     assert viewport.pan == QPointF(30.0, 20.0)
 
 
-def test_qtest_double_tap_invokes_panzoom_toggle(
-    qpane_core,
-    qapp,
-    monkeypatch,
-) -> None:
-    qpane_core.resize(200, 200)
-    qpane_core.show()
-    image = QImage(400, 400, QImage.Format.Format_ARGB32)
-    image.fill(Qt.GlobalColor.white)
-    image_id = uuid.uuid4()
-    qpane_core.setImagesByID(
-        qpane_core.imageMapFromLists([image], [None], [image_id]),
-        image_id,
-    )
-    qapp.processEvents()
-    taps: list[QPointF] = []
-    tool = qpane_core._tools_manager.get_active_tool()
-
-    def handle_double_tap(position: QPointF) -> bool:
-        taps.append(QPointF(position))
-        return True
-
-    monkeypatch.setattr(tool, "handle_double_tap", handle_double_tap)
-    device = QTest.createTouchDevice()
-    for _tap in range(2):
-        QTest.touchEvent(qpane_core, device).press(
-            0, QPoint(75, 85), qpane_core
-        ).commit()
-        QTest.touchEvent(qpane_core, device).release(
-            0, QPoint(75, 85), qpane_core
-        ).commit()
-        qapp.processEvents()
-
-    assert taps == [QPointF(75.0, 85.0)]
-
-
 def test_qtest_double_tap_toggles_fit_and_one_to_one(qpane_core, qapp) -> None:
     """Stationary double taps must zoom in from Fit and return to Fit."""
     qpane_core.applySettings(
@@ -218,13 +177,9 @@ def test_qtest_double_tap_toggles_fit_and_one_to_one(qpane_core, qapp) -> None:
     qpane_core.show()
     image = QImage(1200, 800, QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.white)
-    image_id = uuid.uuid4()
-    qpane_core.setImagesByID(
-        qpane_core.imageMapFromLists([image], [None], [image_id]),
-        image_id,
-    )
+    qpane_core.setImage(image)
     qapp.processEvents()
-    viewport = qpane_core.view().viewport
+    viewport = qpane_core.viewport
     device = QTest.createTouchDevice()
 
     def double_tap() -> None:
@@ -260,24 +215,19 @@ def test_synthetic_tablet_event_reaches_active_brush_without_mouse(
 ) -> None:
     samples = []
 
-    class _PointerTool:
+    class _PointerTool(ViewerTool):
+        """Record normalized tablet samples from QPane's public tool host."""
+
         input_profile = ToolInputProfile(tablet=True)
 
-        @staticmethod
-        def handle_pointer_sample(sample) -> bool:
+        def handle_pointer_sample(self, sample) -> bool:
+            """Retain one sample and consume it."""
             samples.append(sample)
             return True
 
-    monkeypatch.setattr(
-        qpane_core._tools_manager,
-        "get_control_mode",
-        lambda: qpane_core.CONTROL_MODE_DRAW_BRUSH,
-    )
-    monkeypatch.setattr(
-        qpane_core._tools_manager,
-        "get_active_tool",
-        lambda: _PointerTool(),
-    )
+    del monkeypatch
+    qpane_core.registerTool("tablet-probe", _PointerTool)
+    qpane_core.setControlMode("tablet-probe")
     event = _tablet_event(
         pen_device,
         QEvent.Type.TabletPress,
@@ -300,11 +250,7 @@ def test_qtest_single_finger_tap_paints_exactly_one_mask_dab(qapp) -> None:
         viewer.show()
         image = QImage(100, 100, QImage.Format.Format_ARGB32)
         image.fill(Qt.GlobalColor.white)
-        image_id = uuid.uuid4()
-        viewer.setImagesByID(
-            viewer.imageMapFromLists([image], [None], [image_id]),
-            image_id,
-        )
+        viewer.createCompositionFromImage(image, title="Touch paint")
         mask_id = viewer.createBlankMask(image.size())
         assert mask_id is not None
         service = viewer.mask_service
@@ -337,11 +283,7 @@ def test_two_fingers_navigate_without_painting_in_brush_mode(qapp) -> None:
         viewer.show()
         image = QImage(800, 800, QImage.Format.Format_ARGB32)
         image.fill(Qt.GlobalColor.white)
-        image_id = uuid.uuid4()
-        viewer.setImagesByID(
-            viewer.imageMapFromLists([image], [None], [image_id]),
-            image_id,
-        )
+        viewer.createCompositionFromImage(image, title="Touch navigation")
         mask_id = viewer.createBlankMask(image.size())
         assert mask_id is not None
         service = viewer.mask_service
@@ -384,19 +326,12 @@ def test_single_finger_move_tool_translates_policy_enabled_layer(qapp) -> None:
         viewer.show()
         image = QImage(100, 100, QImage.Format.Format_ARGB32)
         image.fill(Qt.GlobalColor.white)
-        image_id = uuid.uuid4()
-        viewer.setImagesByID(
-            viewer.imageMapFromLists([image], [None], [image_id]),
-            image_id,
-        )
+        viewer.createCompositionFromImage(image, title="Touch movement")
         scene = viewer.currentScene()
         assert scene is not None
         layer = scene.layers[0]
-        assert viewer.setLayerInteractionPolicy(
-            scene.scene_id,
-            layer.layer_id,
-            LayerPolicy(selectable=True, movable=True),
-        )
+        assert layer.interaction.selectable
+        assert layer.interaction.movable
         viewer.setControlMode(viewer.CONTROL_MODE_MOVE)
         qapp.processEvents()
         device = QTest.createTouchDevice()
@@ -423,11 +358,7 @@ def _touch_mask_viewer(qapp) -> CuteCanvas:
     viewer.show()
     image = QImage(100, 100, QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.white)
-    image_id = uuid.uuid4()
-    viewer.setImagesByID(
-        viewer.imageMapFromLists([image], [None], [image_id]),
-        image_id,
-    )
+    viewer.createCompositionFromImage(image, title="Pointer feedback")
     assert viewer.createBlankMask(image.size()) is not None
     viewer.setControlMode(viewer.CONTROL_MODE_DRAW_BRUSH)
     qapp.processEvents()
@@ -689,6 +620,7 @@ def test_palm_rejected_touch_preserves_pen_modality_until_proximity_leave(
                 QPointF(80.0, 80.0),
             ),
         )
+        viewer.interaction._pointer_input._pen_last_seen_at -= 10.0
         touch_device = QTest.createTouchDevice()
 
         QTest.touchEvent(viewer, touch_device).press(
@@ -984,7 +916,9 @@ def test_transition_probe_records_ignored_touch_on_blank_pane(qapp) -> None:
     touch_device = QTest.createTouchDevice()
     position = QPointF(100.0, 100.0)
     try:
-        viewer.clearImages()
+        document_id = viewer.currentCompositionID()
+        assert document_id is not None
+        viewer.removeComposition(document_id)
         qapp.processEvents()
         observation = probe.deliver(
             QTouchEvent(

@@ -46,20 +46,32 @@ def test_qpane_public_api_symbols() -> None:
         "HybridRasterSampler",
         "HybridSource",
         "HybridVectorPrimitive",
+        "InspectionRegion",
+        "InspectionStateStore",
+        "InspectionTarget",
+        "InspectionUpdate",
+        "InspectionViewState",
+        "InspectionZoomMode",
         "LayerClip",
+        "LayerLocalPoint",
         "LayerPresentationEffect",
         "LayerPresentationEffectKind",
         "LayerPresentationStyle",
         "LayerTransform",
+        "LayerSourcePoint",
         "LinkedGroup",
         "NavigationInteractionPort",
+        "OutboundDragPayload",
+        "OutboundMimeItem",
         "PanZoomTool",
         "PanelHitTest",
+        "PanelPoint",
         "PointerDeviceKind",
         "PointerInputController",
         "PointerInputPort",
         "PointerPhase",
         "PointerSample",
+        "ProjectedViewport",
         "QPane",
         "RasterBounds",
         "RasterHitTestProvider",
@@ -71,6 +83,8 @@ def test_qpane_public_api_symbols() -> None:
         "RenderScene",
         "SceneSnapshotOverlayLayer",
         "SceneSnapshotOverlayState",
+        "SceneCoordinateSystem",
+        "ScenePoint",
         "SparseRasterSourceProvider",
         "ToolInputProfile",
         "ToolManager",
@@ -105,6 +119,8 @@ def test_qpane_public_api_symbols() -> None:
         "ViewportZoomMode",
         "ZoomMode",
         "__version__",
+        "capture_inspection",
+        "project_inspection",
     }
     assert set(qpane.__all__) == expected
     for symbol in expected:
@@ -119,6 +135,23 @@ def test_cutecanvas_public_api_symbols() -> None:
         "BrushPreset",
         "CoverageCoordinateSpace",
         "CoverageFacade",
+        "CanvasComparison",
+        "CanvasContentKind",
+        "CanvasContentReference",
+        "CanvasDocument",
+        "CanvasInteractionMode",
+        "CanvasPresentation",
+        "CanvasPresentationContext",
+        "CanvasPresentationKind",
+        "CanvasPresentationProvider",
+        "CanvasProjectionHandle",
+        "CanvasProjectionRequest",
+        "CanvasProjectionResult",
+        "CanvasProjectionStatus",
+        "CanvasSessionSnapshot",
+        "CanvasViewSession",
+        "CanvasWorkspace",
+        "CloneStampTransform",
         "CuteCanvas",
         "ControlMode",
         "EditorCapability",
@@ -129,6 +162,7 @@ def test_cutecanvas_public_api_symbols() -> None:
         "MaskInfo",
         "PlacedAssetMode",
         "PlacedAssetStatus",
+        "ResolvedCanvasContent",
     }
     assert expected.issubset(set(cutecanvas.__all__))
     assert "QPane" not in cutecanvas.__all__
@@ -159,7 +193,7 @@ def test_cutecanvas_accessors_remain_curated(qapp) -> None:
     """The editor facade should expose supported boundaries, not internals."""
     editor = cutecanvas.CuteCanvas(features=())
     try:
-        assert editor.catalog() is not None
+        assert editor.editor.compositions is not None
         assert editor.view() is not None
         assert editor.diagnostics() is not None
         assert editor.availableControlModes()

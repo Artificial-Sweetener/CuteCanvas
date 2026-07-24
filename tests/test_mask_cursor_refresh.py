@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from cutecanvas import CuteCanvas
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
@@ -31,9 +29,7 @@ def test_mask_properties_refresh_avoids_direct_brush_cursor_calls(qapp) -> None:
     try:
         image = QImage(8, 8, QImage.Format_ARGB32)
         image.fill(Qt.black)
-        image_id = uuid.uuid4()
-        image_map = CuteCanvas.imageMapFromLists([image], [None], [image_id])
-        qpane.setImagesByID(image_map, image_id)
+        qpane.createCompositionFromImage(image, title="Cursor refresh")
         qpane.setControlMode(CuteCanvas.CONTROL_MODE_PANZOOM)
         calls = {"brush": 0, "refresh": 0}
 

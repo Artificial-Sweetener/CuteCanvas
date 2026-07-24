@@ -22,7 +22,7 @@ from dataclasses import dataclass
 
 from qpane.sdk.vector import VectorDocument, VectorObject, VectorPresentationSnapshot
 
-from .source_reference import VectorDocumentReference
+from ..resources import ProjectResourceReference
 from .store import VectorAssetStore
 
 
@@ -59,13 +59,13 @@ class VectorDocumentProjection:
 
     def snapshot(
         self,
-        source: VectorDocumentReference,
+        source: ProjectResourceReference,
     ) -> VectorPresentationSnapshot | None:
         """Return the current effective document for one source reference."""
-        durable = self._assets.get(source.vector_id)
+        durable = self._assets.get(source.resource_id)
         if durable is None:
             return None
-        preview = self._previews.get(source.vector_id)
+        preview = self._previews.get(source.resource_id)
         if preview is None or preview.base != durable:
             return VectorPresentationSnapshot(
                 durable,
@@ -79,7 +79,7 @@ class VectorDocumentProjection:
 
     def document(self, vector_id: uuid.UUID) -> VectorDocument | None:
         """Return the effective document by stable vector identity."""
-        snapshot = self.snapshot(VectorDocumentReference(vector_id))
+        snapshot = self.snapshot(ProjectResourceReference(vector_id))
         return None if snapshot is None else snapshot.document
 
     def set_object_preview(

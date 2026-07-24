@@ -20,13 +20,14 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerInteractionPolicy,
     LayerPlacement,
     LayerTransform,
+    RasterBounds,
     SceneDescriptor,
 )
 
@@ -37,13 +38,13 @@ from ..composition.layers import (
     CompositionLayerInstance,
     CompositionLayerStore,
 )
+from ..resources import ProjectResourceReference
 from ..scene.mutations import (
     BaseSceneMutationOwner,
     SceneMutationResult,
     SceneMutationStatus,
 )
-from .assets import EditableRasterAssetStore
-from .source_reference import EditableRasterReference
+from .assets import EditableRasterAsset, EditableRasterAssetStore
 
 
 class EditableRasterLayerController:
@@ -56,14 +57,12 @@ class EditableRasterLayerController:
         layers: CompositionLayerStore,
         layer_edits: CompositionLayerEditService,
         current_composition_id: Callable[[], uuid.UUID | None],
-        is_generated_default: Callable[[uuid.UUID], bool],
     ) -> None:
         """Bind raster assets and the active composition document."""
         self.assets = assets
         self._layers = layers
         self._layer_edits = layer_edits
         self._current_composition_id = current_composition_id
-        self._is_generated_default = is_generated_default
 
     def add(
         self,
@@ -73,12 +72,73 @@ class EditableRasterLayerController:
         interaction: LayerInteractionPolicy,
         label: str | None,
         extent_policy: RasterExtentPolicy,
+        index: int | None = None,
     ) -> uuid.UUID | None:
         """Create and attach one editable raster to the active composition."""
         composition_id = self._current_composition_id()
         if composition_id is None:
             return None
         asset = self.assets.create(image, extent_policy=extent_policy)
+        return self._attach(
+            composition_id,
+            asset,
+            placement=placement,
+            interaction=interaction,
+            label=label,
+            index=index,
+        )
+
+    def add_empty(
+        self,
+        size: QSize,
+        *,
+        placement: QRectF | None,
+        interaction: LayerInteractionPolicy,
+        label: str,
+        extent_policy: RasterExtentPolicy,
+        index: int | None = None,
+    ) -> uuid.UUID | None:
+        """Create and attach one transparent editable raster layer."""
+        if size.isEmpty():
+            raise ValueError("empty raster layer size must be positive")
+        composition_id = self._current_composition_id()
+        if composition_id is None:
+            return None
+        asset = self.assets.create_empty(
+            RasterBounds.from_size(size),
+            extent_policy=extent_policy,
+        )
+        return self._attach(
+            composition_id,
+            asset,
+            placement=placement,
+            interaction=interaction,
+            label=label,
+            index=index,
+        )
+
+    def remove(self, composition_id: uuid.UUID, raster_id: uuid.UUID) -> bool:
+        """Remove one instance and delete an orphaned editable raster asset."""
+        instance = self._layers.layer_for_source(
+            composition_id,
+            ProjectResourceReference(raster_id),
+        )
+        return instance is not None and self._layer_edits.remove(
+            composition_id,
+            instance.layer_id,
+        )
+
+    def _attach(
+        self,
+        composition_id: uuid.UUID,
+        asset: EditableRasterAsset,
+        *,
+        placement: QRectF | None,
+        interaction: LayerInteractionPolicy,
+        label: str | None,
+        index: int | None,
+    ) -> uuid.UUID | None:
+        """Attach one retained raster asset as a composition layer instance."""
         bounds = asset.surface.bounds
         destination = (
             LayerPlacement(
@@ -97,32 +157,17 @@ class EditableRasterLayerController:
         )
         instance = CompositionLayerInstance(
             layer_id=uuid.uuid4(),
-            source=EditableRasterReference(asset.raster_id),
+            source=ProjectResourceReference(asset.raster_id),
             transform=LayerTransform.from_placement(bounds, destination),
             interaction=interaction,
             role="raster",
             label=label,
         )
-        added = (
-            self._layers.add_layer(composition_id, instance)
-            if self._is_generated_default(composition_id)
-            else self._layer_edits.add(composition_id, instance)
-        )
+        added = self._layer_edits.add(composition_id, instance, index=index)
         if added:
             return instance.layer_id
         self.assets.remove(asset.raster_id)
         return None
-
-    def remove(self, composition_id: uuid.UUID, raster_id: uuid.UUID) -> bool:
-        """Remove one instance and delete an orphaned editable raster asset."""
-        instance = self._layers.layer_for_source(
-            composition_id,
-            EditableRasterReference(raster_id),
-        )
-        return instance is not None and self._layer_edits.remove(
-            composition_id,
-            instance.layer_id,
-        )
 
 
 class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
@@ -132,16 +177,22 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
 
     def __init__(
         self,
+        assets: EditableRasterAssetStore,
         layers: CompositionLayerStore,
         current_composition_id: Callable[[], uuid.UUID | None],
     ) -> None:
         """Bind composition placement for editable raster instances."""
+        self._assets = assets
         self._layers = layers
         self._current_composition_id = current_composition_id
 
     def supports_layer(self, scene: SceneDescriptor, layer: LayerDescriptor) -> bool:
         """Return whether ``layer`` references an editable raster."""
-        return isinstance(layer.source, EditableRasterReference)
+        source = layer.source
+        return (
+            isinstance(source, ProjectResourceReference)
+            and self._assets.get(source.resource_id) is not None
+        )
 
     def remove_layer(
         self, scene: SceneDescriptor, layer: LayerDescriptor
@@ -151,7 +202,8 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
         source = layer.source
         changed = bool(
             composition_id is not None
-            and isinstance(source, EditableRasterReference)
+            and isinstance(source, ProjectResourceReference)
+            and self._assets.get(source.resource_id) is not None
             and self._layers.remove_layer(composition_id, layer.layer_id)
         )
         return _result(self.name, scene, layer, changed)

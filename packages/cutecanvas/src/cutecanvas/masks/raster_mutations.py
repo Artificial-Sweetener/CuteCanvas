@@ -38,11 +38,11 @@ from ..raster.sparse_grid import (
     SparseRasterSnapshot,
     reframe_sparse_raster_snapshot,
 )
+from ..resources import ProjectResourceReference
 from ..scene.raster_mutations import RasterBoundsCompletion, RasterLayerState
 from .edit_service import MaskEditService
 from .mask import MaskAssetStore
 from .render_cache import MaskRenderCache
-from .source_reference import MaskAssetReference
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,10 @@ class MaskRasterMutationOwner:
 
     def supports_layer(self, layer: LayerDescriptor) -> bool:
         """Return True for mask-backed raster descriptors."""
-        return isinstance(layer.source, MaskAssetReference)
+        return (
+            isinstance(layer.source, ProjectResourceReference)
+            and self._assets.get_layer(layer.source.resource_id) is not None
+        )
 
     def state(
         self,
@@ -132,9 +135,9 @@ class MaskRasterMutationOwner:
         is_current: Callable[[], bool],
     ) -> uuid.UUID | None:
         """Replace prior work for this layer and submit one off-thread reframe."""
-        if self._closed or not isinstance(layer.source, MaskAssetReference):
+        if self._closed or not isinstance(layer.source, ProjectResourceReference):
             return None
-        surface = self._assets.get_surface(layer.source.mask_id)
+        surface = self._assets.get_surface(layer.source.resource_id)
         if surface is None:
             return None
         request_id = uuid.uuid4()
@@ -173,7 +176,7 @@ class MaskRasterMutationOwner:
         self._pending[request_id] = _PendingBoundsRequest(
             scene_id=scene.scene_id,
             layer_id=layer.layer_id,
-            mask_id=layer.source.mask_id,
+            mask_id=layer.source.resource_id,
             is_current=is_current,
             worker=worker,
             handle=handle,
@@ -193,9 +196,9 @@ class MaskRasterMutationOwner:
 
     def _surface_for(self, layer: LayerDescriptor) -> CoverageSurface | None:
         """Resolve authoritative storage from one supported descriptor."""
-        if not isinstance(layer.source, MaskAssetReference):
+        if not isinstance(layer.source, ProjectResourceReference):
             return None
-        return self._assets.get_surface(layer.source.mask_id)
+        return self._assets.get_surface(layer.source.resource_id)
 
     def _replace_pending(
         self,

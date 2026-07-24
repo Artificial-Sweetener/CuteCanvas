@@ -84,46 +84,6 @@ Cache weights are relative. Increase one only after diagnostics shows that its
 products churn during a representative workflow. Leave individual `mb` fields
 at `-1` to let the shared coordinator divide the budget.
 
-## Tune Neighbor Warmup
-
-Catalog navigation can prepare nearby pyramid and tile products after visible
-work settles:
-
-```python
-config.configure(
-    cache={
-        "prefetch": {
-            "pyramids": 1,
-            "tiles": 1,
-            "tiles_per_neighbor": 4,
-        }
-    }
-)
-```
-
-Set the neighbor counts to zero for demand-only rendering. Visible work always
-has priority, and rapid navigation cancels requests that are no longer useful.
-
-## Configure the Empty Canvas
-
-When no document or catalog image is open, CuteCanvas can display a placeholder:
-
-```python
-config.configure(
-    placeholder={
-        "source": "assets/welcome.png",
-        "panzoom_enabled": False,
-        "drag_out_enabled": False,
-        "zoom_mode": "fit",
-        "scale_mode": "logical_fit",
-    }
-)
-```
-
-The placeholder has its own pan, zoom, and drag-out policy. Opening real content
-restores normal editor behavior. File-backed placeholders decode in the
-background.
-
 ## Adjust Zoom Feel
 
 Smooth zoom follows the active display refresh rate when Qt can report it:
@@ -192,7 +152,7 @@ is separate and retains layers, retained shapes, transforms, and off-canvas
 content.
 
 `mask_undo_limit`, `mask_border_enabled`, and `mask_prefetch_enabled` control
-mask history retention, optional border presentation, and catalog warmup.
+mask history retention, optional border presentation, and presentation warmup.
 
 ## Configure SAM
 

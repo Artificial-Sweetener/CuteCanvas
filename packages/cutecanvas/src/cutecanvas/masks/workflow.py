@@ -14,14 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Masks controller that centralizes mask and SAM orchestration for CuteCanvas instances.
-
-The controller wires overlay ordering, activation deferment, diagnostics, and
-
-signal relays through ``CuteCanvas.interaction`` and catalog navigation so the
-
-QWidget facade stays focused on presentation.
-"""
+"""Mask and SAM orchestration for CuteCanvas document compositions."""
 
 from __future__ import annotations
 
@@ -33,6 +26,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QColor, QImage
+from qpane.sdk.scene import RasterBounds
 from qpane.sdk.types import DiagnosticRecord
 
 from ..core.config import Config
@@ -50,9 +44,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover
 
-    from qpane.sdk.catalog import Catalog, NavigationEvent
     from qpane.sdk.diagnostics import Diagnostics
-    from qpane.sdk.swap import SwapDelegate
 
     from ..canvas import CuteCanvas
     from ..masks.mask_service import MaskService
@@ -76,7 +68,7 @@ class MaskInfo:
     color: QColor | None
     label: str | None
     opacity: float | None
-    image_ids: tuple[uuid.UUID, ...]
+    composition_ids: tuple[uuid.UUID, ...]
     interaction: LayerPolicy
     is_active: bool
 
@@ -134,6 +126,19 @@ class _MaskUndoAPI:
         delegate = self._owner._ensure_mask_delegate()
         return False if delegate is None else delegate.invalidate_active_mask_cache()
 
+    def refresh_mask_resource(
+        self,
+        mask_id: uuid.UUID,
+        dirty_bounds: RasterBounds,
+    ) -> bool:
+        """Refresh one changed mask resource via the delegate."""
+        delegate = self._owner._ensure_mask_delegate()
+        return (
+            False
+            if delegate is None
+            else delegate.refresh_mask_resource(mask_id, dirty_bounds)
+        )
+
 
 class _SamWorkflow:
     """Encapsulate SAM orchestration so Masks can delegate high-level calls."""
@@ -183,21 +188,27 @@ class _SamWorkflow:
         if not owner.sam_feature_available():
             return bool(fallbacks.get("sam", "generate_and_apply_mask", default=False))
         service = owner._ensure_mask_service()
+        raster = qpane.activeRasterResolver().resolve(
+            preferred_layer_id=(
+                None
+                if qpane.selectedLayer() is None
+                else qpane.selectedLayer().layer_id
+            )
+        )
         if service is None:
             logger.error(
-                "generate_and_apply_mask aborted: mask service is unavailable (image_path=%s)",
-                qpane.currentImagePath,
+                "generate_and_apply_mask aborted: mask service is unavailable",
             )
             return False
         path_display = (
-            str(qpane.currentImagePath)
-            if qpane.currentImagePath is not None
+            str(raster.source_path)
+            if raster is not None and raster.source_path is not None
             else "<none>"
         )
         bbox_payload = bbox.tolist() if hasattr(bbox, "tolist") else bbox
-        if qpane.original_image.isNull():
+        if raster is None:
             logger.warning(
-                "generate_and_apply_mask aborted: no image loaded (image_path=%s)",
+                "generate_and_apply_mask aborted: no raster resource available (image_path=%s)",
                 path_display,
             )
             return False
@@ -260,8 +271,6 @@ class Masks:
         self,
         *,
         qpane: CuteCanvas,
-        catalog: Catalog,
-        swap_delegate: SwapDelegate,
         cache_registry,  # cache registry kept for future diagnostics usage
         mask_delegate: MaskDelegate | None = None,
         sam_delegate: SamDelegate | None = None,
@@ -270,15 +279,11 @@ class Masks:
 
         Args:
             qpane: Owning CuteCanvas widget coordinating interaction state.
-            catalog: Catalog facade used for navigation hooks and metadata.
-            swap_delegate: Swap delegate for image loading and activation callbacks.
             cache_registry: Cache registry used when mask tools inspect cache usage.
             mask_delegate: Optional delegate that handles mask-specific workflows.
             sam_delegate: Optional delegate for SAM predictors; created when absent.
         """
         self._qpane = qpane
-        self._catalog = catalog
-        self._swap_delegate = swap_delegate
         self._cache_registry = cache_registry
         delegate = mask_delegate if mask_delegate is not None else MaskDelegate(qpane)
         self._mask_delegate: MaskDelegate | None = delegate
@@ -286,21 +291,17 @@ class Masks:
         if sam is None:
             sam = SamDelegate(
                 qpane=qpane,
-                swap_delegate=swap_delegate,
                 cache_registry=cache_registry,
             )
         else:
             sam.updateCacheRegistry(cache_registry)
         self._sam_delegate: SamDelegate | None = sam
         self._mask_service: MaskService | None = getattr(qpane, "mask_service", None)
-        self._last_navigation_event: NavigationEvent | None = None
-        self._pending_activation_images: set[uuid.UUID] = set()
+        self._pending_activation_compositions: set[uuid.UUID] = set()
         self._cached_mask_service_records: tuple[DiagnosticRecord, ...] = ()
         self._diagnostics_registered = False
         self._undo_api = _MaskUndoAPI(self)
         self._sam_workflow = _SamWorkflow(self)
-        # Subscribe to navigation so we can own overlay suspension ordering and activation sequencing.
-        self._catalog.onNavigationStarted(self.on_navigation_started)
         if self._mask_service is not None:
             self._register_activation_hooks(self._mask_service)
         self._register_interaction_hooks()
@@ -314,42 +315,16 @@ class Masks:
         interaction = qpane.interaction
         interaction.unregisterOverlay("mask")
 
-    def on_navigation_started(self, event: NavigationEvent) -> None:
-        """Record navigation metadata and suspend overlays when needed."""
-        self._last_navigation_event = event
-        interaction = self._qpane.interaction
-        if not getattr(interaction, "overlays_suspended", False):
-            interaction.suspend_overlays_for_navigation()
-
-    def on_swap_applied(
-        self, image_id: uuid.UUID | None, activation_pending: bool
-    ) -> None:
-        """React to swap completion so overlays resume in workflow order."""
-        resolved_id = self._resolve_image_id(image_id)
-        interaction = self._qpane.interaction
-        if activation_pending and resolved_id is not None:
-            self._pending_activation_images.add(resolved_id)
-            interaction.overlays_resume_pending = True
-            if not interaction.overlays_suspended:
-                interaction.suspend_overlays_for_navigation()
-            return
-        if resolved_id is not None:
-            self._pending_activation_images.discard(resolved_id)
-        interaction.overlays_resume_pending = False
-        if interaction.overlays_suspended:
-            interaction.resume_overlays()
-        self._qpane.update()
-
     def handle_activation_ready(
         self,
-        image_id: uuid.UUID | None,
+        composition_id: uuid.UUID | None,
         *,
         resumed_with_update: bool,
     ) -> None:
         """Receive activation completion notifications from MaskService."""
-        resolved_id = self._resolve_image_id(image_id)
+        resolved_id = self._resolve_composition_id(composition_id)
         if resolved_id is not None:
-            self._pending_activation_images.discard(resolved_id)
+            self._pending_activation_compositions.discard(resolved_id)
         interaction = self._qpane.interaction
         interaction.overlays_resume_pending = False
         if interaction.overlays_suspended:
@@ -357,12 +332,12 @@ class Masks:
         if resumed_with_update:
             self._qpane.update()
 
-    def _handle_activation_pending(self, image_id: uuid.UUID | None) -> None:
+    def _handle_activation_pending(self, composition_id: uuid.UUID | None) -> None:
         """Record pending activation state and keep overlays suspended."""
-        resolved_id = self._resolve_image_id(image_id)
+        resolved_id = self._resolve_composition_id(composition_id)
         if resolved_id is None:
             return
-        self._pending_activation_images.add(resolved_id)
+        self._pending_activation_compositions.add(resolved_id)
         interaction = self._qpane.interaction
         interaction.overlays_resume_pending = True
         if not getattr(interaction, "overlays_suspended", False):
@@ -423,22 +398,18 @@ class Masks:
         """Relay undo stack notifications through the CuteCanvas signal surface."""
         self._qpane.maskUndoStackChanged.emit(mask_id)
 
-    def _resolve_image_id(
+    def _resolve_composition_id(
         self,
         candidate: uuid.UUID | None,
         *,
         use_fallback: bool = True,
     ) -> uuid.UUID | None:
-        """Resolve an image id from callbacks, optionally falling back to current state."""
+        """Resolve a composition id, optionally using the current document."""
         if isinstance(candidate, uuid.UUID):
             return candidate
         if not use_fallback:
             return None
-        event = self._last_navigation_event
-        target_id = getattr(event, "target_id", None)
-        if isinstance(target_id, uuid.UUID):
-            return target_id
-        current = self.current_image_id()
+        current = self.current_composition_id()
         return current if isinstance(current, uuid.UUID) else None
 
     # Accessors and helpers
@@ -464,14 +435,6 @@ class Masks:
         configure = getattr(service, "configureStrokeDiagnostics", None)
         if callable(configure):
             configure(config)
-
-    def catalog(self) -> Catalog:
-        """Return the catalog collaborator the controller wraps."""
-        return self._catalog
-
-    def swap_delegate(self) -> SwapDelegate:
-        """Expose the swap delegate used for image loading and apply hooks."""
-        return self._swap_delegate
 
     def mask_feature_available(self) -> bool:
         """Return True when mask tooling is installed for the host CuteCanvas."""
@@ -526,10 +489,10 @@ class Masks:
     def _make_activation_resume_callback(self, *, resumed_with_update: bool):
         """Return a callback that resumes overlays after activation."""
 
-        def _callback(image_id: uuid.UUID | None = None) -> None:
+        def _callback(composition_id: uuid.UUID | None = None) -> None:
             """Handle activation completion and resume overlays."""
             self.handle_activation_ready(
-                image_id,
+                composition_id,
                 resumed_with_update=resumed_with_update,
             )
 
@@ -546,18 +509,20 @@ class Masks:
         """Expose the currently active mask identifier via the public facade."""
         return self.active_mask_id()
 
-    def maskIDsForImage(self, image_id: uuid.UUID | None = None) -> list[uuid.UUID]:
-        """Return mask identifiers for ``image_id`` (or the current image when omitted)."""
-        resolved_id = self._resolve_image_id(image_id)
+    def maskIDsForComposition(
+        self, composition_id: uuid.UUID | None = None
+    ) -> list[uuid.UUID]:
+        """Return mask identifiers for a composition or the current document."""
+        resolved_id = self._resolve_composition_id(composition_id)
         if resolved_id is None:
             return []
         service = self._ensure_mask_service()
         if service is None:
             return []
         try:
-            return list(service.mask_ids_for_image(resolved_id))
+            return list(service.mask_ids_for_composition(resolved_id))
         except Exception:  # pragma: no cover - defensive guard
-            logger.exception("Failed to fetch mask ids for image %s", resolved_id)
+            logger.exception("Failed to fetch mask ids for composition %s", resolved_id)
             return []
 
     def maskInfo(self, mask_id: uuid.UUID) -> MaskInfo | None:
@@ -574,10 +539,10 @@ class Masks:
         if layer is None:
             return None
         try:
-            image_ids = tuple(service.image_ids_for_mask(mask_id))
+            composition_ids = tuple(service.composition_ids_for_mask(mask_id))
         except Exception:  # pragma: no cover - defensive guard
-            logger.exception("Failed to fetch image ids for mask %s", mask_id)
-            image_ids = ()
+            logger.exception("Failed to fetch composition ids for mask %s", mask_id)
+            composition_ids = ()
         instance = service.layer_instance_for_mask(mask_id)
         label = None if instance is None else instance.label
         opacity = None if instance is None else instance.opacity
@@ -585,7 +550,6 @@ class Masks:
             opacity = float(opacity) if opacity is not None else None
         except (TypeError, ValueError):
             opacity = None
-        composition_ids = service.composition_ids_for_mask(mask_id)
         current_composition_id = self._qpane.currentCompositionID()
         scene_id = (
             current_composition_id
@@ -599,7 +563,7 @@ class Masks:
             color=None if instance is None else instance.tint,
             label=label,
             opacity=opacity,
-            image_ids=image_ids,
+            composition_ids=composition_ids,
             interaction=(
                 LayerPolicy()
                 if instance is None
@@ -614,18 +578,18 @@ class Masks:
             is_active=mask_id == self.active_mask_id(),
         )
 
-    def listMasksForImage(
-        self, image_id: uuid.UUID | None = None
+    def listMasksForComposition(
+        self, composition_id: uuid.UUID | None = None
     ) -> tuple[MaskInfo, ...]:
-        """Return mask metadata for ``image_id`` (or the current image) as a tuple."""
-        resolved_id = self._resolve_image_id(image_id)
+        """Return mask metadata for a composition or the current document."""
+        resolved_id = self._resolve_composition_id(composition_id)
         if resolved_id is None:
             return ()
-        mask_ids = self.maskIDsForImage(resolved_id)
+        mask_ids = self.maskIDsForComposition(resolved_id)
         info: list[MaskInfo] = []
         for mask_id in mask_ids:
             record = self.maskInfo(mask_id)
-            if record is not None and resolved_id in record.image_ids:
+            if record is not None and resolved_id in record.composition_ids:
                 info.append(record)
         return tuple(info)
 
@@ -651,7 +615,7 @@ class Masks:
         if delegate is not None:
             delegate.detachMaskService()
         self._mask_service = None
-        self._pending_activation_images.clear()
+        self._pending_activation_compositions.clear()
 
     def refreshMaskAutosavePolicy(self) -> None:
         """Refresh autosave wiring via MaskDelegate (no behaviour change)."""
@@ -694,13 +658,15 @@ class Masks:
             else delegate.set_mask_properties(mask_id, color=color, opacity=opacity)
         )
 
-    def remove_mask_from_image(self, image_id: uuid.UUID, mask_id: uuid.UUID) -> bool:
-        """Remove ``mask_id`` from the specified image."""
+    def remove_mask_from_composition(
+        self, composition_id: uuid.UUID, mask_id: uuid.UUID
+    ) -> bool:
+        """Remove ``mask_id`` from the specified composition."""
         delegate = self._ensure_mask_delegate()
         return (
             False
             if delegate is None
-            else delegate.remove_mask_from_image(image_id, mask_id)
+            else delegate.remove_mask_from_composition(composition_id, mask_id)
         )
 
     def cycle_masks_forward(self) -> bool:
@@ -725,19 +691,20 @@ class Masks:
         delegate = self._ensure_mask_delegate()
         return False if delegate is None else delegate.set_active_mask_id(mask_id)
 
-    def sync_mask_activation_for_image(
-        self, image_id: uuid.UUID | None
+    def sync_mask_activation_for_composition(
+        self, composition_id: uuid.UUID | None
     ) -> MaskActivationSyncResult:
-        """Sync activation and overlay prefetching for ``image_id``."""
-        resolved_id = self._resolve_image_id(image_id)
+        """Sync activation and overlay prefetching for ``composition_id``."""
+        resolved_id = self._resolve_composition_id(composition_id)
         delegate = self._ensure_mask_delegate()
         service = self._ensure_mask_service()
         if delegate is not None:
             try:
-                delegate.sync_mask_activation_for_image(resolved_id)
+                delegate.sync_mask_activation_for_composition(resolved_id)
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception(
-                    "Mask delegate activation sync failed for image %s", resolved_id
+                    "Mask delegate activation sync failed for composition %s",
+                    resolved_id,
                 )
         activation_pending = False
         prefetch_requested = False
@@ -746,15 +713,16 @@ class Masks:
                 activation_pending = bool(service.isActivationPending(resolved_id))
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception(
-                    "Mask service pending check failed for image %s", resolved_id
+                    "Mask service pending check failed for composition %s",
+                    resolved_id,
                 )
                 activation_pending = False
         elif resolved_id is not None:
-            activation_pending = resolved_id in self._pending_activation_images
+            activation_pending = resolved_id in self._pending_activation_compositions
         if activation_pending and resolved_id is not None:
-            self._pending_activation_images.add(resolved_id)
+            self._pending_activation_compositions.add(resolved_id)
         elif resolved_id is not None:
-            self._pending_activation_images.discard(resolved_id)
+            self._pending_activation_compositions.discard(resolved_id)
         if (
             not activation_pending
             and delegate is not None
@@ -776,25 +744,19 @@ class Masks:
         )
 
     def prefetch_mask_overlays(
-        self, image_id: uuid.UUID | None, *, reason: str = "navigation"
+        self, composition_id: uuid.UUID | None, *, reason: str = "navigation"
     ) -> bool:
-        """Prefetch overlay pixmaps for the requested image."""
+        """Prefetch overlay pixmaps for the requested composition."""
         delegate = self._ensure_mask_delegate()
         return (
             False
             if delegate is None
-            else delegate.prefetch_mask_overlays(image_id, reason=reason)
+            else delegate.prefetch_mask_overlays(composition_id, reason=reason)
         )
 
-    def prepare_catalog_image_removal(self, image_ids: tuple[uuid.UUID, ...]) -> None:
-        """Stop mask work before catalog mutation removes its source layers."""
-        service = self._ensure_mask_service()
-        if service is not None:
-            service.prepareCatalogImageRemoval(image_ids)
-
-    def is_activation_pending(self, image_id: uuid.UUID | None) -> bool:
-        """Return True when activation work is still pending for ``image_id``."""
-        resolved_id = self._resolve_image_id(image_id)
+    def is_activation_pending(self, composition_id: uuid.UUID | None) -> bool:
+        """Return whether mask activation is pending for ``composition_id``."""
+        resolved_id = self._resolve_composition_id(composition_id)
         if resolved_id is None:
             return False
         service = self._ensure_mask_service()
@@ -803,9 +765,10 @@ class Masks:
                 return bool(service.isActivationPending(resolved_id))
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception(
-                    "Mask service pending check failed for image %s", resolved_id
+                    "Mask service pending check failed for composition %s",
+                    resolved_id,
                 )
-        return resolved_id in self._pending_activation_images
+        return resolved_id in self._pending_activation_compositions
 
     # Edit / undo -----------------------------------------------------------
 
@@ -840,6 +803,14 @@ class Masks:
     def invalidate_active_mask_cache(self) -> bool:
         """Invalidate cached mask renders for the active mask."""
         return self._undo_api.invalidate_active_mask_cache()
+
+    def refresh_mask_resource(
+        self,
+        mask_id: uuid.UUID,
+        dirty_bounds: RasterBounds,
+    ) -> bool:
+        """Patch cached renders for one changed mask resource."""
+        return self._undo_api.refresh_mask_resource(mask_id, dirty_bounds)
 
     # Brush / cursor --------------------------------------------------------
 
@@ -878,6 +849,6 @@ class Masks:
 
     # Introspection ---------------------------------------------------------
 
-    def current_image_id(self) -> uuid.UUID | None:
-        """Return the catalog's current image id."""
-        return self._catalog.currentImageID()
+    def current_composition_id(self) -> uuid.UUID | None:
+        """Return the current editable composition id."""
+        return self._qpane.currentCompositionID()

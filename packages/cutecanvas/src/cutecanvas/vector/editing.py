@@ -35,7 +35,7 @@ from qpane.sdk.vector import (
 )
 
 from ..composition.edit_controller import CompositionEditController
-from .source_reference import VectorDocumentReference
+from ..resources import ProjectResourceReference
 from .store import VectorAssetStore
 
 
@@ -54,9 +54,9 @@ class VectorDocumentEdit:
         return 512 + self.before.retained_bytes + self.after.retained_bytes
 
     @property
-    def retained_resources(self) -> tuple[VectorDocumentReference, ...]:
+    def retained_resources(self) -> tuple[ProjectResourceReference, ...]:
         """Retain the document while this command remains replayable."""
-        return (VectorDocumentReference(self.before.vector_id),)
+        return (ProjectResourceReference(self.before.vector_id),)
 
 
 class VectorEditService:

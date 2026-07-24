@@ -17,7 +17,6 @@
 
 from ..types import (
     CacheMode,
-    CatalogEntry,
     ComparisonDividerState,
     ComparisonOrientation,
     ComparisonState,
@@ -33,7 +32,6 @@ from ..types import (
 
 __all__ = (
     "CacheMode",
-    "CatalogEntry",
     "ComparisonDividerState",
     "ComparisonOrientation",
     "ComparisonState",

@@ -32,13 +32,12 @@ from qpane.sdk.scene import (
 
 from cutecanvas.scene.pixel_move_preview import RasterPixelMovePreview
 
-from ..composition.edit_controller import CompositionEditController
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_owners import LayerPixelOwnerRegistry
 from ..scene.transform_session import LayerTransformBoxState, LayerTransformGesture
 from ..selection import PixelSelectionService, PixelSelectionState
-from .floating_history import FloatingPixelHistory
+from .floating_history import FloatingPixelCommitEdit, FloatingPixelHistory
 from .floating_layers import FloatingLayerPromotionRegistry
 from .floating_resolution import FloatingPixelResolutionOwner
 from .floating_session import FloatingPixelSession
@@ -61,13 +60,17 @@ class SelectedPixelMovementController:
         layer_selection: SceneLayerSelectionController,
         pixel_selection: PixelSelectionService,
         pixel_owners: LayerPixelOwnerRegistry,
-        edits: CompositionEditController,
+        history: FloatingPixelHistory,
+        session_id: uuid.UUID,
         selection_projections: LayerSelectionProjectionCache,
         preview_changed: Callable[[], None],
         promotions: FloatingLayerPromotionRegistry | None = None,
     ) -> None:
         """Bind authoritative target, transient-session, and resolution owners."""
         self._preview_changed = preview_changed
+        self._layer_selection = layer_selection
+        self._pixel_selection = pixel_selection
+        self._selection_projections = selection_projections
         promotion_registry = promotions or FloatingLayerPromotionRegistry()
         self._targets = SelectedPixelMoveTargetResolver(
             active_scene=active_scene,
@@ -77,14 +80,6 @@ class SelectedPixelMovementController:
             pixel_owners=pixel_owners,
             selection_projections=selection_projections,
         )
-        history = FloatingPixelHistory(
-            edits=edits,
-            targets=self._targets,
-            pixel_selection=pixel_selection,
-            layer_selection=layer_selection,
-            selection_projections=selection_projections,
-            promotions=promotion_registry,
-        )
         self._resolution = FloatingPixelResolutionOwner(
             targets=self._targets,
             history=history,
@@ -92,6 +87,11 @@ class SelectedPixelMovementController:
             layer_selection=layer_selection,
             selection_projections=selection_projections,
             promotions=promotion_registry,
+            origin_session_id=lambda: session_id,
+        )
+        self._history_unsubscribe = history.subscribe_replay(
+            session_id,
+            self._restore_view_replay_state,
         )
         self._session: FloatingPixelSession | None = None
         self._transform_gesture: LayerTransformGesture | None = None
@@ -100,6 +100,31 @@ class SelectedPixelMovementController:
     def active(self) -> bool:
         """Return whether selected content is floating unresolved."""
         return self._session is not None
+
+    def shutdown(self) -> None:
+        """Detach session-scoped history observation during view teardown."""
+        self._history_unsubscribe()
+
+    def _restore_view_replay_state(
+        self,
+        command: FloatingPixelCommitEdit,
+        use_after: bool,
+    ) -> None:
+        """Restore only the originating view's derived selection state."""
+        selected = command.selected_after if use_after else command.selected_before
+        self._layer_selection.select(selected.scene_id, selected.layer_id)
+        transform = command.target_transform if use_after else command.source_transform
+        coverage = command.local_after if use_after else command.local_before
+        state = self._pixel_selection.state(command.scene_id)
+        if transform is not None:
+            self._selection_projections.remember(
+                scene_id=command.scene_id,
+                layer_id=selected.layer_id,
+                selection_revision=state.revision,
+                transform=transform,
+                coverage=coverage,
+            )
+        self._preview_changed()
 
     @property
     def target_resolver(self) -> SelectedPixelMoveTargetResolver:

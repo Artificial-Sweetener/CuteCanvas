@@ -21,6 +21,7 @@ import uuid
 from dataclasses import replace
 
 from PySide6.QtCore import (
+    QPointF,
     QRect,
     QRectF,
     QSize,
@@ -42,7 +43,13 @@ from cutecanvas.editor import (
     EditorOperation,
 )
 from cutecanvas.painting import BrushPreset
-from cutecanvas.raster.source_reference import EditableRasterReference
+from cutecanvas.painting.clone_model import (
+    CloneStampAlignment,
+    CloneStampSampleMode,
+    CloneStampState,
+    CloneStampTransform,
+)
+from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.types import (
     FloatingPixelMode,
     FloatingPixelSnapshot,
@@ -66,7 +73,7 @@ class RasterApiMixin:
         interaction: LayerPolicy | None = None,
         extent_policy: RasterExtentPolicy = RasterExtentPolicy.FIXED,
     ) -> uuid.UUID | None:
-        """Add a detached editable color raster to the active image scene.
+        """Add a detached editable color raster to the active document.
 
         Args:
             image: Non-null color raster copied into composition-owned storage.
@@ -76,7 +83,7 @@ class RasterApiMixin:
             extent_policy: Fixed, expanding, or unbounded future write behavior.
 
         Returns:
-            The stable layer UUID, or ``None`` when no catalog image is active.
+            The stable layer UUID, or ``None`` when no document is active.
         """
         if not isinstance(image, QImage):
             raise TypeError("image must be a QImage")
@@ -155,19 +162,22 @@ class RasterApiMixin:
         )
         if initial_size.width() <= 0 or initial_size.height() <= 0:
             raise ValueError("size dimensions must be positive")
-        image = QImage(initial_size, QImage.Format_ARGB32_Premultiplied)
-        image.fill(QColor(0, 0, 0, 0))
-        layer_id = self.addEditableRasterLayer(
-            image,
-            label=label,
-            interaction=LayerPolicy(
-                selectable=True,
-                movable=True,
-                pixel_editable=True,
+        layer_id = self.editableRasterLayers().add_empty(
+            initial_size,
+            placement=None,
+            interaction=internal_layer_policy(
+                LayerPolicy(
+                    selectable=True,
+                    movable=True,
+                    pixel_editable=True,
+                )
             ),
+            label=label,
             extent_policy=extent_policy,
         )
         if layer_id is not None:
+            self._handle_internal_scene_content_changed()
+            self._emit_scene_changed()
             self.setSelectedLayer(scene.scene_id, layer_id)
             self.setPaintTarget(scene.scene_id, layer_id)
         return layer_id
@@ -189,7 +199,7 @@ class RasterApiMixin:
             )
             if resolved is None:
                 return None
-            source_kind = resolved[1].source.kind
+            source_kind = self.compositionService().source_kind(resolved[1].source)
         return PaintTargetSnapshot(
             scene_id=public_scene_id,
             kind=identity.kind,
@@ -214,8 +224,16 @@ class RasterApiMixin:
             raise TypeError("scene_id must be a UUID")
         if not isinstance(layer_id, uuid.UUID):
             raise TypeError("layer_id must be a UUID")
+        resolved_scene_id = self._resolve_public_scene_id(scene_id)
+        selection = self.selectedLayer()
+        if (
+            selection is None
+            or selection.scene_id != scene_id
+            or selection.layer_id != layer_id
+        ):
+            self.setSelectedLayer(scene_id, layer_id)
         return self.paintingCoordinator().select_layer(
-            self._resolve_public_scene_id(scene_id),
+            resolved_scene_id,
             layer_id,
         )
 
@@ -280,6 +298,50 @@ class RasterApiMixin:
         self.refreshCursor()
         self.paintColorChanged.emit(detached)
         return True
+
+    def cloneStampState(self) -> CloneStampState:
+        """Return source, alignment, and sampling state for Clone Stamp."""
+        return self.cloneStampOperation().state
+
+    def setCloneStampSource(self, scene_position: QPointF) -> bool:
+        """Set the Clone Stamp source in active-composition scene coordinates."""
+        if not isinstance(scene_position, QPointF):
+            raise TypeError("scene_position must be QPointF")
+        changed = self.cloneStampOperation().set_source(scene_position)
+        if changed:
+            self.refreshCursor()
+        return changed
+
+    def clearCloneStampSource(self) -> bool:
+        """Clear the Clone Stamp source and retained aligned offset."""
+        changed = self.cloneStampOperation().clear_source()
+        if changed:
+            self.refreshCursor()
+        return changed
+
+    def setCloneStampAlignment(self, alignment: CloneStampAlignment) -> bool:
+        """Set whether Clone Stamp preserves its offset between strokes."""
+        if not isinstance(alignment, CloneStampAlignment):
+            raise TypeError("alignment must be CloneStampAlignment")
+        return self.cloneStampOperation().set_alignment(alignment)
+
+    def setCloneStampSampleMode(self, mode: CloneStampSampleMode) -> bool:
+        """Choose selected-layer or visible-composite Clone Stamp sampling."""
+        if not isinstance(mode, CloneStampSampleMode):
+            raise TypeError("mode must be CloneStampSampleMode")
+        changed = self.cloneStampOperation().set_sample_mode(mode)
+        if changed:
+            self.refreshCursor()
+        return changed
+
+    def setCloneStampTransform(self, transform: CloneStampTransform) -> bool:
+        """Set Clone Stamp rotation, output scale, and reflection."""
+        if not isinstance(transform, CloneStampTransform):
+            raise TypeError("transform must be CloneStampTransform")
+        changed = self.cloneStampOperation().set_transform(transform)
+        if changed:
+            self.update()
+        return changed
 
     def fillSelection(
         self,
@@ -370,11 +432,11 @@ class RasterApiMixin:
             )
         )
         if resolved is None or not isinstance(
-            resolved[1].source, EditableRasterReference
+            resolved[1].source, ProjectResourceReference
         ):
             return None
         assets = self._editable_raster_assets
-        asset = None if assets is None else assets.get(resolved[1].source.raster_id)
+        asset = None if assets is None else assets.get(resolved[1].source.resource_id)
         return None if asset is None else asset.surface.snapshot_qimage()
 
     def setRasterExtentPolicy(
@@ -667,6 +729,14 @@ class RasterApiMixin:
         movement = self._selected_pixel_movement
         if movement is not None and movement.active:
             return True
+        service = self.mask_service
+        active_mask_id = self.activeMaskID()
+        if (
+            service is not None
+            and active_mask_id is not None
+            and service.has_pending_stroke(active_mask_id)
+        ):
+            return True
         scene_id = self._active_resolved_scene_id()
         return bool(
             scene_id is not None
@@ -677,6 +747,14 @@ class RasterApiMixin:
         """Return whether the active scene has a redoable composition edit."""
         movement = self._selected_pixel_movement
         if movement is not None and movement.active:
+            return False
+        service = self.mask_service
+        active_mask_id = self.activeMaskID()
+        if (
+            service is not None
+            and active_mask_id is not None
+            and service.has_pending_stroke(active_mask_id)
+        ):
             return False
         scene_id = self._active_resolved_scene_id()
         return bool(
@@ -695,6 +773,21 @@ class RasterApiMixin:
         scene_id = self._active_resolved_scene_id()
         if scene_id is None:
             return False
+        service = self.mask_service
+        active_mask_id = self.activeMaskID()
+        if (
+            service is not None
+            and active_mask_id is not None
+            and service.defer_history_action(
+                active_mask_id,
+                lambda: self._undo_scene_edit_scope(scene_id),
+            )
+        ):
+            return True
+        return self._undo_scene_edit_scope(scene_id)
+
+    def _undo_scene_edit_scope(self, scene_id: uuid.UUID) -> bool:
+        """Undo one exact scope after any asynchronous edit barrier clears."""
         result = self.compositionService().edit_controller.undo(scene_id)
         if result.changed:
             self._publish_scene_layer_change()

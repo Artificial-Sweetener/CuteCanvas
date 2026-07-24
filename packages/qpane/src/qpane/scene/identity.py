@@ -22,54 +22,9 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-_DEFAULT_SCENE_NAMESPACE = uuid.UUID("efdbe9f6-075c-51ba-8391-715cbf8d6c17")
-_BASE_LAYER_NAMESPACE = uuid.UUID("4952143f-d857-5d1c-98a3-3423f7122264")
 _PLACEHOLDER_SCENE_NAMESPACE = uuid.UUID("96d6c459-5bd7-51b9-b7da-994caaf27218")
 _PLACEHOLDER_LAYER_NAMESPACE = uuid.UUID("2a82ab02-42ed-5269-9f16-21d2b48556ea")
 _PLACEHOLDER_SOURCE_NAMESPACE = uuid.UUID("af86f75f-e94d-5fb6-88fd-5ee9878ff977")
-_COMPARE_LAYER_NAMESPACE = uuid.UUID("e618d770-1769-571f-8471-5df8cf28ab15")
-
-
-def default_scene_id(image_id: uuid.UUID) -> uuid.UUID:
-    """Return the deterministic default-scene ID for a catalog image."""
-    return uuid.uuid5(_DEFAULT_SCENE_NAMESPACE, str(image_id))
-
-
-def base_image_layer_id(image_id: uuid.UUID) -> uuid.UUID:
-    """Return the deterministic base-image layer ID for a catalog image."""
-    return uuid.uuid5(_BASE_LAYER_NAMESPACE, str(image_id))
-
-
-def default_catalog_asset_key(
-    image_id: uuid.UUID,
-    *,
-    revision: int,
-    source_path: Path | None,
-) -> SceneLayerAssetKey:
-    """Return the default-scene asset key for a catalog image."""
-    return SceneLayerAssetKey(
-        scene_id=default_scene_id(image_id),
-        layer_id=base_image_layer_id(image_id),
-        source_id=image_id,
-        source_kind="catalog-image",
-        source_revision=revision,
-        source_path=source_path,
-    )
-
-
-def catalog_source_asset_key(
-    image_id: uuid.UUID,
-    *,
-    revision: int,
-    source_path: Path | None,
-) -> SourceRenderAssetKey:
-    """Return source-product identity for a catalog image."""
-    return SourceRenderAssetKey(
-        source_id=image_id,
-        source_kind="catalog-image",
-        source_revision=revision,
-        source_path=source_path,
-    )
 
 
 def source_render_asset_key(
@@ -104,11 +59,6 @@ def placeholder_scene_id(source_id: uuid.UUID) -> uuid.UUID:
 def placeholder_layer_id(source_id: uuid.UUID) -> uuid.UUID:
     """Return the deterministic layer ID for a placeholder image source."""
     return uuid.uuid5(_PLACEHOLDER_LAYER_NAMESPACE, str(source_id))
-
-
-def compare_layer_id(scene_id: uuid.UUID, source_id: uuid.UUID) -> uuid.UUID:
-    """Return the deterministic comparison layer ID for a source in a scene."""
-    return uuid.uuid5(_COMPARE_LAYER_NAMESPACE, f"{scene_id}:{source_id}")
 
 
 def scene_image_asset_key(

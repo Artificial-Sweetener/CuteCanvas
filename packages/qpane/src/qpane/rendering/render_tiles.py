@@ -116,6 +116,17 @@ class _PendingTiles:
     retained_signature: tuple[RenderTileKey, ...]
     worker: _RenderTileWorker
     handle: TaskHandle
+    submitted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _DeferredTiles:
+    """Retain latest detail work until stable continuity pixels are available."""
+
+    source: RenderTileBatchSource
+    requests: tuple[RenderTileRequest, ...]
+    required_signature: tuple[RenderTileKey, ...]
+    retained_signature: tuple[RenderTileKey, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +156,9 @@ class RenderTileWorkCoordinator:
         self._ready = ready
         self._continuity = RenderTileContinuity(ready)
         self._pending: dict[tuple[str, uuid.UUID, _RefinementLane], _PendingTiles] = {}
+        self._deferred: dict[tuple[str, uuid.UUID, _RefinementLane], _DeferredTiles] = (
+            {}
+        )
         self._overview_requests: dict[tuple[str, uuid.UUID], _OverviewRequestBatch] = {}
         self._rejected: set[tuple[RenderTileKey, ...]] = set()
         self._closed = False
@@ -152,12 +166,14 @@ class RenderTileWorkCoordinator:
     @property
     def pending_count(self) -> int:
         """Return pending worker jobs plus an unsettled presentation transition."""
-        return len(self._pending) + int(self._continuity.pending)
+        return len(self._pending) + len(self._deferred) + int(self._continuity.pending)
 
     @property
     def pending_tile_count(self) -> int:
         """Return the number of uncached tiles currently being evaluated."""
-        return sum(len(pending.signature) for pending in self._pending.values())
+        return sum(len(pending.signature) for pending in self._pending.values()) + sum(
+            len(deferred.requests) for deferred in self._deferred.values()
+        )
 
     def request(
         self,
@@ -199,6 +215,12 @@ class RenderTileWorkCoordinator:
             required_signature=overview_signature,
             retained_signature=overview_signature,
         )
+        continuity_identity = (
+            source.source_kind,
+            source.source_id,
+            _RefinementLane.CONTINUITY,
+        )
+        continuity_pending = continuity_identity in self._pending
         detail_identity = (
             source.source_kind,
             source.source_id,
@@ -232,13 +254,22 @@ class RenderTileWorkCoordinator:
             detail_retained_signature = tuple(
                 dict.fromkeys((*overview_signature, *detail_signature))
             )
-            self._ensure_work(
-                lane=_RefinementLane.DETAIL,
-                source=source,
-                requests=detail_requests,
-                required_signature=visible_signature,
-                retained_signature=detail_retained_signature,
-            )
+            if continuity_pending and self._cache.products(overview_signature) is None:
+                self._defer_detail(
+                    source=source,
+                    requests=detail_requests,
+                    required_signature=visible_signature,
+                    retained_signature=detail_retained_signature,
+                )
+            else:
+                self._deferred.pop(detail_identity, None)
+                self._ensure_work(
+                    lane=_RefinementLane.DETAIL,
+                    source=source,
+                    requests=detail_requests,
+                    required_signature=visible_signature,
+                    retained_signature=detail_retained_signature,
+                )
         stable_fallback = (
             self._cache.products(overview_signature) if overview_signature else None
         )
@@ -259,11 +290,13 @@ class RenderTileWorkCoordinator:
             return RenderRefinement.waiting(stable_fallback)
         if fallback is not None:
             return RenderRefinement.waiting(fallback)
-        work_available = any(
-            identity_key[:2] == identity for identity_key in self._pending
-        ) or any(
-            signature and signature not in self._rejected
-            for signature in (overview_signature, detail_retained_signature)
+        work_available = (
+            any(identity_key[:2] == identity for identity_key in self._pending)
+            or any(identity_key[:2] == identity for identity_key in self._deferred)
+            or any(
+                signature and signature not in self._rejected
+                for signature in (overview_signature, detail_retained_signature)
+            )
         )
         if self._closed or not work_available:
             return (
@@ -348,7 +381,10 @@ class RenderTileWorkCoordinator:
         BaseWorker.connect_queued(worker.finished, self._finish)
         BaseWorker.connect_queued(worker.error, self._finish)
         try:
-            handle = self._executor.submit(worker, category="render_refinement")
+            handle = self._executor.dispatch_to_main_thread(
+                lambda: self._start_worker(identity, worker),
+                category="render_refinement",
+            )
         except TaskRejected:
             self._rejected.add(retained_signature)
             worker.deleteLater()
@@ -360,6 +396,56 @@ class RenderTileWorkCoordinator:
             handle,
         )
 
+    def _start_worker(
+        self,
+        identity: tuple[str, uuid.UUID, _RefinementLane],
+        worker: _RenderTileWorker,
+    ) -> None:
+        """Start deferred refinement after the caller's render plan has returned."""
+        pending = self._pending.get(identity)
+        if pending is None or pending.worker is not worker or self._closed:
+            return
+        try:
+            handle = self._executor.submit(worker, category="render_refinement")
+        except TaskRejected:
+            self._pending.pop(identity, None)
+            self._rejected.add(pending.retained_signature)
+            worker.deleteLater()
+            if worker.lane is _RefinementLane.CONTINUITY:
+                self._start_deferred_detail(
+                    worker.source.source_kind,
+                    worker.source.source_id,
+                )
+            self._ready()
+            return
+        pending.handle = handle
+        pending.submitted = True
+
+    def _defer_detail(
+        self,
+        *,
+        source: RenderTileBatchSource,
+        requests: tuple[RenderTileRequest, ...],
+        required_signature: tuple[RenderTileKey, ...],
+        retained_signature: tuple[RenderTileKey, ...],
+    ) -> None:
+        """Keep only the latest detail request behind active continuity work."""
+        identity = (
+            source.source_kind,
+            source.source_id,
+            _RefinementLane.DETAIL,
+        )
+        self._cancel(identity)
+        if self._closed or not requests:
+            self._deferred.pop(identity, None)
+            return
+        self._deferred[identity] = _DeferredTiles(
+            source,
+            requests,
+            required_signature,
+            retained_signature,
+        )
+
     def shutdown(self) -> None:
         """Cancel every queued refinement and suppress late publication."""
         if self._closed:
@@ -368,6 +454,7 @@ class RenderTileWorkCoordinator:
         self._continuity.shutdown()
         for identity in tuple(self._pending):
             self._cancel(identity)
+        self._deferred.clear()
         self._overview_requests.clear()
         self._rejected.clear()
 
@@ -410,6 +497,29 @@ class RenderTileWorkCoordinator:
                 self._ready()
         finally:
             worker.deleteLater()
+        if worker.lane is _RefinementLane.CONTINUITY:
+            self._start_deferred_detail(
+                worker.source.source_kind,
+                worker.source.source_id,
+            )
+
+    def _start_deferred_detail(
+        self,
+        source_kind: str,
+        source_id: uuid.UUID,
+    ) -> None:
+        """Submit the latest detail work after its continuity lane settles."""
+        identity = (source_kind, source_id, _RefinementLane.DETAIL)
+        deferred = self._deferred.pop(identity, None)
+        if deferred is None or self._closed:
+            return
+        self._ensure_work(
+            lane=_RefinementLane.DETAIL,
+            source=deferred.source,
+            requests=deferred.requests,
+            required_signature=deferred.required_signature,
+            retained_signature=deferred.retained_signature,
+        )
 
     def _cancel(
         self,
@@ -421,6 +531,8 @@ class RenderTileWorkCoordinator:
             return
         pending.worker.cancel()
         self._executor.cancel(pending.handle)
+        if not pending.submitted:
+            pending.worker.deleteLater()
 
 
 def _same_products(

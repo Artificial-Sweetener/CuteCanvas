@@ -22,6 +22,7 @@ from cutecanvas import (
     EditorIntent,
     EditorPolicy,
     LayerPolicy,
+    NonEditablePaintPolicy,
 )
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QImage
@@ -29,12 +30,23 @@ from PySide6.QtGui import QImage
 pytest_plugins = ("tests.test_mask_workflows",)
 
 
+def test_noneditable_paint_policy_defaults_to_visible_layer_creation() -> None:
+    """Editor policy explicitly controls automatic paint-layer provisioning."""
+    assert (
+        EditorPolicy().noneditable_paint is NonEditablePaintPolicy.CREATE_RASTER_LAYER
+    )
+    assert (
+        EditorPolicy(noneditable_paint=NonEditablePaintPolicy.REJECT).noneditable_paint
+        is NonEditablePaintPolicy.REJECT
+    )
+
+
 def test_editor_capabilities_are_independent_and_queryable(qpane_with_mask) -> None:
     """Host policy must deny only the omitted capability through one resolver."""
     viewer, _assets, image_id = qpane_with_mask
-    image = viewer.catalog().currentImage()
-    assert image is not None
-    mask_id = viewer.createBlankMask(image.size())
+    raster = viewer.activeRasterResolver().resolve()
+    assert raster is not None
+    mask_id = viewer.createBlankMask(raster.image.size())
     assert mask_id is not None
     assert viewer.setActiveMaskID(mask_id)
     scene = viewer.currentScene()
@@ -42,9 +54,9 @@ def test_editor_capabilities_are_independent_and_queryable(qpane_with_mask) -> N
     mask_layer = next(
         layer
         for layer in scene.layers
-        if layer.source_kind == "mask" and layer.source_id == mask_id
+        if layer.source_kind == "coverage" and layer.source_id == mask_id
     )
-    assert viewer.setLayerInteractionPolicy(
+    viewer.setLayerInteractionPolicy(
         scene.scene_id,
         mask_layer.layer_id,
         LayerPolicy(
@@ -53,7 +65,8 @@ def test_editor_capabilities_are_independent_and_queryable(qpane_with_mask) -> N
             pixel_editable=True,
         ),
     )
-    assert viewer.setSelectedLayer(scene.scene_id, mask_layer.layer_id)
+    viewer.setSelectedLayer(scene.scene_id, mask_layer.layer_id)
+    assert viewer.selectedLayer().layer_id == mask_layer.layer_id
     coverage = QImage(4, 4, QImage.Format_Grayscale8)
     coverage.fill(Qt.white)
     assert viewer.setPixelSelection(coverage, QRect(0, 0, 4, 4))
@@ -76,7 +89,7 @@ def test_editor_capabilities_are_independent_and_queryable(qpane_with_mask) -> N
     assert viewer.editorOperationState(EditorIntent.SELECT_PIXELS).allowed
     assert viewer.setPixelSelection(coverage, QRect(1, 1, 4, 4))
     assert viewer.clearPixelSelection()
-    assert viewer.maskIDsForImage(image_id) == [mask_id]
+    assert viewer.maskIDsForComposition(image_id) == [mask_id]
 
 
 def test_selection_facade_commands_obey_host_policy(qpane_with_mask) -> None:
