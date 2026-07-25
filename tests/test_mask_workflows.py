@@ -35,13 +35,13 @@ from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.mask_service import MaskService
 from cutecanvas.masks.render_coordination import MaskRenderWorkCoordinator
+from cutecanvas.masks.render_products import MaskPrefetchProduct, PrefetchedOverlay
 from cutecanvas.masks.stroke_models import (
     MaskStrokeJobResult,
     MaskStrokePayload,
 )
 from cutecanvas.masks.stroke_preview import DecimatedStrokePreview
-from cutecanvas.masks.stroke_worker import MaskStrokeWorker
-from cutecanvas.masks.workers import MaskSnippetWorker, PrefetchedOverlay
+from cutecanvas.masks.stroke_rendering import render_mask_stroke
 from cutecanvas.painting import BrushStrokeSegment
 from cutecanvas.painting.rendering import render_coverage_stroke
 from cutecanvas.resources import ProjectResourceReference
@@ -51,9 +51,10 @@ from qpane.raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_view_grayscale8,
 )
+from qpane.sdk.execution import CancellationToken
 
 from tests.helpers.config import fixed_cache_config
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import TestExecution
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
 
 
@@ -65,6 +66,9 @@ def _panel_point(point):
 def _cleanup_qpane(qpane, qapp):
     qpane.deleteLater()
     qapp.processEvents()
+    runtime = getattr(qpane, "_test_execution_runtime", None)
+    if runtime is not None:
+        runtime.shutdown()
 
 
 def _current_image_size(qpane):
@@ -95,8 +99,8 @@ def _current_source_image(qpane: CuteCanvas) -> QImage:
 
 
 def _make_test_qpane(qapp):
-    executor = StubExecutor(auto_finish=True)
-    qpane = CuteCanvas(task_executor=executor, features=())
+    execution = TestExecution(auto_finish=True)
+    qpane = CuteCanvas(execution_runtime=execution.runtime, features=())
     qpane.resize(128, 128)
     base_config = Config()
     mask_config = MaskConfigSlice()
@@ -114,7 +118,13 @@ def _make_test_qpane(qapp):
         mask_controller=controller,
         config=base_config,
         mask_config=mask_config,
-        executor=qpane.executor,
+        view_execution_scope=qpane._execution_binding.scope,
+        document_execution_scope=(
+            qpane._execution_binding.document_runtime.execution_scope
+        ),
+        latest_requests=(
+            qpane._execution_binding.document_runtime._latest_request_registry
+        ),
     )
     qpane.attachMaskService(service)
     return qpane, mask_manager, service
@@ -322,7 +332,13 @@ def qpane_with_mask(qapp, monkeypatch):
             mask_assets=mask_manager,
             mask_controller=controller,
             config=qpane.settings,
-            executor=qpane.executor,
+            view_execution_scope=qpane._execution_binding.scope,
+            document_execution_scope=(
+                qpane._execution_binding.document_runtime.execution_scope
+            ),
+            latest_requests=(
+                qpane._execution_binding.document_runtime._latest_request_registry
+            ),
         )
         qpane.attachMaskService(service)
         qpane.refreshMaskAutosavePolicy()
@@ -412,14 +428,16 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
             settings,
             get_current_image_path,
             *,
-            executor,
+            execution_scope,
+            latest_requests,
             parent=None,
         ):
             super().__init__(
                 snapshot_provider,
                 settings,
                 get_current_image_path,
-                executor=executor,
+                execution_scope=execution_scope,
+                latest_requests=latest_requests,
                 parent=parent,
             )
             self.schedule_calls: list[tuple[object, object]] = []
@@ -444,14 +462,23 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
             mask_assets=mask_manager,
             mask_controller=controller,
             config=qpane.settings,
-            executor=qpane.executor,
+            view_execution_scope=qpane._execution_binding.scope,
+            document_execution_scope=(
+                qpane._execution_binding.document_runtime.execution_scope
+            ),
+            latest_requests=(
+                qpane._execution_binding.document_runtime._latest_request_registry
+            ),
         )
         qpane.attachMaskService(service)
         manager = TrackingAutosaveManager(
             service.getActiveMaskImage,
             qpane.settings,
             lambda: None,
-            executor=qpane.executor,
+            execution_scope=(qpane._execution_binding.document_runtime.execution_scope),
+            latest_requests=(
+                qpane._execution_binding.document_runtime._latest_request_registry
+            ),
             parent=qpane,
         )
         qpane.hooks.attachAutosaveManager(manager)
@@ -528,7 +555,10 @@ def test_mask_region_update_triggers_autosave(qpane_with_mask, monkeypatch):
         service.getActiveMaskImage,
         qpane.settings,
         lambda: None,
-        executor=qpane.executor,
+        execution_scope=(qpane._execution_binding.document_runtime.execution_scope),
+        latest_requests=(
+            qpane._execution_binding.document_runtime._latest_request_registry
+        ),
         parent=qpane,
     )
     qpane.hooks.attachAutosaveManager(manager)
@@ -589,32 +619,21 @@ def test_mask_workflow_generate_and_apply_mask_success(qpane_with_mask, monkeypa
         "sam_feature_available",
         lambda: True,
     )
-    captured_predict = {}
+    captured_request = {}
 
-    def fake_predict(bbox_arg):
-        captured_predict["predictor"] = delegate.activePredictor
-        captured_predict["bbox"] = bbox_arg
-        return np.ones((1, 1), dtype=bool)
+    def fake_request(bbox_arg, *, erase_mode):
+        captured_request["predictor"] = delegate.activePredictor
+        captured_request["bbox"] = bbox_arg
+        captured_request["erase_mode"] = erase_mode
+        return True
 
-    monkeypatch.setattr(delegate, "predict_mask_from_box", fake_predict)
-    handled: list[tuple[np.ndarray, np.ndarray, bool]] = []
-
-    def fake_handle(mask_array, bbox_arg, erase_mode):
-        handled.append((mask_array, bbox_arg, erase_mode))
-
-    monkeypatch.setattr(service, "handleGeneratedMask", fake_handle)
+    monkeypatch.setattr(delegate, "request_mask_from_box", fake_request)
     bbox = np.array([0, 0, 4, 4])
     result = masks.generate_and_apply_mask(bbox, erase_mode=True)
     assert result is True
-    assert captured_predict["predictor"] is predictor
-    assert np.array_equal(captured_predict["bbox"], bbox)
-    assert handled
-    mask_array, handled_bbox, erase_flag = handled[-1]
-    assert np.array_equal(handled_bbox, bbox)
-    assert erase_flag is True
-    assert mask_array.dtype == np.uint8
-    assert mask_array.shape == (1, 1)
-    assert int(mask_array[0, 0]) == 255
+    assert captured_request["predictor"] is predictor
+    assert np.array_equal(captured_request["bbox"], bbox)
+    assert captured_request["erase_mode"] is True
 
 
 def test_mask_workflow_generate_and_apply_mask_invalid_bbox(
@@ -638,23 +657,17 @@ def test_mask_workflow_generate_and_apply_mask_invalid_bbox(
         lambda: True,
     )
 
-    def fake_predict(_bbox):
-        raise ValueError("bad bbox")
-
-    monkeypatch.setattr(delegate, "predict_mask_from_box", fake_predict)
-    handled = []
-
-    def fake_handle(mask_array, bbox_arg, erase_mode):
-        handled.append((mask_array, bbox_arg, erase_mode))
-
-    monkeypatch.setattr(service, "handleGeneratedMask", fake_handle)
+    monkeypatch.setattr(
+        delegate,
+        "request_mask_from_box",
+        lambda _bbox, *, erase_mode: False,
+    )
     bbox = np.array([1, 2, 3])
     caplog.set_level(logging.WARNING, logger="qpane.masks.workflow")
     caplog.clear()
     result = masks.generate_and_apply_mask(bbox, erase_mode=False)
     assert result is False
-    assert not handled
-    assert any("bounding box invalid" in record.message for record in caplog.records)
+    assert any("request was unavailable" in record.message for record in caplog.records)
 
 
 def test_mask_service_reports_diagnostics(qpane_with_mask, tmp_path):
@@ -862,15 +875,21 @@ def test_mask_install_invokes_autosave_refresh_once(monkeypatch, qapp):
 
 def _prepare_qpane_with_mask_feature(
     *,
-    executor: StubExecutor | None = None,
+    executor: TestExecution | None = None,
     features: tuple[str, ...] | None = None,
     image_size_px: int = 64,
 ):
     """Build a CuteCanvas seeded with an image and ready-to-use mask tooling."""
     if executor is None:
-        executor = StubExecutor(auto_finish=True)
+        executor = TestExecution(auto_finish=True)
     active_features = features if features is not None else ("mask",)
-    qpane = CuteCanvas(task_executor=executor, features=active_features)
+    qpane = CuteCanvas(
+        execution_runtime=executor.runtime,
+        features=active_features,
+    )
+    if not executor.auto_finish:
+        qpane._test_execution_backend = executor
+        qpane._test_execution_runtime = executor.runtime
     qpane.resize(max(32, image_size_px * 2), max(32, image_size_px * 2))
     qpane.applySettings(mask_autosave_enabled=True)
     image = QImage(image_size_px, image_size_px, QImage.Format_ARGB32)
@@ -892,10 +911,7 @@ def _emit_brush_stroke(qpane, start, end=None, erase=False):
         )
     )
     tools.signals.stroke_completed.emit()
-    executor = getattr(qpane, "executor", None)
-    drain = getattr(executor, "drain_all", None)
-    if callable(drain):
-        drain()
+    drain_mask_jobs(qpane)
 
 
 def test_brush_mode_persists_when_mask_available(qapp):
@@ -937,7 +953,7 @@ def _queue_pending_stroke(qpane, start, end=None, erase=False):
 
 def test_cancelled_provisional_preview_does_not_drop_next_stroke(qapp):
     """A navigation takeover must not invalidate a future committed job."""
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
     assert service is not None
@@ -955,8 +971,8 @@ def test_cancelled_provisional_preview_does_not_drop_next_stroke(qapp):
             BrushStrokeSegment.fixed((20, 20), (24, 20), 5, False)
         )
         service.commitStroke()
-        executor.drain_all()
-        executor.drain_all()
+        qpane._test_execution_backend.run_all()
+        qapp.processEvents()
 
         layer = service.assets.get_layer(mask_id)
         assert layer is not None
@@ -1101,7 +1117,7 @@ def test_mask_stroke_finalize_clears_preview_and_pending_jobs(qapp):
 
 def test_mask_stroke_records_history_without_reapplying_completed_pixels(qapp):
     """Committing live pixels must record undo without mutating the surface twice."""
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = _mask_service(qpane)
     assert service is not None
@@ -1114,8 +1130,7 @@ def test_mask_stroke_records_history_without_reapplying_completed_pixels(qapp):
     qpane.interaction.brush_size = 6
     try:
         _queue_pending_stroke(qpane, QPoint(8, 8))
-        executor.run_category("mask_stroke")
-        executor.run_category("mask_stroke_main")
+        qpane._test_execution_backend.run_all()
         qapp.processEvents()
 
         assert layer.coverage.raster.generation == generation_before + 1
@@ -1140,7 +1155,7 @@ def test_mask_stroke_records_history_without_reapplying_completed_pixels(qapp):
 
 
 def test_mask_stroke_finalize_drops_stale_generation(qapp):
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = _mask_service(qpane)
     assert service is not None
@@ -1152,11 +1167,10 @@ def test_mask_stroke_finalize_drops_stale_generation(qapp):
     layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     try:
-        _emit_brush_stroke(qpane, QPoint(4, 4))
-        executor.run_category("mask_stroke")
+        _queue_pending_stroke(qpane, QPoint(4, 4))
+        qpane._test_execution_backend.run_all()
         controller = service.controller
         controller.edits.advance_epoch(mask_id, reason="test-stale")
-        executor.run_category("mask_stroke_main")
         qapp.processEvents()
         view, _ = qimage_to_numpy_view_grayscale8(layer.mask_image)
         assert not np.any(view)
@@ -1171,7 +1185,7 @@ def test_mask_stroke_finalize_drops_stale_generation(qapp):
 
 
 def test_mask_stroke_finalize_drops_stale_token(qapp):
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = _mask_service(qpane)
     assert service is not None
@@ -1206,27 +1220,26 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
         second_token = preview_tokens.get(mask_id)
         assert second_token is not None and second_token != first_token
-        worker_records = [
-            record
-            for record in executor.pending_tasks()
-            if record.handle.category == "mask_stroke"
+        backend = qpane._test_execution_backend
+        jobs = [
+            job
+            for job in backend.pending_jobs()
+            if job.operation == "editor.mask.stroke"
         ]
-        assert len(worker_records) == 2
-        executor.run_task(worker_records[0].handle.task_id)
-        executor.run_category("mask_stroke_main")
+        assert len(jobs) == 2
+        backend.run_job(jobs[0])
         qapp.processEvents()
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
         assert preview_tokens.get(mask_id) == second_token
         view, _ = qimage_to_numpy_view_grayscale8(layer.mask_image)
         assert not np.any(view)
-        remaining_workers = [
-            record
-            for record in executor.pending_tasks()
-            if record.handle.category == "mask_stroke"
+        remaining_jobs = [
+            job
+            for job in backend.pending_jobs()
+            if job.operation == "editor.mask.stroke"
         ]
-        assert len(remaining_workers) == 1
-        executor.run_task(remaining_workers[0].handle.task_id)
-        executor.run_category("mask_stroke_main")
+        assert len(remaining_jobs) == 1
+        backend.run_job(remaining_jobs[0])
         qapp.processEvents()
         view, _ = qimage_to_numpy_view_grayscale8(layer.mask_image)
         assert view[5, 5] == 255
@@ -1238,8 +1251,8 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
         _cleanup_qpane(qpane, qapp)
 
 
-def test_mask_stroke_finalize_uses_qtimer_when_dispatch_missing(qapp):
-    executor = StubExecutor(auto_finish=False, supports_main_thread_dispatch=False)
+def test_mask_stroke_adopts_through_canvas_owner_dispatch(qapp):
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = _mask_service(qpane)
     assert service is not None
@@ -1252,15 +1265,8 @@ def test_mask_stroke_finalize_uses_qtimer_when_dispatch_missing(qapp):
     qpane.interaction.brush_size = 4
     try:
         _emit_brush_stroke(qpane, QPoint(5, 5))
-        executor.run_category("mask_stroke")
-        pending_main = [
-            record
-            for record in executor.pending_tasks()
-            if record.handle.category == "mask_stroke_main"
-        ]
-        assert pending_main == []
-        for _ in range(3):
-            qapp.processEvents()
+        pending, tokens = drain_mask_jobs(qpane, executor=executor)
+        assert not pending and not tokens
         view, _ = qimage_to_numpy_view_grayscale8(layer.mask_image)
         assert view[5, 5] == 255
         pending_jobs = service.strokeDebugSnapshot().pending_jobs
@@ -2143,9 +2149,11 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
 
 
 def test_mask_prefetch_warms_masks(qapp):
-    executor = StubExecutor(auto_finish=True)
+    executor = TestExecution(auto_finish=True)
     qpane = CuteCanvas(
-        config=fixed_cache_config(), features=("mask",), task_executor=executor
+        config=fixed_cache_config(),
+        features=("mask",),
+        execution_runtime=executor.runtime,
     )
     qpane.resize(32, 32)
     try:
@@ -2161,10 +2169,12 @@ def test_mask_prefetch_warms_masks(qapp):
         layer.coverage.raster.fill(128)
         _attach_test_mask(service, manager, mask_id, image_id)
         assert service.prefetchColorizedMasks(image_id, reason="test") is True
-        executor.drain_all()
-        executor.drain_all()
-        qapp.processEvents()
+        deadline = time.monotonic() + 2.0
         metrics = controller.renders.snapshot_metrics()
+        while metrics.prefetch_completed < 1 and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.002)
+            metrics = controller.renders.snapshot_metrics()
         assert metrics.prefetch_completed >= 1
         assert metrics.entry_count >= 1
         scale_key = controller.renders.normalize_scale(0.25)
@@ -2186,8 +2196,8 @@ def test_mask_prefetch_warms_masks(qapp):
 
 
 def test_mask_prefetch_respects_deferral_ratio(qapp):
-    executor = StubExecutor(auto_finish=True)
-    qpane = CuteCanvas(features=("mask",), task_executor=executor)
+    executor = TestExecution(auto_finish=True)
+    qpane = CuteCanvas(features=("mask",), execution_runtime=executor.runtime)
     qpane.resize(32, 32)
     try:
         service = qpane.mask_service
@@ -2212,8 +2222,8 @@ def test_mask_prefetch_respects_deferral_ratio(qapp):
 
 
 def test_mask_prefetch_diagnostics_available_by_default(qapp):
-    executor = StubExecutor(auto_finish=True)
-    qpane = CuteCanvas(features=("mask",), task_executor=executor)
+    executor = TestExecution(auto_finish=True)
+    qpane = CuteCanvas(features=("mask",), execution_runtime=executor.runtime)
     qpane.resize(16, 16)
     try:
         service = qpane.mask_service
@@ -2373,12 +2383,19 @@ def test_prefetch_deferred_while_mask_busy(qpane_with_mask):
         stride=1,
     )
     assert pipeline.is_mask_busy(mask_id) is True
+    request_id = uuid.uuid4()
+    service.render_work._prefetch_handles[image_id] = type(
+        "PendingPrefetch",
+        (),
+        {
+            "request_id": request_id,
+            "handle": None,
+            "mask_revisions": ((mask_id, overlay.render_revision),),
+        },
+    )()
     service.render_work.consume_prefetch_results(
-        image_id=image_id,
-        warmed=(overlay,),
-        failures={},
-        duration_ms=1.0,
-        error=None,
+        request_id=request_id,
+        product=MaskPrefetchProduct(image_id, (overlay,), (), 1.0),
     )
     assert mask_id in service.render_work._deferred_overlays
     assert not controller.renders._cache
@@ -2698,7 +2715,7 @@ def test_prefetched_masks_avoid_colorize_on_activation(qapp):
         _cleanup_qpane(qpane, qapp)
 
 
-def test_mask_stroke_worker_matches_render_output(qpane_with_mask):
+def test_mask_stroke_product_matches_render_output(qpane_with_mask):
     qpane, mask_manager, image_id = qpane_with_mask
     service = qpane.mask_service
     controller = service.controller
@@ -2721,12 +2738,11 @@ def test_mask_stroke_worker_matches_render_output(qpane_with_mask):
     )
     spec = controller.edits.prepare_stroke_job(mask_id, dirty_rect, payload=payload)
     assert spec is not None
-    results: list[MaskStrokeJobResult] = []
-    worker = MaskStrokeWorker(spec=spec, finalize=lambda result: results.append(result))
-    executor = StubExecutor(auto_finish=True)
-    executor.submit(worker, category="mask_stroke")
-    assert results, "Worker finalize callback should capture a result"
-    result = results[0]
+    result = render_mask_stroke(
+        spec,
+        qpane.paintingCoordinator().compositor,
+        CancellationToken(),
+    )
     expected_after, expected_preview = render_coverage_stroke(
         before=spec.before,
         dirty_rect=spec.dirty_rect,
@@ -2793,43 +2809,8 @@ def test_durable_worker_preview_matches_live_decimated_preview() -> None:
     assert np.array_equal(live_pixels, durable_pixels)
 
 
-def test_mask_snippet_worker_preserves_snippet_reference():
-    from PySide6.QtCore import QRect
-    from PySide6.QtGui import QColor, QImage
-
-    class DummyController:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def _colorize_with_metrics(self, snippet, color, *, mask_id=None, source=None):
-            self.calls += 1
-            return snippet
-
-        def notify_async_colorize_complete(self, mask_id, render_revision):
-            pass
-
-    class DummyCoordinator:
-        def consume_snippet_result(self, **kwargs):
-            pass
-
-    controller = DummyController()
-    coordinator = DummyCoordinator()
-    snippet = QImage(4, 4, QImage.Format_Grayscale8)
-    snippet.fill(0)
-    worker = MaskSnippetWorker(
-        mask_id=uuid.uuid4(),
-        render_revision=0,
-        dirty_rect=QRect(0, 0, 4, 4),
-        snippet=snippet,
-        color=QColor(Qt.white),
-        controller=controller,
-        coordinator=coordinator,
-    )
-    assert worker._snippet is snippet
-
-
 def test_mask_detach_cancels_pending_strokes(qapp):
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
     assert service is not None
@@ -2845,7 +2826,8 @@ def test_mask_detach_cancels_pending_strokes(qapp):
         pending_jobs = service.strokeDebugSnapshot().pending_jobs
         handles = tuple(pending_jobs.get(mask_id, ()))
         assert handles
-        assert list(executor.pending_tasks())
+        backend = qpane._test_execution_backend
+        assert backend.pending_count
         qpane.detachMaskService()
         pending_after = service.strokeDebugSnapshot().pending_jobs
         assert not pending_after.get(mask_id)
@@ -2854,16 +2836,15 @@ def test_mask_detach_cancels_pending_strokes(qapp):
         preview_states = service.strokeDebugSnapshot().preview_state_ids
         assert mask_id not in preview_states
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
-        cancelled_ids = {handle.task_id for handle in executor.cancelled}
+        cancelled_ids = {job.task_id for job in backend.cancelled}
         assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
-        executor.drain_all()
-        assert not list(executor.pending_tasks())
+        assert backend.pending_count == 0
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
 def test_mask_switch_releases_pending_jobs(qapp):
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
     assert service is not None
@@ -2882,6 +2863,7 @@ def test_mask_switch_releases_pending_jobs(qapp):
         pending_jobs = service.strokeDebugSnapshot().pending_jobs
         handles = tuple(pending_jobs.get(mask_a, ()))
         assert handles
+        backend = qpane._test_execution_backend
         assert service.getActiveMaskId() == mask_a
         generation_before_switch = service.controller.edits.async_epoch(mask_a)
         qpane.setActiveMaskID(mask_b)
@@ -2892,16 +2874,15 @@ def test_mask_switch_releases_pending_jobs(qapp):
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
         assert mask_a not in preview_tokens
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
-        cancelled_ids = {handle.task_id for handle in executor.cancelled}
+        cancelled_ids = {job.task_id for job in backend.cancelled}
         assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
-        executor.drain_all()
-        assert not list(executor.pending_tasks())
+        assert backend.pending_count == 0
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
 def test_cycle_masks_invalidates_pending_jobs(qapp):
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
     assert service is not None
@@ -2922,6 +2903,7 @@ def test_cycle_masks_invalidates_pending_jobs(qapp):
         pending_jobs = service.strokeDebugSnapshot().pending_jobs
         handles = tuple(pending_jobs.get(mask_a, ()))
         assert handles
+        backend = qpane._test_execution_backend
         service.cycleMasks(image_id, forward=True)
         assert service.getActiveMaskId() == mask_b
         pending_after = service.strokeDebugSnapshot().pending_jobs
@@ -2929,16 +2911,15 @@ def test_cycle_masks_invalidates_pending_jobs(qapp):
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
         assert mask_a not in preview_tokens
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
-        cancelled_ids = {handle.task_id for handle in executor.cancelled}
+        cancelled_ids = {job.task_id for job in backend.cancelled}
         assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
-        executor.drain_all()
-        assert not list(executor.pending_tasks())
+        assert backend.pending_count == 0
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
 def test_remove_mask_cancels_pending_jobs(qapp):
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
     assert service is not None
@@ -2959,25 +2940,25 @@ def test_remove_mask_cancels_pending_jobs(qapp):
         pending_jobs = service.strokeDebugSnapshot().pending_jobs
         handles = tuple(pending_jobs.get(mask_a, ()))
         assert handles
+        backend = qpane._test_execution_backend
         assert qpane.removeMaskFromComposition(image_id, mask_a) is True
         pending_after = service.strokeDebugSnapshot().pending_jobs
         assert not pending_after.get(mask_a)
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
         assert mask_a not in preview_tokens
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
-        cancelled_ids = {handle.task_id for handle in executor.cancelled}
+        cancelled_ids = {job.task_id for job in backend.cancelled}
         assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
         manager = service.assets
         assert manager.get_layer(mask_a) is not None
-        executor.drain_all()
-        assert not list(executor.pending_tasks())
+        assert backend.pending_count == 0
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
 def test_concurrent_strokes_survive_mask_reorder(qapp):
     """Pending mask jobs should drop cleanly when mask order changes mid-stroke."""
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
     assert service is not None

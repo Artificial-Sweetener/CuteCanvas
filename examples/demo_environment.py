@@ -30,10 +30,10 @@ from types import MappingProxyType
 
 @dataclass(frozen=True)
 class DemoTier:
-    """Describe one installable demo feature tier."""
+    """Describe one isolated demo dependency environment."""
 
     extra: str | None
-    features: str
+    sam_enabled: bool
     label: str
 
 
@@ -51,13 +51,16 @@ class DemoLaunchSettings:
 
 DEMO_TIERS: Mapping[str, DemoTier] = MappingProxyType(
     {
-        "qpane": DemoTier(extra=None, features="qpane", label="QPane"),
-        "core": DemoTier(extra=None, features="core", label="Core"),
-        "mask": DemoTier(extra=None, features="mask", label="Masks"),
-        "masksam": DemoTier(
+        "qpane": DemoTier(extra=None, sam_enabled=False, label="QPane"),
+        "cutecanvas": DemoTier(
+            extra=None,
+            sam_enabled=False,
+            label="CuteCanvas",
+        ),
+        "cutecanvas-sam": DemoTier(
             extra="sam",
-            features="masksam",
-            label="Mask+SAM",
+            sam_enabled=True,
+            label="CuteCanvas + SAM",
         ),
     }
 )
@@ -139,15 +142,15 @@ class DemoEnvironmentManager:
             str(self.python_path(tier)),
             "-m",
             "examples.cutecanvas_demo",
-            "--features",
-            definition.features,
             "--log-level",
             settings.log_level,
             "--skip-menu",
         ]
+        if definition.sam_enabled:
+            command.append("--sam")
         if settings.config_strict:
             command.append("--config-strict")
-        if tier == "masksam":
+        if definition.sam_enabled:
             self._append_option(
                 command,
                 "--sam-download-mode",

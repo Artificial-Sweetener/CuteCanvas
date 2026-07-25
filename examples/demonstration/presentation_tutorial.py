@@ -148,7 +148,7 @@ class PresentationTutorialController:
         layout.addLayout(controls)
 
         workspace = CanvasWorkspace(
-            document=self._canvas.document(),
+            document_runtime=self._canvas.documentRuntime(),
             features=self._canvas.installedFeatures,
             parent=dialog,
         )

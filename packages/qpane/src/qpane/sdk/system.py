@@ -13,8 +13,14 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Supported host-system monitoring workers."""
+"""Supported host-system monitoring products."""
 
-from ..core.headroom import SystemHeadroomWorker
+from ..core.headroom import (
+    SystemHeadroomSample,
+    sample_system_headroom,
+)
 
-__all__ = ("SystemHeadroomWorker",)
+__all__ = (
+    "SystemHeadroomSample",
+    "sample_system_headroom",
+)

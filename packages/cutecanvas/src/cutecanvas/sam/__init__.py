@@ -21,15 +21,11 @@ from .delegate import SamDelegate
 from .manager import (
     SamManager,
     SamPredictorMetrics,
-    SamWorker,
-    SamWorkerSignals,
 )
 
 __all__ = (
     "SamDelegate",
     "SamManager",
     "SamPredictorMetrics",
-    "SamWorker",
-    "SamWorkerSignals",
     "service",
 )

@@ -35,7 +35,8 @@ The available domains are:
 
 * `CACHE` for retained raster products and memory pressure.
 * `SWAP` for navigation, prefetch, and renderer queue activity.
-* `EXECUTOR` for worker use, pending work, and rejected submissions.
+* `EXECUTOR` for accepted, running, pending, retained, rejected, and completed
+  execution work.
 * `RETRY` for resource retry activity.
 * `MASK` for mask strokes, autosave, and mask jobs.
 * `SAM` for predictor state, embedding cache use, and model workers.
@@ -62,12 +63,14 @@ When an operation feels slow, start with the smallest relevant view:
 * Cache totals and domain rows show whether useful render products are being
   retained.
 * Swap and prefetch rows show whether navigation waits for source work.
-* Executor rows show queue depth and category limits.
+* Executor rows show aggregate queue depth, retained bytes, rejection, and
+  cancellation.
 * Mask rows separate stroke rendering, commit work, and autosave activity.
 * Model rows distinguish predictor setup from inference and embedding reuse.
 
-The values are observations, not controls. Change the corresponding `Config`
-fields, reproduce the same workflow, and compare the records again.
+The values are observations, not controls. Change cache or feature settings,
+or adjust the host-owned execution policy, reproduce the same workflow, and
+compare the records again.
 
 ## Add Host Records
 

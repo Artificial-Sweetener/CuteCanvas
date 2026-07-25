@@ -147,12 +147,13 @@ or document restoration.
 ## Show the Same Work More Than One Way
 
 `CanvasWorkspace` arranges independent composition views without flattening
-them into one artificial coordinate space:
+them into one artificial coordinate space. Its target canvases share one
+document runtime, including mutation freshness and bounded execution:
 
 ```python
 from cutecanvas import CanvasWorkspace
 
-workspace = CanvasWorkspace(document=canvas.document())
+workspace = CanvasWorkspace(document_runtime=canvas.documentRuntime())
 workspace.setTabbedPresentation(document.composition_ids(), linked=True)
 window.setCentralWidget(workspace)
 ```

@@ -32,9 +32,12 @@ from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
     absolute_latency_assertions_are_isolated,
     interaction_clock,
 )
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _MEDIAN_UPDATE_BUDGET_MS = 16.0
 _ISOLATED_OUTLIER_BUDGET_MS = 100.0

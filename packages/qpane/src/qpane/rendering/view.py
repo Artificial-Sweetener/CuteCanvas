@@ -41,8 +41,8 @@ from .scene_coordinates import SceneCoordinateSystem, ScenePoint
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
 
-    from ..concurrency import TaskExecutorProtocol
     from ..core.diagnostics_broker import Diagnostics
+    from ..execution import ExecutionScope
     from ..rendering import Renderer
     from ..scene.model import SceneDescriptor
     from ..scene.render_plan import (
@@ -72,7 +72,7 @@ class View:
         qpane: QPane,
         state: ViewerState,
         pyramid_manager: PyramidManager,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
         scene_providers: SceneProviderRegistry,
         source_capabilities: LayerSourceCapabilities,
         layer_effects: LayerEffectRenderRegistry,
@@ -81,7 +81,9 @@ class View:
         self._qpane = qpane
         self._state = state
         self._pyramid_manager = pyramid_manager
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:view"
+        )
         self._cache_registry: CacheRegistry | None = state.cache_registry
         self._scene_assembly = SceneAssembly(scene_providers)
         self._attach_pyramid_manager()
@@ -89,7 +91,7 @@ class View:
             qpane=qpane,
             pyramid_products=pyramid_manager,
             cache_registry=self._cache_registry,
-            executor=executor,
+            execution_scope=self._execution_scope,
             scene_provider=self._scene_assembly.resolve_scene,
             scene_revision=scene_providers.revision,
             source_metadata=source_capabilities.metadata,

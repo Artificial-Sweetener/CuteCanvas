@@ -51,7 +51,7 @@ from qpane import (
 from qpane import (
     PanelHitTest,
 )
-from qpane.sdk.concurrency import TaskExecutorProtocol, ThreadPolicy
+from qpane.sdk.execution import DefaultExecutionPolicy, ExecutionRuntime
 from qpane.sdk.ui import (
     DragSubject,
     OutboundMimeProvider,
@@ -119,6 +119,7 @@ from .projection import CanvasProjectionHandle as CanvasProjectionHandle
 from .projection import CanvasProjectionRequest as CanvasProjectionRequest
 from .projection import CanvasProjectionResult as CanvasProjectionResult
 from .projection import CanvasProjectionStatus as CanvasProjectionStatus
+from .runtime import CanvasDocumentRuntime as CanvasDocumentRuntime
 from .snapping import SnapPolicy as SnapPolicy
 from .types import MaskSavedPayload as MaskSavedPayload
 
@@ -650,8 +651,9 @@ class CuteCanvas(QWidget):
         features: Iterable[str] | None = ...,
         document: CanvasDocument | None = ...,
         session: CanvasViewSession | None = ...,
-        task_executor: TaskExecutorProtocol | None = ...,
-        thread_policy: ThreadPolicy | Mapping[str, Any] | None = ...,
+        document_runtime: CanvasDocumentRuntime | None = ...,
+        execution_runtime: ExecutionRuntime | None = ...,
+        execution_policy: DefaultExecutionPolicy | None = ...,
         config_strict: bool = ...,
         **kwargs: Any,
     ) -> None: ...
@@ -727,6 +729,7 @@ class CuteCanvas(QWidget):
     ) -> None: ...
     def clearOutboundMimeProvider(self) -> None: ...
     def document(self) -> CanvasDocument: ...
+    def documentRuntime(self) -> CanvasDocumentRuntime: ...
     def viewSession(self) -> CanvasViewSession: ...
     def editorOperationState(
         self,

@@ -41,7 +41,6 @@ from qpane.scene.render_plan import (
     TileRenderData,
 )
 
-from tests.helpers.executor_stubs import StubExecutor
 from tests.helpers.render_compare import (
     assert_images_match,
     checker_image,
@@ -52,7 +51,7 @@ from tests.helpers.render_plan import make_render_plan
 
 @pytest.fixture()
 def qpane_with_image(qapp):
-    qpane = CuteCanvas(features=(), task_executor=StubExecutor())
+    qpane = CuteCanvas(features=())
     qpane.resize(128, 128)
     image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.black)
@@ -150,7 +149,7 @@ def _make_qpane_with_checker_image(
     image_format: QImage.Format | None = None,
 ) -> CuteCanvas:
     """Return a CuteCanvas containing one high-contrast image."""
-    qpane = CuteCanvas(features=(), task_executor=StubExecutor())
+    qpane = CuteCanvas(features=())
     qpane.resize(128, 128)
     qpane.devicePixelRatioF = lambda: dpr  # type: ignore[method-assign]
     image = checker_image(QRect(0, 0, size, size).size())

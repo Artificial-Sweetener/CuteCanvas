@@ -54,7 +54,7 @@ from qpane.rendering.sdk_adapter import RenderSceneController
 from qpane.scene.source_capabilities import LayerSourceCapabilities
 
 from tests.harness.timing import interaction_clock, stable_latency_samples
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import TestExecution
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,8 +226,8 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
     qapp: QApplication,
 ) -> None:
     """Guarded refinement must cover every frame while the next batch is held."""
-    executor = StubExecutor(name="hybrid-pan")
-    pane = QPane(task_executor=executor)
+    executor = TestExecution(auto_finish=False)
+    pane = QPane(execution_runtime=executor.runtime)
     pane.resize(800, 600)
     bounds = RasterBounds(0, 0, 4096, 4096)
     geometry = VectorObject(
@@ -257,16 +257,22 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
         pane.applyZoom(4.0, QPointF(400.0, 300.0))
         qapp.processEvents()
         pane.calculateRenderPlan()
-        assert executor.snapshot().queued_by_category.get("render_refinement", 0) == 1
+        assert (
+            sum(
+                job.operation.startswith("render.refinement")
+                for job in executor.pending_jobs()
+            )
+            == 1
+        )
         assert pane._rendering.presenter._render_refinement.pending_count == 3
         for _ in range(5):
-            queued = executor.snapshot().queued_by_category.get(
-                "render_refinement",
-                0,
+            queued = sum(
+                job.operation.startswith("render.refinement")
+                for job in executor.pending_jobs()
             )
             if queued == 0:
                 break
-            executor.run_category("render_refinement")
+            executor.run_operation("render.refinement")
             qapp.processEvents()
         else:
             raise AssertionError("hybrid refinement did not settle")
@@ -296,7 +302,13 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
         assert all(
             _is_hybrid_tint(color) for samples in frame_samples for color in samples
         )
-        assert executor.snapshot().queued_by_category.get("render_refinement", 0) == 1
+        assert (
+            sum(
+                job.operation.startswith("render.refinement")
+                for job in executor.pending_jobs()
+            )
+            == 1
+        )
         assert len(executor.cancelled) < len(frame_samples) // 4
         metrics_after = pane._rendering.presenter.renderer.snapshot_metrics()
         assert metrics_after.scroll_hits - metrics_before.scroll_hits >= int(

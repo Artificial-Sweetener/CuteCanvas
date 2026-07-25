@@ -83,10 +83,15 @@ or a custom provider that appears to invalidate too broadly.
 
 ### Executor
 
-The `executor` domain shows worker use, pending work, category distribution,
-and rejection/backpressure. Visible tiles should outrank pyramids and
-speculative work. A growing queue is evidence to profile; it is not by itself a
-reason to raise `max_workers`.
+The `executor` domain aggregates accepted, pending, running, completed,
+rejected, and pre-start cancellation counts from every diagnostic-capable
+backend in the runtime. It also reports retained-byte estimates used by bounded
+admission. A supplied host backend may omit this optional capability; task
+execution continues normally.
+
+A growing queue or repeated rejection is evidence to inspect the responsible
+workload and the host's capacity policy. It is not by itself a reason to add
+threads.
 
 ### Retry
 
@@ -172,7 +177,7 @@ there.
 
 ## Related Docs
 
-* [Configuration](configuration.md): cache, concurrency, and startup diagnostic
+* [Configuration](configuration.md): cache, execution, and startup diagnostic
   policy.
 * [Rendering SDK](rendering-sdk.md): provider revisions, damage, and product
   behavior.

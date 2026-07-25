@@ -226,41 +226,17 @@ class _SamWorkflow:
                 path_display,
             )
             return False
-        try:
-            mask_array_bool = delegate.predict_mask_from_box(bbox)
-        except ValueError as exc:
+        if delegate is None or not delegate.request_mask_from_box(
+            np.asarray(bbox),
+            erase_mode=erase_mode,
+        ):
             logger.warning(
-                "generate_and_apply_mask aborted: bounding box invalid (image_path=%s, bbox=%s, erase_mode=%s, reason=%s)",
-                path_display,
-                bbox_payload,
-                erase_mode,
-                exc,
-            )
-            return False
-        except RuntimeError as exc:
-            logger.error(
-                "generate_and_apply_mask aborted: SAM services unavailable (image_path=%s, reason=%s)",
-                path_display,
-                exc,
-            )
-            return False
-        except Exception:
-            logger.exception(
-                "generate_and_apply_mask failed (image_path=%s, bbox=%s, erase_mode=%s)",
-                path_display,
-                bbox_payload,
-                erase_mode,
-            )
-            return False
-        if mask_array_bool is None:
-            logger.warning(
-                "generate_and_apply_mask aborted: SAM returned no mask (image_path=%s, bbox=%s)",
+                "generate_and_apply_mask aborted: SAM request was unavailable "
+                "(image_path=%s, bbox=%s)",
                 path_display,
                 bbox_payload,
             )
             return False
-        mask_array_uint8 = np.asarray(mask_array_bool, dtype=np.uint8) * 255
-        service.handleGeneratedMask(mask_array_uint8, bbox, erase_mode)
         return True
 
 

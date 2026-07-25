@@ -34,10 +34,13 @@ from qpane.rendering.render_tile_geometry import visible_tile_requests
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
     average_interaction_latency_ms,
     interaction_clock,
     stable_latency_samples,
 )
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _INTERACTION_BUDGET_MS = 16.0
 _MANY_SHAPE_REFINEMENT_BUDGET_MS = 100.0

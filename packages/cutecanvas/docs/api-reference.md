@@ -33,6 +33,12 @@ host an application-defined arrangement through
 `CanvasPresentationContext` gives a provider validated target identities and
 the supported function for creating each target view.
 
+`document_runtime` supplies one shared `CanvasDocumentRuntime` for every
+target. `execution_runtime` supplies a host-owned physical runtime when the
+workspace creates that document binding. `execution_policy` configures the
+bounded runtime owned by a standalone workspace. A supplied document runtime
+is mutually exclusive with both execution arguments.
+
 `CanvasInteractionMode` supplies `READ_ONLY`, `MASK_AUTHORING`, and
 `FULL_EDITOR` profiles through the ordinary capability policy.
 `CuteCanvas.interactionMode` reports the current profile and
@@ -66,6 +72,21 @@ cancelled, rejected, stale, and failed terminal outcomes.
 
 `CuteCanvas` is the widget and complete public API. `canvas.editor` groups the
 most common application workflows into smaller typed helpers:
+
+`CuteCanvas(execution_policy=...)` configures its owned standalone runtime.
+`CuteCanvas(execution_runtime=...)` uses a host-owned runtime without
+configuring or closing it.
+`CuteCanvas(document_runtime=...)` shares document-scoped mutation work and
+freshness with other views and leaves that binding host-owned.
+`CuteCanvas.documentRuntime` returns that exact binding so a host can mount
+another editor or presentation workspace without creating a competing
+document scope.
+
+`CanvasDocumentRuntime(document, execution_runtime=...)` binds durable document
+state to ephemeral execution. `execution_scope` is the document-lifetime
+scope, `open_view_scope()` creates receiver-safe view scopes, and
+`native_execution_scope()` uses the supplied runtime when it supports stable
+native affinity or creates a disjoint document-owned fallback for that work.
 
 The `EditorFacade` collects these helpers without owning a second copy of
 document state. `CompositionCollection` creates and resolves typed handles.
@@ -187,9 +208,9 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- DiagnosticsDomain.CACHE — Cache budgets, usage, and eviction/entitlement detail.
 	- DiagnosticsDomain.SWAP — Navigation, renderer queues, and prefetch metrics.
 	- DiagnosticsDomain.MASK — Mask status, autosave, job queues, and brush info.
-	- DiagnosticsDomain.EXECUTOR — Executor identity, queue depth, thread/device limits, wait times.
+	- DiagnosticsDomain.EXECUTOR — Accepted, pending, running, retained, rejected, and completed execution work.
 	- DiagnosticsDomain.RETRY — Retry queues per resource plus compact summaries.
-	- DiagnosticsDomain.SAM — SAM cache, readiness, worker counts, and max threads.
+	- DiagnosticsDomain.SAM — SAM cache, readiness, preparation, and inference activity.
 - cutecanvas.ControlMode — Built-in control mode identifiers for tool registration.
 	- ControlMode.CURSOR — Inert cursor mode (`cursor`).
 	- ControlMode.PANZOOM — Pan/zoom mode (`panzoom`).

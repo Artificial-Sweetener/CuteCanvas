@@ -159,7 +159,7 @@ class ToolModeTutorialController:
                 )
         if mode == CuteCanvas.CONTROL_MODE_SMART_SELECT:
             if not (self._masks_available() and self._sam_available()):
-                self._show_status("Smart Select requires Mask+SAM features.")
+                self._show_status("Enable SAM tools to use Smart Select.")
                 return
             if not self._ensure_active_mask():
                 return

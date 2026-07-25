@@ -18,8 +18,8 @@
 
 import logging
 import uuid
-from collections.abc import Iterable, Mapping
-from typing import Any, cast
+from collections.abc import Iterable
+from typing import cast
 
 from PySide6.QtCore import (
     QEvent,
@@ -39,7 +39,7 @@ from PySide6.QtGui import (
     QWindow,
 )
 from PySide6.QtWidgets import QWidget
-from qpane.sdk.concurrency import TaskExecutorProtocol, ThreadPolicy
+from qpane.sdk.execution import DefaultExecutionPolicy, ExecutionRuntime
 from qpane.sdk.rendering import (
     View,
 )
@@ -101,6 +101,8 @@ from .resources.composition_rasterization import (
 from .resources.image_documents import ImageDocumentWorkflow
 from .resources.layer_operations import LayerResourceOperations
 from .resources.rasterization import LayerResourceRasterizationRouter
+from .runtime.document_runtime import CanvasDocumentRuntime
+from .runtime.execution_binding import CanvasExecutionBinding
 from .scene.layer_assembly import CompositionLayerSceneAssembler
 from .scene.layer_geometry import LayerGeometryResolver
 from .scene.layer_selection import SceneLayerSelectionController
@@ -288,8 +290,9 @@ class CuteCanvas(
         features: Iterable[str] | None = None,
         document: CanvasDocument | None = None,
         session: CanvasViewSession | None = None,
-        task_executor: TaskExecutorProtocol | None = None,
-        thread_policy: ThreadPolicy | Mapping[str, Any] | None = None,
+        document_runtime: CanvasDocumentRuntime | None = None,
+        execution_runtime: ExecutionRuntime | None = None,
+        execution_policy: DefaultExecutionPolicy | None = None,
         config_strict: bool = False,
         **kwargs,
     ):
@@ -300,34 +303,51 @@ class CuteCanvas(
             features: Optional feature names to install (mask, sam, etc.).
             document: Headless content aggregate to mount.
             session: Detachable activation and presentation state to mount.
-            task_executor: Existing executor instance to reuse.
-            thread_policy: Policy or mapping forwarded to the executor builder.
+            document_runtime: Shared ephemeral owner for document-wide work.
+            execution_runtime: Host-owned runtime shared by editor operations.
+            execution_policy: Policy used only for a standalone runtime.
             config_strict: When ``True``, reject overrides targeting inactive
                 feature namespaces instead of logging warnings.
             **kwargs: Configuration overrides forwarded to ``QPaneState``.
         """
         super().__init__()
-        self._session = session or CanvasViewSession()
-        if (
-            document is not None
-            and task_executor is not None
-            and task_executor is not document.executor
+        if document_runtime is not None and (
+            execution_runtime is not None or execution_policy is not None
         ):
-            raise ValueError("task_executor must match the mounted document executor")
-        effective_executor = (
-            document.executor if document is not None else task_executor
+            raise ValueError(
+                "document_runtime cannot be combined with execution runtime options"
+            )
+        if document_runtime is not None:
+            if document is not None and document_runtime.document is not document:
+                raise ValueError("document_runtime belongs to a different document")
+            resolved_document = document_runtime.document
+            resolved_document_runtime = document_runtime
+            owns_document_runtime = False
+        else:
+            resolved_document = document or CanvasDocument()
+            resolved_document_runtime = CanvasDocumentRuntime(
+                resolved_document,
+                execution_runtime=execution_runtime,
+                execution_policy=execution_policy,
+            )
+            owns_document_runtime = True
+        self._execution_binding = CanvasExecutionBinding(
+            self,
+            document_runtime=resolved_document_runtime,
+            close_document_runtime=owns_document_runtime,
         )
+        self._session = session or CanvasViewSession()
         self._state = CuteCanvasState(
             qpane=self,
             initial_config=config,
             config_overrides=kwargs,
             features=features,
-            task_executor=effective_executor,
-            thread_policy=thread_policy,
+            execution_runtime=self._execution_binding.runtime,
+            execution_scope=self._execution_binding.scope,
             config_strict=config_strict,
         )
-        self._owns_document = document is None
-        self._document = document or CanvasDocument(task_executor=self._state.executor)
+        self._owns_document = document is None and document_runtime is None
+        self._document = resolved_document
         self._diagnostics_manager = self._state.diagnostics
         self.interaction = ToolInteractionDelegate(self)
         self._hooks = CuteCanvasHooks(self)
@@ -438,6 +458,7 @@ class CuteCanvas(
             raise RuntimeError("CuteCanvas persistence service was not installed")
         self._editor_facade = EditorFacade.create(self, persistence)
         self.destroyed.connect(self._state.on_destroyed)
+        self.destroyed.connect(lambda _obj=None: self._execution_binding.close())
         self.destroyed.connect(lambda _obj=None: self._outbound_drag.close())
         self.destroyed.connect(
             lambda _obj=None: (

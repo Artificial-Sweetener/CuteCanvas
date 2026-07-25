@@ -17,46 +17,49 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QRect, QRunnable, Signal
-from qpane.sdk.concurrency import (
-    BaseWorker,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
+from PySide6.QtCore import QRect
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
 )
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
-from cutecanvas.coverage import CoverageStateSnapshot, CoverageSurface
+from cutecanvas.coverage import CoverageSurface
 from cutecanvas.types import RasterExtentPolicy
 
-from ..raster.sparse_grid import (
-    SparseRasterSnapshot,
-    reframe_sparse_raster_snapshot,
+from ..raster.structure_products import (
+    RasterReframeProduct,
+    build_sparse_reframe,
 )
 from ..resources import ProjectResourceReference
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..scene.raster_mutations import RasterBoundsCompletion, RasterLayerState
 from .edit_service import MaskEditService
 from .mask import MaskAssetStore
 from .render_cache import MaskRenderCache
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class _PendingBoundsRequest:
     """Track one submitted worker and the scene identity it must still match."""
 
+    request_id: uuid.UUID
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     mask_id: uuid.UUID
     is_current: Callable[[], bool]
-    worker: _MaskReframeWorker
-    handle: TaskHandle
+    handle: ExecutionHandle[RasterReframeProduct, object] | None = None
 
 
 class MaskRasterMutationOwner:
@@ -68,7 +71,8 @@ class MaskRasterMutationOwner:
         assets: MaskAssetStore,
         edits: MaskEditService,
         renders: MaskRenderCache,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         mask_changed: Callable[[uuid.UUID, QRect], None],
         undo_changed: Callable[[uuid.UUID], None],
         scene_changed: Callable[[], None],
@@ -78,13 +82,15 @@ class MaskRasterMutationOwner:
         self._assets = assets
         self._edits = edits
         self._renders = renders
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:mask-structure"
+        )
+        self._latest_requests = latest_requests
         self._mask_changed = mask_changed
         self._undo_changed = undo_changed
         self._scene_changed = scene_changed
         self._completed = completed
         self._pending: dict[uuid.UUID, _PendingBoundsRequest] = {}
-        self._latest_by_layer: dict[uuid.UUID, uuid.UUID] = {}
         self._closed = False
 
     def supports_layer(self, layer: LayerDescriptor) -> bool:
@@ -111,7 +117,9 @@ class MaskRasterMutationOwner:
             extent_policy=surface.extent_policy,
             content_revision=content_revision,
             structure_revision=structure_revision,
-            pending_request_id=self._latest_by_layer.get(layer.layer_id),
+            pending_request_id=self._latest_requests.current_request_id(
+                self._request_key(layer.layer_id)
+            ),
         )
 
     def set_extent_policy(
@@ -150,17 +158,44 @@ class MaskRasterMutationOwner:
                 True,
                 "",
             )
-            self._executor.dispatch_to_main_thread(
-                lambda: self._completed(completion),
-                category="main",
-            )
+            self._completed(completion)
             return request_id
-        worker = _MaskReframeWorker(request_id, surface, bounds)
-        BaseWorker.connect_queued(worker.finished, self._finish_request)
+        pending = _PendingBoundsRequest(
+            request_id=request_id,
+            scene_id=scene.scene_id,
+            layer_id=layer.layer_id,
+            mask_id=layer.source.resource_id,
+            is_current=is_current,
+        )
+        self._pending[request_id] = pending
+        key = self._request_key(layer.layer_id)
+        if not self._latest_requests.claim(
+            key,
+            request_id,
+            lambda message: self._cancel_pending(request_id, message),
+        ):
+            self._pending.pop(request_id, None)
+            return request_id
+        request = ExecutionRequest[RasterReframeProduct, object](
+            operation="editor.mask.reframe",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.FOREGROUND,
+            ),
+            work=lambda context: build_sparse_reframe(
+                surface.versioned_state_snapshot,
+                bounds,
+                context.cancellation,
+            ),
+        )
         try:
-            handle = self._executor.submit(worker, category="mask_structure")
-        except TaskRejected as exc:
-            worker.deleteLater()
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda product: self._finish_request(request_id, product),
+            )
+        except ExecutionRejected as exc:
+            self._pending.pop(request_id, None)
+            self._latest_requests.release(key, request_id)
             completion = RasterBoundsCompletion(
                 request_id,
                 scene.scene_id,
@@ -168,20 +203,13 @@ class MaskRasterMutationOwner:
                 False,
                 str(exc),
             )
-            self._executor.dispatch_to_main_thread(
-                lambda: self._completed(completion),
-                category="main",
-            )
+            self._completed(completion)
             return request_id
-        self._pending[request_id] = _PendingBoundsRequest(
-            scene_id=scene.scene_id,
-            layer_id=layer.layer_id,
-            mask_id=layer.source.resource_id,
-            is_current=is_current,
-            worker=worker,
-            handle=handle,
+        if self._pending.get(request_id) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle_request(request_id, handle, outcome)
         )
-        self._latest_by_layer[layer.layer_id] = request_id
         self._scene_changed()
         return request_id
 
@@ -192,7 +220,7 @@ class MaskRasterMutationOwner:
         self._closed = True
         for request_id in tuple(self._pending):
             self._cancel_pending(request_id, "raster source detached")
-        self._latest_by_layer.clear()
+        self._execution_scope.close(reason="mask_raster_mutation_shutdown")
 
     def _surface_for(self, layer: LayerDescriptor) -> CoverageSurface | None:
         """Resolve authoritative storage from one supported descriptor."""
@@ -206,19 +234,24 @@ class MaskRasterMutationOwner:
         replacement_id: uuid.UUID,
     ) -> None:
         """Cancel an older request for ``layer_id`` before accepting a replacement."""
-        previous = self._latest_by_layer.get(layer_id)
+        previous = self._latest_requests.current_request_id(self._request_key(layer_id))
         if previous is not None and previous != replacement_id:
-            self._cancel_pending(previous, "replaced by a newer bounds request")
+            self._latest_requests.cancel(
+                self._request_key(layer_id),
+                reason="replaced by a newer bounds request",
+            )
 
     def _cancel_pending(self, request_id: uuid.UUID, message: str) -> None:
         """Cancel and complete one tracked request exactly once."""
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        pending.worker.cancel()
-        self._executor.cancel(pending.handle)
-        if self._latest_by_layer.get(pending.layer_id) == request_id:
-            self._latest_by_layer.pop(pending.layer_id, None)
+        if pending.handle is not None:
+            pending.handle.cancel(reason=message)
+        self._latest_requests.release(
+            self._request_key(pending.layer_id),
+            request_id,
+        )
         self._completed(
             RasterBoundsCompletion(
                 request_id,
@@ -229,21 +262,37 @@ class MaskRasterMutationOwner:
             )
         )
 
-    def _finish_request(self, worker: _MaskReframeWorker) -> None:
-        """Apply a current worker result on the Qt thread and record history."""
-        pending = self._pending.pop(worker.request_id, None)
+    def _finish_request(
+        self,
+        request_id: uuid.UUID,
+        product: RasterReframeProduct,
+    ) -> None:
+        """Apply a current detached result on the Qt thread and record history."""
+        pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        if self._latest_by_layer.get(pending.layer_id) == worker.request_id:
-            self._latest_by_layer.pop(pending.layer_id, None)
-        if self._closed or worker.error is not None or worker.result is None:
-            message = "request cancelled" if worker.error is None else str(worker.error)
-            self._publish_completion(pending, worker.request_id, False, message)
+        key = self._request_key(pending.layer_id)
+        if not self._latest_requests.is_current(key, request_id):
+            self._publish_completion(
+                pending,
+                request_id,
+                False,
+                "replaced by a newer bounds request",
+            )
+            return
+        self._latest_requests.release(key, request_id)
+        if self._closed:
+            self._publish_completion(
+                pending,
+                request_id,
+                False,
+                "raster source detached",
+            )
             return
         if not pending.is_current():
             self._publish_completion(
                 pending,
-                worker.request_id,
+                request_id,
                 False,
                 "raster layer is no longer current",
             )
@@ -251,24 +300,19 @@ class MaskRasterMutationOwner:
         surface = self._assets.get_surface(pending.mask_id)
         if surface is None:
             self._publish_completion(
-                pending, worker.request_id, False, "raster source no longer exists"
+                pending, request_id, False, "raster source no longer exists"
             )
             return
-        if surface.revisions() != worker.source_revisions:
+        if surface.revisions() != product.source_revisions:
             self._publish_completion(
                 pending,
-                worker.request_id,
+                request_id,
                 False,
                 "raster source changed while bounds were being prepared",
             )
             return
-        before = worker.source_snapshot
-        after = worker.result
-        if before is None:
-            self._publish_completion(
-                pending, worker.request_id, False, "source snapshot unavailable"
-            )
-            return
+        before = product.source_snapshot
+        after = product.result
         surface.replace_with_state_snapshot(after)
         if self._assets.record_applied_surface(pending.mask_id, before, after):
             self._undo_changed(pending.mask_id)
@@ -278,7 +322,38 @@ class MaskRasterMutationOwner:
         self._edits.advance_epoch(pending.mask_id, reason="raster_bounds_changed")
         self._mask_changed(pending.mask_id, QRect())
         self._scene_changed()
-        self._publish_completion(pending, worker.request_id, True, "")
+        self._publish_completion(pending, request_id, True, "")
+
+    def _settle_request(
+        self,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[RasterReframeProduct, object],
+        outcome: ExecutionOutcome[RasterReframeProduct],
+    ) -> None:
+        """Publish a failed or cancelled mask reframe exactly once."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._pending.get(request_id)
+        if pending is None or (
+            pending.handle is not None and pending.handle is not handle
+        ):
+            return
+        self._pending.pop(request_id, None)
+        self._latest_requests.release(
+            self._request_key(pending.layer_id),
+            request_id,
+        )
+        message = (
+            outcome.cancellation_reason
+            if outcome.state == ExecutionState.CANCELLED
+            else str(outcome.error)
+        )
+        self._publish_completion(
+            pending,
+            request_id,
+            False,
+            message or "mask bounds request did not complete",
+        )
 
     def _publish_completion(
         self,
@@ -298,50 +373,7 @@ class MaskRasterMutationOwner:
             )
         )
 
-
-class _MaskReframeWorker(QObject, QRunnable, BaseWorker):
-    """Capture and reframe one mask surface without blocking the Qt thread."""
-
-    finished = Signal(object)
-
-    def __init__(
-        self,
-        request_id: uuid.UUID,
-        surface: CoverageSurface,
-        bounds: RasterBounds,
-    ) -> None:
-        """Store immutable request values and the synchronized source handle."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        self.request_id = request_id
-        self._surface = surface
-        self._bounds = bounds
-        self.source_revisions: tuple[int, int] | None = None
-        self.source_snapshot: CoverageStateSnapshot | None = None
-        self.result: SparseRasterSnapshot | None = None
-        self.error: BaseException | None = None
-
-    def run(self) -> None:
-        """Copy current source state and calculate the requested frame."""
-        try:
-            if self.is_cancelled:
-                self.emit_finished(False, payload=self)
-                return
-            content_revision, structure_revision, snapshot = (
-                self._surface.versioned_state_snapshot()
-            )
-            self.source_revisions = (content_revision, structure_revision)
-            self.source_snapshot = snapshot
-            if self.is_cancelled:
-                self.emit_finished(False, payload=self)
-                return
-            self.result = reframe_sparse_raster_snapshot(snapshot, self._bounds)
-        except BaseException as exc:  # pragma: no cover - defensive worker boundary
-            self.error = exc
-            logger.exception("Mask surface reframe failed")
-        self.emit_finished(
-            self.error is None and not self.is_cancelled,
-            payload=self,
-            error=self.error,
-        )
+    @staticmethod
+    def _request_key(layer_id: uuid.UUID) -> tuple[str, uuid.UUID]:
+        """Return the document-global replacement key for one mask layer."""
+        return ("mask-structure", layer_id)

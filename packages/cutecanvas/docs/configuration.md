@@ -177,29 +177,39 @@ signals, and runtime refresh.
 
 ## Bound Background Work
 
-The shared executor keeps rendering, painting, file work, and optional model
-work away from the GUI thread. Its default two workers leave capacity for the
-host application.
+CuteCanvas and its QPane renderer use one execution runtime for rendering,
+painting, file work, projections, placed assets, and optional model work. A
+standalone canvas creates a bounded runtime automatically. To choose a
+different standalone budget, pass a typed policy to the widget:
 
 ```python
-config.configure(
-    concurrency={
-        "max_workers": 4,
-        "category_limits": {
-            "pyramid": 2,
-            "sam": 1,
-        },
-        "max_pending_total": 256,
-    }
+from cutecanvas import CuteCanvas
+from qpane.sdk.execution import DefaultExecutionPolicy
+
+canvas = CuteCanvas(
+    execution_policy=DefaultExecutionPolicy(
+        max_workers=4,
+        max_accepted=256,
+    )
 )
 ```
 
-Visible tile and interactive edit work already outrank prefetch and maintenance.
-Change priorities only after profiling a real workload. Raising worker counts
-can increase memory pressure and contention instead of improving latency.
+Execution is not part of `Config` because it belongs to application runtime
+ownership rather than document or editor preferences. A host can pass the same
+`ExecutionRuntime` to several canvases and QPane viewers, or construct it over
+a custom bounded backend. CuteCanvas submits directly to that runtime and does
+not create or shut down another pool.
 
-Applications with an existing executor can pass a `TaskExecutorProtocol` and
-`ThreadPolicy` to `CuteCanvas` rather than creating a second pool.
+Several views of the same document should instead share one
+`CanvasDocumentRuntime`. It keeps document work and replaceable-request
+freshness under one owner while every view retains an independent delivery
+scope.
+
+When a custom runtime does not advertise stable native affinity, CuteCanvas
+creates a document-owned fallback for only the work that requires it. Ordinary
+editor work continues directly through the host backend. See QPane's
+[Advanced Renderer Integration](../../qpane/docs/integration-sdk.md) for the
+complete host contract.
 
 ## Turn on Diagnostics
 
@@ -230,7 +240,7 @@ handwritten settings screen can use the typed fields and
   shipped default.
 * [Masks and SAM](masks-and-sam.md): mask autosave and model setup.
 * [Touch and Pen](touch-and-pen.md): direct input and pressure behavior.
-* [Diagnostics](diagnostics.md): observe memory, rendering, workers, and editor
+* [Diagnostics](diagnostics.md): observe memory, rendering, execution, and editor
   features.
 
 **Continue →** [Configuration Reference](configuration-reference.md)

@@ -40,12 +40,11 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(repository_root / "packages" / "qpane" / "src"))
     sys.path.insert(0, str(repository_root))
 from examples.demo_environment import (
-    DEMO_TIERS,
     DemoEnvironmentError,
     DemoEnvironmentManager,
     DemoLaunchSettings,
 )
-from examples.demo_settings import load_demo_settings, save_demo_settings
+from examples.demo_settings import load_demo_settings, save_demo_launch_settings
 
 if TYPE_CHECKING:
     from examples.demonstration.demo_window import ExampleOptions, ExampleWindow
@@ -120,9 +119,8 @@ def _parse_bootstrap_args(argv: list[str]) -> argparse.Namespace:
     """Parse the CLI arguments needed for bootstrapping."""
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
-        "--features",
-        choices=["core", "mask", "masksam"],
-        default="masksam",
+        "--sam",
+        action="store_true",
     )
     parser.add_argument(
         "--config-strict",
@@ -159,21 +157,15 @@ def _parse_bootstrap_args(argv: list[str]) -> argparse.Namespace:
 
 def _interactive_menu() -> int:
     """Present a dashboard menu to rebuild/install venvs and launch the demo."""
-    tiers = ["core", "mask", "masksam"]
     log_levels = ["DEBUG", "INFO", "WARNING", "ERROR"]
     sam_modes = list(_SAM_DOWNLOAD_MODES)
-    # Load defaults from disk or fall back to Mask+SAM/WARNING
     saved = load_demo_settings()
-    default_tier = saved.get("tier", "masksam")
+    default_sam_enabled = saved.get("sam_enabled", False)
     default_level = saved.get("log_level", "WARNING")
     default_sam_mode = saved.get("sam_download_mode", "background")
     default_sam_path = saved.get("sam_model_path")
     default_sam_url = saved.get("sam_model_url")
     default_sam_hash = saved.get("sam_model_hash")
-    try:
-        tier_idx = tiers.index(default_tier)
-    except ValueError:
-        tier_idx = 2
     try:
         level_idx = log_levels.index(default_level)
     except ValueError:
@@ -183,7 +175,9 @@ def _interactive_menu() -> int:
     except ValueError:
         sam_idx = 0
     state = {
-        "tier_idx": tier_idx,
+        "sam_enabled": (
+            default_sam_enabled if isinstance(default_sam_enabled, bool) else False
+        ),
         "level_idx": level_idx,
         "sam_idx": sam_idx,
         "sam_model_path": default_sam_path,
@@ -192,9 +186,20 @@ def _interactive_menu() -> int:
         "sam_clear_checkpoint": False,
     }
 
-    def _current_tier() -> str:
-        """Return the tier name currently selected in the menu."""
-        return tiers[state["tier_idx"]]
+    def _environment_tier() -> str:
+        """Return the environment matching the current SAM preference."""
+        return "cutecanvas-sam" if state["sam_enabled"] else "cutecanvas"
+
+    def _persist_preferences() -> None:
+        """Persist the current launcher choices immediately."""
+        save_demo_launch_settings(
+            sam_enabled=state["sam_enabled"],
+            log_level=log_levels[state["level_idx"]],
+            sam_download_mode=sam_modes[state["sam_idx"]],
+            sam_model_path=state["sam_model_path"],
+            sam_model_url=state["sam_model_url"],
+            sam_model_hash=state["sam_model_hash"],
+        )
 
     def _resolve_sam_checkpoint_path(value: str | None) -> Path | None:
         """Resolve the SAM checkpoint path for the current menu settings."""
@@ -219,16 +224,16 @@ def _interactive_menu() -> int:
         return value
 
     def _build_menu_rows() -> list[dict[str, str]]:
-        """Build the menu rows based on the selected feature tier."""
+        """Build the menu rows for standard editing and optional SAM."""
         rows: list[dict[str, str]] = [
             {
                 "kind": "option",
-                "key": "feature",
-                "label": "Feature Set",
-                "value": DEMO_TIERS[_current_tier()].label,
+                "key": "sam_enabled",
+                "label": "SAM Tools",
+                "value": "Enabled" if state["sam_enabled"] else "Disabled",
                 "help": (
-                    "Select feature tier. Left/Right to cycle. "
-                    "(Core: Viewer, Masks: +Masks, Mask+SAM: +AI)"
+                    "Enable or disable assisted mask selection. "
+                    "Mask editing is always available."
                 ),
             },
             {
@@ -242,7 +247,7 @@ def _interactive_menu() -> int:
                 ),
             },
         ]
-        if _current_tier() == "masksam":
+        if state["sam_enabled"]:
             rows.append(
                 {
                     "kind": "option",
@@ -412,38 +417,44 @@ def _interactive_menu() -> int:
             selected_row = (selected_row + 1) % len(rows)
         elif action == "LEFT":
             row = rows[selected_row]
-            if row["key"] == "feature":
-                state["tier_idx"] = (state["tier_idx"] - 1) % len(tiers)
+            if row["key"] == "sam_enabled":
+                state["sam_enabled"] = not state["sam_enabled"]
+                _persist_preferences()
             elif row["key"] == "log_level":
                 state["level_idx"] = (state["level_idx"] - 1) % len(log_levels)
+                _persist_preferences()
             elif row["key"] == "sam_download_mode":
                 state["sam_idx"] = (state["sam_idx"] - 1) % len(sam_modes)
+                _persist_preferences()
             elif row["key"] == "sam_clear_checkpoint":
                 state["sam_clear_checkpoint"] = not state["sam_clear_checkpoint"]
         elif action == "RIGHT":
             row = rows[selected_row]
-            if row["key"] == "feature":
-                state["tier_idx"] = (state["tier_idx"] + 1) % len(tiers)
+            if row["key"] == "sam_enabled":
+                state["sam_enabled"] = not state["sam_enabled"]
+                _persist_preferences()
             elif row["key"] == "log_level":
                 state["level_idx"] = (state["level_idx"] + 1) % len(log_levels)
+                _persist_preferences()
             elif row["key"] == "sam_download_mode":
                 state["sam_idx"] = (state["sam_idx"] + 1) % len(sam_modes)
+                _persist_preferences()
             elif row["key"] == "sam_clear_checkpoint":
                 state["sam_clear_checkpoint"] = not state["sam_clear_checkpoint"]
         elif action == "SELECT":
             row = rows[selected_row]
             if row["key"] == "run":
-                tier = tiers[state["tier_idx"]]
+                tier = _environment_tier()
                 level = log_levels[state["level_idx"]]
                 sam_mode = sam_modes[state["sam_idx"]]
                 sam_path = state["sam_model_path"]
                 sam_url = state["sam_model_url"]
                 sam_hash = state["sam_model_hash"]
-                if tier == "masksam" and state["sam_clear_checkpoint"]:
+                if state["sam_enabled"] and state["sam_clear_checkpoint"]:
                     checkpoint_path = _resolve_sam_checkpoint_path(sam_path)
                     if checkpoint_path is not None:
                         _clear_sam_checkpoint(checkpoint_path)
-                save_demo_settings(tier, level, sam_mode, sam_path, sam_url, sam_hash)
+                _persist_preferences()
                 try:
                     _DEMO_ENVIRONMENTS.ensure_ready(tier)
                     return _DEMO_ENVIRONMENTS.launch(
@@ -464,13 +475,13 @@ def _interactive_menu() -> int:
                     print(f"\nError: {exc}")
                     input("Press Enter...")
             elif row["key"] == "rebuild":
-                tier = tiers[state["tier_idx"]]
+                tier = _environment_tier()
                 level = log_levels[state["level_idx"]]
                 sam_mode = sam_modes[state["sam_idx"]]
                 sam_path = state["sam_model_path"]
                 sam_url = state["sam_model_url"]
                 sam_hash = state["sam_model_hash"]
-                save_demo_settings(tier, level, sam_mode, sam_path, sam_url, sam_hash)
+                _persist_preferences()
                 try:
                     print(f"\nRebuilding {tier} environment...")
                     _DEMO_ENVIRONMENTS.ensure_ready(tier, rebuild=True)
@@ -484,37 +495,33 @@ def _interactive_menu() -> int:
                     print(f"\nError: {exc}")
                     input("Press Enter...")
             elif row["key"] == "exit":
-                tier = tiers[state["tier_idx"]]
-                level = log_levels[state["level_idx"]]
-                sam_mode = sam_modes[state["sam_idx"]]
-                sam_path = state["sam_model_path"]
-                sam_url = state["sam_model_url"]
-                sam_hash = state["sam_model_hash"]
-                save_demo_settings(tier, level, sam_mode, sam_path, sam_url, sam_hash)
+                _persist_preferences()
                 return 0
             elif row["key"] == "sam_model_path":
                 state["sam_model_path"] = _prompt_setting(
                     "SAM model path", state["sam_model_path"]
                 )
+                _persist_preferences()
             elif row["key"] == "sam_model_url":
                 state["sam_model_url"] = _prompt_setting(
                     "SAM model URL", state["sam_model_url"]
                 )
+                _persist_preferences()
             elif row["key"] == "sam_model_hash":
                 state["sam_model_hash"] = _prompt_setting(
                     "SAM model hash", state["sam_model_hash"]
                 )
+                _persist_preferences()
 
 
 def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
-    """Parse CLI arguments controlling feature selection and config strictness."""
+    """Parse CLI arguments controlling optional SAM and config strictness."""
     options_type, _window_type = _load_example_types()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--features",
-        choices=["core", "mask", "masksam"],
-        default="masksam",
-        help="Select example feature set (core viewer, mask tools, or Mask+SAM).",
+        "--sam",
+        action="store_true",
+        help="Enable assisted mask selection.",
     )
     parser.add_argument(
         "--config-strict",
@@ -544,12 +551,12 @@ def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
     parser.add_argument(
         "--sam-model-path",
         default=None,
-        help="Override the local SAM checkpoint path for Mask+SAM demos.",
+        help="Override the local SAM checkpoint path for the SAM-enabled demo.",
     )
     parser.add_argument(
         "--sam-model-url",
         default=None,
-        help="Override the SAM checkpoint download URL for Mask+SAM demos.",
+        help="Override the checkpoint download URL for the SAM-enabled demo.",
     )
     parser.add_argument(
         "--sam-model-hash",
@@ -561,7 +568,7 @@ def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
     )
     ns = parser.parse_args(list(argv) if argv is not None else None)
     return options_type(
-        feature_set=ns.features,
+        sam_enabled=bool(ns.sam),
         config_strict=bool(ns.config_strict),
         log_level=ns.log_level,
         sam_download_mode=ns.sam_download_mode,
@@ -590,9 +597,10 @@ def main(argv: Iterable[str] | None = None) -> int:
     if not args:
         return _interactive_menu()
     bootstrap = _parse_bootstrap_args(args)
-    if not _DEMO_ENVIRONMENTS.is_current_process(bootstrap.features):
+    tier = "cutecanvas-sam" if bootstrap.sam else "cutecanvas"
+    if not _DEMO_ENVIRONMENTS.is_current_process(tier):
         try:
-            _DEMO_ENVIRONMENTS.ensure_ready(bootstrap.features)
+            _DEMO_ENVIRONMENTS.ensure_ready(tier)
         except (
             DemoEnvironmentError,
             OSError,
@@ -601,7 +609,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             print(f"\nError: {exc}")
             return 1
         return _DEMO_ENVIRONMENTS.launch(
-            bootstrap.features,
+            tier,
             DemoLaunchSettings(
                 log_level=bootstrap.log_level,
                 config_strict=bootstrap.config_strict,
@@ -621,7 +629,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     app = QApplication(sys.argv[:1])
     QImageReader.setAllocationLimit(0)
     config = Config()
-    if opts.feature_set == "masksam":
+    if opts.sam_enabled:
         sam_overrides: dict[str, object] = {}
         if opts.sam_download_mode:
             sam_overrides["sam_download_mode"] = opts.sam_download_mode

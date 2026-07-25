@@ -17,16 +17,11 @@
 
 from __future__ import annotations
 
-import logging
-import uuid
-
-from PySide6.QtCore import QObject, QRectF, QRunnable, QSize, Signal
+from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage, QPainter
 
-from ..concurrency import BaseWorker
+from ..execution import CancellationToken
 from .render_tile_types import RegionSampleSource
-
-logger = logging.getLogger(__name__)
 
 
 class LayerRasterizer:
@@ -56,90 +51,35 @@ class LayerRasterizer:
         return target
 
 
-class LayerRasterizationWorker(QObject, QRunnable, BaseWorker):
-    """Rasterize a detached render product away from the GUI thread."""
+def rasterize_layer(
+    source: QImage,
+    pixel_size: QSize,
+    cancellation: CancellationToken,
+) -> QImage:
+    """Rasterize one detached render product cooperatively."""
 
-    finished = Signal(object)
-    error = Signal(object)
-
-    def __init__(
-        self,
-        request_id: uuid.UUID,
-        source: QImage,
-        pixel_size: QSize,
-    ) -> None:
-        """Capture immutable request inputs."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        self.request_id = request_id
-        self.source = QImage(source)
-        self.pixel_size = QSize(pixel_size)
-        self.result: QImage | None = None
-        self.error_message: str | None = None
-
-    def run(self) -> None:
-        """Create one output and publish a terminal worker result."""
-        try:
-            if not self.is_cancelled:
-                self.result = LayerRasterizer.rasterize(self.source, self.pixel_size)
-        except BaseException as exc:  # pragma: no cover - defensive worker boundary
-            self.error_message = str(exc)
-            logger.exception("Layer rasterization failed")
-        self.emit_finished(
-            self.result is not None
-            and self.error_message is None
-            and not self.is_cancelled,
-            payload=self,
-        )
+    if cancellation.is_cancelled:
+        raise RuntimeError(cancellation.reason or "layer rasterization cancelled")
+    return LayerRasterizer.rasterize(QImage(source), QSize(pixel_size))
 
 
-class RegionRasterizationWorker(QObject, QRunnable, BaseWorker):
-    """Sample one immutable bounded source region away from the GUI thread."""
+def rasterize_region(
+    source: RegionSampleSource,
+    source_rect: QRectF,
+    pixel_size: QSize,
+    cancellation: CancellationToken,
+) -> QImage:
+    """Sample one immutable bounded source region cooperatively."""
 
-    finished = Signal(object)
-    error = Signal(object)
-
-    def __init__(
-        self,
-        request_id: uuid.UUID,
-        source: RegionSampleSource,
-        source_rect: QRectF,
-        pixel_size: QSize,
-    ) -> None:
-        """Capture one immutable region-sampling request."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        if source_rect.isEmpty():
-            raise ValueError("rasterization source rectangle must be positive")
-        if pixel_size.isEmpty():
-            raise ValueError("rasterization pixel size must be positive")
-        self.request_id = request_id
-        self.source = source
-        self.source_rect = QRectF(source_rect)
-        self.pixel_size = QSize(pixel_size)
-        self.result: QImage | None = None
-        self.error_message: str | None = None
-
-    def run(self) -> None:
-        """Sample the requested region and publish one terminal result."""
-        try:
-            if not self.is_cancelled:
-                result = self.source.sample(self.source_rect, self.pixel_size)
-                if result.isNull():
-                    raise RuntimeError("region rasterization produced no image")
-                if result.size() != self.pixel_size:
-                    raise RuntimeError(
-                        "region rasterization produced unexpected dimensions"
-                    )
-                self.result = QImage(result)
-        except BaseException as exc:  # pragma: no cover - defensive worker boundary
-            self.error_message = str(exc)
-            logger.exception("Region rasterization failed")
-        self.emit_finished(
-            self.result is not None
-            and self.error_message is None
-            and not self.is_cancelled,
-            payload=self,
-        )
+    if source_rect.isEmpty():
+        raise ValueError("rasterization source rectangle must be positive")
+    if pixel_size.isEmpty():
+        raise ValueError("rasterization pixel size must be positive")
+    if cancellation.is_cancelled:
+        raise RuntimeError(cancellation.reason or "region rasterization cancelled")
+    result = source.sample(QRectF(source_rect), QSize(pixel_size))
+    if result.isNull():
+        raise RuntimeError("region rasterization produced no image")
+    if result.size() != pixel_size:
+        raise RuntimeError("region rasterization produced unexpected dimensions")
+    return QImage(result)

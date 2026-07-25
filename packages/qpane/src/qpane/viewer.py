@@ -18,9 +18,8 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
@@ -48,12 +47,6 @@ from .catalog import (
     ViewerPrefetchSnapshot,
 )
 from .compare import CompareDividerInteraction, ViewerComparison
-from .concurrency import (
-    QThreadPoolExecutor,
-    TaskExecutorProtocol,
-    ThreadPolicy,
-    build_thread_policy,
-)
 from .core import (
     Config,
     Diagnostics,
@@ -62,6 +55,12 @@ from .core import (
     OverlayDrawFn,
     OverlayRegistry,
     SceneOverlayDrawFn,
+)
+from .execution import (
+    DefaultExecutionPolicy,
+    ExecutionRuntime,
+    QtOwnerDispatcher,
+    create_default_execution_runtime,
 )
 from .interaction import (
     ViewerInteractionController,
@@ -119,28 +118,38 @@ class QPane(QWidget):
         self,
         *,
         config: Config | None = None,
-        task_executor: TaskExecutorProtocol | None = None,
-        thread_policy: ThreadPolicy | Mapping[str, Any] | None = None,
+        execution_runtime: ExecutionRuntime | None = None,
+        execution_policy: DefaultExecutionPolicy | None = None,
     ) -> None:
         """Build an independently usable rendering widget.
 
         Args:
             config: Optional detached rendering configuration.
-            task_executor: Shared executor supplied by the host.
-            thread_policy: Executor policy used only when QPane creates one.
+            execution_runtime: Optional host-owned runtime shared across widgets.
+            execution_policy: Standalone runtime policy used only when QPane
+                creates its own runtime.
         """
         super().__init__()
+        if execution_runtime is not None and execution_policy is not None:
+            raise ValueError(
+                "execution_policy cannot configure a host-owned execution_runtime"
+            )
         self.settings = Config() if config is None else config.copy()
-        self._owns_executor = task_executor is None
-        policy = self._thread_policy(thread_policy)
-        self._executor = task_executor or QThreadPoolExecutor(
-            policy,
-            name="qpane-rendering",
+        self._owns_execution_runtime = execution_runtime is None
+        self._execution_runtime = (
+            execution_runtime
+            if execution_runtime is not None
+            else create_default_execution_runtime(execution_policy)
+        )
+        self._execution_dispatcher = QtOwnerDispatcher(self)
+        self._execution_scope = self._execution_runtime.open_scope(
+            owner_id=f"qpane:{id(self)}",
+            dispatcher=self._execution_dispatcher,
         )
         self._rendering = ViewerRenderingRuntime(
             self,
             self.settings,
-            self._executor,
+            self._execution_scope,
         )
         self.viewport = self._rendering.viewport
         self._content = ViewerContent(self.scene)
@@ -148,7 +157,7 @@ class QPane(QWidget):
             pane=self,
             presenter=self._rendering.presenter,
             pyramids=self._rendering.pyramids,
-            executor=self._executor,
+            execution_runtime=self._execution_runtime,
             overlay_changed=self.diagnosticsOverlayToggled.emit,
             detail_changed=self.diagnosticsDomainToggled.emit,
         )
@@ -180,7 +189,9 @@ class QPane(QWidget):
         self._placeholder = ViewerPlaceholder(
             catalog=self._catalog,
             viewport=self.viewport,
-            executor=self._executor,
+            execution_scope=self._execution_scope.open_child(
+                f"{self._execution_scope.owner_id}:placeholder"
+            ),
             set_scene=lambda scene, fit: self._apply_scene(scene, fit=fit),
             set_navigation_enabled=self._set_placeholder_navigation_enabled,
             parent=self,
@@ -730,9 +741,18 @@ class QPane(QWidget):
         rendering = getattr(self, "_rendering", None)
         if rendering is not None:
             rendering.shutdown()
-        executor = getattr(self, "_executor", None)
-        if getattr(self, "_owns_executor", False) and executor is not None:
-            executor.shutdown(wait=False)
+        viewer_diagnostics = getattr(self, "_viewer_diagnostics", None)
+        if viewer_diagnostics is not None:
+            viewer_diagnostics.close()
+        execution_scope = getattr(self, "_execution_scope", None)
+        if execution_scope is not None:
+            execution_scope.close(reason="qpane_shutdown")
+        execution_runtime = getattr(self, "_execution_runtime", None)
+        if (
+            getattr(self, "_owns_execution_runtime", False)
+            and execution_runtime is not None
+        ):
+            execution_runtime.shutdown(wait=False)
 
     def _is_drag_out_allowed(self) -> bool:
         """Return whether current content fits and host drag-out is enabled."""
@@ -771,14 +791,3 @@ class QPane(QWidget):
     def _apply_diagnostics_preferences(self) -> None:
         """Apply configured detail domains and overlay visibility at startup."""
         self._viewer_diagnostics.apply_preferences(self.settings)
-
-    @staticmethod
-    def _thread_policy(
-        value: ThreadPolicy | Mapping[str, Any] | None,
-    ) -> ThreadPolicy | None:
-        """Normalize the optional executor policy without hidden globals."""
-        if value is None or isinstance(value, ThreadPolicy):
-            return value
-        if not isinstance(value, Mapping):
-            raise TypeError("thread_policy must be ThreadPolicy, mapping, or None")
-        return build_thread_policy(value)

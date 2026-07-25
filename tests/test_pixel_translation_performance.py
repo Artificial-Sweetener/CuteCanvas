@@ -29,7 +29,12 @@ from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtGui import QColor, QImage
 from qpane.scene.raster import RasterBounds
 
-from tests.harness.timing import average_interaction_latency_ms
+from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    average_interaction_latency_ms,
+)
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _RGBA_MEDIAN_BUDGET_MS = 50.0
 _MASK_MEDIAN_BUDGET_MS = 15.0

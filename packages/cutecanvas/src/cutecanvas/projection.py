@@ -25,16 +25,21 @@ from enum import Enum
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage, QTransform
-from qpane.sdk.concurrency import (
-    BaseWorker,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
 )
 from qpane.sdk.rendering import (
-    RegionRasterizationWorker,
     RegionSampleSource,
     SceneRegionRasterizer,
+    rasterize_region,
 )
 from qpane.sdk.scene import SceneDescriptor
 
@@ -148,11 +153,10 @@ class SceneProjectionSource:
 
 @dataclass(slots=True)
 class _PendingProjection:
-    """Retain one worker and executor handle until terminal publication."""
+    """Retain one request and lifecycle handle until terminal publication."""
 
     request: CanvasProjectionRequest
-    worker: RegionRasterizationWorker
-    handle: TaskHandle
+    handle: ExecutionHandle[QImage, object] | None = None
 
 
 class CanvasProjectionService:
@@ -161,7 +165,7 @@ class CanvasProjectionService:
     def __init__(
         self,
         *,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
         resolve_source: Callable[
             [CanvasContentReference],
             tuple[RegionSampleSource, QRectF],
@@ -170,7 +174,9 @@ class CanvasProjectionService:
         completed: Callable[[CanvasProjectionResult], None],
     ) -> None:
         """Bind the renderer adapter, revision authority, and result callback."""
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:projection"
+        )
         self._resolve_source = resolve_source
         self._is_current = is_current
         self._completed = completed
@@ -200,13 +206,29 @@ class CanvasProjectionService:
         size = QSize(_default_pixel_size(bounds) if pixel_size is None else pixel_size)
         request = CanvasProjectionRequest(reference, bounds, size)
         request_id = uuid.uuid4()
-        worker = RegionRasterizationWorker(request_id, source, bounds, size)
-        BaseWorker.connect_queued(worker.finished, self._finish)
-        BaseWorker.connect_queued(worker.error, self._finish)
+        pending = _PendingProjection(request)
+        self._pending[request_id] = pending
+        execution_request = ExecutionRequest[QImage, object](
+            operation="editor.canvas.project",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.FOREGROUND,
+                estimated_retained_bytes=size.width() * size.height() * 4,
+            ),
+            work=lambda context: rasterize_region(
+                source,
+                bounds,
+                size,
+                context.cancellation,
+            ),
+        )
         try:
-            handle = self._executor.submit(worker, category="canvas_projection")
-        except TaskRejected as exc:
-            worker.deleteLater()
+            handle = self._execution_scope.submit(
+                execution_request,
+                adopt=lambda image: self._finish(request_id, image),
+            )
+        except ExecutionRejected as exc:
+            self._pending.pop(request_id, None)
             self._completed(
                 CanvasProjectionResult(
                     request_id,
@@ -216,7 +238,11 @@ class CanvasProjectionService:
                 )
             )
             return CanvasProjectionHandle(request_id, lambda _request_id: False)
-        self._pending[request_id] = _PendingProjection(request, worker, handle)
+        if self._pending.get(request_id) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle(request_id, handle, outcome)
+        )
         return CanvasProjectionHandle(request_id, self.cancel)
 
     def cancel(self, request_id: uuid.UUID) -> bool:
@@ -224,8 +250,8 @@ class CanvasProjectionService:
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return False
-        pending.worker.cancel()
-        self._executor.cancel(pending.handle)
+        if pending.handle is not None:
+            pending.handle.cancel(reason="projection cancelled")
         self._completed(
             CanvasProjectionResult(
                 request_id,
@@ -243,34 +269,58 @@ class CanvasProjectionService:
         self._closed = True
         for request_id in tuple(self._pending):
             self.cancel(request_id)
+        self._execution_scope.close(reason="canvas_projection_shutdown")
 
-    def _finish(self, worker: RegionRasterizationWorker) -> None:
-        """Publish a current image or discard a stale worker result."""
-        pending = self._pending.pop(worker.request_id, None)
+    def _finish(self, request_id: uuid.UUID, image: QImage) -> None:
+        """Publish a current image or discard a stale render product."""
+        pending = self._pending.pop(request_id, None)
         if pending is None:
             return
         if not self._is_current(pending.request.reference):
             result = CanvasProjectionResult(
-                worker.request_id,
+                request_id,
                 pending.request,
                 CanvasProjectionStatus.STALE,
                 message="content changed during projection",
             )
-        elif worker.result is None or worker.error_message is not None:
-            result = CanvasProjectionResult(
-                worker.request_id,
-                pending.request,
-                CanvasProjectionStatus.FAILED,
-                message=worker.error_message or "projection produced no image",
-            )
         else:
             result = CanvasProjectionResult(
-                worker.request_id,
+                request_id,
                 pending.request,
                 CanvasProjectionStatus.COMPLETED,
-                QImage(worker.result),
+                QImage(image),
             )
         self._completed(result)
+
+    def _settle(
+        self,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[QImage, object],
+        outcome: ExecutionOutcome[QImage],
+    ) -> None:
+        """Publish non-successful execution outcomes exactly once."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._pending.get(request_id)
+        if pending is None or (
+            pending.handle is not None and pending.handle is not handle
+        ):
+            return
+        self._pending.pop(request_id, None)
+        cancelled = outcome.state == ExecutionState.CANCELLED
+        message = outcome.cancellation_reason if cancelled else str(outcome.error)
+        self._completed(
+            CanvasProjectionResult(
+                request_id,
+                pending.request,
+                (
+                    CanvasProjectionStatus.CANCELLED
+                    if cancelled
+                    else CanvasProjectionStatus.FAILED
+                ),
+                message=message or "projection did not complete",
+            )
+        )
 
     def _terminal(
         self,

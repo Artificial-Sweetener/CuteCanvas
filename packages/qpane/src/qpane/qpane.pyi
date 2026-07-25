@@ -14,9 +14,8 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Signal
 from PySide6.QtGui import QImage
@@ -26,11 +25,142 @@ from .catalog import ViewerCatalog as ViewerCatalog
 from .catalog import ViewerCatalogEntry as ViewerCatalogEntry
 from .catalog import ViewerPlaceholderState as ViewerPlaceholderState
 from .catalog import ViewerPrefetchSnapshot as ViewerPrefetchSnapshot
-from .concurrency import TaskExecutorProtocol, ThreadPolicy
 from .core import Config as Config
 from .core import Diagnostics as Diagnostics
 from .core import DiagnosticsProvider, OverlayDrawFn, SceneOverlayDrawFn
 from .core import DiagnosticsSnapshot as DiagnosticsSnapshot
+from .execution import (
+    BackendSubmission as BackendSubmission,
+)
+from .execution import (
+    CancellationToken as CancellationToken,
+)
+from .execution import (
+    CompletionDispatcher as CompletionDispatcher,
+)
+from .execution import (
+    DefaultExecutionPolicy as DefaultExecutionPolicy,
+)
+from .execution import (
+    DelayHandle as DelayHandle,
+)
+from .execution import (
+    DelayScheduler as DelayScheduler,
+)
+from .execution import (
+    DiagnosticsSubscription as DiagnosticsSubscription,
+)
+from .execution import (
+    ExecutionBackend as ExecutionBackend,
+)
+from .execution import (
+    ExecutionBackendCapabilities as ExecutionBackendCapabilities,
+)
+from .execution import (
+    ExecutionDiagnosticsProvider as ExecutionDiagnosticsProvider,
+)
+from .execution import (
+    ExecutionFailurePhase as ExecutionFailurePhase,
+)
+from .execution import (
+    ExecutionHandle as ExecutionHandle,
+)
+from .execution import (
+    ExecutionJob as ExecutionJob,
+)
+from .execution import (
+    ExecutionLeaseRelease as ExecutionLeaseRelease,
+)
+from .execution import (
+    ExecutionOutcome as ExecutionOutcome,
+)
+from .execution import (
+    ExecutionProgressReporter as ExecutionProgressReporter,
+)
+from .execution import (
+    ExecutionRejected as ExecutionRejected,
+)
+from .execution import (
+    ExecutionRejectionReason as ExecutionRejectionReason,
+)
+from .execution import (
+    ExecutionRequest as ExecutionRequest,
+)
+from .execution import (
+    ExecutionRequirements as ExecutionRequirements,
+)
+from .execution import (
+    ExecutionResource as ExecutionResource,
+)
+from .execution import (
+    ExecutionRuntime as ExecutionRuntime,
+)
+from .execution import (
+    ExecutionScope as ExecutionScope,
+)
+from .execution import (
+    ExecutionSnapshot as ExecutionSnapshot,
+)
+from .execution import (
+    ExecutionState as ExecutionState,
+)
+from .execution import (
+    ExecutionTagValue as ExecutionTagValue,
+)
+from .execution import (
+    ExecutionTaskContext as ExecutionTaskContext,
+)
+from .execution import (
+    ExecutionTimings as ExecutionTimings,
+)
+from .execution import (
+    ExecutionUrgency as ExecutionUrgency,
+)
+from .execution import (
+    InlineDispatcher as InlineDispatcher,
+)
+from .execution import (
+    QtDelayScheduler as QtDelayScheduler,
+)
+from .execution import (
+    QtOwnerDispatcher as QtOwnerDispatcher,
+)
+from .execution import (
+    RetryCategorySnapshot as RetryCategorySnapshot,
+)
+from .execution import (
+    RetryContext as RetryContext,
+)
+from .execution import (
+    RetryController as RetryController,
+)
+from .execution import (
+    RetryPolicy as RetryPolicy,
+)
+from .execution import (
+    RetrySchedulingError as RetrySchedulingError,
+)
+from .execution import (
+    RetrySnapshot as RetrySnapshot,
+)
+from .execution import (
+    create_default_execution_runtime as create_default_execution_runtime,
+)
+from .execution import (
+    create_native_execution_runtime as create_native_execution_runtime,
+)
+from .execution import (
+    execution_detail_records as execution_detail_records,
+)
+from .execution import (
+    execution_summary_records as execution_summary_records,
+)
+from .execution import (
+    retry_detail_records as retry_detail_records,
+)
+from .execution import (
+    retry_summary_records as retry_summary_records,
+)
 from .hybrid import HybridCombineMode as HybridCombineMode
 from .hybrid import HybridDocument as HybridDocument
 from .hybrid import HybridPresentationStyle as HybridPresentationStyle
@@ -204,8 +334,8 @@ class QPane(QWidget):
         self,
         *,
         config: Config | None = ...,
-        task_executor: TaskExecutorProtocol | None = ...,
-        thread_policy: ThreadPolicy | Mapping[str, Any] | None = ...,
+        execution_runtime: ExecutionRuntime | None = ...,
+        execution_policy: DefaultExecutionPolicy | None = ...,
     ) -> None: ...
     def setScene(self, scene: RenderScene | None, *, fit: bool = ...) -> bool: ...
     def scene(self) -> RenderScene | None: ...

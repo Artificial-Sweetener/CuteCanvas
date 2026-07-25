@@ -40,6 +40,8 @@ EXCLUDE_DIRS = {
     ".venv",
     "venv",
     "venv-core",
+    "venv-cutecanvas",
+    "venv-cutecanvas-sam",
     "venv-full",
     "venv-mask",
     ".git",

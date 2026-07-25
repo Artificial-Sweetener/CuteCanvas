@@ -190,38 +190,47 @@ the renderer.
 See [Touch and Pen Input](touch-and-pen.md) for gesture arbitration and
 hardware-test guidance.
 
-## Concurrency
+## Background Execution
 
-QPane's shared executor keeps decoding, pyramid generation, and tile sampling
-off the GUI thread. The default two-worker policy is intentionally conservative
-for a widget embedded inside a larger application.
+QPane keeps decoding, pyramid generation, tile sampling, and refinement away
+from the GUI thread. A standalone widget creates a bounded execution runtime
+with practical defaults. Applications that want a different standalone budget
+can pass a typed policy when they construct the widget:
 
 ```python
-config.configure(
-    concurrency={
-        "max_workers": 4,
-        "category_priorities": {
-            "tiles_visible": 40,
-            "pyramid": 30,
-            "tiles_prefetch": 20,
-            "tiles": 20,
-            "io": 10,
-            "maintenance": 0,
-        },
-        "category_limits": {"pyramid": 2},
-    }
+from qpane import QPane
+from qpane.sdk.execution import DefaultExecutionPolicy
+
+viewer = QPane(
+    execution_policy=DefaultExecutionPolicy(
+        max_workers=4,
+        max_accepted=256,
+    )
 )
 ```
 
-Higher priority values run first. Category and device limits prevent one kind
-of work from occupying the whole pool; pending limits provide strict
-backpressure for constrained deployments. Applications with an existing task
-system can pass a `TaskExecutorProtocol` and `ThreadPolicy` to `QPane` instead
-of creating a competing pool.
+Execution policy is a runtime concern, not persistent viewer configuration.
+Several viewers can share one runtime, and a larger application can supply an
+`ExecutionRuntime` backed by its own bounded scheduler. QPane then submits
+directly to that backend without creating another pool or taking ownership of
+host shutdown:
 
-Do not raise worker counts to hide GUI-thread work. Profile first: if an
-interaction handler is decoding or rasterizing synchronously, that ownership
-problem must be fixed rather than out-threaded.
+```python
+from qpane import QPane
+from qpane.sdk.execution import create_default_execution_runtime
+
+runtime = create_default_execution_runtime()
+first = QPane(execution_runtime=runtime)
+second = QPane(execution_runtime=runtime)
+
+# Close the host-owned runtime during application teardown.
+runtime.shutdown(wait=False)
+```
+
+The public backend seam is documented in
+[Advanced Renderer Integration](integration-sdk.md). Tune capacity only after
+profiling. Synchronous decode or raster work in an interaction handler is an
+ownership bug, not a reason to add threads.
 
 ## Diagnostics and Discovery
 
@@ -249,7 +258,7 @@ returns detached records suitable for a host-owned status surface.
   shipped default.
 * [Touch and Pen Input](touch-and-pen.md): direct navigation and normalized
   pointer input.
-* [Diagnostics](diagnostics.md): observing render, cache, and worker behavior.
+* [Diagnostics](diagnostics.md): observing render, cache, and execution behavior.
 * [Catalog and Navigation](catalog-and-navigation.md): managing a review queue.
 
 **Continue →** [Configuration Reference](configuration-reference.md)

@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover
 
-    from ..concurrency import TaskExecutorProtocol
+    from ..execution import ExecutionSnapshot
     from ..rendering import View
     from ..viewer import QPane
 _DEFAULT_DOMAIN = "custom"
@@ -111,9 +111,11 @@ class Diagnostics(QObject):
         self._stack_accessor: Callable[[], View | object | None] | None = None
         self._pyramid_accessor: Callable[[], object | None] | None = None
         self._core_provider: DiagnosticsProvider | None = None
-        self._executor_accessor: Callable[[], TaskExecutorProtocol | None] | None = None
-        self._executor_summary_provider: DiagnosticsProvider | None = None
-        self._executor_detail_provider: DiagnosticsProvider | None = None
+        self._execution_accessor: Callable[[], tuple[ExecutionSnapshot, ...]] | None = (
+            None
+        )
+        self._execution_summary_provider: DiagnosticsProvider | None = None
+        self._execution_detail_provider: DiagnosticsProvider | None = None
         self._retry_detail_provider: DiagnosticsProvider | None = None
         self._cached_snapshot: DiagnosticsSnapshot | None = None
         self._dirty_domains: set[str] = set()
@@ -211,32 +213,32 @@ class Diagnostics(QObject):
             tier=_CORE_TIER,
         )
 
-    def register_executor_providers(
+    def register_execution_providers(
         self,
-        executor_accessor: Callable[[], TaskExecutorProtocol | None],
+        execution_accessor: Callable[[], tuple[ExecutionSnapshot, ...]],
         retry_provider: Callable[[QPane], Iterable[DiagnosticRecord]],
         retry_summary_provider: Callable[[QPane], Iterable[DiagnosticRecord]],
     ) -> None:
-        """Install executor utilisation and retry diagnostics providers.
+        """Install execution-runtime and retry diagnostics providers.
 
         Args:
-            executor_accessor: Callable that yields the shared executor.
+            execution_accessor: Callable returning backend snapshots.
             retry_provider: Callable that emits retry metrics for the active QPane.
             retry_summary_provider: Callable that emits summary retry metrics for
                 the active QPane.
         """
-        self._executor_accessor = executor_accessor
-        if self._executor_summary_provider is None:
-            self._executor_summary_provider = self._build_executor_summary_provider()
+        self._execution_accessor = execution_accessor
+        if self._execution_summary_provider is None:
+            self._execution_summary_provider = self._build_execution_summary_provider()
             self._register_once(
-                self._executor_summary_provider,
+                self._execution_summary_provider,
                 domain="executor",
                 tier=_DETAIL_TIER,
             )
-        if self._executor_detail_provider is None:
-            self._executor_detail_provider = self._build_executor_provider()
+        if self._execution_detail_provider is None:
+            self._execution_detail_provider = self._build_execution_provider()
             self._register_once(
-                self._executor_detail_provider,
+                self._execution_detail_provider,
                 domain="executor",
                 tier=_DETAIL_TIER,
             )
@@ -482,18 +484,18 @@ class Diagnostics(QObject):
 
         return _provider
 
-    def _build_executor_provider(self) -> DiagnosticsProvider:
-        """Return a provider that emits executor metrics via the accessor."""
-        from ..concurrency import executor_diagnostics_provider
+    def _build_execution_provider(self) -> DiagnosticsProvider:
+        """Return a provider that emits execution metrics via the accessor."""
+        from ..execution import execution_detail_records
 
         return self._build_accessor_provider(
-            "_executor_accessor", executor_diagnostics_provider
+            "_execution_accessor", execution_detail_records
         )
 
-    def _build_executor_summary_provider(self) -> DiagnosticsProvider:
-        """Return a provider that emits executor summary metrics via the accessor."""
-        from ..concurrency import executor_summary_provider
+    def _build_execution_summary_provider(self) -> DiagnosticsProvider:
+        """Return a provider that emits execution summary metrics."""
+        from ..execution import execution_summary_records
 
         return self._build_accessor_provider(
-            "_executor_accessor", executor_summary_provider
+            "_execution_accessor", execution_summary_records
         )

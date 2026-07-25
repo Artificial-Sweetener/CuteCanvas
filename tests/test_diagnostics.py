@@ -34,7 +34,7 @@ from cutecanvas.masks.sam_feature import (
     _sam_summary_diagnostics_provider,
 )
 from qpane.cache import cache_detail_provider, cache_diagnostics_provider
-from qpane.concurrency.retry import RetryCategorySnapshot, RetrySnapshot
+from qpane.sdk.execution import RetryCategorySnapshot, RetrySnapshot
 from qpane.types import DiagnosticRecord
 
 

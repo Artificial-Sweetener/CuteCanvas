@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Teach background image loading without blocking the editor window."""
+"""Teach scoped background image loading through QPane's execution SDK."""
 
 from __future__ import annotations
 
@@ -22,94 +22,61 @@ import logging
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject
 from PySide6.QtGui import QImage, QImageReader
+from qpane import (
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionRuntime,
+    ExecutionState,
+    ExecutionTaskContext,
+    ExecutionUrgency,
+    QtOwnerDispatcher,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class _ImageLoaderSignals(QObject):
-    """Carry one decoder runnable's progress back to its GUI-thread owner."""
+@dataclass(frozen=True, slots=True)
+class _DecodedImage:
+    """Carry one detached decoder result to the GUI owner."""
 
-    image_loaded = Signal(Path, QImage)
-    finished = Signal(int)
-
-
-class _ImageLoaderWorker(QRunnable):
-    """Decode one image batch without owning any GUI-thread callbacks."""
-
-    def __init__(
-        self,
-        paths: Iterable[Path],
-        signals: _ImageLoaderSignals,
-    ) -> None:
-        """Store paths and the coordinator-owned signal bridge.
-
-        Args:
-            paths: Image paths decoded sequentially on the pool thread.
-            signals: GUI-owned signal bridge retained by the coordinator.
-        """
-        super().__init__()
-        self._paths = tuple(paths)
-        self._signals = signals
-
-    @Slot()
-    def run(self) -> None:
-        """Execute the loading loop on a background thread."""
-        count = 0
-        for path in self._paths:
-            reader = QImageReader(str(path))
-            reader.setAutoTransform(True)
-            image = reader.read()
-            if not image.isNull():
-                if not self._emit_image(path, image):
-                    return
-                count += 1
-        self._emit_finished(count)
-
-    def _emit_image(self, path: Path, image: QImage) -> bool:
-        """Emit one decoded image unless the GUI owner has already closed."""
-        try:
-            self._signals.image_loaded.emit(path, image)
-        except RuntimeError:
-            logger.debug("Image loader owner closed during decode", exc_info=True)
-            return False
-        return True
-
-    def _emit_finished(self, count: int) -> None:
-        """Emit terminal progress unless the GUI owner has already closed."""
-        try:
-            self._signals.finished.emit(count)
-        except RuntimeError:
-            logger.debug("Image loader owner closed before completion", exc_info=True)
+    path: Path
+    image: QImage
 
 
 @dataclass(slots=True)
-class _ActiveImageLoad:
-    """Retain one runnable and its GUI callbacks until terminal delivery."""
+class _LoadBatch:
+    """Track callbacks and settlement for one host load request."""
 
-    request_id: uuid.UUID
-    worker: _ImageLoaderWorker
-    signals: _ImageLoaderSignals
+    remaining: int
+    loaded: int
     image_loaded: Callable[[Path, QImage], None]
     finished: Callable[[int], None]
 
 
 class ImageLoadCoordinator(QObject):
-    """Own decoder runnable lifetimes and deliver callbacks on the GUI thread."""
+    """Own demo image-decode requests over a shared host runtime."""
 
     def __init__(
         self,
+        execution_runtime: ExecutionRuntime,
         parent: QObject | None = None,
-        *,
-        thread_pool: QThreadPool | None = None,
     ) -> None:
-        """Bind a Qt owner and optional thread pool for background decoding."""
+        """Open a receiver-safe scope for this coordinator's lifetime."""
         super().__init__(parent)
-        self._thread_pool = thread_pool or QThreadPool.globalInstance()
-        self._active: dict[_ImageLoaderSignals, _ActiveImageLoad] = {}
+        self._execution_scope = execution_runtime.open_scope(
+            owner_id=f"cutecanvas-demo:image-loads:{id(self)}",
+            dispatcher=QtOwnerDispatcher(self),
+        )
+        self._batches: dict[uuid.UUID, _LoadBatch] = {}
+        self._closed = False
 
     def submit(
         self,
@@ -118,65 +85,118 @@ class ImageLoadCoordinator(QObject):
         image_loaded: Callable[[Path, QImage], None],
         finished: Callable[[int], None],
     ) -> uuid.UUID:
-        """Decode ``paths`` and invoke both callbacks on this object's thread."""
-        path_batch = tuple(paths)
+        """Decode paths independently and adopt each image on this Qt thread."""
+        path_batch = tuple(Path(path) for path in paths)
         if not path_batch:
             raise ValueError("paths must contain at least one image")
+        if self._closed:
+            raise RuntimeError("image load coordinator is closed")
         request_id = uuid.uuid4()
-        signals = _ImageLoaderSignals(self)
-        worker = _ImageLoaderWorker(path_batch, signals)
-        active = _ActiveImageLoad(
-            request_id=request_id,
-            worker=worker,
-            signals=signals,
+        self._batches[request_id] = _LoadBatch(
+            remaining=len(path_batch),
+            loaded=0,
             image_loaded=image_loaded,
             finished=finished,
         )
-        self._active[signals] = active
-        signals.image_loaded.connect(
-            self._deliver_image,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        signals.finished.connect(
-            self._deliver_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self._thread_pool.start(worker)
+        for path in path_batch:
+            request = ExecutionRequest[_DecodedImage, object](
+                operation="demo.image.decode",
+                work=partial(_decode_image, path),
+                requirements=ExecutionRequirements(
+                    resource=ExecutionResource.BLOCKING_IO,
+                    urgency=ExecutionUrgency.FOREGROUND,
+                ),
+                tags=(("path", str(path)),),
+            )
+            try:
+                handle = self._execution_scope.submit(
+                    request,
+                    adopt=partial(self._adopt_image, request_id),
+                )
+            except ExecutionRejected as error:
+                logger.warning("Image decode was rejected for %s: %s", path, error)
+                self._settle_path(request_id)
+                continue
+            handle.add_done_callback(partial(self._handle_outcome, request_id))
         return request_id
 
     @property
     def active_count(self) -> int:
-        """Return the number of decoder batches awaiting terminal delivery."""
-        return len(self._active)
+        """Return the number of batches with unsettled decoder work."""
+        return len(self._batches)
 
-    @Slot(Path, QImage)
-    def _deliver_image(self, path: Path, image: QImage) -> None:
-        """Forward one decoded image from the coordinator's Qt thread."""
-        active = self._active.get(self.sender())
-        if active is None:
+    def close(self) -> None:
+        """Cancel pending loads and suppress callbacks after owner teardown."""
+        if self._closed:
+            return
+        self._closed = True
+        self._batches.clear()
+        self._execution_scope.close(reason="demo_image_loads_closed")
+
+    def _adopt_image(self, request_id: uuid.UUID, decoded: _DecodedImage) -> None:
+        """Deliver one decoded image without letting host callback errors escape."""
+        batch = self._batches.get(request_id)
+        if batch is None:
             return
         try:
-            active.image_loaded(path, image)
+            batch.image_loaded(decoded.path, decoded.image)
         except Exception:
             logger.exception(
-                "Image load callback failed (request=%s, path=%s)",
-                active.request_id,
-                path,
+                "Image load callback failed",
+                extra={"request_id": str(request_id), "path": str(decoded.path)},
+            )
+        else:
+            batch.loaded += 1
+
+    def _handle_outcome(
+        self,
+        request_id: uuid.UUID,
+        outcome: ExecutionOutcome[_DecodedImage],
+    ) -> None:
+        """Log decoder failures and settle one path in its request batch."""
+        if outcome.state == ExecutionState.FAILED:
+            logger.warning(
+                "Image decode failed",
+                exc_info=(
+                    (
+                        type(outcome.error),
+                        outcome.error,
+                        outcome.error.__traceback__,
+                    )
+                    if outcome.error is not None
+                    else None
+                ),
+            )
+        self._settle_path(request_id)
+
+    def _settle_path(self, request_id: uuid.UUID) -> None:
+        """Publish terminal batch progress after every path settles."""
+        batch = self._batches.get(request_id)
+        if batch is None:
+            return
+        batch.remaining -= 1
+        if batch.remaining > 0:
+            return
+        self._batches.pop(request_id, None)
+        try:
+            batch.finished(batch.loaded)
+        except Exception:
+            logger.exception(
+                "Image load completion callback failed",
+                extra={"request_id": str(request_id)},
             )
 
-    @Slot(int)
-    def _deliver_finished(self, count: int) -> None:
-        """Forward completion and release the runnable on the GUI thread."""
-        signals = self.sender()
-        active = self._active.pop(signals, None)
-        if active is None:
-            return
-        try:
-            active.finished(count)
-        except Exception:
-            logger.exception(
-                "Image load completion callback failed (request=%s)",
-                active.request_id,
-            )
-        finally:
-            active.signals.deleteLater()
+
+def _decode_image(
+    path: Path,
+    context: ExecutionTaskContext[object],
+) -> _DecodedImage:
+    """Decode one image without touching Qt-owned application state."""
+    context.cancellation.raise_if_cancelled()
+    reader = QImageReader(str(path))
+    reader.setAutoTransform(True)
+    image = reader.read()
+    context.cancellation.raise_if_cancelled()
+    if image.isNull():
+        raise OSError(reader.errorString() or f"Unable to decode {path}")
+    return _DecodedImage(path=path, image=image)

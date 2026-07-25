@@ -26,14 +26,15 @@ import pytest
 from cutecanvas import Config
 from qpane.rendering.tiles import TileManager
 
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import ControlledExecution
 from tests.helpers.render_plan import make_tile_key
 
 
 @pytest.mark.usefixtures("qapp")
 def test_allow_cache_insert_honors_guard(caplog):
     """Admission guards should veto inserts and log only once per key."""
-    manager = TileManager(config=Config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = TileManager(config=Config(), execution_scope=execution.scope)
     manager.cache_limit_bytes = 100
     manager.set_admission_guard(lambda _size: False)
     image_id = uuid.uuid4()
@@ -50,21 +51,23 @@ def test_allow_cache_insert_honors_guard(caplog):
 
 
 @pytest.mark.usefixtures("qapp")
-def test_schedule_cache_eviction_requires_executor():
-    """Scheduling eviction should fail when executor wiring is missing."""
-    manager = TileManager(config=Config(), executor=StubExecutor())
-    manager._executor = None
+def test_schedule_cache_eviction_coalesces_owner_callbacks():
+    """Repeated eviction scheduling should retain one owner-loop callback."""
+    execution = ControlledExecution()
+    manager = TileManager(config=Config(), execution_scope=execution.scope)
     manager.cache_limit_bytes = 10
     manager._cache_size_bytes = 20
     manager._tile_cache = OrderedDict({object(): object()})
-    with pytest.raises(RuntimeError, match="TileManager executor is missing"):
-        manager._schedule_cache_eviction()
+    manager._schedule_cache_eviction()
+    manager._schedule_cache_eviction()
+    assert manager._eviction.pending
 
 
 @pytest.mark.usefixtures("qapp")
 def test_evict_cache_batch_drops_entries():
     """Eviction should remove cached tiles and update bytes."""
-    manager = TileManager(config=Config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = TileManager(config=Config(), execution_scope=execution.scope)
     image_id = uuid.uuid4()
     key = make_tile_key(image_id, Path("a.png"), 1.0, 0, 0)
     manager.cache_limit_bytes = 0

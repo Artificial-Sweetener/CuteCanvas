@@ -24,10 +24,21 @@ from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from enum import Enum
 
-from PySide6.QtCore import QObject, QRectF, QRunnable, Signal
+from PySide6.QtCore import QRectF
 from PySide6.QtGui import QTransform
 
-from ..concurrency import BaseWorker, TaskExecutorProtocol, TaskHandle, TaskRejected
+from ..execution import (
+    CancellationToken,
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
+)
 from ..scene.raster import RasterBounds
 from .render_tile_cache import RenderTileCache
 from .render_tile_continuity import RenderTileContinuity
@@ -58,54 +69,29 @@ class _RefinementLane(str, Enum):
     DETAIL = "detail"
 
 
-class _RenderTileWorker(QObject, QRunnable, BaseWorker):
-    """Evaluate one complete visible batch away from the GUI thread."""
-
-    finished = Signal(object)
-    error = Signal(object)
-
-    def __init__(
-        self,
-        source: RenderTileBatchSource,
-        requests: tuple[RenderTileRequest, ...],
-        lane: _RefinementLane,
-    ) -> None:
-        """Capture an immutable source snapshot and stable requests."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        self.source = source
-        self.requests = requests
-        self.lane = lane
-        self.products: tuple[RenderTileProduct, ...] = ()
-        self.error_message: str | None = None
-
-    def run(self) -> None:
-        """Build exact products while containing worker failures."""
-        try:
-            batches: OrderedDict[float, list[RenderTileRequest]] = OrderedDict()
-            for request in self.requests:
-                batches.setdefault(request.key.scale, []).append(request)
-            products: list[RenderTileProduct] = []
-            for requests in batches.values():
-                if self.is_cancelled:
-                    break
-                products.extend(
-                    self.source.render_tiles(
-                        tuple(requests),
-                        lambda: self.is_cancelled,
-                    )
-                )
-            self.products = tuple(products)
-        except BaseException as exc:  # pragma: no cover - worker boundary
-            self.error_message = str(exc)
-            logger.exception("Render tile refinement failed")
-        succeeded = (
-            self.error_message is None
-            and not self.is_cancelled
-            and len(self.products) == len(self.requests)
+def _render_tiles(
+    source: RenderTileBatchSource,
+    requests: tuple[RenderTileRequest, ...],
+    cancellation: CancellationToken,
+) -> tuple[RenderTileProduct, ...]:
+    """Evaluate one complete refinement batch cooperatively."""
+    batches: OrderedDict[float, list[RenderTileRequest]] = OrderedDict()
+    for request in requests:
+        batches.setdefault(request.key.scale, []).append(request)
+    products: list[RenderTileProduct] = []
+    for batch in batches.values():
+        cancellation.raise_if_cancelled()
+        products.extend(
+            source.render_tiles(
+                tuple(batch),
+                lambda: cancellation.is_cancelled,
+            )
         )
-        self.emit_finished(succeeded, payload=self, error=None)
+    cancellation.raise_if_cancelled()
+    result = tuple(products)
+    if len(result) != len(requests):
+        raise RuntimeError("render refinement returned an incomplete tile batch")
+    return result
 
 
 @dataclass(slots=True)
@@ -114,9 +100,9 @@ class _PendingTiles:
 
     signature: tuple[RenderTileKey, ...]
     retained_signature: tuple[RenderTileKey, ...]
-    worker: _RenderTileWorker
-    handle: TaskHandle
-    submitted: bool = False
+    source: RenderTileBatchSource
+    lane: _RefinementLane
+    handle: ExecutionHandle[tuple[RenderTileProduct, ...], object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,12 +132,14 @@ class RenderTileWorkCoordinator:
     def __init__(
         self,
         *,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
         cache: RenderTileCache,
         ready: Callable[[], None],
     ) -> None:
-        """Bind the shared executor, cache, and GUI invalidation callback."""
-        self._executor = executor
+        """Bind an owner execution scope, cache, and GUI invalidation callback."""
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:render-refinement"
+        )
         self._cache = cache
         self._ready = ready
         self._continuity = RenderTileContinuity(ready)
@@ -377,49 +365,47 @@ class RenderTileWorkCoordinator:
             return
         if current is not None:
             self._cancel(identity)
-        worker = _RenderTileWorker(source, missing_requests, lane)
-        BaseWorker.connect_queued(worker.finished, self._finish)
-        BaseWorker.connect_queued(worker.error, self._finish)
-        try:
-            handle = self._executor.dispatch_to_main_thread(
-                lambda: self._start_worker(identity, worker),
-                category="render_refinement",
-            )
-        except TaskRejected:
-            self._rejected.add(retained_signature)
-            worker.deleteLater()
-            return
-        self._pending[identity] = _PendingTiles(
-            signature,
-            retained_signature,
-            worker,
-            handle,
+        pending = _PendingTiles(
+            signature=signature,
+            retained_signature=retained_signature,
+            source=source,
+            lane=lane,
         )
-
-    def _start_worker(
-        self,
-        identity: tuple[str, uuid.UUID, _RefinementLane],
-        worker: _RenderTileWorker,
-    ) -> None:
-        """Start deferred refinement after the caller's render plan has returned."""
-        pending = self._pending.get(identity)
-        if pending is None or pending.worker is not worker or self._closed:
-            return
+        self._pending[identity] = pending
+        request = ExecutionRequest[tuple[RenderTileProduct, ...], object](
+            operation=f"render.refinement.{lane.value}",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.FOREGROUND,
+                estimated_retained_bytes=estimated_request_bytes(missing_requests),
+            ),
+            work=lambda context: _render_tiles(
+                source,
+                missing_requests,
+                context.cancellation,
+            ),
+        )
         try:
-            handle = self._executor.submit(worker, category="render_refinement")
-        except TaskRejected:
-            self._pending.pop(identity, None)
-            self._rejected.add(pending.retained_signature)
-            worker.deleteLater()
-            if worker.lane is _RefinementLane.CONTINUITY:
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda products: self._finish(identity, products),
+            )
+        except ExecutionRejected:
+            if self._pending.get(identity) is pending:
+                self._pending.pop(identity, None)
+            self._rejected.add(retained_signature)
+            if lane is _RefinementLane.CONTINUITY:
                 self._start_deferred_detail(
-                    worker.source.source_kind,
-                    worker.source.source_id,
+                    source.source_kind,
+                    source.source_id,
                 )
             self._ready()
             return
-        pending.handle = handle
-        pending.submitted = True
+        if self._pending.get(identity) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle_request(identity, handle, outcome)
+        )
 
     def _defer_detail(
         self,
@@ -457,51 +443,71 @@ class RenderTileWorkCoordinator:
         self._deferred.clear()
         self._overview_requests.clear()
         self._rejected.clear()
+        self._execution_scope.close(reason="render_refinement_shutdown")
 
-    def _finish(self, worker: _RenderTileWorker) -> None:
+    def _finish(
+        self,
+        identity: tuple[str, uuid.UUID, _RefinementLane],
+        products: tuple[RenderTileProduct, ...],
+    ) -> None:
         """Publish only the exact latest complete request for a source."""
-        identity = (
-            worker.source.source_kind,
-            worker.source.source_id,
-            worker.lane,
-        )
         pending = self._pending.get(identity)
-        if pending is None or pending.worker is not worker:
-            worker.deleteLater()
+        if pending is None:
             return
         self._pending.pop(identity, None)
-        try:
-            if (
-                not self._closed
-                and not worker.is_cancelled
-                and worker.error_message is None
-                and tuple(product.key for product in worker.products)
-                == pending.signature
-            ):
-                self._cache.admit(
-                    worker.products,
-                    retain_keys=pending.retained_signature,
-                )
-                source_identity = (
-                    worker.source.source_kind,
-                    worker.source.source_id,
-                )
-                visible_signature = self._continuity.visible_signature(source_identity)
-                if visible_signature is not None:
-                    self._continuity.note_exact_available(
-                        source_identity,
-                        exact_available=all(
-                            self._cache.contains(key) for key in visible_signature
-                        ),
-                    )
-                self._ready()
-        finally:
-            worker.deleteLater()
-        if worker.lane is _RefinementLane.CONTINUITY:
-            self._start_deferred_detail(
-                worker.source.source_kind,
-                worker.source.source_id,
+        if (
+            not self._closed
+            and tuple(product.key for product in products) == pending.signature
+        ):
+            self._cache.admit(
+                products,
+                retain_keys=pending.retained_signature,
             )
+            source_identity = (
+                pending.source.source_kind,
+                pending.source.source_id,
+            )
+            visible_signature = self._continuity.visible_signature(source_identity)
+            if visible_signature is not None:
+                self._continuity.note_exact_available(
+                    source_identity,
+                    exact_available=all(
+                        self._cache.contains(key) for key in visible_signature
+                    ),
+                )
+            self._ready()
+        if pending.lane is _RefinementLane.CONTINUITY:
+            self._start_deferred_detail(
+                pending.source.source_kind,
+                pending.source.source_id,
+            )
+
+    def _settle_request(
+        self,
+        identity: tuple[str, uuid.UUID, _RefinementLane],
+        handle: ExecutionHandle[tuple[RenderTileProduct, ...], object],
+        outcome: ExecutionOutcome[tuple[RenderTileProduct, ...]],
+    ) -> None:
+        """Release failed or cancelled refinement state without stale adoption."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._pending.get(identity)
+        if pending is None or (
+            pending.handle is not None and pending.handle is not handle
+        ):
+            return
+        self._pending.pop(identity, None)
+        if outcome.state == ExecutionState.FAILED:
+            logger.error(
+                "Render tile refinement failed",
+                exc_info=outcome.error,
+            )
+        if pending.lane is _RefinementLane.CONTINUITY:
+            self._start_deferred_detail(
+                pending.source.source_kind,
+                pending.source.source_id,
+            )
+        self._ready()
 
     def _start_deferred_detail(
         self,
@@ -529,10 +535,8 @@ class RenderTileWorkCoordinator:
         pending = self._pending.pop(identity, None)
         if pending is None:
             return
-        pending.worker.cancel()
-        self._executor.cancel(pending.handle)
-        if not pending.submitted:
-            pending.worker.deleteLater()
+        if pending.handle is not None:
+            pending.handle.cancel(reason="render_refinement_superseded")
 
 
 def _same_products(

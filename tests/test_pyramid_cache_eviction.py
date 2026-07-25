@@ -26,14 +26,15 @@ from cutecanvas import Config
 from PySide6.QtGui import QImage
 from qpane.rendering.pyramid import ImagePyramid, PyramidManager
 
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import ControlledExecution
 from tests.helpers.render_plan import make_source_key
 
 
 @pytest.mark.usefixtures("qapp")
 def test_pyramid_allow_cache_insert_guard(caplog):
     """Admission guard should block oversized entries once per key."""
-    manager = PyramidManager(config=Config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = PyramidManager(config=Config(), execution_scope=execution.scope)
     manager.cache_limit_bytes = 100
     manager.set_admission_guard(lambda _size: False)
     key = make_source_key(uuid.uuid4())
@@ -51,7 +52,8 @@ def test_pyramid_allow_cache_insert_guard(caplog):
 @pytest.mark.usefixtures("qapp")
 def test_pyramid_eviction_batch_drops_entries():
     """Eviction should remove cached pyramids and update byte counts."""
-    manager = PyramidManager(config=Config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = PyramidManager(config=Config(), execution_scope=execution.scope)
     manager.cache_limit_bytes = 0
     image_id = uuid.uuid4()
     key = make_source_key(image_id)

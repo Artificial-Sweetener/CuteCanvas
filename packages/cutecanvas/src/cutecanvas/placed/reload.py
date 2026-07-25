@@ -18,66 +18,60 @@
 from __future__ import annotations
 
 import logging
-import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QImage, QImageReader
-from qpane.sdk.concurrency import BaseWorker
+from qpane.sdk.execution import CancellationToken
 
 from .model import FileFingerprint
 
 logger = logging.getLogger(__name__)
 
 
-class PlacedAssetDecodeWorker(QObject, QRunnable, BaseWorker):
-    """Decode and fingerprint one linked image away from the GUI thread."""
+@dataclass(frozen=True, slots=True)
+class PlacedAssetDecode:
+    """Carry one detached linked-image decode result."""
 
-    finished = Signal(object)
-    error = Signal(object)
+    path: Path
+    image: QImage | None
+    fingerprint: FileFingerprint | None
+    error_message: str | None
+    missing: bool = False
 
-    def __init__(self, request_id: uuid.UUID, path: Path) -> None:
-        """Capture immutable request identity and normalized source path."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        self.request_id = request_id
-        self.path = Path(path)
-        self.image: QImage | None = None
-        self.fingerprint: FileFingerprint | None = None
-        self.error_message: str | None = None
-        self.missing = False
 
-    def run(self) -> None:
-        """Read metadata and pixels, publishing one terminal worker result."""
-        try:
-            if self.is_cancelled:
-                self.emit_finished(False, payload=self)
-                return
-            try:
-                stat = self.path.stat()
-            except FileNotFoundError:
-                self.missing = True
-                self.error_message = f"linked image does not exist: {self.path}"
-                self.emit_finished(False, payload=self)
-                return
-            fingerprint = FileFingerprint(stat.st_size, stat.st_mtime_ns)
-            reader = QImageReader(str(self.path))
-            reader.setAutoTransform(True)
-            image = reader.read()
-            if image.isNull():
-                self.error_message = (
-                    reader.errorString() or "linked image could not be decoded"
-                )
-            elif not self.is_cancelled:
-                self.image = QImage(image)
-                self.fingerprint = fingerprint
-        except BaseException as exc:  # pragma: no cover - defensive worker boundary
-            self.error_message = str(exc)
-            logger.exception("Placed image decode failed")
-        self.emit_finished(
-            self.error_message is None
-            and self.image is not None
-            and not self.is_cancelled,
-            payload=self,
+def decode_placed_asset(
+    path: Path,
+    cancellation: CancellationToken,
+) -> PlacedAssetDecode:
+    """Decode and fingerprint one linked image cooperatively."""
+    normalized_path = Path(path)
+    cancellation.raise_if_cancelled()
+    try:
+        stat = normalized_path.stat()
+    except FileNotFoundError:
+        return PlacedAssetDecode(
+            normalized_path,
+            None,
+            None,
+            f"linked image does not exist: {normalized_path}",
+            True,
         )
+    fingerprint = FileFingerprint(stat.st_size, stat.st_mtime_ns)
+    reader = QImageReader(str(normalized_path))
+    reader.setAutoTransform(True)
+    image = reader.read()
+    cancellation.raise_if_cancelled()
+    if image.isNull():
+        return PlacedAssetDecode(
+            normalized_path,
+            None,
+            None,
+            reader.errorString() or "linked image could not be decoded",
+        )
+    return PlacedAssetDecode(
+        normalized_path,
+        QImage(image),
+        fingerprint,
+        None,
+    )

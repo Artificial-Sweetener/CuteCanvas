@@ -31,10 +31,13 @@ from qpane.raster.image_conversion import (
 
 from .harness.mounted_qpane import MountedQPaneHarness
 from .harness.timing import (
+    INTERACTIVE_PERFORMANCE,
     absolute_latency_assertions_are_isolated,
     interaction_clock,
     stable_latency_samples,
 )
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _INTERACTION_BUDGET_MS = 100.0
 _DEMO_SCALE_PREVIEW_BUDGET_MS = 75.0

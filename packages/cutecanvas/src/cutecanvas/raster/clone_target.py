@@ -194,9 +194,13 @@ class EditableRasterCloneTarget:
                 canonical_tile,
                 surface.capture_region(canonical_tile),
             )
+            sample_bounds = canonical_tile.intersection(surface.bounds)
+            if sample_bounds is None:
+                continue
             source_pixels = session.sampler.pixels(
                 layer,
                 tile,
+                sample_bounds,
                 mapping,
             )
             if source_pixels is None:

@@ -57,7 +57,7 @@ It's easy to use (`setPixmap`), but it's static. You get no zooming, no panning,
 To build a production-grade viewer with `QGraphicsView`, you inevitably end up writing the same complex infrastructure:
 *   **Interaction Logic:** Implementing anchored zooming and smooth panning.
 *   **Coordinate Systems:** Mapping mouse events from the view to the scene to the image pixels for precise tool handling.
-*   **Performance Tuning:** Managing threading and tiling to keep the UI responsive when the image gets large.
+*   **Performance Tuning:** Managing execution, caching, and tiling to keep the UI responsive when the image gets large.
 
 **QPane is that infrastructure.** It encapsulates the hundreds of hours of specialized engineering required to turn a raw Qt widget into a professional image viewer.
 
@@ -71,7 +71,7 @@ I originally built QPane for my **Stable Diffusion frontend**, where the GPU is 
 QPane avoids Qt's item-heavy scene graph and uses its own raster-first scene model, closer to a map engine than a traditional canvas. Instead of rendering the image, QPane renders the *viewport*.
 *   **Software Tiling:** Large images are sliced into small CPU-resident tiles. Instead of thousands of `QGraphicsItem` objects, QPane resolves lightweight scene layers into visible tile work using raw coordinate math.
 *   **Viewport Culling:** Only the pixels currently visible on screen are processed. You can load a 5GB satellite scan, and QPane will only render the 1920x1080 pixels needed for your monitor.
-*   **Threaded Pyramids:** Background workers generate downsampled versions of your image. When you zoom out, QPane instantly swaps to a lower-resolution tier. This happens in a thread pool, ensuring the UI thread never stutters while loading a 100MB image.
+*   **Background Pyramids:** The execution runtime generates downsampled versions of your image away from the GUI thread. When you zoom out, QPane instantly swaps to a lower-resolution tier without stuttering over a 100MB image.
 *   **Bit-Blit Scrolling:** When you pan, QPane doesn't redraw the screen. It shifts the existing pixel buffer and only renders the newly exposed "damage strips" at the edges. This keeps scrolling silky smooth even at high resolutions.
 
 ### 2. Smart Memory Management
@@ -108,11 +108,11 @@ single image. A `RenderScene` is an immutable description of what to draw;
 
 ## Developer Experience
 
-QPane is designed to be the library I wish I had. It uses a **Facade Pattern** to hide complexity: you work with catalog images, immutable scenes, tools, and signals, while QPane handles tile managers, pyramids, damage, and thread pools internally.
+QPane is designed to be the library I wish I had. It uses a **Facade Pattern** to hide complexity: you work with catalog images, immutable scenes, tools, and signals, while QPane handles tile managers, pyramids, damage, and bounded execution internally.
 
 *   **Native Qt Feel:** It's a `QWidget`. Add it to a layout, connect signals such as `catalogSelectionChanged` and `sceneChanged`, and it just works.
 *   **Snapshot-Style Config:** No global state spaghetti. Create a `Config` object, set your preferences (cache size, keybindings), and pass it in; QPane keeps its own copy for the widget.
-*   **Diagnostics HUD:** Easy to wire into your app. Bind your preferred shortcut to toggle the overlay and see memory usage, render times, and worker queues.
+*   **Diagnostics HUD:** Easy to wire into your app. Bind your preferred shortcut to toggle the overlay and see memory usage, render times, and execution queues.
 *   **Typed Public SDK:** The facade exposes the complete supported viewer and rendering vocabulary without requiring private-module imports.
 
 <p align="center">
@@ -159,7 +159,7 @@ viewer.sceneChanged.connect(
 ## Documentation
 
 *   **[Getting Started](docs/getting-started.md):** A step-by-step guide to your first integration.
-*   **[Configuration](docs/configuration.md):** Learn how to tune the cache, thread pool, and interaction behavior.
+*   **[Configuration](docs/configuration.md):** Learn how to tune the cache, execution policy, and interaction behavior.
 *   **[Configuration Reference](docs/configuration-reference.md):** The complete list of every field and default value.
 *   **[Catalog and Navigation](docs/catalog-and-navigation.md):** Managing image lists and linked views.
 *   **[Rendering SDK](docs/rendering-sdk.md):** Building layered raster/vector scenes, custom sources, hit tests, and effects.
@@ -180,7 +180,7 @@ I believe that robust UI infrastructure should be a public good, not a proprieta
 
 ## From the Developer 💖
 
-I hope QPane saves you the months of headache I spent figuring out efficient tiling and threading! If you'd like to support my work or see what else I'm up to, here are a few links:
+I hope QPane saves you the months of headache I spent figuring out efficient tiling and responsive rendering! If you'd like to support my work or see what else I'm up to, here are a few links:
 
 - **Buy Me a Coffee**: You can help fuel more projects like this at my [Ko-fi page](https://ko-fi.com/artificial_sweetener).
 - **My Website & Socials**: See my art, poetry, and other dev updates at [artificialsweetener.ai](https://artificialsweetener.ai).

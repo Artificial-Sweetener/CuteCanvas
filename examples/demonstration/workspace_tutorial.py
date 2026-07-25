@@ -29,6 +29,7 @@ from pathlib import Path
 from cutecanvas import CuteCanvas, LayerPolicy
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QFileDialog, QWidget
+from qpane import ExecutionRuntime
 
 from examples.demonstration.workers import ImageLoadCoordinator
 
@@ -41,6 +42,7 @@ class WorkspaceTutorialController:
         canvas: CuteCanvas,
         parent: QWidget,
         *,
+        execution_runtime: ExecutionRuntime,
         masks_available: Callable[[], bool],
         set_status: Callable[[str], None],
     ) -> None:
@@ -50,7 +52,11 @@ class WorkspaceTutorialController:
         self._masks_available = masks_available
         self._set_status = set_status
         self._load_batch_auto_select = False
-        self._image_loads = ImageLoadCoordinator(parent)
+        self._image_loads = ImageLoadCoordinator(execution_runtime, parent)
+
+    def close(self) -> None:
+        """Cancel host-owned decoder work before the demo runtime shuts down."""
+        self._image_loads.close()
 
     @staticmethod
     def _ordinary_image_policy() -> LayerPolicy:

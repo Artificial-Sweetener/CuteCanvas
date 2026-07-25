@@ -38,7 +38,7 @@ def test_demo_document_clicks_drive_tool_focus(qapp, monkeypatch) -> None:
         """Keep inference outside a catalog-focus test."""
 
     monkeypatch.setattr(SamManager, "requestPredictor", ignore_predictor_request)
-    window = ExampleWindow(ExampleOptions(feature_set="masksam"))
+    window = ExampleWindow(ExampleOptions(sam_enabled=True))
     try:
         composition_id = window.qpane.createCompositionFromImage(
             _solid_image(),

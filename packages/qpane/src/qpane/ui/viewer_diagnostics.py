@@ -22,12 +22,8 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QWidget
 
-from ..concurrency import (
-    TaskExecutorProtocol,
-    retry_diagnostics_provider,
-    retry_summary_provider,
-)
 from ..core import Config, Diagnostics, DiagnosticsProvider, DiagnosticsSnapshot
+from ..execution import ExecutionRuntime
 from ..rendering.presenter import RenderingPresenter
 from ..rendering.pyramid import PyramidManager
 from ..types import DiagnosticRecord
@@ -47,7 +43,7 @@ class ViewerDiagnostics:
         pane: QPane,
         presenter: RenderingPresenter,
         pyramids: PyramidManager,
-        executor: TaskExecutorProtocol,
+        execution_runtime: ExecutionRuntime,
         overlay_changed: Callable[[bool], None],
         detail_changed: Callable[[str, bool], None],
     ) -> None:
@@ -66,18 +62,26 @@ class ViewerDiagnostics:
             self._cache_detail_provider(presenter, pyramids),
             tier="detail",
         )
-        self._diagnostics.register_executor_providers(
-            executor_accessor=lambda: executor,
-            retry_provider=lambda _pane: retry_diagnostics_provider(
-                {"tiles": presenter.tile_manager, "pyramid": pyramids}
-            ),
-            retry_summary_provider=lambda _pane: retry_summary_provider(
-                {"tiles": presenter.tile_manager, "pyramid": pyramids}
-            ),
+        self._diagnostics.register_provider(
+            self._execution_summary_provider(execution_runtime),
+            domain="executor",
+            tier="detail",
+        )
+        self._diagnostics.register_provider(
+            self._retry_provider(presenter, pyramids),
+            domain="retry",
+            tier="detail",
+        )
+        self._execution_subscription = execution_runtime.subscribe_diagnostics(
+            lambda _snapshots: self._diagnostics.set_dirty("executor")
         )
         self._overlay = DiagnosticsOverlayController(pane)
         self._overlay.setOverlayChangedCallback(overlay_changed)
         self._overlay.setDetailChangedCallback(detail_changed)
+
+    def close(self) -> None:
+        """Stop observing execution diagnostics for the viewer lifetime."""
+        self._execution_subscription.close()
 
     @property
     def broker(self) -> Diagnostics:
@@ -200,5 +204,63 @@ class ViewerDiagnostics:
                     )
                 )
             return tuple(rows)
+
+        return _provider
+
+    @staticmethod
+    def _execution_summary_provider(
+        runtime: ExecutionRuntime,
+    ) -> DiagnosticsProvider:
+        """Build rows from optional backend diagnostics capabilities."""
+
+        def _provider(_pane: QPane) -> tuple[DiagnosticRecord, ...]:
+            """Aggregate configured backend snapshots without private access."""
+            snapshots = runtime.execution_snapshots()
+            if not snapshots:
+                return ()
+            accepted = sum(snapshot.accepted for snapshot in snapshots)
+            pending = sum(snapshot.pending for snapshot in snapshots)
+            running = sum(snapshot.running for snapshot in snapshots)
+            retained = sum(snapshot.retained_bytes for snapshot in snapshots)
+            rejected = sum(snapshot.rejected for snapshot in snapshots)
+            rows = [
+                DiagnosticRecord(
+                    "Executor",
+                    f"{running} running, {pending} pending, {accepted} accepted",
+                ),
+                DiagnosticRecord(
+                    "Executor|Retained",
+                    f"{retained / (1024**2):.1f} MB",
+                ),
+            ]
+            if rejected:
+                rows.append(DiagnosticRecord("Executor|Rejected", str(rejected)))
+            return tuple(rows)
+
+        return _provider
+
+    @staticmethod
+    def _retry_provider(
+        presenter: RenderingPresenter,
+        pyramids: PyramidManager,
+    ) -> DiagnosticsProvider:
+        """Build one compact row from renderer producer retry owners."""
+
+        def _provider(_pane: QPane) -> tuple[DiagnosticRecord, ...]:
+            """Read focused retry snapshots without legacy executor helpers."""
+            parts: list[str] = []
+            for name, owner in (
+                ("tiles", presenter.tile_manager),
+                ("pyramid", pyramids),
+            ):
+                snapshot = owner.retry_snapshot()
+                category = snapshot.categories.get(name)
+                if category is None:
+                    continue
+                if category.active or category.total_scheduled:
+                    parts.append(f"{name}:{category.active}/{category.total_scheduled}")
+            if not parts:
+                return ()
+            return (DiagnosticRecord("Retry", ", ".join(parts)),)
 
         return _provider

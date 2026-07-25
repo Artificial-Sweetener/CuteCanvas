@@ -17,33 +17,28 @@
 
 from __future__ import annotations
 
-import logging
-import math
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from enum import Enum
 
-import numpy as np
-from PySide6.QtCore import QObject, QRectF, QRunnable, QSize, Signal
-from PySide6.QtGui import QImage, QPainter
-from qpane.sdk.concurrency import (
-    BaseWorker,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QImage
+from qpane.sdk.execution import (
+    CancellationToken,
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
 )
-from qpane.sdk.raster import qimage_to_numpy_argb32
 from qpane.sdk.scene import LayerPlacement, LayerTransform, RasterBounds
-from qpane.sdk.vector import (
-    SemanticTextLayoutCache,
-    VectorDocument,
-    draw_vector_document,
-    painted_document_path,
-)
+from qpane.sdk.vector import VectorDocument
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
-from cutecanvas.types import RasterExtentPolicy
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import (
@@ -57,23 +52,18 @@ from ..composition.resource_lifetime import (
 )
 from ..raster.assets import EditableRasterAssetStore
 from ..resources import ProjectResourceReference
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..selection import PixelSelectionService
+from .conversion_products import (
+    VectorConversionKind,
+    VectorConversionProduct,
+    build_vector_conversion,
+    validate_vector_raster_size,
+)
 from .editing import VectorEditService
 from .selection import VectorObjectSelectionController
 from .store import VectorAssetStore
-from .text_paths import VectorTextPathConversion, build_text_path_conversion
-
-logger = logging.getLogger(__name__)
-
-_MAX_OUTPUT_BYTES = 512 * 1024 * 1024
-
-
-class VectorConversionKind(str, Enum):
-    """Identify explicit asynchronous vector conversion operations."""
-
-    PIXEL_SELECTION = "pixel-selection"
-    EDITABLE_RASTER = "editable-raster"
-    TEXT_PATHS = "text-paths"
+from .text_paths import VectorTextPathConversion
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,151 +78,11 @@ class VectorConversionCompletion:
     message: str
 
 
-class VectorRasterizer:
-    """Produce explicit raster derivatives from semantic vector documents."""
-
-    @staticmethod
-    def rasterize_local(document: VectorDocument, pixel_size: QSize) -> QImage:
-        """Render a document canvas into an explicit premultiplied image."""
-        _validate_size(pixel_size)
-        target = _transparent_image(pixel_size)
-        bounds = document.bounds
-        local_to_pixels = LayerTransform.from_placement(
-            bounds,
-            LayerPlacement(
-                0.0,
-                0.0,
-                float(pixel_size.width()),
-                float(pixel_size.height()),
-            ),
-        )
-        _draw(
-            target,
-            document,
-            local_to_pixels,
-            text_layouts=SemanticTextLayoutCache(0),
-        )
-        return target
-
-    @staticmethod
-    def rasterize_selection(
-        document: VectorDocument,
-        layer_transform: LayerTransform,
-        object_ids: frozenset[uuid.UUID] | None,
-    ) -> CoverageSnapshot | None:
-        """Render selected semantic object alpha into minimal scene coverage."""
-        text_layouts = SemanticTextLayoutCache(0)
-        document_path = painted_document_path(document, object_ids, text_layouts)
-        scene_path = layer_transform.to_qtransform().map(document_path)
-        if scene_path.isEmpty():
-            return None
-        bounds = _integer_paint_bounds(scene_path.boundingRect())
-        _validate_size(QSize(bounds.width, bounds.height))
-        target = _transparent_image(QSize(bounds.width, bounds.height))
-        source_to_target = layer_transform.followed_by(
-            LayerTransform(dx=-float(bounds.x), dy=-float(bounds.y))
-        )
-        _draw(
-            target,
-            document,
-            source_to_target,
-            object_ids,
-            text_layouts=text_layouts,
-        )
-        pixels = qimage_to_numpy_argb32(target)
-        alpha = np.array(pixels[:, :, 3], copy=True, order="C")
-        if not np.any(alpha):
-            return None
-        occupied_y, occupied_x = np.nonzero(alpha)
-        left = int(occupied_x.min())
-        top = int(occupied_y.min())
-        right = int(occupied_x.max()) + 1
-        bottom = int(occupied_y.max()) + 1
-        trimmed = np.array(alpha[top:bottom, left:right], copy=True, order="C")
-        return CoverageSnapshot(
-            RasterBounds(
-                bounds.x + left,
-                bounds.y + top,
-                right - left,
-                bottom - top,
-            ),
-            RasterExtentPolicy.EXPAND_ON_WRITE,
-            trimmed,
-        )
-
-
-class _VectorConversionWorker(QObject, QRunnable, BaseWorker):
-    """Build one detached vector conversion result away from the GUI thread."""
-
-    finished = Signal(object)
-    error = Signal(object)
-
-    def __init__(
-        self,
-        request_id: uuid.UUID,
-        document: VectorDocument,
-        kind: VectorConversionKind,
-        *,
-        pixel_size: QSize | None = None,
-        layer_transform: LayerTransform | None = None,
-        object_ids: frozenset[uuid.UUID] | None = None,
-        text_object_id: uuid.UUID | None = None,
-    ) -> None:
-        """Capture immutable request inputs and no mutable domain authority."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        self.request_id = request_id
-        self.document = document
-        self.kind = kind
-        self.pixel_size = None if pixel_size is None else QSize(pixel_size)
-        self.layer_transform = layer_transform
-        self.object_ids = object_ids
-        self.text_object_id = text_object_id
-        self.raster: QImage | None = None
-        self.coverage: CoverageSnapshot | None = None
-        self.text_paths: VectorTextPathConversion | None = None
-        self.error_message: str | None = None
-
-    def run(self) -> None:
-        """Produce one terminal result while containing worker failures."""
-        try:
-            if not self.is_cancelled:
-                if self.kind is VectorConversionKind.EDITABLE_RASTER:
-                    if self.pixel_size is None:
-                        raise RuntimeError("raster conversion is missing pixel size")
-                    self.raster = VectorRasterizer.rasterize_local(
-                        self.document,
-                        self.pixel_size,
-                    )
-                elif self.kind is VectorConversionKind.PIXEL_SELECTION:
-                    if self.layer_transform is None:
-                        raise RuntimeError("selection conversion is missing transform")
-                    self.coverage = VectorRasterizer.rasterize_selection(
-                        self.document,
-                        self.layer_transform,
-                        self.object_ids,
-                    )
-                else:
-                    if self.text_object_id is None:
-                        raise RuntimeError("text conversion is missing an object ID")
-                    self.text_paths = build_text_path_conversion(
-                        self.document,
-                        self.text_object_id,
-                    )
-                    if self.text_paths is None:
-                        raise RuntimeError("semantic text produced no painted paths")
-        except BaseException as exc:  # pragma: no cover - defensive worker boundary
-            self.error_message = str(exc)
-            logger.exception("Vector conversion failed")
-        succeeded = self.error_message is None and not self.is_cancelled
-        self.emit_finished(succeeded, payload=self, error=None)
-
-
 @dataclass(slots=True)
 class _PendingConversion:
     """Retain one exact request snapshot and its resource lease."""
 
+    request_id: uuid.UUID
     composition_id: uuid.UUID
     history_scope_id: uuid.UUID
     public_scene_id: uuid.UUID
@@ -242,8 +92,7 @@ class _PendingConversion:
     kind: VectorConversionKind
     selection_mode: CoverageCombineMode
     selection_revision: int | None
-    worker: _VectorConversionWorker
-    handle: TaskHandle
+    handle: ExecutionHandle[VectorConversionProduct, object] | None = None
 
 
 class VectorConversionService:
@@ -260,11 +109,12 @@ class VectorConversionService:
         lifetime: CompositionResourceLifetime,
         pixel_selection: PixelSelectionService,
         object_selection: VectorObjectSelectionController,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         changed: Callable[[], None],
         completed: Callable[[VectorConversionCompletion], None],
     ) -> None:
-        """Bind vector, selection, raster, history, and worker owners."""
+        """Bind vector, selection, raster, history, and execution owners."""
         self._assets = assets
         self._raster_assets = raster_assets
         self._layers = layers
@@ -273,11 +123,13 @@ class VectorConversionService:
         self._lifetime = lifetime
         self._pixel_selection = pixel_selection
         self._object_selection = object_selection
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:vector-conversion"
+        )
+        self._latest_requests = latest_requests
         self._changed = changed
         self._completed = completed
         self._pending: dict[uuid.UUID, _PendingConversion] = {}
-        self._latest: dict[tuple[uuid.UUID, VectorConversionKind], uuid.UUID] = {}
         self._closed = False
 
     def request_selection(
@@ -307,20 +159,20 @@ class VectorConversionService:
             document.object(object_id) is None for object_id in object_ids
         ):
             return None
-        worker = _VectorConversionWorker(
-            uuid.uuid4(),
-            document,
-            VectorConversionKind.PIXEL_SELECTION,
-            layer_transform=document_to_scene,
-            object_ids=object_ids,
-        )
         return self._submit(
             composition_id,
             history_scope_id,
             public_scene_id,
             layer,
             document,
-            worker,
+            VectorConversionKind.PIXEL_SELECTION,
+            lambda cancellation: build_vector_conversion(
+                document,
+                VectorConversionKind.PIXEL_SELECTION,
+                cancellation,
+                layer_transform=document_to_scene,
+                object_ids=object_ids,
+            ),
             mode,
             retained_source,
         )
@@ -344,20 +196,20 @@ class VectorConversionService:
             if pixel_size is None
             else QSize(pixel_size)
         )
-        _validate_size(size)
-        worker = _VectorConversionWorker(
-            uuid.uuid4(),
-            document,
-            VectorConversionKind.EDITABLE_RASTER,
-            pixel_size=size,
-        )
+        validate_vector_raster_size(size)
         return self._submit(
             composition_id,
             history_scope_id,
             public_scene_id,
             layer,
             document,
-            worker,
+            VectorConversionKind.EDITABLE_RASTER,
+            lambda cancellation: build_vector_conversion(
+                document,
+                VectorConversionKind.EDITABLE_RASTER,
+                cancellation,
+                pixel_size=size,
+            ),
             CoverageCombineMode.REPLACE,
             layer.source,
         )
@@ -386,19 +238,19 @@ class VectorConversionService:
             or item.text is None
         ):
             return None
-        worker = _VectorConversionWorker(
-            uuid.uuid4(),
-            document,
-            VectorConversionKind.TEXT_PATHS,
-            text_object_id=object_id,
-        )
         return self._submit(
             composition_id,
             history_scope_id,
             public_scene_id,
             layer,
             document,
-            worker,
+            VectorConversionKind.TEXT_PATHS,
+            lambda cancellation: build_vector_conversion(
+                document,
+                VectorConversionKind.TEXT_PATHS,
+                cancellation,
+                text_object_id=object_id,
+            ),
             CoverageCombineMode.REPLACE,
             retained_source,
         )
@@ -410,7 +262,7 @@ class VectorConversionService:
         self._closed = True
         for request_id in tuple(self._pending):
             self._cancel(request_id, "vector conversion service detached")
-        self._latest.clear()
+        self._execution_scope.close(reason="vector_conversion_service_shutdown")
 
     def _request_context(
         self,
@@ -433,62 +285,100 @@ class VectorConversionService:
         public_scene_id: uuid.UUID,
         layer: CompositionLayerInstance,
         document: VectorDocument,
-        worker: _VectorConversionWorker,
+        kind: VectorConversionKind,
+        work: Callable[[CancellationToken], VectorConversionProduct],
         selection_mode: CoverageCombineMode,
         retained_source: ProjectResourceReference,
     ) -> uuid.UUID:
         """Submit one bounded request while retaining its exact source."""
-        key = (layer.layer_id, worker.kind)
-        previous = self._latest.pop(key, None)
-        if previous is not None:
-            self._cancel(previous, "replaced by a newer vector conversion")
+        request_id = uuid.uuid4()
+        key = self._request_key(layer.layer_id, kind)
         self._lifetime.acquire(retained_source, ResourceLeaseKind.SESSION)
-        BaseWorker.connect_queued(worker.finished, self._finish)
-        BaseWorker.connect_queued(worker.error, self._finish)
-        try:
-            handle = self._executor.submit(worker, category="vector_conversion")
-        except TaskRejected as exc:
-            self._lifetime.release(retained_source, ResourceLeaseKind.SESSION)
-            worker.deleteLater()
-            self._completed(
-                VectorConversionCompletion(
-                    worker.request_id,
-                    public_scene_id,
-                    layer.layer_id,
-                    worker.kind,
-                    False,
-                    str(exc),
-                )
-            )
-            return worker.request_id
-        self._pending[worker.request_id] = _PendingConversion(
+        pending = _PendingConversion(
+            request_id,
             composition_id,
             history_scope_id,
             public_scene_id,
             layer,
             retained_source,
             document,
-            worker.kind,
+            kind,
             selection_mode,
             (
                 self._pixel_selection.state(history_scope_id).revision
-                if worker.kind is VectorConversionKind.PIXEL_SELECTION
+                if kind is VectorConversionKind.PIXEL_SELECTION
                 else None
             ),
-            worker,
-            handle,
         )
-        self._latest[key] = worker.request_id
-        return worker.request_id
+        self._pending[request_id] = pending
+        if not self._latest_requests.claim(
+            key,
+            request_id,
+            lambda message: self._cancel(request_id, message),
+        ):
+            self._pending.pop(request_id, None)
+            self._lifetime.release(retained_source, ResourceLeaseKind.SESSION)
+            return request_id
+        request = ExecutionRequest[VectorConversionProduct, object](
+            operation=f"editor.vector.convert.{kind.value}",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.FOREGROUND,
+            ),
+            work=lambda context: work(context.cancellation),
+        )
+        try:
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda product: self._finish(request_id, product),
+            )
+        except ExecutionRejected as exc:
+            self._pending.pop(request_id, None)
+            self._latest_requests.release(key, request_id)
+            self._lifetime.release(retained_source, ResourceLeaseKind.SESSION)
+            self._completed(
+                VectorConversionCompletion(
+                    request_id,
+                    public_scene_id,
+                    layer.layer_id,
+                    kind,
+                    False,
+                    str(exc),
+                )
+            )
+            return request_id
+        if self._pending.get(request_id) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle(request_id, handle, outcome)
+        )
+        return request_id
 
-    def _finish(self, worker: _VectorConversionWorker) -> None:
+    def _finish(
+        self,
+        request_id: uuid.UUID,
+        product: VectorConversionProduct,
+    ) -> None:
         """Commit one current result to its existing authoritative owner."""
-        pending = self._pending.pop(worker.request_id, None)
+        pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        self._latest.pop((pending.layer.layer_id, pending.kind), None)
+        key = self._request_key(pending.layer.layer_id, pending.kind)
+        if not self._latest_requests.is_current(key, request_id):
+            self._lifetime.release(
+                pending.retained_source,
+                ResourceLeaseKind.SESSION,
+            )
+            self._publish(
+                pending,
+                False,
+                "replaced by a newer vector conversion request",
+            )
+            return
+        self._latest_requests.release(key, request_id)
         try:
             if self._closed:
+                self._publish(pending, False, "vector conversion service detached")
                 return
             current = self._layers.layer(
                 pending.composition_id,
@@ -497,13 +387,6 @@ class VectorConversionService:
             document = self._assets.get(pending.retained_source.resource_id)
             if current != pending.layer or document != pending.document:
                 self._publish(pending, False, "vector layer changed during conversion")
-                return
-            if worker.error_message is not None or worker.is_cancelled:
-                self._publish(
-                    pending,
-                    False,
-                    worker.error_message or "vector conversion was cancelled",
-                )
                 return
             if pending.kind is VectorConversionKind.PIXEL_SELECTION:
                 if (
@@ -517,11 +400,11 @@ class VectorConversionService:
                         "pixel selection changed during vector conversion",
                     )
                     return
-                self._finish_selection(pending, worker.coverage)
+                self._finish_selection(pending, product.coverage)
             elif pending.kind is VectorConversionKind.EDITABLE_RASTER:
-                self._finish_raster(pending, worker.raster)
+                self._finish_raster(pending, product.raster)
             else:
-                self._finish_text_paths(pending, worker.text_paths)
+                self._finish_text_paths(pending, product.text_paths)
         finally:
             self._lifetime.release(pending.retained_source, ResourceLeaseKind.SESSION)
 
@@ -611,11 +494,49 @@ class VectorConversionService:
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        pending.worker.cancel()
-        self._executor.cancel(pending.handle)
-        self._latest.pop((pending.layer.layer_id, pending.kind), None)
+        if pending.handle is not None:
+            pending.handle.cancel(reason=message)
+        key = self._request_key(pending.layer.layer_id, pending.kind)
+        self._latest_requests.release(key, request_id)
         self._lifetime.release(pending.retained_source, ResourceLeaseKind.SESSION)
         self._publish(pending, False, message)
+
+    def _settle(
+        self,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[VectorConversionProduct, object],
+        outcome: ExecutionOutcome[VectorConversionProduct],
+    ) -> None:
+        """Publish failed or cancelled execution after owner-safe delivery."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._pending.get(request_id)
+        if pending is None or (
+            pending.handle is not None and pending.handle is not handle
+        ):
+            return
+        self._pending.pop(request_id, None)
+        key = self._request_key(pending.layer.layer_id, pending.kind)
+        self._latest_requests.release(key, request_id)
+        self._lifetime.release(pending.retained_source, ResourceLeaseKind.SESSION)
+        message = (
+            outcome.cancellation_reason
+            if outcome.state == ExecutionState.CANCELLED
+            else str(outcome.error)
+        )
+        self._publish(
+            pending,
+            False,
+            message or "vector conversion did not complete",
+        )
+
+    @staticmethod
+    def _request_key(
+        layer_id: uuid.UUID,
+        kind: VectorConversionKind,
+    ) -> tuple[str, tuple[uuid.UUID, VectorConversionKind]]:
+        """Return the document-global replacement key for one conversion."""
+        return ("vector-conversion", (layer_id, kind))
 
     def _publish(
         self,
@@ -626,7 +547,7 @@ class VectorConversionService:
         """Publish one normalized terminal result."""
         self._completed(
             VectorConversionCompletion(
-                pending.worker.request_id,
+                pending.request_id,
                 pending.public_scene_id,
                 pending.layer.layer_id,
                 pending.kind,
@@ -634,49 +555,3 @@ class VectorConversionService:
                 message,
             )
         )
-
-
-def _draw(
-    target: QImage,
-    document: VectorDocument,
-    source_to_target: LayerTransform,
-    object_ids: frozenset[uuid.UUID] | None = None,
-    *,
-    text_layouts: SemanticTextLayoutCache | None = None,
-) -> None:
-    """Draw semantic vector content into one initialized target image."""
-    painter = QPainter(target)
-    if not painter.isActive():
-        raise RuntimeError("vector rasterization painter could not be activated")
-    try:
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setTransform(source_to_target.to_qtransform())
-        draw_vector_document(painter, document, object_ids, text_layouts)
-    finally:
-        painter.end()
-
-
-def _transparent_image(size: QSize) -> QImage:
-    """Allocate one bounded transparent premultiplied raster."""
-    target = QImage(size, QImage.Format_ARGB32_Premultiplied)
-    if target.isNull():
-        raise MemoryError("vector rasterization target could not be allocated")
-    target.fill(0)
-    return target
-
-
-def _validate_size(size: QSize) -> None:
-    """Reject empty or unbounded explicit vector raster products."""
-    if size.isEmpty():
-        raise ValueError("vector raster dimensions must be positive")
-    if size.width() * size.height() * 4 > _MAX_OUTPUT_BYTES:
-        raise ValueError("vector rasterization exceeds the 512 MiB output limit")
-
-
-def _integer_paint_bounds(bounds: QRectF) -> RasterBounds:
-    """Return antialias-safe half-open integer bounds around painted geometry."""
-    left = math.floor(bounds.left()) - 1
-    top = math.floor(bounds.top()) - 1
-    right = math.ceil(bounds.right()) + 1
-    bottom = math.ceil(bounds.bottom()) + 1
-    return RasterBounds(left, top, max(1, right - left), max(1, bottom - top))

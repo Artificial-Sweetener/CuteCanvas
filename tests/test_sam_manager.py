@@ -14,611 +14,405 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Tests for SAM manager predictor handling and retries."""
+"""Verify native SAM session affinity, lifecycle, caching, and inference."""
 
 from __future__ import annotations
 
-import logging
+import threading
 import time
 import uuid
 from pathlib import Path
 
 import numpy as np
-import pytest
-from cutecanvas import Config, sam
-from cutecanvas.core.config_features import MaskConfigSlice
-from cutecanvas.coverage import CoverageAsset, CoverageSurface
-from cutecanvas.masks.generated_edits import MaskGeneratedEditService
-from cutecanvas.masks.mask import MaskAssetStore, MaskLayer
-from cutecanvas.masks.mask_controller import MaskController
-from cutecanvas.masks.projection import MaskCanvasProjectionService
-from cutecanvas.resources import ProjectResourceStore
-from cutecanvas.sam.manager import SamManager, SamWorker
+from cutecanvas.sam import service
+from cutecanvas.sam.manager import SamManager
+from cutecanvas.sam.session import prepare_image_rgb
+from PySide6.QtCore import QObject
 from PySide6.QtGui import QColor, QImage
+from qpane.sdk.execution import (
+    ExecutionLeaseRelease,
+    ExecutionResource,
+    ExecutionRuntime,
+    InlineDispatcher,
+    QtOwnerDispatcher,
+    create_default_execution_runtime,
+)
 
-from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
+from tests.helpers.execution_backend import (
+    ControllableAffinityExecutionBackend,
+    ControllableExecutionBackend,
+    RejectingAffinityExecutionBackend,
+)
 
-DEFAULT_CHECKPOINT = Path("sam-checkpoint.pt")
+
+class _Tensor:
+    """Expose deterministic model storage metrics."""
+
+    def __init__(self, count: int, size: int) -> None:
+        """Capture element count and size."""
+        self._count = count
+        self._size = size
+
+    def numel(self) -> int:
+        """Return element count."""
+        return self._count
+
+    def element_size(self) -> int:
+        """Return bytes per element."""
+        return self._size
 
 
-class _DeferredWorkerResult:
-    """Record deferred executor completions from direct manager callbacks."""
+class _Predictor:
+    """Minimal native predictor test double."""
 
     def __init__(self) -> None:
-        self.completions: list[tuple[bool, object | None]] = []
+        """Create measurable model state."""
+        self.model = type(
+            "Model",
+            (),
+            {
+                "parameters": lambda _self: (_Tensor(10, 4),),
+                "buffers": lambda _self: (_Tensor(3, 2),),
+            },
+        )()
+        self.image: np.ndarray | None = None
 
-    def complete_executor(
-        self,
-        success: bool,
-        payload: object | None = None,
-        error: BaseException | None = None,
-    ) -> None:
-        """Record one result-owner completion."""
-        del error
-        self.completions.append((success, payload))
-
-
-def _touch_checkpoint(path: Path) -> Path:
-    """Ensure a checkpoint path exists for readiness checks."""
-    path.write_bytes(b"checkpoint")
-    return path
+    def set_image(self, image: np.ndarray) -> None:
+        """Retain the prepared RGB input."""
+        self.image = image
 
 
-@pytest.mark.usefixtures("qapp")
-def test_prepare_image_rgb_preserves_channels():
-    image = QImage(2, 1, QImage.Format_ARGB32)
-    image.fill(QColor(10, 20, 30, 255))
-    rgb = SamWorker._prepare_image_rgb(image)
-    assert rgb.shape == (1, 2, 3)
-    assert rgb[0, 0, :].tolist() == [10, 20, 30]
-    assert rgb[0, 1, :].tolist() == [10, 20, 30]
-
-
-@pytest.mark.usefixtures("qapp")
-def test_prepare_image_rgb_does_not_detach_normalized_source() -> None:
-    """SAM preparation must not mutate or detach shared large-image storage."""
-    image = QImage(64, 32, QImage.Format_RGBA8888)
-    image.fill(QColor(10, 20, 30, 255))
-    shared = QImage(image)
-    cache_key = image.cacheKey()
-
-    rgb = SamWorker._prepare_image_rgb(shared)
-
-    assert rgb.shape == (32, 64, 3)
-    assert image.cacheKey() == cache_key
-    assert shared.cacheKey() == cache_key
-
-
-def test_generate_mask_emits_none_when_predictor_missing():
-    manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
-    captured: list[tuple[object, np.ndarray, bool]] = []
-    manager.maskReady.connect(
-        lambda mask, bbox, erase: captured.append((mask, bbox.copy(), erase))
-    )
-    bbox = np.array([0, 0, 10, 10])
-    manager.generateMaskFromBox(uuid.uuid4(), bbox, erase_mode=False)
-    assert captured, "maskReady should fire even when the predictor is absent"
-    emitted_mask, emitted_bbox, emitted_erase = captured[-1]
-    assert emitted_mask is None
-    np.testing.assert_array_equal(emitted_bbox, bbox)
-    assert emitted_erase is False
-
-
-def test_generate_mask_emits_none_when_service_returns_none(monkeypatch):
-    manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
-    image_id = uuid.uuid4()
-    manager._sam_predictors[image_id] = object()
-    monkeypatch.setattr(
-        sam.service,
-        "predict_mask_from_box",
-        lambda predictor, bbox: None,
-    )
-    captured: list[tuple[object, np.ndarray, bool]] = []
-    manager.maskReady.connect(
-        lambda mask, bbox, erase: captured.append((mask, bbox.copy(), erase))
-    )
-    bbox = np.array([1, 2, 3, 4])
-    manager.generateMaskFromBox(image_id, bbox, erase_mode=True)
-    assert captured, "maskReady should fire when SAM returns no mask"
-    emitted_mask, emitted_bbox, emitted_erase = captured[-1]
-    assert emitted_mask is None
-    np.testing.assert_array_equal(emitted_bbox, bbox)
-    assert emitted_erase is True
-
-
-def test_worker_error_emits_failure_signal():
-    manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
-    worker = _DeferredWorkerResult()
-    failures: list[tuple[uuid.UUID, str]] = []
-    manager.predictorLoadFailed.connect(
-        lambda path, message: failures.append((path, message))
-    )
-    image_id = uuid.uuid4()
-    manager._on_worker_error(worker, image_id, "boom")
-    assert failures == [(image_id, "boom")]
-    assert worker.completions == [(False, (image_id, "boom"))]
-
-
-@pytest.mark.usefixtures("qapp")
-def test_mask_controller_handles_none_mask():
-    mask_manager = MaskAssetStore(ProjectResourceStore())
-    controller = MaskController(
-        mask_manager,
-        lambda point: point,
-        Config(),
-        mask_config=MaskConfigSlice(),
-    )
-    mask_image = QImage(4, 4, QImage.Format_Grayscale8)
-    mask_image.fill(0)
-    mask_id = uuid.uuid4()
-    mask_manager._masks[mask_id] = MaskLayer(
-        mask_id=mask_id,
-        coverage=CoverageAsset(mask_id, CoverageSurface.from_qimage(mask_image)),
-    )
-    controller._active_mask_id = mask_id
-    emissions: list[tuple[uuid.UUID, object]] = []
-    controller.mask_updated.connect(lambda mid, rect: emissions.append((mid, rect)))
-    generated = MaskGeneratedEditService(
-        active_mask_id=lambda: mask_id,
-        projection=MaskCanvasProjectionService(
-            assets=mask_manager,
-            active_scene=lambda: None,
-        ),
-        edits=controller.edits,
-        renders=controller.renders,
-    )
-
-    result = generated.apply(None, erase=False)
-
-    assert result == (mask_id, False)
-    assert not emissions
-
-
-def test_generate_mask_emits_none_on_invalid_bbox(caplog):
-    manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
-    image_id = uuid.uuid4()
-
-    class _Predictor:
-        def predict(self, *, box, multimask_output):
-            raise AssertionError("predict should not run for invalid bbox")
-
-    manager._sam_predictors[image_id] = _Predictor()
-    captured: list[tuple[object, np.ndarray, bool]] = []
-    manager.maskReady.connect(
-        lambda mask, bbox, erase: captured.append((mask, bbox.copy(), erase))
-    )
-    caplog.set_level(logging.WARNING)
-    invalid_bbox = np.array([0, 1, 2])
-    manager.generateMaskFromBox(image_id, invalid_bbox, erase_mode=True)
-    assert captured, "maskReady should emit when SAM rejects a bbox"
-    emitted_mask, emitted_bbox, emitted_erase = captured[-1]
-    assert emitted_mask is None
-    np.testing.assert_array_equal(emitted_bbox, invalid_bbox)
-    assert emitted_erase is True
-    assert "Invalid bounding box" in caplog.text
-
-
-@pytest.mark.usefixtures("qapp")
-def test_requestPredictor_queues_executor(monkeypatch, qapp, tmp_path):
-    """SamManager should submit predictor loads via the shared executor."""
-    executor = StubExecutor()
-    checkpoint = _touch_checkpoint(tmp_path / "sam-checkpoint.pt")
-    manager = SamManager(executor=executor, checkpoint_path=checkpoint)
-
-    class _FakePredictor:
-        def __init__(self) -> None:
-            self.image = None
-
-        def set_image(self, image):
-            self.image = image
-
-    monkeypatch.setattr(
-        sam.service,
-        "load_predictor",
-        lambda checkpoint_path, device="cpu": _FakePredictor(),
-    )
-    image = QImage(8, 8, QImage.Format_ARGB32)
+def _image(width: int = 5, height: int = 3) -> QImage:
+    """Return one non-null test image."""
+    image = QImage(width, height, QImage.Format_ARGB32)
     image.fill(QColor("white"))
-    image_id = uuid.uuid4()
-    source_path = Path("sam-image.png")
-    manager.requestPredictor(image, image_id, source_path=source_path)
-    pending = list(executor.pending_tasks())
-    assert pending and pending[0].handle.category == "sam"
-    executor.run_task(pending[0].handle.task_id)
-    assert executor.active_counts() == {"sam": 1}
-    assert executor.finished == []
-    qapp.processEvents()
-    assert executor.finished
-    assert manager.getPredictor(image_id) is not None
-    manager.shutdown()
+    return image
 
 
-@pytest.mark.usefixtures("qapp")
-def test_predictor_eviction_finishes_before_native_slot_is_released(
+def _manager(
+    checkpoint: Path,
+    *,
+    affinity_backend: ControllableAffinityExecutionBackend | None = None,
+    cache_limit: int = 2,
+) -> tuple[
+    SamManager,
+    ExecutionRuntime,
+    ControllableAffinityExecutionBackend,
+]:
+    """Build one manager over public deterministic backends."""
+    affinity = affinity_backend or ControllableAffinityExecutionBackend()
+    runtime = ExecutionRuntime(
+        ControllableExecutionBackend(),
+        capability_backends=(affinity,),
+    )
+    scope = runtime.open_scope(
+        owner_id="sam-test",
+        dispatcher=InlineDispatcher(),
+    )
+    manager = SamManager(
+        execution_scope=scope,
+        checkpoint_path=checkpoint,
+        cache_limit=cache_limit,
+    )
+    return manager, runtime, affinity
+
+
+def _install_predictor_stubs(monkeypatch) -> None:
+    """Replace optional native dependencies with deterministic doubles."""
+    monkeypatch.setattr(
+        service, "load_predictor", lambda *_args, **_kwargs: _Predictor()
+    )
+    monkeypatch.setattr(
+        service,
+        "set_predictor_image",
+        lambda predictor, image: predictor.set_image(image),
+    )
+    monkeypatch.setattr(
+        service,
+        "predict_mask_from_box",
+        lambda _predictor, bbox: np.ones(
+            (int(bbox[3] - bbox[1]), int(bbox[2] - bbox[0])),
+            dtype=bool,
+        ),
+    )
+
+
+def test_prepare_image_rgb_handles_padding_and_shared_images() -> None:
+    """Image conversion returns exact contiguous RGB pixels."""
+    image = QImage(3, 2, QImage.Format_RGB888)
+    image.fill(QColor(12, 34, 56))
+    shared = QImage(image)
+    rgb = prepare_image_rgb(shared)
+    assert rgb.shape == (2, 3, 3)
+    assert rgb.flags.c_contiguous
+    assert tuple(rgb[0, 0]) == (12, 34, 56)
+
+
+def test_predictor_request_declares_native_affinity_and_adoption_lease(
     monkeypatch,
-    qapp,
     tmp_path,
 ) -> None:
-    """Cache teardown must finish before another shared-model job can start."""
-    executor = StubExecutor()
-    checkpoint = _touch_checkpoint(tmp_path / "sam-checkpoint.pt")
-    manager = SamManager(
-        executor=executor,
-        checkpoint_path=checkpoint,
-        cache_limit=1,
-    )
+    """Preparation expresses hard native scheduling requirements."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
+    image_id = uuid.uuid4()
+    manager.requestPredictor(_image(), image_id)
+    job = backend.pending_jobs()[0]
+    requirements = job.requirements
+    assert job.operation == "editor.sam.prepare"
+    assert requirements.resource == ExecutionResource.THREAD_AFFINE_NATIVE
+    assert requirements.affinity_key == "sam:cpu"
+    assert requirements.exclusive_key == "sam:cpu"
+    assert requirements.lease_release == ExecutionLeaseRelease.ADOPTION_FINISHED
+    runtime.shutdown()
 
-    class _FakePredictor:
-        def set_image(self, image: np.ndarray) -> None:
-            self.image = image
 
-    monkeypatch.setattr(
-        sam.service,
-        "load_predictor",
-        lambda checkpoint_path, device="cpu": _FakePredictor(),
+def test_preparation_adopts_reference_and_measured_cache_state(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Native predictors remain private while readiness and metrics publish."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
+    ready: list[tuple[object, uuid.UUID]] = []
+    manager.predictorReady.connect(lambda *args: ready.append(args))
+    image_id = uuid.uuid4()
+    manager.requestPredictor(_image(), image_id)
+    backend.run_all()
+    reference = manager.getPredictor(image_id)
+    assert reference is not None and reference.image_id == image_id
+    assert ready[-1] == (reference, image_id)
+    assert manager.cache_usage_bytes() == 46
+    assert manager.pendingUsageBytes() == 0
+    runtime.shutdown()
+
+
+def test_inference_uses_same_affinity_session_and_publishes_uint8_mask(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Box inference is asynchronous and returns normalized mask coverage."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
+    image_id = uuid.uuid4()
+    manager.requestPredictor(_image(), image_id)
+    backend.run_all()
+    masks: list[tuple[object, np.ndarray, bool]] = []
+    manager.maskReady.connect(lambda *args: masks.append(args))
+    bbox = np.array([0, 0, 4, 3])
+    manager.generateMaskFromBox(image_id, bbox, erase_mode=True)
+    assert backend.pending_jobs()[0].operation == "editor.sam.infer_box"
+    backend.run_all()
+    mask, published_bbox, erase_mode = masks[-1]
+    assert mask.shape == (3, 4)
+    assert mask.dtype == np.uint8
+    assert np.all(mask == 255)
+    assert np.array_equal(published_bbox, bbox)
+    assert erase_mode is True
+    runtime.shutdown()
+
+
+def test_missing_predictor_fails_without_native_submission(tmp_path) -> None:
+    """Inference without prepared state reports no mask immediately."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    manager, runtime, backend = _manager(checkpoint)
+    masks: list[object] = []
+    manager.maskReady.connect(lambda mask, *_args: masks.append(mask))
+    manager.generateMaskFromBox(uuid.uuid4(), np.array([0, 0, 1, 1]))
+    assert masks == [None]
+    assert backend.pending_count == 0
+    runtime.shutdown()
+
+
+def test_duplicate_preparation_coalesces_and_cancellation_is_handle_owned(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """One image has one current preparation and one cancellation authority."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
+    image_id = uuid.uuid4()
+    manager.requestPredictor(_image(), image_id)
+    manager.requestPredictor(_image(7, 7), image_id)
+    assert backend.pending_count == 1
+    assert manager.cancelPendingPredictor(image_id)
+    assert backend.pending_count == 0
+    assert len(backend.cancelled) == 1
+    assert manager.activePredictorLoads() == 0
+    runtime.shutdown()
+
+
+def test_structured_rejection_retries_latest_preparation(
+    monkeypatch,
+    tmp_path,
+    qapp,
+) -> None:
+    """Saturation retains a bounded latest request and reports throttling."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    backend = RejectingAffinityExecutionBackend({"editor.sam.prepare": 1})
+    manager, runtime, _backend = _manager(
+        checkpoint,
+        affinity_backend=backend,
     )
-    image = QImage(8, 8, QImage.Format_ARGB32)
-    image.fill(QColor("white"))
+    throttled: list[tuple[uuid.UUID, int]] = []
+    manager.predictorThrottled.connect(lambda *args: throttled.append(args))
+    image_id = uuid.uuid4()
+    manager.requestPredictor(_image(), image_id)
+    deadline = time.monotonic() + 2.0
+    while backend.pending_count == 0 and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.005)
+    assert throttled == [(image_id, 1)]
+    backend.run_all()
+    assert manager.getPredictor(image_id) is not None
+    runtime.shutdown()
+
+
+def test_cache_limit_evicts_on_native_session_and_publishes_removal(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """LRU eviction stays in the native owner and updates derived metadata."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint, cache_limit=1)
+    removed: list[uuid.UUID] = []
+    manager.predictorRemoved.connect(removed.append)
     first_id = uuid.uuid4()
     second_id = uuid.uuid4()
-    retained_during_eviction: list[int] = []
-    manager.predictorRemoved.connect(
-        lambda _image_id: retained_during_eviction.append(
-            len(manager._retired_predictors)
-        )
-    )
-
-    manager.requestPredictor(image, first_id)
-    first_task = next(iter(executor.pending_tasks()))
-    executor.run_task(first_task.handle.task_id)
-    qapp.processEvents()
-
-    manager.requestPredictor(image, second_id)
-    second_task = next(iter(executor.pending_tasks()))
-    executor.run_task(second_task.handle.task_id)
-    qapp.processEvents()
-
-    assert retained_during_eviction == [1]
-    assert manager._retired_predictors == []
-    assert executor.active_counts() == {}
+    manager.requestPredictor(_image(), first_id)
+    backend.run_all()
+    manager.requestPredictor(_image(), second_id)
+    backend.run_all()
     assert manager.predictorImageIds() == [second_id]
+    assert removed == [first_id]
+    assert manager.snapshot_metrics().evictions == 1
+    runtime.shutdown()
 
 
-def test_cancel_pending_predictor_requests_executor_cancellation(monkeypatch, tmp_path):
-    """Cancelling an in-flight predictor should invoke executor.cancel."""
-    executor = StubExecutor()
-    checkpoint = _touch_checkpoint(tmp_path / "sam-checkpoint.pt")
-    manager = SamManager(executor=executor, checkpoint_path=checkpoint)
-    monkeypatch.setattr(
-        sam.service,
-        "load_predictor",
-        lambda checkpoint_path, device="cpu": object(),
-    )
-    image = QImage(4, 4, QImage.Format_ARGB32)
-    image.fill(QColor("black"))
+def test_clear_and_remove_are_serialized_cache_operations(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Public cache mutations do not destroy predictors on the GUI thread."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
     image_id = uuid.uuid4()
-    source_path = Path("cancel-me.png")
-    manager.requestPredictor(image, image_id, source_path=source_path)
-    pending = list(executor.pending_tasks())
-    handle = pending[0].handle
-    manager.cancelPendingPredictor(image_id)
-    assert handle in executor.cancelled
-    assert image_id not in manager._inflight
-    manager.shutdown()
+    manager.requestPredictor(_image(), image_id)
+    backend.run_all()
+    assert manager.removeFromCache(image_id)
+    assert backend.pending_jobs()[0].operation == "editor.sam.cache.remove"
+    backend.run_all()
+    assert manager.getPredictor(image_id) is None
+    manager.clearCache()
+    backend.run_all()
+    assert manager.getCachedPredictorCount() == 0
+    runtime.shutdown()
 
 
-def test_shutdown_releases_owned_predictor_executor() -> None:
-    """Managers must deterministically release execution lanes they created."""
-    executor = StubExecutor()
-    manager = SamManager(
-        executor=executor,
-        owns_executor=True,
-        checkpoint_path=DEFAULT_CHECKPOINT,
-    )
+def test_real_affinity_lane_preserves_thread_identity_through_cleanup(
+    monkeypatch,
+    tmp_path,
+    qapp,
+) -> None:
+    """Construction, inference, and native destruction use one stable thread."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    events: list[tuple[str, int]] = []
 
-    manager.shutdown()
-    manager.shutdown()
+    class _TrackedPredictor(_Predictor):
+        """Record native lifetime thread identity."""
 
-    assert executor.shutdown_called is True
-    assert manager._owns_executor is False
-
-
-@pytest.mark.usefixtures("qapp")
-def test_requestPredictor_retries_after_throttle(monkeypatch, qapp, tmp_path) -> None:
-    executor = RejectingStubExecutor(reject_counts={"sam": 1})
-    checkpoint = _touch_checkpoint(tmp_path / "sam-checkpoint.pt")
-    manager = SamManager(executor=executor, checkpoint_path=checkpoint)
-
-    class _FakePredictor:
         def __init__(self) -> None:
-            self.image = None
+            """Record construction."""
+            super().__init__()
+            events.append(("construct", threading.get_ident()))
 
-        def set_image(self, image):
-            self.image = image
+        def __del__(self) -> None:
+            """Record destruction."""
+            events.append(("destroy", threading.get_ident()))
 
     monkeypatch.setattr(
-        sam.service,
+        service,
         "load_predictor",
-        lambda checkpoint_path, device="cpu": _FakePredictor(),
+        lambda *_args, **_kwargs: _TrackedPredictor(),
     )
-    image = QImage(16, 16, QImage.Format_ARGB32)
-    image.fill(QColor("white"))
-    image_id = uuid.uuid4()
-    source_path = Path("sam-throttle.png")
-    throttled: list[tuple[uuid.UUID, int]] = []
-    manager.predictorThrottled.connect(
-        lambda p, attempt: throttled.append((p, attempt))
+    monkeypatch.setattr(
+        service,
+        "set_predictor_image",
+        lambda predictor, image: predictor.set_image(image),
     )
-    manager.requestPredictor(image, image_id, source_path=source_path)
-    assert throttled == [(image_id, 1)]
-    assert executor.rejections
 
-    def wait_for(predicate, *, timeout: float = 1.0) -> None:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            qapp.processEvents()
-            if predicate():
-                return
-            time.sleep(0.01)
-        raise AssertionError("condition was not met before timeout")
+    def _predict(_predictor, _bbox):
+        """Record inference."""
+        events.append(("infer", threading.get_ident()))
+        return np.ones((1, 1), dtype=bool)
 
-    wait_for(
-        lambda: any(
-            record.handle.category == "sam" for record in executor.pending_tasks()
-        )
+    monkeypatch.setattr(service, "predict_mask_from_box", _predict)
+    receiver = QObject()
+    runtime = create_default_execution_runtime()
+    scope = runtime.open_scope(
+        owner_id="real-affinity",
+        dispatcher=QtOwnerDispatcher(receiver),
     )
-    pending = list(executor.pending_tasks())
-    assert pending
-    executor.run_task(pending[0].handle.task_id)
-    wait_for(lambda: manager.getPredictor(image_id) is not None)
-    assert not getattr(
-        manager, "_predictor_retry_entries", {}
-    ), "sam retries should be cleared"
-
-
-def test_setCacheLimit_trims_existing_predictors(qapp):
-    manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
-    removed: list[uuid.UUID] = []
-    manager.predictorRemoved.connect(lambda path: removed.append(path))
-    first = uuid.uuid4()
-    second = uuid.uuid4()
-    manager._sam_predictors[first] = object()
-    manager._sam_predictors[second] = object()
-    manager.setCacheLimit(1)
-    assert removed == [first]
-    assert list(manager._sam_predictors.keys()) == [second]
-
-
-def test_cache_limit_enforced_on_predictor_ready(qapp):
     manager = SamManager(
-        cache_limit=1,
-        executor=StubExecutor(),
-        checkpoint_path=DEFAULT_CHECKPOINT,
-    )
-    removed: list[uuid.UUID] = []
-    manager.predictorRemoved.connect(lambda path: removed.append(path))
-    first = uuid.uuid4()
-    second = uuid.uuid4()
-    first_worker = _DeferredWorkerResult()
-    second_worker = _DeferredWorkerResult()
-    first_predictor = object()
-    second_predictor = object()
-    manager._on_worker_finished(first_worker, first_predictor, first)
-    manager._on_worker_finished(second_worker, second_predictor, second)
-    assert removed == [first]
-    assert list(manager._sam_predictors.keys()) == [second]
-    assert first_worker.completions == [(True, (first_predictor, first))]
-    assert second_worker.completions == [(True, (second_predictor, second))]
-
-
-def test_snapshot_metrics_report_cache_bytes():
-    manager = SamManager(executor=StubExecutor(), checkpoint_path=DEFAULT_CHECKPOINT)
-    image_id = uuid.uuid4()
-
-    class _Tensor:
-        def __init__(self, numel, element_size):
-            self._numel = numel
-            self._element_size = element_size
-
-        def numel(self):
-            return self._numel
-
-        def element_size(self):
-            return self._element_size
-
-    class _Model:
-        def __init__(self):
-            self._params = [_Tensor(4, 2)]
-            self._buffers = [_Tensor(2, 4)]
-
-        def parameters(self):
-            return self._params
-
-        def buffers(self):
-            return self._buffers
-
-    class _Predictor:
-        def __init__(self):
-            self.model = _Model()
-
-    worker = _DeferredWorkerResult()
-    predictor = _Predictor()
-    manager._on_worker_finished(worker, predictor, image_id)
-    metrics = manager.snapshot_metrics()
-    assert metrics.cache_bytes == 16
-    assert manager.cache_usage_bytes() == 16
-    assert worker.completions == [(True, (predictor, image_id))]
-    manager.removeFromCache(image_id)
-    assert manager.cache_usage_bytes() == 0
-
-
-def test_requestPredictor_logs_when_checkpoint_missing(caplog, tmp_path):
-    executor = StubExecutor()
-    manager = SamManager(
-        executor=executor, checkpoint_path=tmp_path / "missing-checkpoint.pt"
-    )
-    image = QImage(4, 4, QImage.Format_ARGB32)
-    image.fill(QColor("black"))
-    caplog.set_level(logging.WARNING)
-    manager.requestPredictor(image, uuid.uuid4(), source_path=Path("nope.png"))
-    assert not list(executor.pending_tasks())
-    assert "checkpoint is missing" in caplog.text
-
-
-def test_requestPredictor_emits_ready_on_cache_hit(tmp_path) -> None:
-    """Cached predictors should emit predictorReady without re-queueing."""
-    executor = StubExecutor()
-    checkpoint = _touch_checkpoint(tmp_path / "sam-checkpoint.pt")
-    manager = SamManager(executor=executor, checkpoint_path=checkpoint)
-    image_id = uuid.uuid4()
-    source_path = Path("cached.png")
-    predictor = object()
-    manager._sam_predictors[image_id] = predictor
-    captured: list[tuple[object, uuid.UUID]] = []
-    manager.predictorReady.connect(lambda pred, p: captured.append((pred, p)))
-    image = QImage(2, 2, QImage.Format_ARGB32)
-    manager.requestPredictor(image, image_id, source_path=source_path)
-    assert captured == [(predictor, image_id)]
-    assert not list(executor.pending_tasks())
-
-
-def test_requestPredictor_skips_duplicate_inflight(tmp_path) -> None:
-    """Duplicate predictor requests should not queue extra work."""
-    executor = StubExecutor()
-    checkpoint = _touch_checkpoint(tmp_path / "sam-checkpoint.pt")
-    manager = SamManager(executor=executor, checkpoint_path=checkpoint)
-    image = QImage(2, 2, QImage.Format_ARGB32)
-    image_id = uuid.uuid4()
-    source_path = Path("dupe.png")
-    manager.requestPredictor(image, image_id, source_path=source_path)
-    manager.requestPredictor(image, image_id, source_path=source_path)
-    pending = list(executor.pending_tasks())
-    assert len(pending) == 1
-
-
-def test_compute_predictor_retry_delay_bounds(tmp_path) -> None:
-    """Retry delays should respect configured min/max bounds."""
-    manager = SamManager(
-        executor=StubExecutor(),
-        checkpoint_path=_touch_checkpoint(tmp_path / "sam-checkpoint.pt"),
-    )
-    for attempts in (1, 2, 6):
-        delay = manager._compute_predictor_retry_delay(attempts)
-        assert 150 <= delay <= 2500
-
-
-def test_estimate_predictor_bytes_falls_back_on_failure(tmp_path) -> None:
-    """Estimator should return the default when sizeInBytes fails."""
-    manager = SamManager(
-        executor=StubExecutor(),
-        checkpoint_path=_touch_checkpoint(tmp_path / "sam-checkpoint.pt"),
-    )
-
-    class _BrokenImage:
-        def sizeInBytes(self) -> int:
-            raise RuntimeError("boom")
-
-    estimated = manager._estimate_predictor_bytes(_BrokenImage())
-    assert estimated == 128 * 1024 * 1024
-
-
-def test_sanitize_cache_limit_accepts_valid_values() -> None:
-    """Cache limit sanitizer should reject invalid values and accept integers."""
-    assert SamManager._sanitize_cache_limit(None) is None
-    assert SamManager._sanitize_cache_limit("bad") is None
-    assert SamManager._sanitize_cache_limit(-1) is None
-    assert SamManager._sanitize_cache_limit(2) == 2
-    assert SamManager._sanitize_cache_limit("3") == 3
-
-
-def test_enforce_cache_limit_trims_oldest_entry(tmp_path) -> None:
-    """Cache enforcement should drop the oldest predictor when over limit."""
-    manager = SamManager(
-        executor=StubExecutor(),
-        checkpoint_path=_touch_checkpoint(tmp_path / "sam-checkpoint.pt"),
-    )
-    first = uuid.uuid4()
-    second = uuid.uuid4()
-    manager._sam_predictors = {first: object(), second: object()}
-    manager._predictor_sizes = {first: 10, second: 10}
-    manager._pending_estimates = {first: 10, second: 10}
-    removed: list[uuid.UUID] = []
-    manager.predictorRemoved.connect(lambda path: removed.append(path))
-    manager.setCacheLimit(1)
-    assert removed == [first]
-    assert list(manager._sam_predictors.keys()) == [second]
-
-
-def test_model_tensor_bytes_sums_parameters_and_buffers() -> None:
-    """Model tensor accounting should sum parameter and buffer sizes."""
-
-    class _FakeTensor:
-        def __init__(self, numel, element_size) -> None:
-            self._numel = numel
-            self._element_size = element_size
-
-        def numel(self):
-            return self._numel
-
-        def element_size(self):
-            return self._element_size
-
-    class _FakeModel:
-        def __init__(self) -> None:
-            self._params = [_FakeTensor(4, 2)]
-            self._buffers = [_FakeTensor(3, 4)]
-
-        def parameters(self):
-            return self._params
-
-        def buffers(self):
-            return self._buffers
-
-    bytes_used = SamManager._model_tensor_bytes(_FakeModel())
-    assert bytes_used == (4 * 2) + (3 * 4)
-
-
-def test_drop_predictor_removes_sizes_and_estimates(tmp_path) -> None:
-    """Dropping predictors should clear cache metadata and emit signals."""
-    manager = SamManager(
-        executor=StubExecutor(),
-        checkpoint_path=_touch_checkpoint(tmp_path / "sam-checkpoint.pt"),
+        parent=receiver,
+        execution_scope=scope,
+        checkpoint_path=checkpoint,
     )
     image_id = uuid.uuid4()
-    manager._sam_predictors[image_id] = object()
-    manager._predictor_sizes[image_id] = 12
-    manager._pending_estimates[image_id] = 7
-    removed: list[uuid.UUID] = []
-    manager.predictorRemoved.connect(lambda removed_id: removed.append(removed_id))
-    assert manager._drop_predictor(image_id) is True
-    assert removed == [image_id]
-    assert image_id not in manager._sam_predictors
-    assert image_id not in manager._predictor_sizes
-    assert image_id not in manager._pending_estimates
+    manager.requestPredictor(_image(), image_id)
+    _wait_until(qapp, lambda: manager.getCachedPredictorCount() == 1)
+    manager.generateMaskFromBox(image_id, np.array([0, 0, 1, 1]))
+    _wait_until(qapp, lambda: any(name == "infer" for name, _thread in events))
+    manager.clearCache()
+    _wait_until(qapp, lambda: manager.getCachedPredictorCount() == 0)
+    _wait_until(qapp, lambda: any(name == "destroy" for name, _thread in events))
+    native_threads = {thread_id for _name, thread_id in events}
+    assert len(native_threads) == 1
+    assert next(iter(native_threads)) != threading.get_ident()
+    manager.shutdown()
+    _wait_until(qapp, lambda: manager._execution_scope.is_closed)
+    runtime.shutdown(wait=True)
 
 
-def test_remove_from_cache_reports_whether_a_predictor_was_removed(tmp_path) -> None:
-    """The public cache hook must truthfully report each eviction result."""
-    manager = SamManager(
-        executor=StubExecutor(),
-        checkpoint_path=_touch_checkpoint(tmp_path / "sam-checkpoint.pt"),
-    )
-    image_id = uuid.uuid4()
-    manager._sam_predictors[image_id] = object()
-    manager._predictor_sizes[image_id] = 12
+def test_shutdown_schedules_native_cleanup_before_closing_scope(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Manager teardown retains its scope until session cleanup settles."""
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
+    manager.shutdown()
+    assert not manager._execution_scope.is_closed
+    assert backend.pending_jobs()[0].operation == "editor.sam.session.close"
+    backend.run_all()
+    assert manager._execution_scope.is_closed
+    runtime.shutdown()
 
-    assert manager.removeFromCache(image_id) is True
-    assert manager.removeFromCache(image_id) is False
 
-
-def test_measure_predictor_bytes_returns_zero_without_model(tmp_path) -> None:
-    """Predictors without model metadata should report zero bytes."""
-    manager = SamManager(
-        executor=StubExecutor(),
-        checkpoint_path=_touch_checkpoint(tmp_path / "sam-checkpoint.pt"),
-    )
-
-    class _Predictor:
-        pass
-
-    assert manager._measure_predictor_bytes(_Predictor()) == 0
+def _wait_until(qapp, predicate, *, timeout: float = 2.0) -> None:
+    """Process Qt events until one asynchronous condition becomes true."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return
+        time.sleep(0.005)
+    raise AssertionError("condition did not settle before timeout")

@@ -26,7 +26,13 @@ from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 from .harness.mounted_qpane import MountedQPaneHarness
-from .harness.timing import interaction_clock, stable_latency_samples
+from .harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    interaction_clock,
+    stable_latency_samples,
+)
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _POINTER_UPDATE_MEDIAN_BUDGET_MS = 16.0
 _POINTER_UPDATE_MAXIMUM_BUDGET_MS = 50.0

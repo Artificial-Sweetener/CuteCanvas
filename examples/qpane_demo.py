@@ -66,7 +66,7 @@ def __getattr__(name: str) -> Any:
 
 
 def main(argv: Iterable[str] | None = None) -> int:
-    """Provision when necessary and launch the QPane core viewer example."""
+    """Provision when necessary and launch the QPane viewer example."""
     args = list(argv) if argv is not None else sys.argv[1:]
     skip_bootstrap = "--skip-bootstrap" in args
     if not skip_bootstrap and not _DEMO_ENVIRONMENTS.is_current_process("qpane"):

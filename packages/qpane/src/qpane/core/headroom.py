@@ -18,14 +18,9 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QRunnable, Signal
-
-from ..concurrency import BaseWorker
-
-logger = logging.getLogger(__name__)
+from ..execution import CancellationToken
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,54 +45,32 @@ class SystemHeadroomSample:
         return snapshot
 
 
-class SystemHeadroomWorker(QObject, QRunnable, BaseWorker):
-    """Sample optional system-memory APIs away from the GUI thread."""
+def sample_system_headroom(
+    cancellation: CancellationToken,
+    psutil_module: object | None = None,
+) -> SystemHeadroomSample:
+    """Return one detached system-memory sample outside the GUI thread."""
 
-    finished = Signal(object)
-    error = Signal(object)
+    provider = psutil_module
+    if provider is None:
+        import psutil  # type: ignore
 
-    def __init__(self, psutil_module: object | None = None) -> None:
-        """Capture an optional provider used by deterministic tests."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        self.psutil_module = psutil_module
-        self.sample: SystemHeadroomSample | None = None
-        self.error_message: str | None = None
-
-    def run(self) -> None:
-        """Observe memory once and publish one terminal result."""
-        try:
-            provider = self.psutil_module
-            if provider is None:
-                import psutil  # type: ignore
-
-                provider = psutil
-                self.psutil_module = provider
-            if self.is_cancelled:
-                self.emit_finished(False, payload=self)
-                return
-            memory = provider.virtual_memory()  # type: ignore[attr-defined]
-            swap_total: int | None = None
-            swap_free: int | None = None
-            try:
-                swap = provider.swap_memory()  # type: ignore[attr-defined]
-            except Exception:  # noqa: BLE001 - optional system diagnostic
-                swap = None
-            if swap is not None:
-                swap_total = int(swap.total)
-                swap_free = int(swap.free)
-            self.sample = SystemHeadroomSample(
-                available_bytes=int(memory.available),
-                total_bytes=int(memory.total),
-                swap_total_bytes=swap_total,
-                swap_free_bytes=swap_free,
-            )
-        except BaseException as exc:  # noqa: BLE001 - optional system boundary
-            self.error_message = str(exc)
-        self.emit_finished(
-            self.sample is not None
-            and self.error_message is None
-            and not self.is_cancelled,
-            payload=self,
-        )
+        provider = psutil
+    if cancellation.is_cancelled:
+        raise RuntimeError(cancellation.reason or "headroom sampling cancelled")
+    memory = provider.virtual_memory()  # type: ignore[attr-defined]
+    swap_total: int | None = None
+    swap_free: int | None = None
+    try:
+        swap = provider.swap_memory()  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - optional system diagnostic
+        swap = None
+    if swap is not None:
+        swap_total = int(swap.total)
+        swap_free = int(swap.free)
+    return SystemHeadroomSample(
+        available_bytes=int(memory.available),
+        total_bytes=int(memory.total),
+        swap_total_bytes=swap_total,
+        swap_free_bytes=swap_free,
+    )

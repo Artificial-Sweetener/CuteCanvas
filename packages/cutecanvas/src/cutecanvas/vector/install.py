@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QRectF
 from qpane.sdk.cache import CacheRegistry
-from qpane.sdk.concurrency import TaskExecutorProtocol
+from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.rendering import SceneCoordinateSystem
 from qpane.sdk.scene import (
     LayerEffectRenderRegistry,
@@ -38,6 +38,7 @@ from ..resources import ProjectResourceKind, ProjectResourceStore
 from ..resources.descriptor_factory import ProjectResourceLayerDescriptorFactory
 from ..resources.lifecycle import ProjectResourceLifecycleOwner
 from ..resources.source_capabilities import ProjectResourceSourceCapabilities
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
@@ -106,7 +107,8 @@ class VectorDomainInstaller:
         coordinates: SceneCoordinateSystem,
         raster_assets: EditableRasterAssetStore,
         pixel_selection: PixelSelectionService,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         conversion_completed: Callable[[VectorConversionCompletion], None],
         layer_effects: LayerEffectRenderRegistry,
         cache_registry: CacheRegistry | None,
@@ -189,7 +191,8 @@ class VectorDomainInstaller:
             lifetime=compositions.resource_lifetime,
             pixel_selection=pixel_selection,
             object_selection=selection,
-            executor=executor,
+            execution_scope=execution_scope,
+            latest_requests=latest_requests,
             changed=lambda: changed(None),
             completed=conversion_completed,
         )

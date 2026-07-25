@@ -22,11 +22,21 @@ import logging
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field, replace
 from itertools import count
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import numpy as np
 from PySide6.QtCore import QRect
-from qpane.sdk.concurrency import TaskExecutorProtocol, TaskHandle
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
+)
 from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.coverage import CoverageSnapshot
@@ -41,7 +51,7 @@ from .stroke_models import (
 )
 from .stroke_preview import DecimatedStrokePreview
 from .stroke_regions import MaskStrokeRegionPlanner
-from .stroke_worker import MaskStrokeWorker
+from .stroke_rendering import render_mask_stroke
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +62,10 @@ class MaskStrokeDebugSnapshot:
 
     preview_state_ids: tuple[UUID, ...] = ()
     preview_tokens: dict[UUID, int] = field(default_factory=dict)
-    pending_jobs: dict[UUID, tuple[TaskHandle, ...]] = field(default_factory=dict)
+    pending_jobs: dict[
+        UUID,
+        tuple[ExecutionHandle[MaskStrokeJobResult, object], ...],
+    ] = field(default_factory=dict)
     invalidated_job_tokens: tuple[tuple[UUID, int], ...] = ()
 
 
@@ -64,7 +77,7 @@ class MaskStrokePipeline:
         *,
         assets: MaskAssetStore,
         controller: MaskController,
-        executor: TaskExecutorProtocol | None,
+        execution_scope: ExecutionScope,
         mask_feature_available: Callable[[], bool],
         current_composition_id: Callable[[], UUID | None],
         ensure_active: Callable[[UUID | None], bool],
@@ -78,7 +91,9 @@ class MaskStrokePipeline:
         """Initialize stroke pipeline state, tokens, and optional diagnostics."""
         self._assets = assets
         self._controller = controller
-        self._task_executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:mask-strokes"
+        )
         self._mask_feature_available = mask_feature_available
         self._current_composition_id = current_composition_id
         self._ensure_active = ensure_active
@@ -90,8 +105,12 @@ class MaskStrokePipeline:
         )
         self._preview_states: dict[UUID, DecimatedStrokePreview] = {}
         self._preview_tokens: dict[UUID, int] = {}
-        self._pending_jobs: dict[UUID, set[TaskHandle]] = {}
-        self._pending_job_tokens: dict[TaskHandle, int] = {}
+        self._pending_jobs: dict[UUID, set[UUID]] = {}
+        self._pending_handles: dict[
+            UUID,
+            ExecutionHandle[MaskStrokeJobResult, object],
+        ] = {}
+        self._pending_job_tokens: dict[UUID, int] = {}
         self._invalidated_job_tokens: set[tuple[UUID, int]] = set()
         self._job_token_counter = count(1)
         self._diagnostics = diagnostics
@@ -145,9 +164,13 @@ class MaskStrokePipeline:
     def debug_snapshot(self) -> MaskStrokeDebugSnapshot:
         """Expose pending state for tests without leaking internal dicts."""
         pending = {
-            mask_id: tuple(handles)
-            for mask_id, handles in self._pending_jobs.items()
-            if handles
+            mask_id: tuple(
+                self._pending_handles[request_id]
+                for request_id in request_ids
+                if request_id in self._pending_handles
+            )
+            for mask_id, request_ids in self._pending_jobs.items()
+            if request_ids
         }
         return MaskStrokeDebugSnapshot(
             preview_state_ids=tuple(self._preview_states.keys()),
@@ -171,7 +194,6 @@ class MaskStrokePipeline:
         pending_jobs = self._pending_jobs
         pending_job_tokens = self._pending_job_tokens
         invalidated_job_tokens = self._invalidated_job_tokens
-        executor = self._executor
         manager = self._assets
         diagnostics = self._diagnostics
         target_ids: set[UUID] = set()
@@ -187,18 +209,14 @@ class MaskStrokePipeline:
             had_pending_jobs = bool(handles)
             if handles:
                 had_state = True
-                for handle in tuple(handles):
-                    job_token = pending_job_tokens.pop(handle, None)
-                    cancelled = False
-                    if executor is not None and hasattr(executor, "cancel"):
-                        try:
-                            cancelled = bool(executor.cancel(handle))
-                        except Exception:  # pragma: no cover - defensive guard
-                            logger.debug(
-                                "Failed to cancel pending mask stroke job (mask=%s).",
-                                target,
-                                exc_info=True,
-                            )
+                for request_id in tuple(handles):
+                    job_token = pending_job_tokens.pop(request_id, None)
+                    handle = self._pending_handles.pop(request_id, None)
+                    cancelled = (
+                        False
+                        if handle is None
+                        else handle.cancel(reason="mask stroke state reset")
+                    )
                     if not cancelled and job_token is not None:
                         invalidated_job_tokens.add((target, job_token))
                 handles.clear()
@@ -231,6 +249,7 @@ class MaskStrokePipeline:
                     diagnostics.cancel_mask_jobs(target)
         if mask_id is None:
             pending_jobs.clear()
+            self._pending_handles.clear()
             pending_job_tokens.clear()
             preview_states.clear()
             preview_tokens.clear()
@@ -242,11 +261,6 @@ class MaskStrokePipeline:
             self._job_token_counter = count(1)
         for target in target_ids:
             self._notify_idle_if_clear(target)
-
-    @property
-    def _executor(self) -> TaskExecutorProtocol | None:
-        """Return the executor used for background stroke work."""
-        return self._task_executor
 
     def _allocate_job_token(self) -> int:
         """Return the next stroke job token for diagnostics and ordering."""
@@ -273,10 +287,8 @@ class MaskStrokePipeline:
         commit: bool,
         job_token: int,
     ) -> bool:
-        """Queue a stroke worker and wire finalize callbacks/diagnostics."""
-        executor = self._executor
-        handle_box: dict[str, TaskHandle | None] = {"handle": None}
-        completed = {"value": False}
+        """Queue one typed stroke product and wire owner-safe adoption."""
+        request_id = uuid4()
         diagnostics = self._diagnostics
         pending_jobs = self._pending_jobs
         if diagnostics is not None:
@@ -301,15 +313,6 @@ class MaskStrokePipeline:
                 stride=stride_value,
             )
 
-        def finalize(result: MaskStrokeJobResult) -> None:
-            """Finalize stroke results and propagate completion state."""
-            completed["value"] = True
-            self._finalize_stroke_result(
-                result,
-                handle=handle_box["handle"],
-                commit=commit,
-            )
-
         logger.debug(
             "queue stroke job mask=%s gen=%s token=%s source=%s",
             spec.mask_id,
@@ -317,40 +320,61 @@ class MaskStrokePipeline:
             job_token,
             source,
         )
-        worker = MaskStrokeWorker(
-            spec=spec,
-            finalize=finalize,
-            compositor=self._compositor,
+        pending_jobs.setdefault(spec.mask_id, set()).add(request_id)
+        self._pending_job_tokens[request_id] = job_token
+        request = ExecutionRequest[MaskStrokeJobResult, object](
+            operation="editor.mask.stroke",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.INTERACTIVE,
+                resource_id=str(spec.mask_id),
+            ),
+            work=lambda context: render_mask_stroke(
+                spec,
+                self._compositor,
+                context.cancellation,
+            ),
         )
-        if executor is None:
-            worker.run()
-            return True
         try:
-            handle = executor.submit(
-                worker,
-                category="mask_stroke",
-                device=str(spec.mask_id),
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda result: self._finalize_stroke_result(
+                    result,
+                    request_id=request_id,
+                    commit=commit,
+                ),
             )
-        except Exception:
+        except ExecutionRejected:
+            pending_jobs.get(spec.mask_id, set()).discard(request_id)
+            self._pending_job_tokens.pop(request_id, None)
             logger.exception(
-                "Failed to queue mask stroke worker (mask=%s source=%s); executing synchronously.",
+                "Failed to queue mask stroke work (mask=%s source=%s)",
                 spec.mask_id,
                 source,
             )
-            worker.run()
-            return True
-        handle_box["handle"] = handle
-        if not completed["value"]:
-            pending = pending_jobs.setdefault(spec.mask_id, set())
-            pending.add(handle)
-            self._pending_job_tokens[handle] = job_token
+            return False
+        if request_id in pending_jobs.get(spec.mask_id, set()):
+            self._pending_handles[request_id] = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle_stroke_job(
+                spec.mask_id,
+                request_id,
+                handle,
+                outcome,
+            )
+        )
         return True
+
+    def shutdown(self) -> None:
+        """Cancel every pending stroke and close the view-owned scope."""
+        self.reset_state(None, request_redraw=False)
+        self._execution_scope.close(reason="mask_stroke_pipeline_shutdown")
 
     def _finalize_stroke_result(
         self,
         result: MaskStrokeJobResult,
         *,
-        handle: TaskHandle | None,
+        request_id: UUID,
         commit: bool,
     ) -> None:
         """Merge a completed stroke, update diagnostics, and clean pending state."""
@@ -360,16 +384,15 @@ class MaskStrokePipeline:
         log_fn = logger.debug
         pending = self._pending_jobs.get(mask_id)
         if pending is not None:
-            if handle is not None:
-                pending.discard(handle)
+            pending.discard(request_id)
             if not pending:
                 self._pending_jobs.pop(mask_id, None)
+        self._pending_handles.pop(request_id, None)
         metadata_mapping = (
             result.metadata if isinstance(result.metadata, Mapping) else {}
         )
         job_token = metadata_mapping.get("job_token")
-        if handle is not None:
-            self._pending_job_tokens.pop(handle, None)
+        self._pending_job_tokens.pop(request_id, None)
 
         def _clear_pending_token(target_mask_id: UUID, token_value: int | None) -> None:
             """Drop preview token if it matches the finalized job token."""
@@ -568,6 +591,49 @@ class MaskStrokePipeline:
         self._refresh_active_preview(job_result.mask_id, mask_layer)
         _clear_pending_token(job_result.mask_id, job_token)
         _notify_idle()
+
+    def _settle_stroke_job(
+        self,
+        mask_id: UUID,
+        request_id: UUID,
+        handle: ExecutionHandle[MaskStrokeJobResult, object],
+        outcome: ExecutionOutcome[MaskStrokeJobResult],
+    ) -> None:
+        """Clear failed or cancelled stroke execution without leaving preview state."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        current = self._pending_handles.get(request_id)
+        if current is not None and current is not handle:
+            return
+        pending = self._pending_jobs.get(mask_id)
+        if pending is None or request_id not in pending:
+            return
+        pending.discard(request_id)
+        if not pending:
+            self._pending_jobs.pop(mask_id, None)
+        self._pending_handles.pop(request_id, None)
+        job_token = self._pending_job_tokens.pop(request_id, None)
+        if job_token is not None and self._preview_tokens.get(mask_id) == job_token:
+            self._preview_tokens.pop(mask_id, None)
+        layer = self._assets.get_layer(mask_id)
+        if layer is not None and not layer.mask_image.isNull():
+            self._update_region(layer.mask_image.rect(), layer)
+        if self._diagnostics is not None:
+            self._diagnostics.record_drop(
+                mask_id=mask_id,
+                job_token=job_token,
+                reason=(
+                    "cancelled"
+                    if outcome.state == ExecutionState.CANCELLED
+                    else "execution_failed"
+                ),
+                detail=(
+                    outcome.cancellation_reason
+                    if outcome.state == ExecutionState.CANCELLED
+                    else str(outcome.error)
+                ),
+            )
+        self._notify_idle_if_clear(mask_id)
 
     def apply_stroke_segment(
         self,

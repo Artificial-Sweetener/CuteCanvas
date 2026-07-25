@@ -29,7 +29,6 @@ from PySide6.QtGui import (
     QImage,
 )
 from qpane.sdk.cache import CacheCoordinator
-from qpane.sdk.concurrency import TaskExecutorProtocol
 from qpane.sdk.diagnostics import Diagnostics
 from qpane.sdk.rendering import RenderingPresenter, SceneCoordinateSystem, View
 from qpane.sdk.scene import (
@@ -61,6 +60,7 @@ from cutecanvas.painting.clone_operation import CloneStampOperation
 from cutecanvas.raster.layers import EditableRasterLayerController
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.resources.active_raster import ActiveRasterResolver
+from cutecanvas.runtime.document_runtime import CanvasDocumentRuntime
 from cutecanvas.scene.geometry import aspect_scene_rect
 from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from cutecanvas.scene.movement_interaction import SceneLayerMovementInteraction
@@ -478,11 +478,6 @@ class CanvasAccessorsMixin:
         return self.view().scene_hit_test(panel_pos)
 
     @property
-    def executor(self) -> TaskExecutorProtocol:
-        """Return the task executor shared across CuteCanvas subsystems."""
-        return self._state.executor
-
-    @property
     def cacheCoordinator(self) -> CacheCoordinator | None:
         """Return the cache coordinator when coordination is enabled."""
         return self._state.cache_coordinator
@@ -516,6 +511,10 @@ class CanvasAccessorsMixin:
     def document(self) -> CanvasDocument:
         """Return the headless content aggregate mounted by this widget."""
         return self._document
+
+    def documentRuntime(self) -> CanvasDocumentRuntime:
+        """Return the ephemeral document-wide execution owner."""
+        return self._execution_binding.document_runtime
 
     def _inspection_target_bounds(self, target_id: uuid.UUID) -> QRectF | None:
         """Return one composition's native coordinate bounds."""

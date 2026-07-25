@@ -34,9 +34,13 @@ def drain_mask_jobs(
 ) -> tuple[dict[Any, tuple[Any, ...]], dict[Any, int]]:
     """Run queued mask worker + finalize jobs until pending state clears."""
     deadline = time.monotonic() + timeout
+    backend = getattr(qpane, "_test_execution_backend", None)
     exec_obj = executor or getattr(qpane, "executor", None)
     while time.monotonic() < deadline:
         progressed = False
+        if backend is not None and backend.pending_count:
+            backend.run_all()
+            progressed = True
         if exec_obj is not None:
             runner = getattr(exec_obj, "run_category", None)
             if callable(runner):

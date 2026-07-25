@@ -19,12 +19,22 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QImage
-from qpane.sdk.concurrency import TaskExecutorProtocol, TaskHandle, TaskRejected
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
+)
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
 )
@@ -32,7 +42,13 @@ from qpane.sdk.scene import RasterBounds
 
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController
-from .workers import MaskPrefetchWorker, MaskSnippetWorker, PrefetchedOverlay
+from .render_products import (
+    MaskPrefetchProduct,
+    MaskSnippetProduct,
+    PrefetchedOverlay,
+    build_mask_prefetch,
+    build_mask_snippet,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +68,22 @@ class MaskRenderWorkStats:
     last_duration_ms: float | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class _PrefetchHandle:
     """Track one queued prefetch and the render revisions it owns."""
 
-    handle: TaskHandle
+    request_id: uuid.UUID
+    handle: ExecutionHandle[MaskPrefetchProduct, object] | None
     mask_revisions: tuple[tuple[uuid.UUID, int], ...]
+
+
+@dataclass(slots=True)
+class _SnippetHandle:
+    """Track one current snippet request and its lifecycle handle."""
+
+    request_id: uuid.UUID
+    render_revision: int
+    handle: ExecutionHandle[MaskSnippetProduct, object] | None = None
 
 
 class MaskRenderWorkCoordinator:
@@ -68,7 +94,7 @@ class MaskRenderWorkCoordinator:
         *,
         assets: MaskAssetStore,
         controller: MaskController,
-        executor: TaskExecutorProtocol | None,
+        execution_scope: ExecutionScope,
         mask_ids_for_composition: Callable[[uuid.UUID], list[uuid.UUID]],
         composition_ids_for_mask: Callable[[uuid.UUID], tuple[uuid.UUID, ...]],
         current_composition_id: Callable[[], uuid.UUID | None],
@@ -80,7 +106,9 @@ class MaskRenderWorkCoordinator:
         """Store render-work collaborators and initialize owned task state."""
         self._assets = assets
         self._controller = controller
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:mask-render-work"
+        )
         self._mask_ids_for_composition = mask_ids_for_composition
         self._composition_ids_for_mask = composition_ids_for_mask
         self._current_composition_id = current_composition_id
@@ -89,9 +117,9 @@ class MaskRenderWorkCoordinator:
         self._is_mask_busy = is_mask_busy
         self._publish_status = publish_status
         self._enabled = True
-        self._cancelled_task_ids: set[str] = set()
+        self._cancelled_task_ids: set[uuid.UUID] = set()
         self._prefetch_handles: dict[uuid.UUID, _PrefetchHandle] = {}
-        self._snippet_handles: dict[uuid.UUID, TaskHandle] = {}
+        self._snippet_handles: dict[uuid.UUID, _SnippetHandle] = {}
         self._deferred_overlays: dict[uuid.UUID, PrefetchedOverlay] = {}
         self._skipped = 0
         self._submission_failures = 0
@@ -174,10 +202,6 @@ class MaskRenderWorkCoordinator:
         if not self._enabled:
             logger.debug("Mask prefetch skipped for %s: disabled", image_id)
             return False
-        executor = self._executor
-        if executor is None:
-            logger.debug("Mask prefetch skipped for %s: executor unavailable", image_id)
-            return False
         if image_id is None:
             return False
         mask_ids = [
@@ -203,18 +227,39 @@ class MaskRenderWorkCoordinator:
             )
             return False
         self.cancel_prefetch(image_id)
-        worker = MaskPrefetchWorker(
-            image_id=image_id,
-            mask_ids=tuple(mask_ids),
-            mask_manager=self._assets,
-            controller=self._controller,
-            coordinator=self,
-            current_image_id=self._current_composition_id(),
-            scales=prefetch_scales,
+        request_id = uuid.uuid4()
+        mask_revisions = tuple(
+            (mask_id, self._controller.renders.render_revision(mask_id))
+            for mask_id in mask_ids
+        )
+        pending = _PrefetchHandle(request_id, None, mask_revisions)
+        self._prefetch_handles[image_id] = pending
+        request = ExecutionRequest[MaskPrefetchProduct, object](
+            operation="editor.mask.prefetch",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.BACKGROUND,
+            ),
+            work=lambda context: build_mask_prefetch(
+                image_id=image_id,
+                mask_ids=mask_ids,
+                assets=self._assets,
+                controller=self._controller,
+                current_mask_id=self._controller.get_active_mask_id(),
+                scales=prefetch_scales,
+                cancellation=context.cancellation,
+            ),
         )
         try:
-            handle = executor.submit(worker, category="mask_prefetch")
-        except Exception as exc:
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda product: self.consume_prefetch_results(
+                    request_id=request_id,
+                    product=product,
+                ),
+            )
+        except ExecutionRejected as exc:
+            self._prefetch_handles.pop(image_id, None)
             self._submission_failures += len(mask_ids)
             message = (
                 f"Prefetch rejected for image {self._format_uuid(image_id)}: {exc}"
@@ -224,16 +269,17 @@ class MaskRenderWorkCoordinator:
             self._publish_status(message, label="Mask Prefetch Error")
             logger.exception("Failed to queue mask prefetch for image %s", image_id)
             return False
-        worker.set_task_id(handle.task_id)
-        mask_revisions = tuple(
-            (mask_id, self._controller.renders.render_revision(mask_id))
-            for mask_id in mask_ids
+        if self._prefetch_handles.get(image_id) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle_prefetch(
+                image_id,
+                request_id,
+                handle,
+                outcome,
+            )
         )
         count = len(mask_revisions)
-        self._prefetch_handles[image_id] = _PrefetchHandle(
-            handle=handle,
-            mask_revisions=mask_revisions,
-        )
         self._last_message = (
             f"Prefetch queued for {count} mask(s) on {self._format_uuid(image_id)}."
         )
@@ -261,11 +307,8 @@ class MaskRenderWorkCoordinator:
         handle = handle_entry.handle
         mask_revisions = handle_entry.mask_revisions
         cancelled = False
-        if self._executor is not None:
-            try:
-                cancelled = self._executor.cancel(handle)
-            except Exception:
-                logger.debug("Mask prefetch cancellation failed", exc_info=True)
+        if handle is not None:
+            cancelled = handle.cancel(reason="mask prefetch cancelled")
         if cancelled:
             message = f"Prefetch cancelled for {self._format_uuid(image_id)}."
         else:
@@ -281,7 +324,7 @@ class MaskRenderWorkCoordinator:
             image_id,
             cancelled,
         )
-        self._cancelled_task_ids.add(handle.task_id)
+        self._cancelled_task_ids.add(handle_entry.request_id)
         metrics = self._controller.renders.snapshot_metrics()
         outstanding = metrics.prefetch_requested - (
             metrics.prefetch_completed + metrics.prefetch_failed
@@ -295,17 +338,22 @@ class MaskRenderWorkCoordinator:
             self._controller.renders.complete_async(mask_id, render_revision)
         return cancelled
 
+    def shutdown(self) -> None:
+        """Cancel derived render work and close its view-owned scope."""
+        self.cancel_prefetch(None)
+        for mask_id in tuple(self._snippet_handles):
+            self.prioritize_interaction(mask_id)
+        self._deferred_overlays.clear()
+        self._execution_scope.close(reason="mask_render_work_shutdown")
+
     def prioritize_interaction(self, mask_id: uuid.UUID) -> None:
         """Cancel competing derived work before direct mask interaction begins."""
         image_id = self._resolve_image_id(mask_id)
         if image_id is not None:
             self.cancel_prefetch(image_id)
         handle = self._snippet_handles.pop(mask_id, None)
-        if handle is not None and self._executor is not None:
-            try:
-                self._executor.cancel(handle)
-            except Exception:
-                logger.debug("Mask snippet cancellation failed", exc_info=True)
+        if handle is not None and handle.handle is not None:
+            handle.handle.cancel(reason="mask interaction prioritized")
         self._controller.renders.cancel_async(mask_id)
 
     def update_region(
@@ -346,7 +394,6 @@ class MaskRenderWorkCoordinator:
         should_request_async = (
             mask_id is not None
             and async_available
-            and self._executor is not None
             and (
                 force_async_colorize
                 or (sub_mask_image is None and area > SNIPPET_ASYNC_THRESHOLD_PX)
@@ -419,28 +466,42 @@ class MaskRenderWorkCoordinator:
         mask_layer: MaskLayer,
         snippet: QImage,
     ) -> bool:
-        """Dispatch a snippet colorization worker for the dirty mask region."""
-        if self._executor is None:
-            return False
+        """Dispatch a typed snippet colorization product."""
         render_revision = self._controller.renders.render_revision(mask_id)
-        worker = MaskSnippetWorker(
-            mask_id=mask_id,
-            render_revision=render_revision,
-            dirty_rect=QRect(dirty_image_rect),
-            snippet=snippet,
-            color=self._controller.color_for_mask(mask_id),
-            controller=self._controller,
-            coordinator=self,
-        )
         previous = self._snippet_handles.pop(mask_id, None)
-        if previous is not None:
-            try:
-                self._executor.cancel(previous)
-            except Exception:
-                logger.debug("Previous mask snippet cancellation failed", exc_info=True)
+        if previous is not None and previous.handle is not None:
+            previous.handle.cancel(reason="replaced by newer mask snippet")
+        request_id = uuid.uuid4()
+        pending = _SnippetHandle(request_id, render_revision)
+        self._snippet_handles[mask_id] = pending
+        request = ExecutionRequest[MaskSnippetProduct, object](
+            operation="editor.mask.snippet",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.INTERACTIVE,
+                resource_id=str(mask_id),
+            ),
+            work=lambda context: build_mask_snippet(
+                mask_id=mask_id,
+                render_revision=render_revision,
+                dirty_rect=dirty_image_rect,
+                snippet=snippet,
+                color=self._controller.color_for_mask(mask_id),
+                controller=self._controller,
+                cancellation=context.cancellation,
+            ),
+        )
         try:
-            handle = self._executor.submit(worker, category="mask_snippet")
-        except TaskRejected as exc:
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda product: self.consume_snippet_result(
+                    request_id=request_id,
+                    product=product,
+                ),
+            )
+        except ExecutionRejected as exc:
+            if self._snippet_handles.get(mask_id) is pending:
+                self._snippet_handles.pop(mask_id, None)
             message = (
                 "Mask snippet colorization rejected for mask "
                 f"{self._format_uuid(mask_id)}: {exc}"
@@ -448,25 +509,34 @@ class MaskRenderWorkCoordinator:
             logger.debug(message)
             self._publish_status(message, label="Mask Snippet Error")
             return False
-        self._snippet_handles[mask_id] = handle
+        if self._snippet_handles.get(mask_id) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle_snippet(
+                mask_id,
+                request_id,
+                handle,
+                outcome,
+            )
+        )
         return True
 
     def consume_snippet_result(
         self,
         *,
-        mask_id: uuid.UUID,
-        render_revision: int,
-        handle: TaskHandle | None,
-        dirty_rect: QRect,
-        colorized_image: QImage | None,
-        colorize_duration_ms: float | None = None,
+        request_id: uuid.UUID,
+        product: MaskSnippetProduct,
     ) -> None:
         """Apply snippet colorization results and finalize async notifications."""
-        if handle is not None:
-            current = self._snippet_handles.get(mask_id)
-            if current is None or current.task_id != handle.task_id:
-                return
-            self._snippet_handles.pop(mask_id, None)
+        mask_id = product.mask_id
+        current = self._snippet_handles.get(mask_id)
+        if current is None or current.request_id != request_id:
+            return
+        self._snippet_handles.pop(mask_id, None)
+        render_revision = product.render_revision
+        dirty_rect = product.dirty_rect
+        colorized_image = product.image
+        colorize_duration_ms = product.colorize_duration_ms
         if render_revision != self._controller.renders.render_revision(
             mask_id
         ) or self._is_mask_busy(mask_id):
@@ -514,19 +584,17 @@ class MaskRenderWorkCoordinator:
     def consume_prefetch_results(
         self,
         *,
-        image_id: uuid.UUID,
-        warmed: Sequence[PrefetchedOverlay],
-        failures: Mapping[uuid.UUID, str],
-        duration_ms: float,
-        error: BaseException | None,
-        task_id: str | None = None,
+        request_id: uuid.UUID,
+        product: MaskPrefetchProduct,
     ) -> None:
         """Commit prefetched overlays and update diagnostics on the main thread."""
+        image_id = product.image_id
+        warmed = product.warmed
+        failures = dict(product.failures)
+        duration_ms = product.duration_ms
         active_handle = self._prefetch_handles.get(image_id)
-        if task_id is not None and (
-            active_handle is None or active_handle.handle.task_id != task_id
-        ):
-            self._cancelled_task_ids.discard(task_id)
+        if active_handle is None or active_handle.request_id != request_id:
+            self._cancelled_task_ids.discard(request_id)
             return
         owned_revisions = (
             dict(active_handle.mask_revisions)
@@ -534,8 +602,8 @@ class MaskRenderWorkCoordinator:
             else {overlay.mask_id: overlay.render_revision for overlay in warmed}
         )
         self._prefetch_handles.pop(image_id, None)
-        if task_id is not None and task_id in self._cancelled_task_ids:
-            self._cancelled_task_ids.discard(task_id)
+        if request_id in self._cancelled_task_ids:
+            self._cancelled_task_ids.discard(request_id)
             return
         failure_messages = dict(failures)
         completed = 0
@@ -568,8 +636,6 @@ class MaskRenderWorkCoordinator:
         for mask_id, render_revision in owned_revisions.items():
             if mask_id not in deferred_mask_ids:
                 self._controller.renders.complete_async(mask_id, render_revision)
-        if error is not None:
-            failure_messages["worker"] = str(error)
         failure_count = len(failure_messages)
         duration_value = duration_ms if (completed or failure_count) else None
         self._controller.renders.record_prefetch_completion(
@@ -614,6 +680,60 @@ class MaskRenderWorkCoordinator:
         self._publish_status(summary, label=label)
         for overlay in warmed:
             self.apply_deferred(overlay.mask_id)
+
+    def _settle_prefetch(
+        self,
+        image_id: uuid.UUID,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[MaskPrefetchProduct, object],
+        outcome: ExecutionOutcome[MaskPrefetchProduct],
+    ) -> None:
+        """Settle failed or cancelled prefetch work without stale cache adoption."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._prefetch_handles.get(image_id)
+        if (
+            pending is None
+            or pending.request_id != request_id
+            or (pending.handle is not None and pending.handle is not handle)
+        ):
+            return
+        self._prefetch_handles.pop(image_id, None)
+        for mask_id, render_revision in pending.mask_revisions:
+            self._controller.renders.complete_async(mask_id, render_revision)
+        if outcome.state == ExecutionState.CANCELLED:
+            return
+        self._submission_failures += len(pending.mask_revisions)
+        message = (
+            f"Mask prefetch failed for {self._format_uuid(image_id)}: "
+            f"{outcome.error}"
+        )
+        self._last_message = message
+        self._last_duration_ms = None
+        self._publish_status(message, label="Mask Prefetch Error")
+
+    def _settle_snippet(
+        self,
+        mask_id: uuid.UUID,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[MaskSnippetProduct, object],
+        outcome: ExecutionOutcome[MaskSnippetProduct],
+    ) -> None:
+        """Settle failed or cancelled snippet work exactly once."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._snippet_handles.get(mask_id)
+        if (
+            pending is None
+            or pending.request_id != request_id
+            or (pending.handle is not None and pending.handle is not handle)
+        ):
+            return
+        self._snippet_handles.pop(mask_id, None)
+        self._controller.renders.complete_async(
+            mask_id,
+            pending.render_revision,
+        )
 
     def handle_mask_idle(self, mask_id: uuid.UUID) -> None:
         """Apply deferred prefetch work once stroke work for mask_id completes."""

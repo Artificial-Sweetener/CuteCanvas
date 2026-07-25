@@ -17,9 +17,9 @@
 from . import cache as cache
 from . import catalog as catalog
 from . import compare as compare
-from . import concurrency as concurrency
 from . import configuration as configuration
 from . import diagnostics as diagnostics
+from . import execution as execution
 from . import features as features
 from . import inspection as inspection
 from . import layout as layout

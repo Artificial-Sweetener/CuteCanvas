@@ -150,14 +150,19 @@ class SamDelegate:
             ),
         )
 
-    def predict_mask_from_box(self, bbox: np.ndarray) -> np.ndarray | None:
-        """Run box inference through the SAM service boundary."""
-        predictor = self._active_predictor
-        if predictor is None:
-            return None
-        from .service import predict_mask_from_box
-
-        return predict_mask_from_box(predictor, bbox)
+    def request_mask_from_box(
+        self,
+        bbox: np.ndarray,
+        *,
+        erase_mode: bool,
+    ) -> bool:
+        """Queue box inference through the manager's native session."""
+        reference = self._active_predictor
+        manager = self._manager
+        image_id = getattr(reference, "image_id", None)
+        if manager is None or image_id is None:
+            return False
+        return manager.generateMaskFromBox(image_id, bbox, erase_mode=erase_mode)
 
     def _on_predictor_ready(self, predictor, image_id: uuid.UUID) -> None:
         """Activate a predictor that matches the active raster resource."""

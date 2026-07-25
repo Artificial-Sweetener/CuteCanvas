@@ -22,11 +22,21 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPointF, QRunnable, QSize, Signal
+from PySide6.QtCore import QObject, QPointF, QSize, Signal
 from PySide6.QtGui import QImage, QImageReader
 
-from ..concurrency import BaseWorker, TaskExecutorProtocol, TaskHandle
 from ..core.config import Config, PlaceholderSettings
+from ..execution import (
+    CancellationToken,
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
+)
 from ..rendering.sdk import RasterSource, RenderLayer, RenderScene
 from ..rendering.viewport import Viewport, ViewportZoomMode
 from ..scene.identity import (
@@ -49,41 +59,13 @@ class ViewerPlaceholderState:
     error: str | None
 
 
-class _PlaceholderLoadSignals(QObject):
-    """Deliver one background image decode result to the GUI thread."""
+@dataclass(frozen=True, slots=True)
+class _PlaceholderDecode:
+    """Carry one detached placeholder decode result."""
 
-    finished = Signal(int, object, object)
-    error = Signal(int, object, str)
-
-
-class _PlaceholderLoadWorker(QRunnable, BaseWorker):
-    """Decode one configured placeholder without blocking Qt input."""
-
-    def __init__(self, generation: int, path: Path) -> None:
-        """Store immutable request identity and source path."""
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self, logger=logger)
-        self.generation = generation
-        self.path = Path(path)
-        self.signals = _PlaceholderLoadSignals()
-
-    def run(self) -> None:
-        """Decode the image and publish a detached worker result."""
-        if self.is_cancelled:
-            self.emit_finished(False, (self.generation, self.path, "cancelled"))
-            return
-        reader = QImageReader(str(self.path))
-        reader.setAutoTransform(True)
-        image = reader.read()
-        if self.is_cancelled:
-            self.emit_finished(False, (self.generation, self.path, "cancelled"))
-        elif image.isNull():
-            self.emit_finished(
-                False,
-                (self.generation, self.path, reader.errorString()),
-            )
-        else:
-            self.emit_finished(True, (self.generation, self.path, image))
+    generation: int
+    path: Path
+    image: QImage
 
 
 class ViewerPlaceholder(QObject):
@@ -97,7 +79,7 @@ class ViewerPlaceholder(QObject):
         *,
         catalog: ViewerCatalog,
         viewport: Viewport,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
         set_scene: Callable[[RenderScene | None, bool], None],
         set_navigation_enabled: Callable[[bool], None],
         parent: QObject | None = None,
@@ -106,7 +88,7 @@ class ViewerPlaceholder(QObject):
         super().__init__(parent)
         self._catalog = catalog
         self._viewport = viewport
-        self._executor = executor
+        self._execution_scope = execution_scope
         self._set_scene = set_scene
         self._set_navigation_enabled = set_navigation_enabled
         self._settings = PlaceholderSettings()
@@ -116,8 +98,7 @@ class ViewerPlaceholder(QObject):
         self._loading = False
         self._error: str | None = None
         self._generation = 0
-        self._worker: _PlaceholderLoadWorker | None = None
-        self._handle: TaskHandle | None = None
+        self._handle: ExecutionHandle[_PlaceholderDecode, object] | None = None
         self._suspended = False
         catalog.selectionChanged.connect(self._selection_changed)
 
@@ -176,6 +157,7 @@ class ViewerPlaceholder(QObject):
     def shutdown(self) -> None:
         """Cancel decoding and release temporary interaction policy."""
         self._cancel_load()
+        self._execution_scope.close(reason="placeholder_shutdown")
         self._deactivate()
 
     def _selection_changed(self, entry: ViewerCatalogEntry | None) -> None:
@@ -197,16 +179,35 @@ class ViewerPlaceholder(QObject):
             self._loading = False
             self._present_or_blank()
             return
-        worker = _PlaceholderLoadWorker(self._generation, path)
-        BaseWorker.connect_queued(worker.signals.finished, self._load_finished)
-        BaseWorker.connect_queued(worker.signals.error, self._load_failed)
-        self._worker = worker
         self._loading = True
         self._publish()
+        generation = self._generation
         try:
-            self._handle = self._executor.submit(worker, category="io")
+            handle = self._execution_scope.submit(
+                ExecutionRequest(
+                    operation="viewer_placeholder_decode",
+                    requirements=ExecutionRequirements(
+                        resource=ExecutionResource.BLOCKING_IO,
+                        urgency=ExecutionUrgency.BACKGROUND,
+                    ),
+                    work=lambda context: _decode_placeholder(
+                        generation,
+                        path,
+                        context.cancellation,
+                    ),
+                    tags=(("generation", generation),),
+                ),
+                adopt=self._load_finished,
+            )
+            handle.add_done_callback(
+                lambda outcome: self._load_settled(
+                    generation,
+                    path,
+                    outcome,
+                )
+            )
+            self._handle = None if handle.state.is_terminal else handle
         except Exception:
-            self._worker = None
             self._handle = None
             self._loading = False
             self._error = "placeholder decode could not be scheduled"
@@ -215,34 +216,36 @@ class ViewerPlaceholder(QObject):
 
     def _cancel_load(self) -> None:
         """Cancel the current decode without accepting a late worker result."""
-        worker = self._worker
         handle = self._handle
-        self._worker = None
         self._handle = None
-        if worker is not None:
-            worker.cancel()
         if handle is not None:
-            self._executor.cancel(handle)
+            handle.cancel(reason="placeholder_replaced")
 
-    def _load_finished(self, generation: int, path: Path, image: QImage) -> None:
+    def _load_finished(self, result: _PlaceholderDecode) -> None:
         """Accept one current successful decode and reject stale results."""
-        if generation != self._generation or Path(path) != self._path:
+        if result.generation != self._generation or result.path != self._path:
             return
-        self._worker = None
         self._handle = None
         self._loading = False
         self._error = None
-        self._image = QImage(image)
+        self._image = QImage(result.image)
         self._present_or_blank()
 
-    def _load_failed(self, generation: int, path: Path, reason: str) -> None:
+    def _load_settled(
+        self,
+        generation: int,
+        path: Path,
+        outcome: ExecutionOutcome[_PlaceholderDecode],
+    ) -> None:
         """Record a current decode failure without disturbing real content."""
-        if generation != self._generation or Path(path) != self._path:
+
+        if outcome.state != ExecutionState.FAILED:
             return
-        self._worker = None
+        if generation != self._generation or path != self._path:
+            return
         self._handle = None
         self._loading = False
-        self._error = str(reason)
+        self._error = str(outcome.error)
         self._image = None
         self._present_or_blank()
 
@@ -316,3 +319,22 @@ class ViewerPlaceholder(QObject):
     def _publish(self) -> None:
         """Publish a detached lifecycle snapshot."""
         self.changed.emit(self.state())
+
+
+def _decode_placeholder(
+    generation: int,
+    path: Path,
+    cancellation: CancellationToken,
+) -> _PlaceholderDecode:
+    """Decode one configured placeholder away from the GUI thread."""
+
+    if cancellation.is_cancelled:
+        raise RuntimeError(cancellation.reason or "placeholder decode cancelled")
+    reader = QImageReader(str(path))
+    reader.setAutoTransform(True)
+    image = reader.read()
+    if cancellation.is_cancelled:
+        raise RuntimeError(cancellation.reason or "placeholder decode cancelled")
+    if image.isNull():
+        raise RuntimeError(reader.errorString())
+    return _PlaceholderDecode(generation, Path(path), QImage(image))

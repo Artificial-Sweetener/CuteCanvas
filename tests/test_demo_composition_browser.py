@@ -95,7 +95,7 @@ def test_browser_nests_all_inactive_layers_and_selects_exact_child(qapp) -> None
 
 def test_layer_properties_request_opens_one_focused_modal(qapp) -> None:
     """Layer properties must open without disturbing the active viewport."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.resize(900, 700)
         window.show()
@@ -295,7 +295,7 @@ def test_browser_selection_and_hover_use_transient_content_effects(qapp) -> None
 
 def test_demo_composition_creation_placement_and_policy_are_intentional(qapp) -> None:
     """The compact browser should expose complete composition-first workflows."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         seeded_id = window.qpane.createCompositionFromImage(
             _image("blue"),
@@ -408,7 +408,7 @@ def test_browser_refreshes_each_composition_immediately_after_layer_lifecycle(
     qapp,
 ) -> None:
     """Each composition row must reflect layer additions without incidental refreshes."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         first_composition = window.qpane.createCompositionFromImage(
             _image("red"),
@@ -466,7 +466,7 @@ def test_demo_browser_survives_repeated_cross_composition_layer_activation(
     qapp,
 ) -> None:
     """Repeated tree activation must never retain deleted rows or lose child stacks."""
-    window = ExampleWindow(ExampleOptions(feature_set="mask"))
+    window = ExampleWindow(ExampleOptions())
     try:
         first_id = window.qpane.createCompositionFromImage(
             _image("red", QSize(2048, 1536)),

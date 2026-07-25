@@ -221,5 +221,5 @@ Use it while testing large images or tuning memory. The complete workflow is in
 * [Catalog and Navigation](catalog-and-navigation.md): catalog state, linking,
   comparison, prefetch, and events.
 * [Configuration](configuration.md): memory, placeholders, navigation feel,
-  touch, and concurrency.
+  touch, and background execution.
 * [Rendering SDK](rendering-sdk.md): build layered raster and vector scenes.

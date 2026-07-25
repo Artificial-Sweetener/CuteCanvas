@@ -101,38 +101,12 @@ config = {
     "sam_download_mode": "background",  # One of "blocking", "background", "disabled".
     "sam_prefetch_depth": None,  # Predictor prefetch depth; None inherits cache.prefetch.predictors.
     "sam_cache_limit": 1,  # Max cached SAM predictors/embeddings kept in RAM.
-
-    # --- Concurrency ---
-    "concurrency": {  # Executor tuning (threads, priorities, and limits).
-        "max_workers": 2,  # Max worker threads in the background executor.
-        "category_priorities": {  # Higher numbers run sooner within the queue.
-            "mask_stroke": 60,
-            "mask_snippet": 50,
-            "tiles_visible": 40,
-            "pyramid": 30,
-            "tiles_prefetch": 20,
-            "tiles": 20,
-            "io": 10,
-            "sam": 5,
-            "maintenance": 0,
-        },
-        "category_limits": {  # Max concurrent tasks per category.
-            "pyramid": 2,
-        },
-        "device_limits": {  # Per-device caps for categories (e.g., sam on cpu/cuda).
-            "cpu": {
-                "sam": 1,
-            },
-            "cuda": {
-                "sam": 1,
-            },
-        },
-        "max_pending_total": None,  # Global pending-queue cap; None is unlimited.
-        "pending_limits": {  # Per-category pending-queue caps.
-        },
-    },
 }
 ```
+
+Execution capacity is supplied separately through `execution_policy`,
+`execution_runtime`, or a shared `document_runtime`. It is runtime ownership,
+not serializable editor configuration.
 
 ## Related Docs
 Pair this reference with the narrative guide in [Configuration](configuration.md) to understand when to choose each setting, see [Masks and SAM](masks-and-sam.md) for feature-specific behavior, and check [Diagnostics](diagnostics.md) to interpret the live overlay after you tweak these values.

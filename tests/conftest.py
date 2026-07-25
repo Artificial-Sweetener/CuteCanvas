@@ -25,6 +25,19 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 from qpane import QPane
 
+from tests.harness.process_lock import InterprocessPerformanceLock
+
+
+@pytest.fixture(autouse=True)
+def _isolate_interactive_performance(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Give strict latency probes exclusive access to shared hardware."""
+    if request.node.get_closest_marker("interactive_performance") is None:
+        yield
+        return
+    lock_path = Path.cwd() / ".pytest-tmp" / "interactive-performance.lock"
+    with InterprocessPerformanceLock(lock_path):
+        yield
+
 
 @pytest.fixture(scope="session")
 def qapp():

@@ -83,6 +83,7 @@ __all__ = [
     "CanvasContentReference",
     "CanvasInteractionMode",
     "CanvasDocument",
+    "CanvasDocumentRuntime",
     "CanvasPresentation",
     "CanvasPresentationContext",
     "CanvasPresentationKind",
@@ -135,6 +136,7 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
         "CanvasInteractionMode",
     ),
     "CanvasDocument": ("cutecanvas.document", "CanvasDocument"),
+    "CanvasDocumentRuntime": ("cutecanvas.runtime", "CanvasDocumentRuntime"),
     "CanvasPresentation": ("cutecanvas.document", "CanvasPresentation"),
     "CanvasPresentationKind": (
         "cutecanvas.document",

@@ -8,7 +8,7 @@ lifecycle. CuteCanvas is one such host. Import only the concern you actually
 integrate:
 
 ```python
-from qpane.sdk.concurrency import TaskExecutorProtocol
+from qpane.sdk.execution import ExecutionRuntime
 from qpane.sdk.scene import LayerSourceCapabilities, SceneProviderRegistry
 ```
 
@@ -72,9 +72,9 @@ as ordinary raster, vector, and hybrid content.
 `View` owns viewport state used by the low-level engine, `Renderer` produces
 frames from compiled scenes, and `RenderingPresenter` coordinates publication
 without exposing half-finished work. `PyramidManager` owns multiresolution
-raster products, while `LayerRasterizationWorker` resolves bounded layer
-content away from the GUI thread. `ViewportZoomMode` names the authoritative
-fit, native-scale, and explicit zoom policies.
+raster products, while `rasterize_layer()` and `rasterize_region()` produce
+detached bounded products inside an execution request. `ViewportZoomMode`
+names the authoritative fit, native-scale, and explicit zoom policies.
 
 `View.coordinates` and `QPane.coordinateSystem()` expose the same
 `SceneCoordinateSystem`. Advanced interactions pass `PanelPoint`,
@@ -99,27 +99,100 @@ implementations.
 
 ## Task execution and retry
 
-Render-adjacent work implements `BaseWorker` and is submitted through
-`TaskExecutorProtocol`; `TaskHandle` represents cancellation and completion,
-while `TaskRejected` reports a bounded executor refusing more work.
-Workers whose GUI-thread result handling owns native-resource teardown can
-defer scheduler completion until that handling finishes, keeping category and
-device limits authoritative across the complete resource lifecycle.
-`QThreadPoolExecutor` owns QPane's bounded scheduler and uses a Qt thread pool
-by default.
-`LiveTunableExecutorProtocol` is the narrow contract used when concurrency may
-change at runtime.
-`PersistentWorkerPool` is an optional executor backend for native libraries
-that require stable Python worker-thread identity across serialized jobs. It
-uses the same QPane queueing, cancellation, limits, completion, and diagnostics
-ownership as the default Qt pool.
+`ExecutionRuntime` owns task lifecycle and routes each accepted
+`ExecutionRequest` to exactly one capable `ExecutionBackend`. A request carries
+detached work plus `ExecutionRequirements`: resource class, semantic urgency,
+optional affinity or exclusion, and a retained-byte estimate. String operation
+names are diagnostic identity, not scheduler policy.
 
-`ThreadPolicy` is the immutable resolved scheduling policy and
-`build_thread_policy` derives it from settings and host limits.
-`RetryContext` and `RetryEntriesView` retain bounded retry state;
-`makeQtRetryController` and `qt_retry_dispatcher` bridge retry decisions onto
-Qt safely. `retry_diagnostics_provider` and `retry_summary_provider` expose the
-same state to diagnostics rather than maintaining parallel counters.
+Every owner opens an `ExecutionScope`. Closing the scope cancels its handles,
+prevents new submissions, and suppresses unsafe late delivery. `ExecutionHandle`
+exposes cancellation, state, timings, and one terminal `ExecutionOutcome`.
+Worker exceptions and adoption exceptions are identified separately.
+`QtOwnerDispatcher` adopts results on a receiver's Qt thread and acknowledges
+discarded delivery when that receiver is destroyed.
+
+Worker code receives an `ExecutionTaskContext`. Its `CancellationToken` makes
+cooperative cancellation cheap to check, and its typed
+`ExecutionProgressReporter` coalesces bursts before delivery. The terminal
+`ExecutionOutcome` names its `ExecutionState`, separates worker and adoption
+errors with `ExecutionFailurePhase`, and records phase boundaries in
+`ExecutionTimings`. Diagnostic request tags accept only safe immutable
+`ExecutionTagValue` values.
+
+`CompletionDispatcher` is the delivery protocol used by a scope.
+`QtOwnerDispatcher` is the normal widget choice, while `InlineDispatcher`
+supports synchronous services and deterministic tests. Dispatchers acknowledge
+discarded callbacks so teardown still settles every accepted task.
+
+The standalone runtime uses `DefaultExecutionPolicy` and remains bounded by
+accepted-task count and retained bytes. Its default backend applies semantic
+urgency with aging, resource limits, immediate structured rejection, and
+multi-observer `ExecutionSnapshot` diagnostics. Thread-affine native work is
+routed to the affinity backend; an adoption-held exclusive lease can keep a
+native resource serialized through GUI-thread adoption.
+
+`create_native_execution_runtime()` creates an owned runtime dedicated to
+those hard native-affinity requirements. An integrating product can use it as
+a disjoint fallback when its ordinary host backend does not advertise the
+capability; ordinary requests continue to use the host backend and each
+request is still admitted exactly once.
+
+Applications may inject an `ExecutionRuntime` into `QPane` or `CuteCanvas`.
+A custom backend implements only three public responsibilities:
+
+1. report honest `ExecutionBackendCapabilities`;
+2. admit one `ExecutionJob` or raise `ExecutionRejected`; and
+3. schedule `job.run()` exactly once while returning a `BackendSubmission`
+   that can remove pending work with `job.cancel_before_start()`.
+
+`ExecutionBackendCapabilities` tells the runtime which scheduling constraints
+the backend can enforce. Each accepted `ExecutionJob` remains owned by the
+runtime even though the backend chooses where it runs. The returned
+`BackendSubmission` represents only physical pending-work cancellation, so it
+does not duplicate the task lifecycle or its terminal outcome.
+
+Each request carries `ExecutionRequirements` instead of a backend-specific
+queue name. `ExecutionResource` describes the kind of capacity the work
+consumes, while `ExecutionUrgency` expresses how promptly it should begin.
+`ExecutionLeaseRelease` determines whether an exclusive resource is released
+after worker execution or retained until owner-thread adoption completes.
+These scheduling facts let different backends preserve the same observable
+contract without copying QPane's standalone policy.
+
+An `ExecutionRejected` value includes an `ExecutionRejectionReason`, so a
+producer can distinguish saturation, unsupported requirements, and closed
+ownership from worker failure. A rejected request was never accepted and never
+has an accepted-task completion lifecycle.
+
+The host remains the only physical admission owner. It does not wrap a QPane
+pool, publish domain results, marshal Qt adoption, or duplicate cancellation
+state. QPane never configures or shuts down a supplied runtime.
+
+`RetryPolicy` computes bounded deterministic delays. `RetryController` retains
+at most one coalesced payload per producer key and retries only structured
+rejection through a `DelayScheduler`. `QtDelayScheduler` keeps those producer
+decisions on the owner thread. Retry diagnostics use `RetrySnapshot` and the
+same diagnostics system as runtime snapshots.
+
+`RetryContext` carries the operation, producer key, and retained payload size
+used to calculate policy. A `DelayHandle` cancels one scheduled attempt, while
+`RetrySchedulingError` reports that a `DelayScheduler` could not retain the
+delay. `RetryCategorySnapshot` is one operation's immutable counters inside
+the complete `RetrySnapshot`.
+
+Runtime diagnostics are read through `ExecutionDiagnosticsProvider`.
+`ExecutionSnapshot` contains bounded aggregate and operation state, while a
+`DiagnosticsSubscription` releases one listener independently. Use
+`execution_summary_records` and `execution_detail_records` to present runtime
+state through QPane's diagnostics model. The matching
+`retry_summary_records` and `retry_detail_records` functions present producer
+backoff without exposing retry internals to host UI code.
+
+`create_default_execution_runtime()` is the convenient bounded runtime for
+standalone applications. `create_native_execution_runtime()` is reserved for
+hard stable-affinity operations; it does not become a second admission path
+for ordinary work.
 
 ## Configuration extensions
 
@@ -240,14 +313,14 @@ host-selected outbound content without assuming it is one image file.
 `OutboundMimeProvider` may materialize URLs, text, previews, and custom MIME
 values synchronously or later. `OutboundDragController` cancels superseded
 work, ignores stale completion, marshals delivery to the GUI thread, and uses
-the same native Qt drag executor as QPane's ready-made image workflow.
+the same native drag path as QPane's ready-made image workflow.
 Deferred providers receive a one-shot `DragCompletion` callback and may return
 a `DragCancellation` object for superseded work. Custom native hosts can call
 `execute_outbound_drag` after materializing an `OutboundDragPayload`; the
 helper builds the Qt MIME data, preview, hotspot, and copy action consistently.
 
-`SystemHeadroomWorker` samples memory pressure away from the GUI thread so
-cache policy can react without blocking input.
+`sample_system_headroom` returns a detached `SystemHeadroomSample` suitable for
+runtime submission, so cache policy can react without blocking input.
 
 The advanced SDK deliberately stops at renderer integration. Documents,
 editable layers, masks, selections, history, painting, and authoring tools

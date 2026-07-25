@@ -18,9 +18,8 @@
 
 Expose cache and prefetch settings plus the :class:`Config` snapshot wrapper.
 
-Clone configurations before mutating so panes keep isolated cache budgets, radii,
-
-and concurrency limits.
+Clone configurations before mutating so panes keep isolated cache budgets and
+prefetch radii.
 """
 
 from __future__ import annotations
@@ -628,21 +627,6 @@ _DEFAULTS: dict[str, Any] = {
     "diagnostics_overlay_enabled": False,
     "diagnostics_domains_enabled": (),
     "draw_tile_grid": False,
-    "concurrency": {
-        "max_workers": 2,
-        "category_priorities": {
-            "tiles_visible": 40,
-            "pyramid": 30,
-            "tiles_prefetch": 20,
-            "tiles": 20,
-            "io": 10,
-            "maintenance": 0,
-        },
-        "category_limits": {"pyramid": 2},
-        "device_limits": {},
-        "max_pending_total": None,
-        "pending_limits": {},
-    },
 }
 
 # NOTE: Update slots whenever the _DEFAULTS mapping changes so the instance
@@ -658,7 +642,7 @@ ConfigT = TypeVar("ConfigT", bound="Config")
 
 
 class Config:
-    """Mutable snapshot providing cloning helpers and concurrency controls."""
+    """Mutable snapshot providing cloning helpers for viewer configuration."""
 
     __slots__ = _SLOT_KEYS
 
@@ -731,9 +715,7 @@ class Config:
         for key, value in items:
             if key not in self.config_keys():
                 raise ValueError(f"Unknown configuration key: {key}")
-            if key == "concurrency":
-                setattr(self, key, self._merge_concurrency(value))
-            elif key == "cache":
+            if key == "cache":
                 setattr(self, key, self._merge_cache_settings(value))
             elif key == "placeholder":
                 setattr(self, key, self._merge_placeholder_settings(value))
@@ -757,59 +739,6 @@ class Config:
             yield from dictionary.items()
             return
         raise TypeError(f"Unsupported config source type: {type(source)!r}")
-
-    def _merge_concurrency(self, overrides: Any) -> dict[str, Any]:
-        """Return a concurrency mapping that merges overrides with defaults.
-
-        Raises:
-            TypeError: If ``overrides`` is not a mapping.
-        """
-        base = self._copy_value(
-            getattr(self, "concurrency", _DEFAULTS.get("concurrency", {}))
-        )
-        if overrides is None:
-            return base
-        if not isinstance(overrides, Mapping):
-            raise TypeError("Config 'concurrency' overrides must be a mapping")
-        merged: dict[str, Any] = dict(base)
-        for key, value in overrides.items():
-            if key in {
-                "category_priorities",
-                "category_limits",
-                "pending_limits",
-                "device_limits",
-            }:
-                merged[key] = self._merge_mapping(merged.get(key, {}), value, label=key)
-            else:
-                merged[key] = self._copy_value(value)
-        return merged
-
-    def _merge_mapping(
-        self,
-        base: Mapping[str, Any] | None,
-        overrides: Any,
-        *,
-        label: str,
-    ) -> dict[str, Any]:
-        """Merge nested mapping overrides while cloning dictionary leaves."""
-        if overrides is None:
-            return {k: self._copy_value(v) for k, v in (base or {}).items()}
-        if not isinstance(overrides, Mapping):
-            type_name = type(overrides).__name__
-            raise TypeError(
-                f"Expected mapping for concurrency.{label}, not {type_name}"
-            )
-        merged: dict[str, Any] = {
-            k: self._copy_value(v) for k, v in (base or {}).items()
-        }
-        for key, value in overrides.items():
-            if isinstance(value, Mapping):
-                merged[key] = self._merge_mapping(
-                    merged.get(key, {}), value, label=f"{label}.{key}"
-                )
-            else:
-                merged[key] = self._copy_value(value)
-        return merged
 
     def _merge_cache_settings(self, overrides: Any) -> CacheSettings:
         """Clone the existing cache settings and merge host overrides safely.

@@ -28,12 +28,14 @@ from cutecanvas.masks import activation as activation_module
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.mask_service import MaskService
-from cutecanvas.masks.workers import PrefetchedOverlay
+from cutecanvas.masks.render_products import (
+    MaskPrefetchProduct,
+    MaskSnippetProduct,
+    PrefetchedOverlay,
+)
 from cutecanvas.resources import ProjectResourceStore
 from PySide6.QtGui import QImage
 from qpane.types import DiagnosticRecord
-
-from tests.helpers.executor_stubs import StubExecutor
 
 
 def _build_service(qpane):
@@ -50,9 +52,52 @@ def _build_service(qpane):
         mask_controller=controller,
         config=Config(),
         mask_config=MaskConfigSlice(),
-        executor=StubExecutor(),
+        view_execution_scope=qpane._execution_binding.scope,
+        document_execution_scope=(
+            qpane._execution_binding.document_runtime.execution_scope
+        ),
+        latest_requests=(
+            qpane._execution_binding.document_runtime._latest_request_registry
+        ),
     )
     return service, manager, controller
+
+
+def _install_prefetch_request(service, image_id, revisions):
+    """Install one pending prefetch identity for direct adoption tests."""
+    request_id = uuid.uuid4()
+    service.render_work._prefetch_handles[image_id] = SimpleNamespace(
+        request_id=request_id,
+        handle=None,
+        mask_revisions=tuple(revisions),
+    )
+    return request_id
+
+
+def _consume_prefetch(
+    service,
+    image_id,
+    overlays,
+    *,
+    failures=(),
+    duration_ms=1.0,
+):
+    """Adopt one direct prefetch product through current request identity."""
+    request_id = _install_prefetch_request(
+        service,
+        image_id,
+        ((overlay.mask_id, overlay.render_revision) for overlay in overlays),
+    )
+    service.render_work.consume_prefetch_results(
+        request_id=request_id,
+        product=MaskPrefetchProduct(
+            image_id,
+            tuple(overlays),
+            tuple(failures),
+            duration_ms,
+        ),
+    )
+    return request_id
 
 
 @pytest.mark.usefixtures("qapp")
@@ -116,19 +161,16 @@ def test_consume_prefetch_results_stashes_when_busy(canvas_core):
         scaled=(),
     )
     image_id = uuid.uuid4()
-    service.render_work._prefetch_handles[image_id] = SimpleNamespace(
-        handle=None,
-        mask_revisions=((mask_id, controller.renders.render_revision(mask_id)),),
+    request_id = _install_prefetch_request(
+        service,
+        image_id,
+        ((mask_id, controller.renders.render_revision(mask_id)),),
     )
     controller.renders._async_pending[mask_id] = overlay.render_revision
     service._stroke_pipeline.is_mask_busy = lambda _mid: True
     service.render_work.consume_prefetch_results(
-        image_id=image_id,
-        warmed=(overlay,),
-        failures={},
-        duration_ms=12.5,
-        error=None,
-        task_id=None,
+        request_id=request_id,
+        product=MaskPrefetchProduct(image_id, (overlay,), (), 12.5),
     )
     assert mask_id in service.render_work._deferred_overlays
     assert controller.renders.has_pending_async(mask_id)
@@ -164,18 +206,15 @@ def test_stale_prefetch_completion_preserves_replacement_handle(canvas_core):
     service, _, _ = _build_service(canvas_core)
     image_id = uuid.uuid4()
     replacement = SimpleNamespace(
-        handle=SimpleNamespace(task_id="replacement"),
+        request_id=uuid.uuid4(),
+        handle=None,
         mask_revisions=(),
     )
     service.render_work._prefetch_handles[image_id] = replacement
 
     service.render_work.consume_prefetch_results(
-        image_id=image_id,
-        warmed=(),
-        failures={},
-        duration_ms=1.0,
-        error=None,
-        task_id="stale",
+        request_id=uuid.uuid4(),
+        product=MaskPrefetchProduct(image_id, (), (), 1.0),
     )
 
     assert service.render_work._prefetch_handles[image_id] is replacement
@@ -191,8 +230,10 @@ def test_prefetch_cancellation_balances_completed_worker_awaiting_ui(canvas_core
     mask_ids = tuple(
         manager.create_mask(QImage(8, 8, QImage.Format_Grayscale8)) for _ in range(2)
     )
-    handle = SimpleNamespace(task_id="worker-complete")
+    request_id = uuid.uuid4()
+    handle = SimpleNamespace(cancel=lambda **_kwargs: False)
     service.render_work._prefetch_handles[image_id] = SimpleNamespace(
+        request_id=request_id,
         handle=handle,
         mask_revisions=tuple(
             (mask_id, controller.renders.render_revision(mask_id))
@@ -212,18 +253,14 @@ def test_prefetch_cancellation_balances_completed_worker_awaiting_ui(canvas_core
     assert metrics.prefetch_requested == 2
     assert metrics.prefetch_completed == 0
     assert metrics.prefetch_failed == 2
-    assert handle.task_id in service.render_work._cancelled_task_ids
+    assert request_id in service.render_work._cancelled_task_ids
     assert all(
         not controller.renders.has_pending_async(mask_id) for mask_id in mask_ids
     )
 
     service.render_work.consume_prefetch_results(
-        image_id=image_id,
-        warmed=(),
-        failures={},
-        duration_ms=1.0,
-        error=None,
-        task_id=handle.task_id,
+        request_id=request_id,
+        product=MaskPrefetchProduct(image_id, (), (), 1.0),
     )
 
     metrics = controller.renders.snapshot_metrics()
@@ -236,7 +273,7 @@ def test_pending_render_work_includes_every_mask_render_stage(canvas_core):
     service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     image_id = uuid.uuid4()
-    handle = SimpleNamespace(task_id="pending")
+    handle = SimpleNamespace()
 
     assert service.hasPendingRenderWork() is False
 
@@ -278,14 +315,7 @@ def test_successful_prefetch_clears_async_colorize_ownership(canvas_core):
         image=QImage(32, 32, QImage.Format_ARGB32),
     )
 
-    service.render_work.consume_prefetch_results(
-        image_id=image_id,
-        warmed=(overlay,),
-        failures={},
-        duration_ms=1.0,
-        error=None,
-        task_id=None,
-    )
+    _consume_prefetch(service, image_id, (overlay,))
 
     assert mask_id not in controller.renders._async_pending
 
@@ -305,14 +335,7 @@ def test_stale_prefetch_cannot_clear_newer_async_colorize_ownership(canvas_core)
         image=QImage(32, 32, QImage.Format_ARGB32),
     )
 
-    service.render_work.consume_prefetch_results(
-        image_id=uuid.uuid4(),
-        warmed=(stale_overlay,),
-        failures={},
-        duration_ms=1.0,
-        error=None,
-        task_id=None,
-    )
+    _consume_prefetch(service, uuid.uuid4(), (stale_overlay,))
 
     assert controller.renders.has_pending_async(mask_id)
     assert controller.renders._async_pending[mask_id] == current_revision
@@ -331,13 +354,11 @@ def test_failed_prefetch_clears_matching_async_colorize_ownership(canvas_core):
         image=QImage(),
     )
 
-    service.render_work.consume_prefetch_results(
-        image_id=uuid.uuid4(),
-        warmed=(failed_overlay,),
-        failures={mask_id: "colorization failed"},
-        duration_ms=1.0,
-        error=None,
-        task_id=None,
+    _consume_prefetch(
+        service,
+        uuid.uuid4(),
+        (failed_overlay,),
+        failures=((mask_id, "colorization failed"),),
     )
 
     assert not controller.renders.has_pending_async(mask_id)
@@ -363,12 +384,20 @@ def test_snippet_result_is_discarded_while_stroke_preview_is_active(
         lambda *args, **kwargs: updates.append((args, kwargs)),
     )
 
+    request_id = uuid.uuid4()
+    revision = controller.renders.render_revision(mask_id)
+    service.render_work._snippet_handles[mask_id] = SimpleNamespace(
+        request_id=request_id
+    )
     service.render_work.consume_snippet_result(
-        mask_id=mask_id,
-        render_revision=controller.renders.render_revision(mask_id),
-        handle=None,
-        dirty_rect=manager.get_layer(mask_id).mask_image.rect(),
-        colorized_image=QImage(32, 32, QImage.Format_ARGB32),
+        request_id=request_id,
+        product=MaskSnippetProduct(
+            mask_id,
+            revision,
+            manager.get_layer(mask_id).mask_image.rect(),
+            QImage(32, 32, QImage.Format_ARGB32),
+            0.0,
+        ),
     )
 
     assert updates == []
@@ -382,12 +411,19 @@ def test_missing_snippet_layer_clears_async_colorize_ownership(canvas_core):
     revision = controller.renders.render_revision(mask_id)
     controller.renders._async_pending[mask_id] = revision
 
+    request_id = uuid.uuid4()
+    service.render_work._snippet_handles[mask_id] = SimpleNamespace(
+        request_id=request_id
+    )
     service.render_work.consume_snippet_result(
-        mask_id=mask_id,
-        render_revision=revision,
-        handle=None,
-        dirty_rect=QImage(4, 4, QImage.Format_Grayscale8).rect(),
-        colorized_image=QImage(4, 4, QImage.Format_ARGB32),
+        request_id=request_id,
+        product=MaskSnippetProduct(
+            mask_id,
+            revision,
+            QImage(4, 4, QImage.Format_Grayscale8).rect(),
+            QImage(4, 4, QImage.Format_ARGB32),
+            0.0,
+        ),
     )
 
     assert not controller.renders.has_pending_async(mask_id)

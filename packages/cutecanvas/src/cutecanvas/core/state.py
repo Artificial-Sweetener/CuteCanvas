@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Configuration, feature, cache, and executor state for CuteCanvas."""
+"""Configuration, feature, cache, and diagnostics state for CuteCanvas."""
 
 from __future__ import annotations
 
@@ -24,19 +24,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QTimer
 from qpane.sdk.cache import CacheCoordinator, CacheRegistry
-from qpane.sdk.concurrency import (
-    LiveTunableExecutorProtocol,
-    QThreadPoolExecutor,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
-    ThreadPolicy,
-    build_thread_policy,
-    retry_diagnostics_provider,
-    retry_summary_provider,
-)
 from qpane.sdk.configuration import (
     CacheSettings,
     FeatureAwareConfig,
@@ -49,9 +37,15 @@ from qpane.sdk.diagnostics import (
     DiagnosticsRegistry,
     DiagnosticsSnapshot,
 )
-from qpane.sdk.system import SystemHeadroomWorker
+from qpane.sdk.execution import (
+    ExecutionRuntime,
+    ExecutionScope,
+    retry_detail_records,
+    retry_summary_records,
+)
 from qpane.sdk.types import DiagnosticRecord
 
+from ..runtime.headroom_monitor import HeadroomMonitor
 from .config import Config
 from .config_features import iter_descriptors
 from .fallbacks import FeatureFailure, FeatureFallbacks
@@ -75,7 +69,7 @@ def _canvas_view(canvas: CuteCanvas):
 
 
 class CuteCanvasState:
-    """Own CuteCanvas configuration, features, caches, and executors."""
+    """Own CuteCanvas configuration, features, caches, and diagnostics."""
 
     def __init__(
         self,
@@ -84,11 +78,11 @@ class CuteCanvasState:
         initial_config: Config | None,
         config_overrides: Mapping[str, Any] | None,
         features: Iterable[str] | None,
-        task_executor: TaskExecutorProtocol | None,
-        thread_policy: ThreadPolicy | Mapping[str, Any] | None,
+        execution_runtime: ExecutionRuntime,
+        execution_scope: ExecutionScope,
         config_strict: bool = False,
     ) -> None:
-        """Capture configuration, features, and executors for a QPane instance.
+        """Capture configuration, features, caches, and diagnostics.
 
         Args:
             qpane: Owning QPane facade whose collaborators are configured by this
@@ -97,11 +91,8 @@ class CuteCanvasState:
                 from instead of the global singleton.
             config_overrides: Mapping of config keys applied on top of the base.
             features: Optional iterable of feature names requested by the host.
-            task_executor: Pre-built executor to reuse; when ``None`` QPaneState
-                constructs and owns a single shared :class:`QThreadPoolExecutor`
-                for all collaborators.
-            thread_policy: :class:`ThreadPolicy` or mapping used when creating a
-                managed executor.
+            execution_runtime: Runtime supplying diagnostics and editor execution.
+            execution_scope: Canvas-owned root for state services.
             config_strict: Raise ``ValueError`` when overrides target inactive
                 feature namespaces instead of logging warnings.
         """
@@ -119,15 +110,15 @@ class CuteCanvasState:
         self._unused_setting_counts: Counter[str] = Counter()
         self._unused_setting_last_fields: dict[str, tuple[str, ...]] = {}
         self._validation_failures: dict[str, str] = {}
-        self._executor, self._owns_executor = self._resolve_executor(
-            task_executor, thread_policy
-        )
         self._cache_coordinator: CacheCoordinator | None = None
         self._cache_registry: CacheRegistry | None = None
         self._diagnostics = Diagnostics(qpane)
         self._diagnostics.register_core_providers(lambda: _canvas_view(qpane))
-        self._register_executor_diagnostics()
-        self._attach_executor_dirty_callback()
+        self._execution_runtime = execution_runtime
+        self._register_execution_diagnostics()
+        self._execution_subscription = execution_runtime.subscribe_diagnostics(
+            lambda _snapshots: self._diagnostics.set_dirty("executor")
+        )
         self._config_diagnostics_provider = self._build_config_diagnostics_provider()
         self._diagnostics.register_provider(
             self._config_diagnostics_provider,
@@ -140,16 +131,12 @@ class CuteCanvasState:
         self._compose_settings_view()
         self._missing_view_logged = False
         self._missing_presenter_logged = False
-        self._headroom_timer: QTimer | None = None
-        self._headroom_psutil_module = None
-        self._headroom_psutil_missing = False
-        self._last_headroom_snapshot: dict[str, object] = {}
-        self._pending_headroom: tuple[SystemHeadroomWorker, TaskHandle] | None = None
-
-    @property
-    def executor(self) -> TaskExecutorProtocol:
-        """Return the shared task executor for the QPane instance."""
-        return self._executor
+        self._headroom = HeadroomMonitor(
+            owner=qpane,
+            execution_scope=execution_scope,
+            coordinator=lambda: self._cache_coordinator,
+            settings=self._cache_settings,
+        )
 
     @property
     def cache_coordinator(self) -> CacheCoordinator | None:
@@ -226,13 +213,6 @@ class CuteCanvasState:
         """Collect diagnostics via the shared broker."""
         return self._diagnostics.gather()
 
-    def _attach_executor_dirty_callback(self) -> None:
-        """Forward executor diagnostics dirty events to the broker."""
-        setter = getattr(self._executor, "set_dirty_callback", None)
-        if not callable(setter):
-            return
-        setter(lambda domain="executor": self._diagnostics.set_dirty(domain))
-
     def register_diagnostics_provider(
         self,
         provider: DiagnosticsProvider,
@@ -296,9 +276,8 @@ class CuteCanvasState:
             self.settings = old_settings
             raise
         self._apply_settings_to_components(old_settings)
-        self._apply_concurrency_settings()
         self.apply_cache_settings()
-        self._restart_headroom_monitor()
+        self._headroom.restart()
 
     def _compose_settings_view(self) -> None:
         """Rebuild the feature-aware settings view exposed to callers."""
@@ -408,119 +387,6 @@ class CuteCanvasState:
             if budget_bytes is not None:
                 coordinator.set_consumer_preferred(consumer_id, budget_bytes)
 
-    def _restart_headroom_monitor(self) -> None:
-        """Start or stop the Auto-mode headroom monitor based on the active config."""
-        if self._cache_coordinator is None:
-            self._stop_headroom_monitor()
-            return
-        mode = self._cache_settings().mode.lower()
-        if mode != "auto":
-            self._stop_headroom_monitor()
-            return
-        self._headroom_psutil_missing = False
-        self._start_headroom_monitor()
-
-    def _start_headroom_monitor(self) -> None:
-        """Ensure the headroom monitor timer is running."""
-        timer = self._headroom_timer
-        if timer is None:
-            timer = QTimer(self._qpane)
-            timer.setInterval(2000)
-            timer.timeout.connect(self._headroom_tick)
-            self._headroom_timer = timer
-        if not timer.isActive():
-            timer.start()
-
-    def _stop_headroom_monitor(self) -> None:
-        """Stop the headroom monitor timer when inactive."""
-        timer = self._headroom_timer
-        if timer is not None:
-            timer.stop()
-        pending = self._pending_headroom
-        self._pending_headroom = None
-        if pending is not None:
-            worker, handle = pending
-            worker.cancel()
-            self._executor.cancel(handle)
-
-    def _headroom_tick(self) -> None:
-        """Submit one system-headroom observation without blocking Qt."""
-        coordinator = self._cache_coordinator
-        if coordinator is None:
-            self._stop_headroom_monitor()
-            return
-        cache_settings = self._cache_settings()
-        if cache_settings.mode.lower() != "auto":
-            self._stop_headroom_monitor()
-            return
-        if self._pending_headroom is not None:
-            return
-        if self._headroom_psutil_missing:
-            self._apply_headroom_fallback()
-            return
-        worker = SystemHeadroomWorker(self._headroom_psutil_module)
-        worker.connect_queued(worker.finished, self._finish_headroom_sample)
-        worker.connect_queued(worker.error, self._finish_headroom_sample)
-        try:
-            handle = self._executor.submit(worker, category="cache_headroom")
-        except TaskRejected:
-            worker.deleteLater()
-            return
-        self._pending_headroom = (worker, handle)
-
-    def _finish_headroom_sample(self, worker: SystemHeadroomWorker) -> None:
-        """Apply one current worker observation on the GUI thread."""
-        pending = self._pending_headroom
-        if pending is None or pending[0] is not worker:
-            return
-        self._pending_headroom = None
-        coordinator = self._cache_coordinator
-        if coordinator is None or self._cache_settings().mode.lower() != "auto":
-            return
-        sample = worker.sample
-        if sample is None:
-            self._headroom_psutil_missing = True
-            self._apply_headroom_fallback()
-            return
-        self._headroom_psutil_module = worker.psutil_module
-        cache_settings = self._cache_settings()
-        available = max(0, sample.available_bytes)
-        total = max(0, sample.total_bytes)
-        headroom_bytes = min(
-            int(total * max(0.0, float(cache_settings.headroom_percent))),
-            max(0, int(cache_settings.headroom_cap_mb)) * MB,
-        )
-        usage_bytes = coordinator.total_usage_bytes
-        capacity_bytes = max(0, total - headroom_bytes)
-        budget_bytes = min(
-            max(available + usage_bytes - headroom_bytes, usage_bytes),
-            capacity_bytes,
-        )
-        snapshot = sample.diagnostic_snapshot()
-        if (
-            budget_bytes != coordinator.active_budget_bytes
-            or snapshot != self._last_headroom_snapshot
-        ):
-            coordinator.set_active_budget(budget_bytes)
-            coordinator.set_headroom_snapshot(snapshot)
-            self._last_headroom_snapshot = snapshot
-
-    def _apply_headroom_fallback(self) -> None:
-        """Install the conservative hard cap after observation failure."""
-        coordinator = self._cache_coordinator
-        if coordinator is None:
-            return
-        self._stop_headroom_monitor()
-        coordinator.set_hard_cap(True)
-        budget_bytes = 1024 * MB
-        if (
-            budget_bytes != coordinator.active_budget_bytes
-            or self._last_headroom_snapshot
-        ):
-            coordinator.set_active_budget(budget_bytes)
-            coordinator.set_headroom_snapshot({})
-            self._last_headroom_snapshot = {}
-
     def build_cache_coordinator(self) -> CacheCoordinator:
         """Build a cache coordinator configured with the resolved budgets.
 
@@ -547,7 +413,7 @@ class CuteCanvasState:
         coordinator = CacheCoordinator(active_budget_bytes, dirty_callback=callback)
         self._cache_coordinator = coordinator
         self._configure_cache_coordinator(coordinator)
-        self._restart_headroom_monitor()
+        self._headroom.restart()
         return coordinator
 
     def _cache_settings(self) -> CacheSettings:
@@ -605,25 +471,6 @@ class CuteCanvasState:
         if qpane.interaction.brush_size == old_settings.default_brush_size:
             qpane.interaction.brush_size = self.settings.default_brush_size
 
-    def _apply_concurrency_settings(self) -> None:
-        """Push the active concurrency configuration into the executor live."""
-        executor = getattr(self, "_executor", None)
-        if executor is None:
-            return
-        if not isinstance(executor, LiveTunableExecutorProtocol):
-            logger.debug(
-                "Skipping live concurrency update because executor %s lacks live tuning",
-                type(executor).__name__,
-            )
-            return
-        policy = build_thread_policy(self._base_config)
-        executor.setMaxWorkers(policy.max_workers)
-        executor.setPendingTotal(policy.max_pending_total)
-        executor.setCategoryPriorities(policy.category_priorities)
-        executor.setCategoryLimits(policy.category_limits)
-        executor.setPendingLimits(policy.pending_limits)
-        executor.setDeviceLimits(policy.device_limits)
-
     def _normalize_feature_request(self, features) -> tuple[str, ...]:
         """Normalize feature inputs into a tuple of unique names.
 
@@ -652,36 +499,13 @@ class CuteCanvasState:
                 normalized.append(item)
         return tuple(normalized)
 
-    def _resolve_executor(
-        self,
-        supplied_executor: TaskExecutorProtocol | None,
-        thread_policy: ThreadPolicy | Mapping[str, Any] | None,
-    ) -> tuple[TaskExecutorProtocol, bool]:
-        """Return the executor plus ownership flag for shutdown handling."""
-        if supplied_executor is not None:
-            return supplied_executor, False
-        config_source = self._base_config
-        if isinstance(thread_policy, ThreadPolicy):
-            policy = thread_policy
-        elif isinstance(thread_policy, Mapping):
-            policy = build_thread_policy(config_source, **dict(thread_policy))
-        else:
-            policy = build_thread_policy(config_source)
-        return self._build_executor(policy), True
-
-    def _build_executor(self, policy: ThreadPolicy) -> TaskExecutorProtocol:
-        """Construct the shared executor using the provided thread policy."""
-        return QThreadPoolExecutor(policy=policy)
-
-    def _register_executor_diagnostics(self) -> None:
-        """Wire the executor metrics and retry providers into diagnostics."""
+    def _register_execution_diagnostics(self) -> None:
+        """Wire runtime and retry snapshots into diagnostics."""
         diagnostics = self._diagnostics
-        diagnostics.register_executor_providers(
-            executor_accessor=lambda: self._executor,
-            retry_provider=lambda _canvas: retry_diagnostics_provider(
-                self._retry_managers()
-            ),
-            retry_summary_provider=lambda _canvas: retry_summary_provider(
+        diagnostics.register_execution_providers(
+            execution_accessor=self._execution_runtime.execution_snapshots,
+            retry_provider=lambda _canvas: retry_detail_records(self._retry_managers()),
+            retry_summary_provider=lambda _canvas: retry_summary_records(
                 self._retry_managers()
             ),
         )
@@ -698,17 +522,14 @@ class CuteCanvasState:
         }
 
     def on_destroyed(self, _obj: Any | None = None) -> None:
-        """Teardown hook to release thread pools when the widget is destroyed."""
-        self._stop_headroom_monitor()
-        self._shutdown_executor()
-
-    def _shutdown_executor(self) -> None:
-        """Best-effort shutdown for executors the QPaneState created."""
-        if not getattr(self, "_owns_executor", False):
-            return
+        """Close feature-native services before the canvas execution scope."""
+        manager = self._qpane.samManager()
+        if manager is not None:
+            finalizer = manager.shutdown()
+            if finalizer is not None:
+                self._qpane._execution_binding.defer_close_until(finalizer)
+        self._execution_subscription.close()
         try:
-            self._executor.shutdown(wait=False)
+            self._headroom.close()
         except Exception:
-            logger.exception("Failed to shut down QPane executor")
-        finally:
-            self._owns_executor = False
+            logger.exception("Failed to close cache headroom monitoring")

@@ -43,6 +43,9 @@ from tests.harness.abuse_model import (
     action_to_dict,
 )
 from tests.harness.abuse_runner import MaskAbuseRunner
+from tests.harness.timing import INTERACTIVE_PERFORMANCE
+
+pytestmark = INTERACTIVE_PERFORMANCE
 from tests.harness.input_driver import QtStrokeDriver
 from tests.harness.minimizer import minimize_failing_actions
 from tests.harness.mounted_qpane import MountedQPaneHarness

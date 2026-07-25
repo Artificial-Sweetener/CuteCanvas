@@ -93,17 +93,18 @@ class CloneSourceSampler:
         self,
         layer: LayerDescriptor,
         destination: RasterBounds,
+        sample_bounds: RasterBounds,
         mapping: CloneStampMapping,
     ) -> np.ndarray | None:
-        """Return one destination-aligned immutable source sample."""
-        cached = self._sampled_tiles.get(destination)
+        """Return a destination crop from one cached canonical source tile."""
+        cached = self._sampled_tiles.get(sample_bounds)
         if cached is not None:
-            return cached
-        sampled = self._rendered_scene_pixels(layer, destination, mapping)
-        if sampled is None:
-            return None
-        self._sampled_tiles[destination] = sampled
-        return sampled
+            return _crop_sample(cached, sample_bounds, destination)
+        sampled = self._rendered_scene_pixels(layer, sample_bounds, mapping)
+        if sampled is not None:
+            self._sampled_tiles[sample_bounds] = sampled
+            return _crop_sample(sampled, sample_bounds, destination)
+        return None
 
     def source_is_current(self, mapping: CloneStampMapping) -> bool:
         """Return whether every non-target resource in the frozen scope is unchanged."""
@@ -176,3 +177,24 @@ class CloneSourceSampler:
             if revision is not None:
                 revisions[reference.resource_id] = revision
         return revisions
+
+
+def _crop_sample(
+    pixels: np.ndarray,
+    sample_bounds: RasterBounds,
+    destination: RasterBounds,
+) -> np.ndarray:
+    """Return destination-aligned pixels from a containing cached sample."""
+    left = destination.x - sample_bounds.x
+    top = destination.y - sample_bounds.y
+    if (
+        left < 0
+        or top < 0
+        or destination.right > sample_bounds.right
+        or destination.bottom > sample_bounds.bottom
+    ):
+        raise ValueError("clone destination must lie within cached sample bounds")
+    return pixels[
+        top : top + destination.height,
+        left : left + destination.width,
+    ]

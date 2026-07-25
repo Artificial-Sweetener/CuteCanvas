@@ -24,8 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from PySide6.QtCore import QObject, QPoint, QRunnable, Signal
-from qpane.sdk.concurrency import BaseWorker, TaskRejected
+from PySide6.QtCore import QPoint
 from qpane.sdk.features import FeatureInstallError
 from qpane.sdk.types import DiagnosticRecord
 
@@ -45,52 +44,6 @@ _SAM_HASH_WARNING_EMITTED = False
 
 if TYPE_CHECKING:
     from ..canvas import CuteCanvas
-
-
-class _CheckpointDownloadSignals(QObject):
-    """Signals emitted during SAM checkpoint downloads."""
-
-    finished = Signal(Path)
-    error = Signal(str)
-
-
-class _CheckpointDownloadWorker(QRunnable, BaseWorker):
-    """Download the SAM checkpoint on a background executor."""
-
-    def __init__(
-        self,
-        checkpoint_path: Path,
-        *,
-        download_mode: str,
-        model_url: str,
-        progress_callback: Callable[[int, int | None], None],
-        expected_hash: str | None,
-    ) -> None:
-        """Store checkpoint inputs and the progress callback."""
-        super().__init__()
-        BaseWorker.__init__(self)
-        self._checkpoint_path = checkpoint_path
-        self._download_mode = download_mode
-        self._model_url = model_url
-        self._progress_callback = progress_callback
-        self._expected_hash = expected_hash
-        self.signals = _CheckpointDownloadSignals()
-
-    def run(self) -> None:
-        """Download the checkpoint and emit completion signals."""
-        try:
-            from cutecanvas.sam.service import ensure_checkpoint
-
-            ensure_checkpoint(
-                self._checkpoint_path,
-                download_mode=self._download_mode,
-                model_url=self._model_url,
-                expected_hash=self._expected_hash,
-                progress_callback=self._progress_callback,
-            )
-            self.emit_finished(True, payload=self._checkpoint_path)
-        except Exception as exc:  # noqa: BLE001 - background dependency boundary
-            self.emit_finished(False, payload=str(exc), error=exc)
 
 
 def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
@@ -119,7 +72,8 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
         )
     except ValueError:
         pass
-    from cutecanvas.sam.execution import build_sam_executor
+    from cutecanvas.sam.checkpoint import CheckpointProgress
+    from cutecanvas.sam.checkpoint_coordination import CheckpointAcquisition
     from cutecanvas.sam.manager import SamManager
 
     sam_config = require_sam_config(qpane.settings)
@@ -144,68 +98,18 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
         """Emit a SAM checkpoint status update via the CuteCanvas signal."""
         qpane.samCheckpointStatusChanged.emit(status, checkpoint_path)
 
-    def _emit_checkpoint_progress(downloaded: int, total: int | None) -> None:
+    def _emit_checkpoint_progress(progress: CheckpointProgress) -> None:
         """Emit a SAM checkpoint progress update via the CuteCanvas signal."""
         qpane.samCheckpointProgress.emit(
-            int(downloaded), None if total is None else int(total)
+            progress.downloaded,
+            progress.total,
         )
 
-    if download_mode == "blocking":
-        try:
-            if not checkpoint_path.exists():
-                _emit_checkpoint_status("downloading")
-            checkpoint_path = ensure_checkpoint(
-                checkpoint_path,
-                download_mode=download_mode,
-                model_url=model_url,
-                expected_hash=expected_hash,
-                progress_callback=_emit_checkpoint_progress,
-            )
-            _emit_checkpoint_status("ready")
-        except SamDependencyError as exc:
-            raise FeatureInstallError(
-                str(exc),
-                hint=(
-                    "Set sam_model_path or sam_model_url, or disable downloads "
-                    "once the checkpoint is provisioned."
-                ),
-            ) from exc
-    elif download_mode == "background":
-        if checkpoint_path.exists():
-            _emit_checkpoint_status("ready")
-        else:
-            _emit_checkpoint_status("downloading")
-            worker = _CheckpointDownloadWorker(
-                checkpoint_path,
-                download_mode=download_mode,
-                model_url=model_url,
-                progress_callback=_emit_checkpoint_progress,
-                expected_hash=expected_hash,
-            )
-
-            def _handle_download_finished(path: Path) -> None:
-                """Mark the checkpoint as ready after download."""
-                _emit_checkpoint_status("ready")
-
-            def _handle_download_error(message: str) -> None:
-                """Log background download failures and notify listeners."""
-                logger.error(
-                    "SAM checkpoint download failed for %s: %s",
-                    checkpoint_path,
-                    message,
-                )
-                _emit_checkpoint_status("failed")
-
-            BaseWorker.connect_queued(
-                worker.signals.finished, _handle_download_finished
-            )
-            BaseWorker.connect_queued(worker.signals.error, _handle_download_error)
-            try:
-                qpane.executor.submit(worker, category="sam", device=sam_device)
-            except TaskRejected as exc:
-                logger.error("SAM checkpoint download rejected by executor: %s", exc)
-                _emit_checkpoint_status("failed")
-    else:
+    acquisition: CheckpointAcquisition | None = None
+    checkpoint_ready_callbacks: list[Callable[[], None]] = []
+    if checkpoint_path.exists():
+        _emit_checkpoint_status("ready")
+    elif download_mode == "disabled":
         try:
             checkpoint_path = ensure_checkpoint(
                 checkpoint_path,
@@ -219,26 +123,51 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
             raise FeatureInstallError(
                 str(exc),
                 hint=(
-                    "Provide a checkpoint at sam_model_path or switch "
-                    "sam_download_mode to blocking/background."
+                    "Provide a checkpoint at sam_model_path or enable checkpoint "
+                    "acquisition."
                 ),
             ) from exc
-    sam_executor = build_sam_executor(
-        qpane.settings.concurrency,
-        device=sam_device,
-    )
-    try:
-        sam_manager = SamManager(
+    else:
+        _emit_checkpoint_status("downloading")
+        acquisition = CheckpointAcquisition(
+            execution_scope=qpane._execution_binding.scope,
             parent=qpane,
-            device=sam_device,
-            executor=sam_executor,
-            owns_executor=True,
-            cache_limit=sam_config.sam_cache_limit,
-            checkpoint_path=checkpoint_path,
         )
-    except Exception:
-        sam_executor.shutdown(wait=False)
-        raise
+
+        def _handle_download_finished(_path: Path) -> None:
+            """Publish checkpoint readiness after owner-context adoption."""
+            _emit_checkpoint_status("ready")
+            for callback in tuple(checkpoint_ready_callbacks):
+                callback()
+
+        def _handle_download_error(error: BaseException) -> None:
+            """Publish terminal checkpoint acquisition failure."""
+            logger.error(
+                "SAM checkpoint acquisition failed for %s: %s",
+                checkpoint_path,
+                error,
+            )
+            _emit_checkpoint_status("failed")
+
+        acquisition.request(
+            checkpoint_path,
+            download_mode=download_mode,
+            model_url=model_url,
+            expected_hash=expected_hash,
+            progress=_emit_checkpoint_progress,
+            completed=_handle_download_finished,
+            failed=_handle_download_error,
+        )
+    sam_manager = SamManager(
+        parent=qpane,
+        device=sam_device,
+        execution_scope=(
+            qpane._execution_binding.document_runtime.native_execution_scope()
+        ),
+        cache_limit=sam_config.sam_cache_limit,
+        checkpoint_path=checkpoint_path,
+        checkpoint_acquisition=acquisition,
+    )
     qpane.attachSamManager(sam_manager)
     hooks.registerCursorProvider(
         qpane.CONTROL_MODE_SMART_SELECT, smart_select_cursor_provider
@@ -334,6 +263,7 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
     tm_signals.mask_component_adjustment_requested.connect(_handle_component_adjustment)
     qpane.compositionSelectionChanged.connect(_prepare_active_raster)
     qpane.selectedLayerChanged.connect(_prepare_active_raster)
+    checkpoint_ready_callbacks.append(_prepare_active_raster)
     _prepare_active_raster()
 
 

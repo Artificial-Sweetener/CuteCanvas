@@ -6,15 +6,29 @@ Keep `CanvasDocument` beside the host project or workflow state, then mount it
 in whichever canvas surface the current application mode needs:
 
 ```python
-from cutecanvas import CanvasDocument, CanvasWorkspace, CuteCanvas
+from cutecanvas import (
+    CanvasDocument,
+    CanvasDocumentRuntime,
+    CanvasWorkspace,
+    CuteCanvas,
+)
+from qpane.sdk.execution import create_default_execution_runtime
 
 document = CanvasDocument()
-editor = CuteCanvas(document=document, features=("mask",))
-inspection = CanvasWorkspace(document=document)
+runtime = create_default_execution_runtime()
+document_runtime = CanvasDocumentRuntime(document, execution_runtime=runtime)
+editor = CuteCanvas(
+    document_runtime=document_runtime,
+    features=("mask",),
+)
+inspection = CanvasWorkspace(
+    document_runtime=document_runtime,
+)
 ```
 
-The editor and inspection workspace share resources and history. Their active
-composition, viewport, and tools remain independent. Use
+The editor and inspection workspace share resources, history, document-wide
+mutation freshness, and execution. Their active composition, viewport, and
+tools remain independent. Use
 `setTabbedPresentation(..., linked=True)` for native-size review,
 `setGridPresentation()` for a responsive overview, and
 `setComparisonPresentation()` for a draggable independent-target reveal.
@@ -23,6 +37,10 @@ Install one `OutboundMimeProvider` on the workspace when the host needs drag
 targets to resolve to a preferred file variant or custom MIME payload. The
 provider receives a stable content reference and remains the sole owner of
 storage and materialization policy.
+
+The host closes `document_runtime`, `runtime`, and `document` after its canvases
+and workspaces. A standalone `CuteCanvas` or `CanvasWorkspace` creates and owns
+the document binding and bounded default runtime automatically.
 
 This guide connects CuteCanvas's focused tutorials into the flow of a complete
 editor host. It shows which commands belong together and which signals should
@@ -48,6 +66,12 @@ redo, and `CompositionPersistenceFacade` saves complete composition archives.
 `CuteCanvas.editorPolicyChanged` tells toolbars to resolve their enabled state
 again. `CuteCanvas.editorOperationState()` explains whether a particular intent
 is allowed for the selected composition, layer, and pointer position.
+
+Pass `execution_policy` when one widget should own a tuned standalone runtime.
+Pass `execution_runtime` when the application owns execution. When several
+editor views mount the same document, create one `CanvasDocumentRuntime` and
+pass it as `document_runtime` so document work and freshness share one owner as
+well as physical capacity.
 
 ## Control the View
 

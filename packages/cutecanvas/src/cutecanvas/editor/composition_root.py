@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtWidgets import QApplication
 from qpane.sdk.cache import CacheRegistry, cache_detail_provider
-from qpane.sdk.concurrency import TaskExecutorProtocol
 from qpane.sdk.diagnostics import Diagnostics
+from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.rendering import PyramidManager, SceneRegionRasterizer, View
 from qpane.sdk.scene import (
     LayerEffectRenderRegistry,
@@ -86,6 +86,7 @@ from ..resources.install import (
 from ..resources.layer_operations import LayerResourceOperations, ResourceForkOwner
 from ..resources.lifecycle import ProjectResourceLifecycleOwner
 from ..resources.source_capabilities import ProjectResourceSourceCapabilities
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
 from ..scene.layer_geometry import LayerGeometryPolicy, LayerGeometryResolver
 from ..scene.layer_selection import SceneLayerSelectionController
@@ -172,7 +173,9 @@ class EditorRootInputs:
     document: CanvasDocument
     state: CuteCanvasState
     settings: Config
-    executor: TaskExecutorProtocol
+    execution_scope: ExecutionScope
+    document_execution_scope: ExecutionScope
+    latest_requests: DocumentLatestRequestRegistry
     cache_registry: CacheRegistry | None
     diagnostics: Diagnostics
     layer_selection: SceneLayerSelectionController
@@ -250,11 +253,12 @@ class EditorCompositionRoot:
         layer_effects = LayerEffectRenderRegistry()
         pyramid_manager = PyramidManager(
             config=inputs.settings,
-            executor=inputs.executor,
+            execution_scope=inputs.execution_scope,
             parent=inputs.qpane,
         )
         resource_domain = ProjectResourceDomainInstaller().install(
-            executor=inputs.executor,
+            execution_scope=inputs.document_execution_scope,
+            latest_requests=inputs.latest_requests,
             document=inputs.document.resources,
             render_capabilities=render_source_capabilities,
             editor_capabilities=editor_source_capabilities,
@@ -290,7 +294,7 @@ class EditorCompositionRoot:
             qpane=inputs.qpane,
             state=inputs.state,
             pyramid_manager=pyramid_manager,
-            executor=inputs.executor,
+            execution_scope=inputs.execution_scope,
             scene_providers=scene_providers,
             source_capabilities=render_source_capabilities,
             layer_effects=layer_effects,
@@ -322,7 +326,8 @@ class EditorCompositionRoot:
             coordinates=view.coordinates,
             raster_assets=editable_raster_assets,
             pixel_selection=pixel_selection,
-            executor=inputs.executor,
+            execution_scope=inputs.document_execution_scope,
+            latest_requests=inputs.latest_requests,
             conversion_completed=callbacks.vector_conversion_completed,
             layer_effects=layer_effects,
             cache_registry=inputs.cache_registry,
@@ -436,7 +441,7 @@ class EditorCompositionRoot:
         paint_bucket = PaintBucketCoordinator(
             painting=painting,
             selections=pixel_selection,
-            executor=inputs.executor,
+            execution_scope=inputs.execution_scope,
         )
         selection_fill = SelectionFillCoordinator(
             painting=painting,
@@ -576,7 +581,8 @@ class EditorCompositionRoot:
             EditableRasterStructureMutationOwner(
                 editable_raster_assets,
                 edits=compositions.edit_controller,
-                executor=inputs.executor,
+                execution_scope=inputs.document_execution_scope,
+                latest_requests=inputs.latest_requests,
                 changed=callbacks.raster_structure_changed,
                 completed=callbacks.raster_bounds_completed,
             )

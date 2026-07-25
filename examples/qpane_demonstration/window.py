@@ -25,9 +25,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QImage
+from PySide6.QtGui import QCloseEvent, QIcon, QImage
 from PySide6.QtWidgets import QMainWindow, QSplitter, QVBoxLayout, QWidget
-from qpane import QPane, ViewerCatalogEntry
+from qpane import QPane, ViewerCatalogEntry, create_default_execution_runtime
 
 from .catalog import CatalogPanel
 from .commands import ViewerCommandController
@@ -40,15 +40,17 @@ _INSPECTION_MODE = "inspect"
 
 
 class ViewerWindow(QMainWindow):
-    """Present the original catalog-oriented QPane core viewer experience."""
+    """Present the catalog-oriented QPane viewer experience."""
 
     def __init__(self) -> None:
         """Build the empty viewer, tutorial owners, and familiar host chrome."""
         super().__init__()
-        self.setWindowTitle("QPane Example (Core)")
+        self.setWindowTitle("QPane Example")
         self.resize(1280, 900)
         self._apply_window_icon()
-        self.pane = QPane()
+        self._execution_runtime = create_default_execution_runtime()
+        self._execution_closed = False
+        self.pane = QPane(execution_runtime=self._execution_runtime)
         self.pane.setObjectName("qpaneViewer")
         self.pane.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.pane.registerTool(
@@ -64,6 +66,7 @@ class ViewerWindow(QMainWindow):
         self.workspace = ViewerWorkspaceController(
             self.pane,
             self,
+            execution_runtime=self._execution_runtime,
             catalog_panel=self.catalog_panel,
             scenes=self.scenes,
             status=self.status,
@@ -105,6 +108,15 @@ class ViewerWindow(QMainWindow):
             The new catalog entry and reusable raster source owner.
         """
         return self.workspace.add_image(image, label=label, path=path)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Release host-owned load work and runtime when the window closes."""
+        super().closeEvent(event)
+        if not event.isAccepted() or self._execution_closed:
+            return
+        self._execution_closed = True
+        self.workspace.close()
+        self._execution_runtime.shutdown(wait=False)
 
     def _build_layout(self) -> None:
         """Compose the recognizable hideable catalog-and-canvas splitter."""

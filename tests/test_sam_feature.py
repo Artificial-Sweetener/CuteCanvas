@@ -16,6 +16,7 @@
 
 """Tests for SAM feature installation and interactions."""
 
+import time
 import types
 import uuid
 from pathlib import Path
@@ -35,14 +36,7 @@ from PySide6.QtWidgets import QApplication
 from qpane.features import FeatureInstallError
 from qpane.types import DiagnosticRecord
 
-from tests.helpers.executor_stubs import StubExecutor
-
-
-def test_default_cpu_sam_work_is_serialized() -> None:
-    """The shared CPU model must admit only one predictor job at a time."""
-    device_limits = Config().concurrency["device_limits"]
-
-    assert device_limits["cpu"]["sam"] == 1
+from tests.helpers.execution_backend import TestExecution
 
 
 def _stub_sam_service(monkeypatch):
@@ -96,13 +90,8 @@ def _seed_mask_service(qpane: CuteCanvas) -> None:
 @pytest.fixture
 def qpane_with_sam(monkeypatch, qapp):
     _stub_sam_service(monkeypatch)
-    executor = StubExecutor()
-    sam_executor = StubExecutor(name="sam-test")
-    monkeypatch.setattr(
-        "cutecanvas.sam.execution.build_sam_executor",
-        lambda concurrency, *, device: sam_executor,
-    )
-    qpane = CuteCanvas(features=("mask", "sam"), task_executor=executor)
+    executor = TestExecution()
+    qpane = CuteCanvas(features=("mask", "sam"), execution_runtime=executor.runtime)
     qpane.resize(64, 64)
     image = QImage(QSize(64, 64), QImage.Format_ARGB32)
     image.fill(Qt.GlobalColor.white)
@@ -178,7 +167,8 @@ def test_sam_component_adjustment_accepts_real_transformed_mask_coordinates(
 ) -> None:
     """The factory adjustment hook must accept the mapper's QPointF contract."""
     _stub_sam_service(monkeypatch)
-    qpane = CuteCanvas(features=("mask", "sam"), task_executor=StubExecutor())
+    execution = TestExecution()
+    qpane = CuteCanvas(features=("mask", "sam"), execution_runtime=execution.runtime)
     try:
         image = QImage(QSize(64, 64), QImage.Format_ARGB32)
         image.fill(Qt.GlobalColor.white)
@@ -231,23 +221,14 @@ def test_detach_sam_manager_cancels_pending_predictor_work(
     image = QImage(8, 8, QImage.Format_ARGB32)
     image.fill(QColor("white"))
     image_id = uuid.uuid4()
-    executor = manager._executor
-    assert isinstance(executor, StubExecutor)
-    existing_handles = {record.handle for record in executor.pending_tasks()}
-
     manager.requestPredictor(image, image_id, source_path=tmp_path / "image.png")
-    predictor_handles = {
-        record.handle
-        for record in executor.pending_tasks()
-        if record.handle not in existing_handles
-    }
-    assert len(predictor_handles) == 1
-    predictor_handle = predictor_handles.pop()
+    pending = manager._pending[image_id]
+    predictor_handle = pending.handle
+    assert predictor_handle is not None
 
     qpane.detachSamManager()
 
-    assert predictor_handle in executor.cancelled
-    assert all(record.handle != predictor_handle for record in executor.pending_tasks())
+    assert predictor_handle.state.is_terminal
     assert manager.activePredictorLoads() == 0
 
 
@@ -275,8 +256,8 @@ def test_sam_providers_report_additional_metrics():
 
 def test_install_sam_feature_respects_config(monkeypatch, qapp):
     _stub_sam_service(monkeypatch)
-    executor = StubExecutor()
-    qpane = CuteCanvas(features=("mask", "sam"), task_executor=executor)
+    executor = TestExecution()
+    qpane = CuteCanvas(features=("mask", "sam"), execution_runtime=executor.runtime)
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(sam_device="cuda", sam_cache_limit=1)
@@ -319,12 +300,16 @@ def test_sam_feature_install_defers_predictor_dependency_imports(
         "ensure_checkpoint",
         lambda checkpoint_path, **_kwargs: Path(checkpoint_path).resolve(),
     )
-    executor = StubExecutor()
+    executor = TestExecution()
     config = Config(
         sam_download_mode="disabled",
         sam_model_path=str(checkpoint),
     )
-    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(
+        features=("mask", "sam"),
+        config=config,
+        execution_runtime=executor.runtime,
+    )
     qpane.resize(64, 64)
     try:
         assert qpane.samFeatureAvailable()
@@ -341,8 +326,8 @@ def test_install_sam_feature_disabled_missing_checkpoint(monkeypatch, qapp):
         raise service.SamDependencyError("missing checkpoint")
 
     monkeypatch.setattr(service, "ensure_checkpoint", _raise_missing)
-    executor = StubExecutor()
-    qpane = CuteCanvas(features=("mask", "sam"), task_executor=executor)
+    executor = TestExecution()
+    qpane = CuteCanvas(features=("mask", "sam"), execution_runtime=executor.runtime)
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(sam_download_mode="disabled")
@@ -385,12 +370,16 @@ def test_install_sam_feature_background_download_signals(monkeypatch, qapp, tmp_
         lambda checkpoint_path=None: Path(checkpoint_path).resolve(),
     )
     monkeypatch.setattr(service, "ensure_checkpoint", fake_ensure_checkpoint)
-    executor = StubExecutor()
+    executor = TestExecution()
     config = Config(
         sam_download_mode="background",
         sam_model_path=str(initial_checkpoint),
     )
-    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(
+        features=("mask", "sam"),
+        config=config,
+        execution_runtime=executor.runtime,
+    )
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(
@@ -408,10 +397,10 @@ def test_install_sam_feature_background_download_signals(monkeypatch, qapp, tmp_
     )
     sam_feature.install_sam_feature(qpane)
     assert statuses == ["downloading"]
-    pending = list(executor.pending_tasks())
-    assert pending and pending[0].handle.category == "sam"
-    executor.run_task(pending[0].handle.task_id)
-    qapp.processEvents()
+    deadline = time.monotonic() + 2.0
+    while statuses[-1] != "ready" and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.005)
     assert statuses[-1] == "ready"
     assert progress == [(5, 10)]
 
@@ -430,12 +419,16 @@ def test_install_sam_feature_background_noop_when_ready(monkeypatch, qapp, tmp_p
         lambda checkpoint_path=None: Path(checkpoint_path).resolve(),
     )
     monkeypatch.setattr(service, "ensure_checkpoint", fail_ensure_checkpoint)
-    executor = StubExecutor()
+    executor = TestExecution()
     config = Config(
         sam_download_mode="background",
         sam_model_path=str(checkpoint),
     )
-    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(
+        features=("mask", "sam"),
+        config=config,
+        execution_runtime=executor.runtime,
+    )
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(
@@ -449,7 +442,7 @@ def test_install_sam_feature_background_noop_when_ready(monkeypatch, qapp, tmp_p
     )
     sam_feature.install_sam_feature(qpane)
     assert statuses == ["ready"]
-    assert not list(executor.pending_tasks())
+    assert not executor.pending_jobs()
 
 
 def test_install_sam_feature_disabled_mode_skips_executor(monkeypatch, qapp, tmp_path):
@@ -467,12 +460,16 @@ def test_install_sam_feature_disabled_mode_skips_executor(monkeypatch, qapp, tmp
         lambda checkpoint_path=None: Path(checkpoint_path).resolve(),
     )
     monkeypatch.setattr(service, "ensure_checkpoint", raise_missing)
-    executor = StubExecutor()
+    executor = TestExecution()
     config = Config(
         sam_download_mode="background",
         sam_model_path=str(initial_checkpoint),
     )
-    qpane = CuteCanvas(features=("mask", "sam"), config=config, task_executor=executor)
+    qpane = CuteCanvas(
+        features=("mask", "sam"),
+        config=config,
+        execution_runtime=executor.runtime,
+    )
     qpane.resize(64, 64)
     _detachSamManager_keep_delegate(qpane)
     qpane.applySettings(
@@ -487,4 +484,4 @@ def test_install_sam_feature_disabled_mode_skips_executor(monkeypatch, qapp, tmp
     with pytest.raises(FeatureInstallError):
         sam_feature.install_sam_feature(qpane)
     assert "missing" in statuses
-    assert not list(executor.pending_tasks())
+    assert not executor.pending_jobs()

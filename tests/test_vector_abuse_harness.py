@@ -34,14 +34,18 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.scene.render_plan import VectorLayerRenderItem
+from qpane.sdk.execution import ExecutionRuntime
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
     absolute_latency_assertions_are_isolated,
     interaction_clock,
     stable_latency_samples,
 )
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import ControllableExecutionBackend
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _SUBMISSION_BUDGET_MS = 16.0
 
@@ -533,10 +537,11 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
     qapp: QApplication,
 ) -> None:
     """Late vector jobs must not overwrite edits, selections, or removed layers."""
-    executor = StubExecutor(name="vector-abuse")
+    backend = ControllableExecutionBackend()
+    runtime = ExecutionRuntime(backend)
     from cutecanvas import CuteCanvas
 
-    viewer = CuteCanvas(features=(), task_executor=executor)
+    viewer = CuteCanvas(features=(), execution_runtime=runtime)
     image = QImage(320, 240, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor("white"))
     viewer.createCompositionFromImage(image, title="Vector conversion abuse")
@@ -567,7 +572,7 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
             object_id,
             transform=moved,
         )
-        executor.run_category("vector_conversion")
+        backend.run_operation("editor.vector.convert.pixel-selection")
         qapp.processEvents()
 
         stale = next(item for item in completions if item[0] == stale_request)
@@ -597,7 +602,7 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
             text_id,
             content=changed_text,
         )
-        executor.run_category("vector_conversion")
+        backend.run_operation("editor.vector.convert.text-paths")
         qapp.processEvents()
         text_completion = next(item for item in completions if item[0] == text_request)
         assert text_completion[3:] == (
@@ -617,7 +622,7 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
             for _index in range(24)
         ]
         assert all(request is not None for request in requests)
-        executor.run_category("vector_conversion")
+        backend.run_operation("editor.vector.convert.pixel-selection")
         qapp.processEvents()
         qapp.processEvents()
         assert all(
@@ -628,26 +633,35 @@ def test_vector_conversion_storm_rejects_stale_edits_and_tears_down_cleanly(
 
         raster_request = viewer.rasterizeLayer(scene.scene_id, layer_id)
         assert raster_request is not None
+        raster_job = next(
+            job
+            for job in backend.pending_jobs()
+            if job.operation == "editor.vector.convert.editable-raster"
+        )
         for _index in range(10):
             if all(
                 layer.layer_id != layer_id for layer in viewer.currentScene().layers
             ):
                 break
             assert viewer.undoSceneEdit()
-        executor.run_category("vector_conversion")
+        backend.run_job(raster_job)
         qapp.processEvents()
         qapp.processEvents()
         assert (
             next(item for item in completions if item[0] == raster_request)[4] is False
         )
         assert all(layer.layer_id != layer_id for layer in viewer.currentScene().layers)
-        assert executor.snapshot().queued_by_category.get("vector_conversion", 0) == 0
+        assert not any(
+            job.operation.startswith("editor.vector.convert")
+            for job in backend.pending_jobs()
+        )
     finally:
         composition_id = viewer.currentCompositionID()
         if composition_id is not None:
             viewer.removeComposition(composition_id)
         viewer.deleteLater()
         qapp.processEvents()
+        runtime.shutdown()
 
 
 def test_mounted_vector_mask_edits_remain_exact_under_hostile_transforms(

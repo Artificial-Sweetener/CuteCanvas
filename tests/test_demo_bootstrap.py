@@ -47,15 +47,16 @@ class _DifferentTierEnvironment:
 
 def test_editor_demo_tiers_match_cutecanvas_dependency_ownership() -> None:
     """Masks ship normally while only SAM requires an optional dependency."""
-    assert DEMO_TIERS["core"].extra is None
-    assert DEMO_TIERS["mask"].extra is None
-    assert DEMO_TIERS["masksam"].extra == "sam"
+    assert DEMO_TIERS["cutecanvas"].extra is None
+    assert DEMO_TIERS["cutecanvas"].sam_enabled is False
+    assert DEMO_TIERS["cutecanvas-sam"].extra == "sam"
+    assert DEMO_TIERS["cutecanvas-sam"].sam_enabled is True
 
 
 def test_main_bootstraps_before_importing_demo_window(monkeypatch) -> None:
     """Select the tier environment even when system Python already has Qt."""
     options = Namespace(
-        features="core",
+        sam=False,
         log_level="INFO",
         config_strict=False,
         sam_download_mode=None,
@@ -73,13 +74,13 @@ def test_main_bootstraps_before_importing_demo_window(monkeypatch) -> None:
         lambda: (_ for _ in ()).throw(AssertionError("imported before bootstrap")),
     )
 
-    result = demo.main(["--features", "core", "--skip-menu"])
+    result = demo.main(["--skip-menu"])
 
     assert result == 23
     assert environment.actions == [
-        ("inspect", "core"),
-        ("ensure", "core"),
-        ("launch", "core"),
+        ("inspect", "cutecanvas"),
+        ("ensure", "cutecanvas"),
+        ("launch", "cutecanvas"),
     ]
 
 

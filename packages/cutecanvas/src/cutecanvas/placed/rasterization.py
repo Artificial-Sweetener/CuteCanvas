@@ -22,13 +22,19 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QSize
-from qpane.sdk.concurrency import (
-    BaseWorker,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
+from PySide6.QtGui import QImage
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
 )
-from qpane.sdk.rendering import LayerRasterizationWorker
+from qpane.sdk.rendering import rasterize_layer
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import CompositionLayerInstance, CompositionLayerStore
@@ -38,6 +44,7 @@ from ..resources.rasterization import (
     LayerRasterizationCompletion,
     retarget_raster_transform,
 )
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from .store import PlacedAssetStore
 from .workflow import PlacedAssetCompletion
 
@@ -53,8 +60,7 @@ class _PendingRasterization:
     public_scene_id: uuid.UUID
     layer: CompositionLayerInstance
     source_size: QSize
-    worker: LayerRasterizationWorker
-    handle: TaskHandle
+    handle: ExecutionHandle[QImage, object] | None = None
 
 
 class PlacedAssetRasterizationService:
@@ -67,7 +73,8 @@ class PlacedAssetRasterizationService:
         raster_assets: EditableRasterAssetStore,
         layers: CompositionLayerStore,
         layer_edits: CompositionLayerEditService,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         changed: Callable[[uuid.UUID], None],
         completed: Callable[[PlacedAssetCompletion], None],
         resource_completed: Callable[[LayerRasterizationCompletion], None],
@@ -77,12 +84,14 @@ class PlacedAssetRasterizationService:
         self._raster_assets = raster_assets
         self._layers = layers
         self._layer_edits = layer_edits
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:placed-rasterization"
+        )
+        self._latest_requests = latest_requests
         self._changed = changed
         self._completed = completed
         self._resource_completed = resource_completed
         self._pending: dict[uuid.UUID, _PendingRasterization] = {}
-        self._latest_by_layer: dict[uuid.UUID, uuid.UUID] = {}
         self._closed = False
 
     def request(
@@ -113,14 +122,44 @@ class PlacedAssetRasterizationService:
         if byte_count > _MAX_RASTERIZATION_BYTES:
             raise ValueError("rasterization exceeds the 512 MiB output limit")
         request_id = uuid.uuid4()
-        self._cancel_layer(layer_id, "replaced by a newer rasterization")
-        worker = LayerRasterizationWorker(request_id, snapshot.image, target_size)
-        BaseWorker.connect_queued(worker.finished, self._finish)
-        BaseWorker.connect_queued(worker.error, self._finish)
+        pending = _PendingRasterization(
+            composition_id,
+            history_scope_id,
+            public_scene_id,
+            layer,
+            source_size,
+        )
+        self._pending[request_id] = pending
+        key = self._request_key(layer_id)
+        if not self._latest_requests.claim(
+            key,
+            request_id,
+            lambda message: self._cancel(request_id, message),
+        ):
+            self._pending.pop(request_id, None)
+            return None
+        source_image = snapshot.image
+        request = ExecutionRequest[QImage, object](
+            operation="editor.placed.rasterize",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.NATIVE_CPU,
+                urgency=ExecutionUrgency.FOREGROUND,
+                estimated_retained_bytes=byte_count,
+            ),
+            work=lambda context: rasterize_layer(
+                source_image,
+                target_size,
+                context.cancellation,
+            ),
+        )
         try:
-            handle = self._executor.submit(worker, category="layer_rasterization")
-        except TaskRejected as exc:
-            worker.deleteLater()
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda image: self._finish(request_id, image),
+            )
+        except ExecutionRejected as exc:
+            self._pending.pop(request_id, None)
+            self._latest_requests.release(key, request_id)
             self._completed(
                 PlacedAssetCompletion(
                     request_id,
@@ -140,16 +179,11 @@ class PlacedAssetRasterizationService:
                 )
             )
             return request_id
-        self._pending[request_id] = _PendingRasterization(
-            composition_id,
-            history_scope_id,
-            public_scene_id,
-            layer,
-            source_size,
-            worker,
-            handle,
+        if self._pending.get(request_id) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle(request_id, handle, outcome)
         )
-        self._latest_by_layer[layer_id] = request_id
         return request_id
 
     def shutdown(self) -> None:
@@ -159,39 +193,50 @@ class PlacedAssetRasterizationService:
         self._closed = True
         for request_id in tuple(self._pending):
             self._cancel(request_id, "placed asset service detached")
-        self._latest_by_layer.clear()
+        self._execution_scope.close(reason="placed_rasterization_shutdown")
 
-    def _finish(self, worker: LayerRasterizationWorker) -> None:
+    def _finish(self, request_id: uuid.UUID, result: QImage) -> None:
         """Install one current output as an editable source atomically."""
-        pending = self._pending.pop(worker.request_id, None)
-        if pending is None or self._closed:
+        pending = self._pending.pop(request_id, None)
+        if pending is None:
             return
         layer_id = pending.layer.layer_id
-        if self._latest_by_layer.get(layer_id) != worker.request_id:
+        key = self._request_key(layer_id)
+        if self._closed:
+            self._latest_requests.release(key, request_id)
+            self._publish(
+                pending,
+                request_id,
+                False,
+                "placed asset service detached",
+            )
             return
-        self._latest_by_layer.pop(layer_id, None)
+        if not self._latest_requests.is_current(key, request_id):
+            self._publish(
+                pending,
+                request_id,
+                False,
+                "replaced by a newer rasterization request",
+            )
+            return
+        self._latest_requests.release(key, request_id)
         current = self._layers.layer(pending.composition_id, layer_id)
         if current != pending.layer:
             self._publish(
-                pending, worker.request_id, False, "layer changed during rasterization"
+                pending, request_id, False, "layer changed during rasterization"
             )
             return
-        if worker.result is None or worker.error_message is not None:
-            self._publish(
-                pending,
-                worker.request_id,
-                False,
-                worker.error_message or "layer rasterization was cancelled",
-            )
+        if result.isNull():
+            self._publish(pending, request_id, False, "rasterization produced no image")
             return
-        raster = self._raster_assets.create(worker.result)
+        raster = self._raster_assets.create(result)
         replacement = replace(
             pending.layer,
             source=ProjectResourceReference(raster.raster_id),
             transform=retarget_raster_transform(
                 pending.layer.transform,
                 pending.source_size,
-                worker.result.size(),
+                result.size(),
             ),
             role="raster",
         )
@@ -201,28 +246,58 @@ class PlacedAssetRasterizationService:
             history_scope_id=pending.history_scope_id,
         ):
             self._raster_assets.remove(raster.raster_id)
-            self._publish(
-                pending, worker.request_id, False, "layer is no longer current"
-            )
+            self._publish(pending, request_id, False, "layer is no longer current")
             return
         self._changed(pending.composition_id)
-        self._publish(pending, worker.request_id, True, "")
+        self._publish(pending, request_id, True, "")
+
+    def _settle(
+        self,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[QImage, object],
+        outcome: ExecutionOutcome[QImage],
+    ) -> None:
+        """Publish execution failure or cancellation once."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._pending.get(request_id)
+        if pending is None or (
+            pending.handle is not None and pending.handle is not handle
+        ):
+            return
+        self._pending.pop(request_id, None)
+        self._latest_requests.release(
+            self._request_key(pending.layer.layer_id),
+            request_id,
+        )
+        message = (
+            outcome.cancellation_reason
+            if outcome.state == ExecutionState.CANCELLED
+            else str(outcome.error)
+        )
+        self._publish(pending, request_id, False, message or "rasterization failed")
 
     def _cancel_layer(self, layer_id: uuid.UUID, message: str) -> None:
         """Cancel the current request for one layer."""
-        request_id = self._latest_by_layer.pop(layer_id, None)
-        if request_id is not None:
-            self._cancel(request_id, message)
+        self._latest_requests.cancel(self._request_key(layer_id), reason=message)
 
     def _cancel(self, request_id: uuid.UUID, message: str) -> None:
         """Cancel one submitted worker and publish exactly one outcome."""
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        pending.worker.cancel()
-        self._executor.cancel(pending.handle)
-        self._latest_by_layer.pop(pending.layer.layer_id, None)
+        if pending.handle is not None:
+            pending.handle.cancel(reason=message)
+        self._latest_requests.release(
+            self._request_key(pending.layer.layer_id),
+            request_id,
+        )
         self._publish(pending, request_id, False, message)
+
+    @staticmethod
+    def _request_key(layer_id: uuid.UUID) -> tuple[str, uuid.UUID]:
+        """Return the document-global replacement key for one layer."""
+        return ("placed-rasterization", layer_id)
 
     def _publish(
         self,

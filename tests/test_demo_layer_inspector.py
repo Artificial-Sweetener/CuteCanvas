@@ -210,7 +210,7 @@ def test_demo_layer_inspector_accepts_crop_and_clips_painted_pixels(
 
 def test_demo_transform_controls_apply_to_non_destructive_placed_layer(qapp) -> None:
     """Placed layers must scale and rotate through the visible demo controls."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     inspector = None
     try:
         background = QImage(400, 300, QImage.Format_ARGB32_Premultiplied)
@@ -298,7 +298,7 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
     monkeypatch,
 ) -> None:
     """The shown demo must explain async readiness and then accept pixel edits."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     inspector = None
     release_rasterization = threading.Event()
     try:
@@ -464,7 +464,7 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
 
 def test_demo_rasterized_vector_layer_is_immediately_pixel_editable(qapp) -> None:
     """Every semantic-to-raster source swap must refresh demo edit policy."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         background = QImage(240, 180, QImage.Format_ARGB32_Premultiplied)
         background.fill(QColor("black"))

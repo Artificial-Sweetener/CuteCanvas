@@ -146,13 +146,13 @@ def test_documented_configuration_value_mismatch_fails() -> None:
 def test_demo_tiers_cannot_reference_removed_package_extras() -> None:
     """Trinity rejects stale bootstrap extras and optional ordinary masks."""
     errors = _compare_tier_extras(
-        {"core": None, "mask": "mask", "masksam": "full"},
+        {"cutecanvas": "mask", "cutecanvas-sam": "full"},
         {"sam"},
     )
 
     assert errors == [
-        "demo tier 'mask' requests unknown CuteCanvas extra 'mask'",
-        "demo tier 'masksam' requests unknown CuteCanvas extra 'full'",
-        "demo tier 'mask' must use the normal CuteCanvas install",
-        "demo tier 'masksam' must request the CuteCanvas 'sam' extra",
+        "demo tier 'cutecanvas' requests unknown CuteCanvas extra 'mask'",
+        "demo tier 'cutecanvas-sam' requests unknown CuteCanvas extra 'full'",
+        "the standard CuteCanvas demo must use the normal install",
+        "the SAM-enabled CuteCanvas demo must request the 'sam' extra",
     ]

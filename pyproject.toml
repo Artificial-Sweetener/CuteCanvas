@@ -2,6 +2,7 @@
 addopts = ["--basetemp=.pytest-tmp"]
 pythonpath = ["packages/qpane/src", "packages/cutecanvas/src"]
 markers = [
+  "interactive_performance: isolate strict interactive latency probes from shared hardware contention",
   "performance: mark long-running performance benchmarks",
   "swap_benchmark: mark swap latency benchmarks",
 ]

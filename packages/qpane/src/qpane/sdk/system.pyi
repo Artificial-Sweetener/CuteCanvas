@@ -14,4 +14,5 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from ..core.headroom import SystemHeadroomWorker as SystemHeadroomWorker
+from ..core.headroom import SystemHeadroomSample as SystemHeadroomSample
+from ..core.headroom import sample_system_headroom as sample_system_headroom

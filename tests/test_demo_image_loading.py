@@ -27,6 +27,7 @@ from cutecanvas import Config
 from cutecanvas.sam.manager import SamManager
 from PySide6.QtCore import QThread
 from PySide6.QtGui import QColor, QImage
+from qpane.sdk.execution import create_default_execution_runtime
 
 from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
 from examples.demonstration.workers import ImageLoadCoordinator
@@ -43,22 +44,27 @@ def test_image_loader_pool_lifecycle_returns_callbacks_to_gui_thread(
 
     callback_threads: list[QThread] = []
     finished_counts: list[int] = []
-    coordinator = ImageLoadCoordinator()
-    coordinator.submit(
-        [image_path],
-        image_loaded=lambda _path, _image: callback_threads.append(
-            QThread.currentThread()
-        ),
-        finished=lambda count: finished_counts.append(count),
-    )
-    deadline = time.monotonic() + 10.0
-    while finished_counts != [1] and time.monotonic() < deadline:
-        qapp.processEvents()
-        time.sleep(0.005)
+    runtime = create_default_execution_runtime()
+    coordinator = ImageLoadCoordinator(runtime)
+    try:
+        coordinator.submit(
+            [image_path],
+            image_loaded=lambda _path, _image: callback_threads.append(
+                QThread.currentThread()
+            ),
+            finished=lambda count: finished_counts.append(count),
+        )
+        deadline = time.monotonic() + 10.0
+        while finished_counts != [1] and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.005)
 
-    assert finished_counts == [1]
-    assert callback_threads == [qapp.thread()]
-    assert coordinator.active_count == 0
+        assert finished_counts == [1]
+        assert callback_threads == [qapp.thread()]
+        assert coordinator.active_count == 0
+    finally:
+        coordinator.close()
+        runtime.shutdown(wait=True)
 
 
 def test_demo_loads_image_with_pending_sam_and_zero_cache_budget(
@@ -102,7 +108,7 @@ def test_demo_loads_image_with_pending_sam_and_zero_cache_budget(
     config.cache.mode = "hard"
     config.cache.budget_mb = 0
     caplog.set_level(logging.WARNING)
-    window = ExampleWindow(ExampleOptions(feature_set="masksam"), config=config)
+    window = ExampleWindow(ExampleOptions(sam_enabled=True), config=config)
     try:
         initial_document_ids = set(window.qpane.compositionIDs())
         window.workspace.load_images([image_path])

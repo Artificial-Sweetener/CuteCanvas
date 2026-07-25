@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Supported renderer host objects and layer rasterization workers."""
+"""Supported renderer host objects and detached rasterization functions."""
 
 from ..rendering import (
     PyramidManager,
@@ -24,8 +24,8 @@ from ..rendering import (
 )
 from ..rendering.coordinates import PanelHitTest
 from ..rendering.layer_rasterization import (
-    LayerRasterizationWorker,
-    RegionRasterizationWorker,
+    rasterize_layer,
+    rasterize_region,
 )
 from ..rendering.render_tile_geometry import RenderTileRequest
 from ..rendering.render_tile_types import (
@@ -51,13 +51,11 @@ from ..rendering.scene_region import (
 __all__ = (
     "LayerCoordinateProjection",
     "LayerLocalPoint",
-    "LayerRasterizationWorker",
     "LayerSourcePoint",
     "PanelHitTest",
     "PanelPoint",
     "PyramidManager",
     "RasterLayerRegionOverride",
-    "RegionRasterizationWorker",
     "RegionSampleSource",
     "RenderTileBatchSource",
     "RenderTileProduct",
@@ -71,4 +69,6 @@ __all__ = (
     "SceneRegionRasterizer",
     "View",
     "ViewportZoomMode",
+    "rasterize_layer",
+    "rasterize_region",
 )

@@ -28,7 +28,7 @@ from qpane.rendering.pyramid import PyramidManager
 from qpane.rendering.tiles import Tile, TileManager
 
 from tests.helpers.config import fixed_cache_config
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import ControlledExecution
 from tests.helpers.render_plan import make_tile_key
 
 
@@ -44,7 +44,8 @@ def _make_tile(image: QImage) -> Tile:
 
 
 def test_tile_manager_emits_usage_changed(qapp, small_image: QImage) -> None:
-    manager = TileManager(config=fixed_cache_config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = TileManager(config=fixed_cache_config(), execution_scope=execution.scope)
     usages: list[int] = []
     manager.usageChanged.connect(usages.append)
 
@@ -57,7 +58,8 @@ def test_tile_manager_emits_usage_changed(qapp, small_image: QImage) -> None:
 
 
 def test_tile_manager_emits_cache_limit_changed(qapp) -> None:
-    manager = TileManager(config=fixed_cache_config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = TileManager(config=fixed_cache_config(), execution_scope=execution.scope)
     limits: list[int] = []
     manager.cacheLimitChanged.connect(limits.append)
 
@@ -67,7 +69,10 @@ def test_tile_manager_emits_cache_limit_changed(qapp) -> None:
 
 
 def test_pyramid_manager_emits_usage_and_budget(qapp) -> None:
-    manager = PyramidManager(config=fixed_cache_config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = PyramidManager(
+        config=fixed_cache_config(), execution_scope=execution.scope
+    )
     usages: list[int] = []
     limits: list[int] = []
     manager.usageChanged.connect(usages.append)
@@ -84,7 +89,8 @@ def test_pyramid_manager_emits_usage_and_budget(qapp) -> None:
 def test_tile_consumer_updates_coordinator_via_signals(
     qapp, small_image: QImage
 ) -> None:
-    manager = TileManager(config=fixed_cache_config(), executor=StubExecutor())
+    execution = ControlledExecution()
+    manager = TileManager(config=fixed_cache_config(), execution_scope=execution.scope)
     coordinator = CacheCoordinator(active_budget_bytes=16_384)
     TileCacheConsumer(manager, coordinator)
 

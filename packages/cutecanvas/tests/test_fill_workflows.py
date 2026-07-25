@@ -31,13 +31,15 @@ from cutecanvas.coverage import (
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QImage
 
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import ControlledExecution
 
 
-def _mounted_mask_canvas(qapp) -> tuple[CuteCanvas, StubExecutor, uuid.UUID, uuid.UUID]:
-    """Return one active image, mask, and deterministic executor."""
-    executor = StubExecutor()
-    canvas = CuteCanvas(features=("mask",), task_executor=executor)
+def _mounted_mask_canvas(
+    qapp,
+) -> tuple[CuteCanvas, ControlledExecution, uuid.UUID, uuid.UUID]:
+    """Return one active image, mask, and deterministic execution runtime."""
+    execution = ControlledExecution()
+    canvas = CuteCanvas(features=("mask",), execution_runtime=execution.runtime)
     canvas.resize(128, 96)
     image = QImage(32, 24, QImage.Format_ARGB32_Premultiplied)
     image.fill(Qt.GlobalColor.white)
@@ -61,7 +63,7 @@ def _mounted_mask_canvas(qapp) -> tuple[CuteCanvas, StubExecutor, uuid.UUID, uui
         ),
     )
     assert canvas.setPaintTarget(scene.scene_id, instance.layer_id)
-    return canvas, executor, image_id, mask_id
+    return canvas, execution, image_id, mask_id
 
 
 def test_paint_bucket_commits_one_retained_mask_edit(qapp) -> None:
@@ -71,7 +73,7 @@ def test_paint_bucket_commits_one_retained_mask_edit(qapp) -> None:
         bucket = canvas.paintBucketCoordinator()
         assert bucket.request(QPointF(4.0, 5.0))
         assert bucket.busy
-        executor.run_category("paint_bucket")
+        executor.run_operation("editor.paint.bucket")
         qapp.processEvents()
         layer = canvas.mask_service.assets.get_layer(mask_id)
         assert layer is not None
@@ -120,7 +122,7 @@ def test_paint_bucket_rejects_result_after_target_revision_changes(qapp) -> None
             lambda pixels, _image: pixels.__setitem__((0, 0), 73)
         )
         assert layer.coverage.revision != before_revision
-        executor.run_category("paint_bucket")
+        executor.run_operation("editor.paint.bucket")
         qapp.processEvents()
         assert not bucket.busy
         assert not layer.coverage.retained.items

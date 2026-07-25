@@ -35,7 +35,7 @@ from examples.demonstration.clone_stamp_controls import CloneStampControls
 
 def test_clone_stamp_action_selects_tool_before_a_raster_target_exists(qapp) -> None:
     """Clicking the demo action must not leave the previous navigation tool active."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.tools.set_mode(CuteCanvas.CONTROL_MODE_PANZOOM)
         assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
@@ -54,7 +54,7 @@ def test_clone_stamp_action_selects_tool_before_a_raster_target_exists(qapp) -> 
 
 def test_clone_stamp_demo_action_sets_persistent_source_and_paints(qapp) -> None:
     """The mounted demo action should drive the complete source-to-destination workflow."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.resize(1000, 760)
         window.show()

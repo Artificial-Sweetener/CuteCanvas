@@ -24,7 +24,6 @@ from .sources import (
     HybridCoverageFillPixelSource,
     SparseFloodFillPixelSource,
 )
-from .worker import FloodFillWorker
 
 __all__ = [
     "DenseFloodFillPixelSource",
@@ -32,7 +31,6 @@ __all__ = [
     "FloodFillEngine",
     "FloodFillPixelSource",
     "FloodFillRequest",
-    "FloodFillWorker",
     "HybridCoverageFillPixelSource",
     "PaintBucketCoordinator",
     "SelectionFillCoordinator",

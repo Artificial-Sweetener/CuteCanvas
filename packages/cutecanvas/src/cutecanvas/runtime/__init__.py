@@ -14,3 +14,22 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Focused CuteCanvas runtime responsibilities."""
+
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .document_runtime import CanvasDocumentRuntime
+
+__all__ = ["CanvasDocumentRuntime"]
+
+
+def __getattr__(name: str):
+    """Load the public document runtime without eager document imports."""
+    if name != "CanvasDocumentRuntime":
+        raise AttributeError(name)
+    value = import_module(".document_runtime", __name__).CanvasDocumentRuntime
+    globals()[name] = value
+    return value

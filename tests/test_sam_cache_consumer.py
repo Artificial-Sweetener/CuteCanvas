@@ -26,8 +26,12 @@ from cutecanvas.sam.manager import SamManager
 from PySide6.QtGui import QColor, QImage
 from qpane.cache.consumers import KeyedCacheConsumer
 from qpane.cache.coordinator import CacheCoordinator, CachePriority
+from qpane.sdk.execution import ExecutionRuntime, InlineDispatcher
 
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import (
+    ControllableAffinityExecutionBackend,
+    ControllableExecutionBackend,
+)
 
 
 class _Signal:
@@ -158,8 +162,19 @@ def test_real_manager_pending_request_stays_outside_cache_budget(
     """The production manager contract keeps in-flight work out of cache usage."""
     checkpoint = tmp_path / "sam-checkpoint.pt"
     checkpoint.write_bytes(b"checkpoint")
-    executor = StubExecutor()
-    manager = SamManager(executor=executor, checkpoint_path=checkpoint)
+    affinity = ControllableAffinityExecutionBackend()
+    runtime = ExecutionRuntime(
+        ControllableExecutionBackend(),
+        capability_backends=(affinity,),
+    )
+    scope = runtime.open_scope(
+        owner_id="sam-cache-test",
+        dispatcher=InlineDispatcher(),
+    )
+    manager = SamManager(
+        execution_scope=scope,
+        checkpoint_path=checkpoint,
+    )
     coordinator = CacheCoordinator(0)
     _attach_consumer(manager, coordinator)
     image = QImage(16, 16, QImage.Format_ARGB32)
@@ -170,13 +185,15 @@ def test_real_manager_pending_request_stays_outside_cache_budget(
         manager.requestPredictor(image, image_id, source_path=tmp_path / "image.png")
 
         assert manager.pendingUsageBytes() == 128 * 1024 * 1024
-        assert list(executor.pending_tasks())
+        assert affinity.pending_jobs()
         snapshot = coordinator.snapshot()
         assert snapshot["consumers"]["predictors"]["usage_bytes"] == 0
         assert "failed to trim below target" not in caplog.text
         assert "Cache remains over budget" not in caplog.text
     finally:
         manager.shutdown()
+        affinity.run_all()
+        runtime.shutdown()
 
 
 def test_predictor_consumer_surfaces_injected_key_enumeration_failure(caplog):

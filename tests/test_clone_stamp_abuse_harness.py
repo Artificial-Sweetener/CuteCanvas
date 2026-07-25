@@ -43,6 +43,9 @@ from qpane.sdk.rendering import LayerSourcePoint, PanelPoint, ScenePoint
 from qpane.sdk.scene import RasterBounds
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
+from tests.harness.timing import INTERACTIVE_PERFORMANCE
+
+pytestmark = INTERACTIVE_PERFORMANCE
 from tests.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,

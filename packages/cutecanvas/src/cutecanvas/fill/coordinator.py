@@ -22,30 +22,35 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.concurrency import (
-    BaseWorker,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
 )
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from cutecanvas.painting import PaintingCoordinator, PaintTargetContext
 from cutecanvas.selection import LayerCoverageProjector, PixelSelectionService
 
+from .evaluation import evaluate_flood_fill
 from .flood import FloodFillRequest
-from .worker import FloodFillWorker
 
 
 @dataclass(slots=True)
 class _PendingFill:
     """Retain one submitted target revision until terminal publication."""
 
+    request_id: uuid.UUID
     context: PaintTargetContext
     source_revision: object
     mode: CoverageCombineMode
-    worker: FloodFillWorker
-    handle: TaskHandle
+    handle: ExecutionHandle[CoverageSnapshot, object] | None = None
 
 
 class PaintBucketCoordinator:
@@ -56,13 +61,15 @@ class PaintBucketCoordinator:
         *,
         painting: PaintingCoordinator,
         selections: PixelSelectionService,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
         changed: Callable[[bool], None] | None = None,
     ) -> None:
         """Bind the shared target, selection, and task owners."""
         self._painting = painting
         self._selections = selections
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:paint-bucket"
+        )
         self._changed = changed
         self._projector = LayerCoverageProjector()
         self._pending: _PendingFill | None = None
@@ -131,20 +138,37 @@ class PaintBucketCoordinator:
             constraint,
         )
         request_id = uuid.uuid4()
-        worker = FloodFillWorker(request_id, request)
-        BaseWorker.connect_queued(worker.finished, self._finish)
-        BaseWorker.connect_queued(worker.error, self._finish)
-        try:
-            handle = self._executor.submit(worker, category="paint_bucket")
-        except TaskRejected:
-            worker.deleteLater()
-            return False
-        self._pending = _PendingFill(
+        pending = _PendingFill(
+            request_id,
             context,
             source.revision,
             CoverageCombineMode(mode),
-            worker,
-            handle,
+        )
+        self._pending = pending
+        execution_request = ExecutionRequest[CoverageSnapshot, object](
+            operation="editor.paint.bucket",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.PYTHON_CPU,
+                urgency=ExecutionUrgency.FOREGROUND,
+            ),
+            work=lambda task_context: evaluate_flood_fill(
+                request,
+                task_context.cancellation,
+            ),
+        )
+        try:
+            handle = self._execution_scope.submit(
+                execution_request,
+                adopt=lambda result: self._finish(request_id, result),
+            )
+        except ExecutionRejected:
+            if self._pending is pending:
+                self._pending = None
+            return False
+        if self._pending is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle(request_id, handle, outcome)
         )
         return True
 
@@ -154,35 +178,55 @@ class PaintBucketCoordinator:
         if pending is None:
             return False
         self._pending = None
-        pending.worker.cancel()
-        self._executor.cancel(pending.handle)
+        if pending.handle is not None:
+            pending.handle.cancel(reason="paint-bucket request cancelled")
         return True
 
     def shutdown(self) -> None:
         """Cancel pending work before editor teardown."""
         self.cancel()
+        self._execution_scope.close(reason="paint_bucket_shutdown")
 
-    def _finish(self, worker: FloodFillWorker) -> None:
+    def _finish(
+        self,
+        request_id: uuid.UUID,
+        result: CoverageSnapshot,
+    ) -> None:
         """Commit one current successful result and reject stale completion."""
         pending = self._pending
-        if pending is None or pending.worker is not worker:
-            worker.deleteLater()
+        if pending is None or pending.request_id != request_id:
             return
         self._pending = None
-        result = worker.result
         changed = bool(
-            worker.error_message is None
-            and result is not None
-            and self._painting.commit_flood_fill(
+            self._painting.commit_flood_fill(
                 pending.context,
                 result,
                 pending.mode,
                 pending.source_revision,
             )
         )
-        worker.deleteLater()
         if self._changed is not None:
             self._changed(changed)
+
+    def _settle(
+        self,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[CoverageSnapshot, object],
+        outcome: ExecutionOutcome[CoverageSnapshot],
+    ) -> None:
+        """Clear failed or cancelled fill work without stale publication."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._pending
+        if (
+            pending is None
+            or pending.request_id != request_id
+            or (pending.handle is not None and pending.handle is not handle)
+        ):
+            return
+        self._pending = None
+        if self._changed is not None:
+            self._changed(False)
 
     def _target_constraint(
         self,

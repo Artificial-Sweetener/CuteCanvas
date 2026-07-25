@@ -24,8 +24,9 @@ from cutecanvas import CuteCanvas, LayerPolicy
 from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
+from qpane.sdk.execution import ExecutionRuntime
 
-from tests.helpers.executor_stubs import RejectingStubExecutor
+from tests.helpers.execution_backend import RejectingExecutionBackend
 
 pytest_plugins = ("tests.test_mask_workflows",)
 
@@ -180,10 +181,14 @@ def test_rejected_async_work_returns_correlatable_terminal_request(
     tmp_path: Path,
 ) -> None:
     """Executor pressure must return the UUID emitted by each terminal failure."""
-    executor = RejectingStubExecutor(
-        reject_counts={"placed_decode": 1, "layer_rasterization": 1}
+    backend = RejectingExecutionBackend(
+        rejection_counts={
+            "editor.placed.decode": 1,
+            "editor.placed.rasterize": 1,
+        }
     )
-    qpane = CuteCanvas(features=(), task_executor=executor)
+    runtime = ExecutionRuntime(backend)
+    qpane = CuteCanvas(features=(), execution_runtime=runtime)
     base = _image(QColor("black"))
     qpane.createCompositionFromImage(base, title="Async rejection")
     completions: list[tuple] = []
@@ -207,6 +212,7 @@ def test_rejected_async_work_returns_correlatable_terminal_request(
     finally:
         qpane.deleteLater()
         qapp.processEvents()
+        runtime.shutdown()
 
 
 def test_embed_linked_asset_is_undoable_without_changing_pixels(

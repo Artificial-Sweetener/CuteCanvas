@@ -22,10 +22,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qpane.sdk.concurrency import TaskExecutorProtocol
+from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.features import FeatureInstallError
 
 from ..core.config_features import MaskConfigSlice, require_mask_config
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from .autosave import AutosaveManager, MaskImagePayload
 from .mask_controller import MaskController
 
@@ -43,14 +44,16 @@ class MaskAutosaveCoordinator:
         *,
         qpane: CuteCanvas,
         mask_controller: MaskController,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         snapshot_provider: Callable[[object], MaskImagePayload | None],
         publish_status: Callable[..., None],
     ) -> None:
         """Bind the feature collaborators required for autosave wiring."""
         self._qpane = qpane
         self._mask_controller = mask_controller
-        self._executor = executor
+        self._execution_scope = execution_scope
+        self._latest_requests = latest_requests
         self._snapshot_provider = snapshot_provider
         self._publish_status = publish_status
         self._connected_manager: AutosaveManager | None = None
@@ -76,7 +79,8 @@ class MaskAutosaveCoordinator:
                 snapshot_provider=self._snapshot_provider,
                 settings=require_mask_config(self._qpane.settings),
                 get_current_image_path=self._current_source_path,
-                executor=self._executor,
+                execution_scope=self._execution_scope,
+                latest_requests=self._latest_requests,
                 diagnostics_dirty=lambda domain="mask": self._qpane.diagnostics().set_dirty(
                     domain
                 ),

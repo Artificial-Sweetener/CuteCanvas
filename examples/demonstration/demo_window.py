@@ -45,8 +45,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qpane import create_default_execution_runtime
 
-from examples.demo_settings import load_demo_settings, save_demo_settings
+from examples.demo_settings import load_demo_settings, save_demo_window_settings
 from examples.demonstration import demo_text
 from examples.demonstration.command_tutorial import CommandTutorialController
 from examples.demonstration.composition_tutorial import (
@@ -69,13 +70,6 @@ from examples.demonstration.tool_mode_tutorial import ToolModeTutorialController
 from examples.demonstration.welcome_document import seed_welcome_document
 from examples.demonstration.workspace_tutorial import WorkspaceTutorialController
 
-_FEATURE_LABELS = {
-    "core": "Core",
-    "mask": "Masks",
-    "masksam": "Mask+SAM",
-}
-
-
 MASK_KEY_LOOKUP = {
     Qt.Key_1: 0,
     Qt.Key_2: 1,
@@ -95,9 +89,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ExampleOptions:
-    """CLI options controlling the example feature set and SAM configuration."""
+    """CLI options controlling optional SAM and its configuration."""
 
-    feature_set: str = "masksam"  # core, mask, masksam
+    sam_enabled: bool = False
     config_strict: bool = False
     log_level: str = "INFO"
     sam_download_mode: str | None = None
@@ -128,6 +122,8 @@ class ExampleWindow(QMainWindow):
         super().__init__()
         self.options = options
         self._example_config = config if config is not None else Config()
+        self._execution_runtime = create_default_execution_runtime()
+        self._execution_closed = False
         self._reference_dialog: QuickReferenceDialog | None = None
         self._shortcuts: list[QShortcut] = []
         self._configure_window_frame()
@@ -146,6 +142,7 @@ class ExampleWindow(QMainWindow):
         self.workspace = WorkspaceTutorialController(
             self.qpane,
             self,
+            execution_runtime=self._execution_runtime,
             masks_available=self._mask_tools_available,
             set_status=self.status_ui.show_message,
         )
@@ -231,10 +228,7 @@ class ExampleWindow(QMainWindow):
 
     def _configure_window_frame(self) -> None:
         """Apply the window title and initial sizing."""
-        feature_label = _FEATURE_LABELS.get(
-            self.options.feature_set, self.options.feature_set
-        )
-        self.setWindowTitle(f"CuteCanvas Example ({feature_label})")
+        self.setWindowTitle("CuteCanvas Example")
         self.setMinimumSize(1100, 700)
         self._apply_window_icon()
         settings = load_demo_settings()
@@ -259,24 +253,7 @@ class ExampleWindow(QMainWindow):
         size = geometry.size()
         position = geometry.topLeft()
         window_geometry = self._encode_window_geometry()
-        existing = load_demo_settings()
-        sam_download_mode = self._resolve_sam_download_mode(existing)
-        sam_model_path = self._resolve_optional_setting(
-            self.options.sam_model_path, existing.get("sam_model_path")
-        )
-        sam_model_url = self._resolve_optional_setting(
-            self.options.sam_model_url, existing.get("sam_model_url")
-        )
-        sam_model_hash = self._resolve_optional_setting(
-            self.options.sam_model_hash, existing.get("sam_model_hash")
-        )
-        save_demo_settings(
-            self.options.feature_set,
-            self.options.log_level,
-            sam_download_mode,
-            sam_model_path,
-            sam_model_url,
-            sam_model_hash,
+        save_demo_window_settings(
             window_geometry=window_geometry,
             window_size=(size.width(), size.height()),
             window_position=(position.x(), position.y()),
@@ -304,26 +281,6 @@ class ExampleWindow(QMainWindow):
         restored = self.restoreGeometry(QByteArray.fromBase64(raw))
         return restored
 
-    def _resolve_sam_download_mode(self, existing: dict[str, object]) -> str:
-        """Select a SAM download mode for persisted demo settings."""
-        if self.options.sam_download_mode:
-            return self.options.sam_download_mode
-        existing_mode = existing.get("sam_download_mode")
-        if isinstance(existing_mode, str):
-            return existing_mode
-        return "background"
-
-    @staticmethod
-    def _resolve_optional_setting(
-        preferred: str | None, fallback: object
-    ) -> str | None:
-        """Return preferred optional settings or a validated fallback."""
-        if preferred is not None:
-            return preferred
-        if isinstance(fallback, str):
-            return fallback
-        return None
-
     def _apply_window_icon(self) -> None:
         """Set the demo window icon when the asset exists on disk."""
         icon_path = (
@@ -333,13 +290,9 @@ class ExampleWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
 
     @staticmethod
-    def _feature_names(feature_set: str) -> tuple[str, ...]:
-        """Return the configured feature names for the demo tier."""
-        if feature_set == "masksam":
-            return ("mask", "sam")
-        if feature_set == "mask":
-            return ("mask",)
-        return ()
+    def _feature_names(sam_enabled: bool) -> tuple[str, ...]:
+        """Return the standard editor features and optional SAM integration."""
+        return ("mask", "sam") if sam_enabled else ("mask",)
 
     def _mask_tools_available(self) -> bool:
         """Return True when mask tooling is available."""
@@ -355,10 +308,11 @@ class ExampleWindow(QMainWindow):
 
     def _build_qpane(self) -> None:
         """Create the public CuteCanvas facade and capture feature state."""
-        feature_names = self._feature_names(self.options.feature_set)
+        feature_names = self._feature_names(self.options.sam_enabled)
         self.qpane = CuteCanvas(
             config=self._example_config.copy(),
             features=feature_names,
+            execution_runtime=self._execution_runtime,
             config_strict=self.options.config_strict,
         )
         self.qpane.setFocusPolicy(Qt.StrongFocus)
@@ -482,7 +436,16 @@ class ExampleWindow(QMainWindow):
         self.status_ui.show_message(demo_text.EXIT_MESSAGE)
         super().closeEvent(event)
         if event.isAccepted():
+            self._close_execution()
             self._persist_window_geometry()
+
+    def _close_execution(self) -> None:
+        """Close demo-owned scopes before releasing the shared runtime."""
+        if self._execution_closed:
+            return
+        self._execution_closed = True
+        self.workspace.close()
+        self._execution_runtime.shutdown(wait=False)
 
 
 class QuickReferenceDialog(QDialog):

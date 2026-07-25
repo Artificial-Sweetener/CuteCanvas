@@ -56,27 +56,6 @@ _EDITOR_DEFAULTS: dict[str, Any] = {
     "sam_cache_limit": 1,
 }
 
-_EDITOR_CONCURRENCY: dict[str, Any] = {
-    "category_priorities": {
-        "mask_stroke": 60,
-        "mask_snippet": 50,
-        "sam": 5,
-    },
-    "device_limits": {
-        "cpu": {"sam": 1},
-        "cuda": {"sam": 1},
-    },
-}
-
-
-def _combined_concurrency_defaults() -> dict[str, Any]:
-    """Merge editor worker categories into QPane's generic scheduler policy."""
-    base = deepcopy(RenderConfig.config_defaults()["concurrency"])
-    for field, overrides in _EDITOR_CONCURRENCY.items():
-        current = base.setdefault(field, {})
-        current.update(deepcopy(overrides))
-    return base
-
 
 def _editor_cache_defaults() -> CacheSettings:
     """Return QPane cache policy extended with editor-owned consumers."""
@@ -96,7 +75,6 @@ class Config(RenderConfig):
         """Initialize independent rendering and authoring defaults."""
         RenderConfig.__init__(self)
         self.cache = _editor_cache_defaults()
-        self.concurrency = _combined_concurrency_defaults()
         for key, value in _EDITOR_DEFAULTS.items():
             setattr(self, key, deepcopy(value))
         if overrides:
@@ -117,7 +95,6 @@ class Config(RenderConfig):
             for key, value in RenderConfig.config_defaults().items()
             if key != "placeholder"
         }
-        defaults["concurrency"] = _combined_concurrency_defaults()
         defaults["cache"] = _editor_cache_defaults()
         defaults.update(
             {key: deepcopy(value) for key, value in _EDITOR_DEFAULTS.items()}

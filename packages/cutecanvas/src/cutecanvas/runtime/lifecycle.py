@@ -88,7 +88,13 @@ class CanvasLifecycleMixin:
                 document=self.document(),
                 state=self._state,
                 settings=self.settings,
-                executor=self.executor,
+                execution_scope=self._execution_binding.scope,
+                document_execution_scope=(
+                    self._execution_binding.document_runtime.execution_scope
+                ),
+                latest_requests=(
+                    self._execution_binding.document_runtime._latest_request_registry
+                ),
                 cache_registry=self._state.cache_registry,
                 diagnostics=self._diagnostics_manager,
                 layer_selection=self._scene_selection,
@@ -421,7 +427,10 @@ class CanvasLifecycleMixin:
             assets=service.assets,
             edits=service.controller.edits,
             renders=service.controller.renders,
-            executor=self.executor,
+            execution_scope=(self._execution_binding.document_runtime.execution_scope),
+            latest_requests=(
+                self._execution_binding.document_runtime._latest_request_registry
+            ),
             mask_changed=service.controller.mask_updated.emit,
             undo_changed=service.controller.undo_stack_changed.emit,
             scene_changed=self._handle_raster_structure_changed,

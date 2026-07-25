@@ -23,6 +23,10 @@ from collections.abc import Iterable
 from PySide6.QtCore import QRectF, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QStackedLayout, QWidget
+from qpane.sdk.execution import (
+    DefaultExecutionPolicy,
+    ExecutionRuntime,
+)
 from qpane.sdk.types import ComparisonOrientation, LinkedGroup
 from qpane.sdk.ui import OutboundMimeProvider
 
@@ -37,6 +41,7 @@ from ..document import (
 )
 from ..editor.interaction_policy import CanvasInteractionMode
 from ..facade.drag_api import CanvasDragSubjectResolver
+from ..runtime.document_runtime import CanvasDocumentRuntime
 from .contracts import CanvasPresentationContext, CanvasPresentationProvider
 from .surfaces import (
     CanvasTargetMount,
@@ -58,12 +63,38 @@ class CanvasWorkspace(QWidget):
         document: CanvasDocument | None = None,
         session: CanvasViewSession | None = None,
         features: Iterable[str] | None = None,
+        document_runtime: CanvasDocumentRuntime | None = None,
+        execution_runtime: ExecutionRuntime | None = None,
+        execution_policy: DefaultExecutionPolicy | None = None,
         parent: QWidget | None = None,
     ) -> None:
-        """Create a workspace while preserving document and session ownership."""
+        """Create a workspace over one runtime shared by every target canvas."""
         super().__init__(parent)
-        self._document = document or CanvasDocument()
-        self._owns_document = document is None
+        if document_runtime is not None and (
+            execution_runtime is not None or execution_policy is not None
+        ):
+            raise ValueError(
+                "document_runtime cannot be combined with execution runtime options"
+            )
+        if execution_runtime is not None and execution_policy is not None:
+            raise ValueError(
+                "execution_policy cannot configure a host-owned execution_runtime"
+            )
+        if document_runtime is not None:
+            if document is not None and document_runtime.document is not document:
+                raise ValueError("document_runtime belongs to a different document")
+            self._document = document_runtime.document
+            self._document_runtime = document_runtime
+            self._owns_document_runtime = False
+        else:
+            self._document = document or CanvasDocument()
+            self._document_runtime = CanvasDocumentRuntime(
+                self._document,
+                execution_runtime=execution_runtime,
+                execution_policy=execution_policy,
+            )
+            self._owns_document_runtime = True
+        self._owns_document = document is None and document_runtime is None
         self._session = session or CanvasViewSession()
         self._features = None if features is None else tuple(features)
         self._providers: dict[str, CanvasPresentationProvider] = {}
@@ -92,6 +123,11 @@ class CanvasWorkspace(QWidget):
     def session(self) -> CanvasViewSession:
         """Return detachable presentation and inspection state."""
         return self._session
+
+    @property
+    def documentRuntime(self) -> CanvasDocumentRuntime:
+        """Return the document-wide execution owner shared by target views."""
+        return self._document_runtime
 
     def registerPresentationProvider(
         self,
@@ -364,6 +400,7 @@ class CanvasWorkspace(QWidget):
                 document=self._document,
                 session=child_session,
                 features=self._features,
+                document_runtime=self._document_runtime,
             )
             self._canvases[target_id] = canvas
             self._mounts[target_id] = CanvasTargetMount(canvas, self)
@@ -469,5 +506,7 @@ class CanvasWorkspace(QWidget):
                 pass
         self._canvases.clear()
         self._mounts.clear()
+        if self._owns_document_runtime:
+            self._document_runtime.close()
         if self._owns_document:
             self._document.close()

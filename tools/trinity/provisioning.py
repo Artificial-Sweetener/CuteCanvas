@@ -102,14 +102,14 @@ def _compare_tier_extras(
     tier_extras: dict[str, str | None],
     optional_extras: set[str],
 ) -> list[str]:
-    """Return invalid-extra and mask-ownership errors for demo tiers."""
+    """Return invalid-extra and CuteCanvas ownership errors for demo tiers."""
     errors = [
         f"demo tier {tier!r} requests unknown CuteCanvas extra {extra!r}"
         for tier, extra in tier_extras.items()
         if extra is not None and extra not in optional_extras
     ]
-    if tier_extras.get("mask") is not None:
-        errors.append("demo tier 'mask' must use the normal CuteCanvas install")
-    if "masksam" in tier_extras and tier_extras["masksam"] != "sam":
-        errors.append("demo tier 'masksam' must request the CuteCanvas 'sam' extra")
+    if tier_extras.get("cutecanvas") is not None:
+        errors.append("the standard CuteCanvas demo must use the normal install")
+    if "cutecanvas-sam" in tier_extras and tier_extras["cutecanvas-sam"] != "sam":
+        errors.append("the SAM-enabled CuteCanvas demo must request the 'sam' extra")
     return errors

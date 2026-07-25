@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from qpane.sdk.concurrency import TaskExecutorProtocol
+from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.rendering import SceneRegionRasterizer
 from qpane.sdk.scene import LayerEffectRenderRegistry, LayerSourceCapabilities
 
@@ -37,6 +37,7 @@ from ..raster.descriptor_factory import EditableRasterLayerDescriptorFactory
 from ..raster.layers import EditableRasterLayerController
 from ..raster.presentation_state import EditableRasterPresentationState
 from ..raster.source_resolver import EditableRasterSourceCapabilities
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
 from ..scene.source_capabilities import EditorSourceCapabilities
 from ..selection import PixelSelectionService
@@ -99,7 +100,8 @@ class ProjectResourceDomainInstaller:
     def install(
         self,
         *,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         document: DocumentResourceCore,
         render_capabilities: LayerSourceCapabilities,
         editor_capabilities: EditorSourceCapabilities,
@@ -130,7 +132,8 @@ class ProjectResourceDomainInstaller:
         )
         layer_operations = document.layer_operations
         placed_workflow, placed_rasterization = self._install_placed_workflows(
-            executor=executor,
+            execution_scope=execution_scope,
+            latest_requests=latest_requests,
             compositions=compositions,
             raster_assets=raster_assets,
             placed_assets=placed_assets,
@@ -169,7 +172,8 @@ class ProjectResourceDomainInstaller:
             raster_assets=raster_assets,
             layers=compositions.layers,
             layer_edits=compositions.layer_edits,
-            executor=executor,
+            execution_scope=execution_scope,
+            latest_requests=latest_requests,
             changed=callbacks.resource_content_changed,
             completed=callbacks.layer_rasterization_completed,
         )
@@ -202,7 +206,8 @@ class ProjectResourceDomainInstaller:
     @staticmethod
     def _install_placed_workflows(
         *,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         compositions: CompositionService,
         raster_assets: EditableRasterAssetStore,
         placed_assets: PlacedAssetStore,
@@ -214,7 +219,8 @@ class ProjectResourceDomainInstaller:
             layers=compositions.layers,
             layer_edits=compositions.layer_edits,
             edits=compositions.edit_controller,
-            executor=executor,
+            execution_scope=execution_scope,
+            latest_requests=latest_requests,
             current_scope_id=callbacks.current_composition_id,
             current_history_scope_id=callbacks.current_edit_scope_id,
             changed=callbacks.resource_content_changed,
@@ -225,7 +231,8 @@ class ProjectResourceDomainInstaller:
             raster_assets=raster_assets,
             layers=compositions.layers,
             layer_edits=compositions.layer_edits,
-            executor=executor,
+            execution_scope=execution_scope,
+            latest_requests=latest_requests,
             changed=callbacks.resource_content_changed,
             completed=callbacks.placed_asset_completed,
             resource_completed=callbacks.layer_rasterization_completed,

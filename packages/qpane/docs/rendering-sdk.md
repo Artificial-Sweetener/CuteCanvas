@@ -325,8 +325,8 @@ complete tuple of `RenderTileProduct` values for that revision. Implement
 `RegionSampleSource` as well when the source can answer arbitrary bounded
 samples for nested scene rendering. These protocols keep expensive sampling on
 workers while QPane retains cache keys, scheduling, cancellation, and frame
-publication. `RegionRasterizationWorker` executes one such bounded sample
-through the shared task system and validates the returned dimensions.
+publication. `rasterize_region()` executes one such bounded sample inside an
+execution request and validates the returned dimensions.
 
 ## Related Docs
 

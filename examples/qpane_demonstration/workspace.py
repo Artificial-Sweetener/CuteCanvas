@@ -20,13 +20,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
-from qpane import QPane, ViewerCatalogEntry
+from qpane import ExecutionRuntime, QPane, ViewerCatalogEntry
 
 from .catalog import CatalogPanel
-from .loading import ImageLoader
+from .loading import ViewerImageLoadCoordinator, ViewerImageProduct
 from .scenes import ViewerSceneController
 from .status import ViewerStatusBar
 
@@ -41,6 +41,7 @@ class ViewerWorkspaceController:
         pane: QPane,
         parent: QWidget,
         *,
+        execution_runtime: ExecutionRuntime,
         catalog_panel: CatalogPanel,
         scenes: ViewerSceneController,
         status: ViewerStatusBar,
@@ -56,7 +57,7 @@ class ViewerWorkspaceController:
         self._status = status
         self._refresh_commands = refresh_commands
         self._reveal_catalog = reveal_catalog
-        self._loaders: set[ImageLoader] = set()
+        self._image_loads = ViewerImageLoadCoordinator(execution_runtime, parent)
 
     def add_image(
         self,
@@ -88,30 +89,30 @@ class ViewerWorkspaceController:
         if not names:
             return
         paths = tuple(Path(name) for name in names)
-        loader = ImageLoader(paths)
-        self._loaders.add(loader)
-        loader.signals.loaded.connect(self.accept_loaded_image)
-        loader.signals.failed.connect(self.report_load_failure)
-        loader.signals.finished.connect(lambda: self._finish_loader(loader))
+        self._image_loads.submit(
+            paths,
+            loaded=self.accept_loaded_image,
+            failed=self.report_load_failure,
+            finished=lambda: self._status.showMessage(
+                f"Finished loading {len(paths)} image(s)"
+            ),
+        )
         self._status.showMessage(f"Loading {len(paths)} image(s)…")
-        QThreadPool.globalInstance().start(loader)
 
     def accept_loaded_image(
         self,
-        path: Path,
-        image: QImage,
-        thumbnail: QImage,
+        product: ViewerImageProduct,
     ) -> None:
         """Promote one worker result into GUI-owned catalog state."""
         entry = self._pane.addImage(
-            image,
-            label=path.name,
-            path=path,
+            product.image,
+            label=product.path.name,
+            path=product.path,
             select=False,
         )
-        self._catalog_panel.set_thumbnail(entry.entry_id, thumbnail)
+        self._catalog_panel.set_thumbnail(entry.entry_id, product.thumbnail)
         self._pane.selectCatalogImage(entry.entry_id)
-        self._status.showMessage(f"Loaded image: {path.name}")
+        self._status.showMessage(f"Loaded image: {product.path.name}")
 
     def report_load_failure(self, path: Path, reason: str) -> None:
         """Report one decoding failure without disrupting successful entries."""
@@ -196,6 +197,6 @@ class ViewerWorkspaceController:
         else:
             self._status.showMessage("No raster image is available to copy")
 
-    def _finish_loader(self, loader: ImageLoader) -> None:
-        """Release a completed worker retained for its signal lifetime."""
-        self._loaders.discard(loader)
+    def close(self) -> None:
+        """Cancel host-owned decoder work before runtime shutdown."""
+        self._image_loads.close()

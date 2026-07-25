@@ -20,12 +20,8 @@ from ..rendering import RenderingPresenter as RenderingPresenter
 from ..rendering import View as View
 from ..rendering import ViewportZoomMode as ViewportZoomMode
 from ..rendering.coordinates import PanelHitTest as PanelHitTest
-from ..rendering.layer_rasterization import (
-    LayerRasterizationWorker as LayerRasterizationWorker,
-)
-from ..rendering.layer_rasterization import (
-    RegionRasterizationWorker as RegionRasterizationWorker,
-)
+from ..rendering.layer_rasterization import rasterize_layer as rasterize_layer
+from ..rendering.layer_rasterization import rasterize_region as rasterize_region
 from ..rendering.render_tile_geometry import RenderTileRequest as RenderTileRequest
 from ..rendering.render_tile_types import (
     RegionSampleSource as RegionSampleSource,

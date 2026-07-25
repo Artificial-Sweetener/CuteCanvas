@@ -33,7 +33,13 @@ from PySide6.QtTest import QTest
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
-from tests.harness.timing import interaction_clock, stable_latency_samples
+from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    interaction_clock,
+    stable_latency_samples,
+)
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 
 def _paint_square(layer: object, left: int, top: int, size: int) -> None:

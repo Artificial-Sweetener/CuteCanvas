@@ -47,7 +47,7 @@ def test_demo_selection_split_button_centers_label_across_toolbar(
     qapp: QApplication,
 ) -> None:
     """Selection text should center across the split control, not its left half."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.resize(900, 600)
         window.show()
@@ -137,7 +137,7 @@ def test_demo_delete_shortcut_clears_selected_pixels_from_moved_mask(
 ) -> None:
     """Delete must route through the demo action to the selected mask layer."""
     size = 400
-    window = ExampleWindow(ExampleOptions(feature_set="mask"))
+    window = ExampleWindow(ExampleOptions())
     try:
         composition_id = window.qpane.createCompositionFromImage(
             _white_image(size),
@@ -193,7 +193,7 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
     qapp: QApplication,
 ) -> None:
     """The literal first-stroke demo workflow must enable and execute Ctrl+Z."""
-    window = ExampleWindow(ExampleOptions(feature_set="mask"))
+    window = ExampleWindow(ExampleOptions())
     try:
         image = QImage(QSize(3440, 1440), QImage.Format_ARGB32)
         image.fill(QColor(35, 55, 80))
@@ -323,7 +323,7 @@ def test_demo_ctrl_d_deselects_while_escape_preserves_committed_selection(
     qapp: QApplication,
 ) -> None:
     """Deselect must not conflate durable state with cancellation."""
-    window = ExampleWindow(ExampleOptions(feature_set="mask"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.qpane.createCompositionFromImage(
             _white_image(200),
@@ -355,7 +355,7 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
     qapp: QApplication,
 ) -> None:
     """Repeated Undo must traverse deselection, movement, and prior selection."""
-    window = ExampleWindow(ExampleOptions(feature_set="mask"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.qpane.createCompositionFromImage(
             _white_image(400),
@@ -530,7 +530,7 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
 ) -> None:
     """The demo should expose intentional resolution controls only when needed."""
     size = 240
-    window = ExampleWindow(ExampleOptions(feature_set="mask"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.qpane.createCompositionFromImage(
             _white_image(size),

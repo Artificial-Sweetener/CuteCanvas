@@ -14,88 +14,91 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Mask autosave workflows that queue disk writes through the shared task executor."""
+"""Coordinate debounced, stale-safe mask autosaves."""
 
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import (
-    QBuffer,
-    QIODevice,
-    QObject,
-    QRunnable,
-    QTimer,
-    Signal,
-)
-from PySide6.QtGui import QImage, Qt
-from qpane.sdk.concurrency import (
-    BaseWorker,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
-    makeQtRetryController,
-    qt_retry_dispatcher,
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtGui import QImage
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
+    QtDelayScheduler,
+    RetryController,
+    RetryPolicy,
 )
 
 from ..core.config_features import MaskConfigSlice
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
+from .autosave_products import (
+    MaskImagePayload,
+    encode_blank_mask,
+    save_mask_payload,
+)
 
 logger = logging.getLogger(__name__)
 
 _AUTOSAVE_RETRY_BASE_DELAY_MS = 100
 _AUTOSAVE_RETRY_MAX_DELAY_MS = 2000
 
-MaskImagePayload = QImage | bytes | Callable[[], QImage]
-
 
 class AutosaveManager(QObject):
-    """Manage debounced autosaves of mask layers using background workers."""
+    """Own mask autosave debounce, retry, cancellation, and publication."""
 
-    saveCompleted = Signal(str, str)  # mask_id, path
-    saveFailed = Signal(str, str, Exception)  # mask_id, path, exception
-    saveThrottled = Signal(str, str, int)  # mask_id, path, attempt
+    saveCompleted = Signal(str, str)
+    saveFailed = Signal(str, str, Exception)
+    saveThrottled = Signal(str, str, int)
 
     def __init__(
         self,
         snapshot_provider: Callable[[object], MaskImagePayload | None],
         settings: MaskConfigSlice,
-        get_current_image_path: Callable,
+        get_current_image_path: Callable[[], object],
         *,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         diagnostics_dirty: Callable[[str], None] | None = None,
-        parent=None,
-    ):
-        """Initialize the autosave manager and optional worker executor.
-
-        Args:
-            snapshot_provider: Callable returning the canvas-projected mask image.
-            settings: Mask configuration slice containing autosave preferences.
-            get_current_image_path: Callable returning the active image path.
-            executor: Shared executor instance used for autosave workers.
-            diagnostics_dirty: Optional callback to mark diagnostics dirty for the
-                mask domain when autosave state changes.
-            parent: Optional QObject parent for Qt ownership.
-        """
+        parent: QObject | None = None,
+    ) -> None:
+        """Bind autosave policy to document execution and freshness ownership."""
         super().__init__(parent)
         self._snapshot_provider = snapshot_provider
         self._settings = settings
-        self._executor: TaskExecutorProtocol | None = executor
         self._get_current_image_path = get_current_image_path
         self._diagnostics_dirty = diagnostics_dirty
-        self._dirty_masks_for_autosave = set()
-        self._active_workers: list[_MaskSaveWorker] = []
-        self._active_entries: dict[str, list[tuple[_MaskSaveWorker, TaskHandle]]] = {}
-        self._blank_encode_entries: dict[
-            str, list[tuple[_BlankMaskEncodeWorker, TaskHandle]]
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:mask-autosave"
+        )
+        self._latest_requests = latest_requests
+        self._dirty_masks_for_autosave: dict[str, object] = {}
+        self._active_entries: dict[
+            str,
+            dict[uuid.UUID, ExecutionHandle[Path, object]],
         ] = {}
-        self._retry = makeQtRetryController(
-            "autosave",
-            _AUTOSAVE_RETRY_BASE_DELAY_MS,
-            _AUTOSAVE_RETRY_MAX_DELAY_MS,
-            parent=self,
-            dispatcher=qt_retry_dispatcher(self._executor, category="autosave_main"),
+        self._blank_encode_entries: dict[
+            str,
+            dict[uuid.UUID, ExecutionHandle[bytes, object]],
+        ] = {}
+        self._request_ids: dict[str, uuid.UUID] = {}
+        self._retry: RetryController[str, object, object, object] = RetryController(
+            "editor.mask.autosave",
+            RetryPolicy(
+                base_ms=_AUTOSAVE_RETRY_BASE_DELAY_MS,
+                max_ms=_AUTOSAVE_RETRY_MAX_DELAY_MS,
+            ),
+            QtDelayScheduler(self),
         )
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
@@ -105,15 +108,15 @@ class AutosaveManager(QObject):
         self._diagnostics_tick_timer.timeout.connect(self._maybe_mark_diagnostics_dirty)
 
     def applyConfig(self, settings: MaskConfigSlice) -> None:
-        """Swap in a new configuration snapshot for subsequent saves."""
+        """Use a new mask configuration snapshot for subsequent saves."""
         self._settings = settings
 
     def retry_snapshot(self):
-        """Expose the autosave retry controller snapshot for diagnostics."""
+        """Return bounded retry telemetry for diagnostics."""
         return self._retry.snapshot()
 
-    def saveBlankMask(self, mask_id: str, image_size) -> None:
-        """Immediately saves a blank, transparent version of a new mask."""
+    def saveBlankMask(self, mask_id: str, image_size: object) -> None:
+        """Persist a new transparent mask when creation autosave is enabled."""
         if not (
             self._settings.mask_autosave_enabled
             and self._settings.mask_autosave_on_creation
@@ -124,159 +127,422 @@ class AutosaveManager(QObject):
             return
         save_path = Path(
             self._settings.mask_autosave_path_template.format(
-                image_name=image_path.stem, mask_id=mask_id
+                image_name=Path(image_path).stem,
+                mask_id=mask_id,
             )
         )
         if save_path.exists():
-            logger.debug(
-                "Skipping blank mask autosave for %s: %s already exists",
-                mask_id,
-                save_path,
-            )
+            logger.debug("Blank mask autosave already exists at %s", save_path)
             return
-        width, height = self._coerce_image_dimensions(image_size)
-        if width <= 0 or height <= 0:
+        size = self._coerce_image_dimensions(image_size)
+        if size[0] <= 0 or size[1] <= 0:
             logger.warning(
                 "Skipping blank mask autosave for %s: invalid size %sx%s",
                 mask_id,
-                width,
-                height,
+                size[0],
+                size[1],
             )
             return
-        self._schedule_blank_mask_encode(str(mask_id), (width, height), save_path)
+        key = str(mask_id)
+        request_id = self._begin_request(key)
+        if request_id is not None:
+            self._queue_blank_encode(key, request_id, size, save_path)
 
-    def _schedule_blank_mask_encode(
-        self, mask_id: str, size: tuple[int, int], path: Path, *, attempt: int = 0
-    ) -> None:
-        """Submit a background encode for a blank mask, retrying when throttled."""
-        try:
-            self._submit_blank_mask_encode_worker(
-                mask_id=mask_id, size=size, path=path, attempt=attempt
-            )
-        except TaskRejected as rejection:
-            self._handle_blank_encode_rejection(
-                mask_id=mask_id,
-                size=size,
-                path=path,
-                attempt=attempt,
-                rejection=rejection,
-            )
+    def scheduleSave(self, mask_id: str, dirty_rect: object = None) -> None:
+        """Debounce persistence for one modified mask."""
+        del dirty_rect
+        if not self._settings.mask_autosave_enabled or not mask_id:
+            return
+        self._dirty_masks_for_autosave[str(mask_id)] = mask_id
+        self._autosave_timer.start(self._settings.mask_autosave_debounce_ms)
+        self._ensure_diagnostics_ticks()
+        self._mark_diagnostics_dirty()
 
-    def _submit_blank_mask_encode_worker(
-        self, *, mask_id: str, size: tuple[int, int], path: Path, attempt: int
-    ) -> TaskHandle:
-        """Dispatch a blank-mask encode worker to the executor."""
-        worker = _BlankMaskEncodeWorker(mask_id, size, path)
-        worker.setAutoDelete(False)
-        try:
-            BaseWorker.connect_queued(worker.finished, self._on_blank_mask_encoded)
-        except TypeError:  # pragma: no cover - PySide signal edge case
-            worker.finished.connect(self._on_blank_mask_encoded)
-        executor = self._executor
-        if executor is None:
-            raise RuntimeError("AutosaveManager executor is missing")
-        try:
-            handle = executor.submit(worker, category="io")
-        except TaskRejected:
-            try:
-                worker.deleteLater()
-            except RuntimeError:
-                logger.debug("Blank-mask worker was already deleted", exc_info=True)
-            raise
-        self._blank_encode_entries.setdefault(mask_id, []).append((worker, handle))
-        logger.info(
-            "Queued blank mask encode for mask %s to %s (task=%s, attempt=%s)",
-            mask_id,
-            path,
-            handle.task_id,
-            attempt,
+    def performSave(self) -> None:
+        """Submit every dirty mask using the configured path template."""
+        if not self._settings.mask_autosave_enabled:
+            return
+        for key, mask_id in tuple(self._dirty_masks_for_autosave.items()):
+            default_path = self._resolveDefaultSavePath(key)
+            if default_path is None:
+                logger.warning("No autosave path resolved for mask %s", key)
+                continue
+            self.saveMaskToPath(mask_id, default_path)
+        self._mark_diagnostics_dirty()
+
+    def saveMaskToPath(self, mask_id: object, path: str | Path) -> None:
+        """Snapshot and asynchronously persist one mask."""
+        if mask_id is None or not path:
+            return
+        key = str(mask_id)
+        payload = self._snapshot_provider(mask_id)
+        if payload is None:
+            return
+        if isinstance(payload, QImage):
+            if payload.isNull():
+                return
+            payload = payload.copy()
+        self._dirty_masks_for_autosave.pop(key, None)
+        request_id = self._begin_request(key)
+        if request_id is not None:
+            self._queue_save(key, request_id, payload, Path(path))
+
+    def pending_mask_count(self) -> int:
+        """Return the number of dirty masks waiting for debounce."""
+        return len(self._dirty_masks_for_autosave)
+
+    def seconds_until_next_save(self) -> float | None:
+        """Return the remaining debounce duration in seconds."""
+        if not self._autosave_timer.isActive():
+            return None
+        remaining_ms = self._autosave_timer.remainingTime()
+        return None if remaining_ms < 0 else remaining_ms / 1000.0
+
+    def cancelPendingMask(self, mask_id: str) -> None:
+        """Cancel delayed and accepted work for one mask."""
+        key = str(mask_id)
+        request_id = self._request_ids.get(key)
+        if request_id is not None:
+            self._latest_requests.cancel_request(
+                self._request_key(key),
+                request_id,
+                reason="mask autosave cancelled",
+            )
+        else:
+            self._cancel_local_request(key, reason="mask autosave cancelled")
+        self._dirty_masks_for_autosave.pop(key, None)
+        self._mark_diagnostics_dirty()
+
+    def activeSaveCount(self) -> int:
+        """Return accepted autosave operations that have not settled."""
+        return sum(len(entries) for entries in self._active_entries.values()) + sum(
+            len(entries) for entries in self._blank_encode_entries.values()
         )
-        return handle
 
-    def _handle_blank_encode_rejection(
+    def shutdown(self, *, wait: bool = True) -> None:
+        """Close autosave ownership and cancel delayed or accepted work."""
+        del wait
+        self._autosave_timer.stop()
+        self._diagnostics_tick_timer.stop()
+        for mask_id, request_id in tuple(self._request_ids.items()):
+            if not self._latest_requests.cancel_request(
+                self._request_key(mask_id),
+                request_id,
+                reason="mask autosave manager shut down",
+            ):
+                self._cancel_local_request(
+                    mask_id,
+                    reason="mask autosave manager shut down",
+                )
+        self._retry.cancel_all()
+        self._execution_scope.close(reason="mask_autosave_shutdown")
+        self._active_entries.clear()
+        self._blank_encode_entries.clear()
+        self._request_ids.clear()
+
+    def _queue_blank_encode(
         self,
-        *,
         mask_id: str,
+        request_id: uuid.UUID,
         size: tuple[int, int],
         path: Path,
-        attempt: int,
-        rejection: TaskRejected,
     ) -> None:
-        """Schedule a retry when the blank encode submission is throttled."""
-        next_attempt = max(1, attempt + 1)
-        logger.warning(
-            "Blank mask encode for %s throttled: pending %s limit=%s (total=%s, category=%s)",
-            mask_id,
-            rejection.limit_type,
-            rejection.limit_value,
-            rejection.pending_total,
-            rejection.pending_category,
-        )
-        self.saveThrottled.emit(mask_id, str(path), next_attempt)
-        key = self._blank_encode_retry_key(mask_id)
+        """Submit or coalesce transparent-image encoding for one mask."""
+        retry_key = self._blank_retry_key(mask_id)
 
         def _submit(
-            payload: tuple[str, tuple[int, int], Path], tries: int
-        ) -> TaskHandle:
-            """Forward encoded-blank submission to the executor via retry controller."""
-            mid, dims, target_path = payload
-            return self._submit_blank_mask_encode_worker(
-                mask_id=mid,
-                size=dims,
-                path=target_path,
-                attempt=tries,
+            payload: object,
+            attempt: int,
+        ) -> ExecutionHandle[bytes, object]:
+            """Submit the retained blank encode payload."""
+            retained_mask_id, retained_size, retained_path = payload
+            request = ExecutionRequest[bytes, object](
+                operation="editor.mask.autosave.encode_blank",
+                requirements=ExecutionRequirements(
+                    resource=ExecutionResource.NATIVE_CPU,
+                    urgency=ExecutionUrgency.BACKGROUND,
+                    estimated_retained_bytes=retained_size[0] * retained_size[1] * 4,
+                ),
+                tags=(("mask_id", retained_mask_id), ("attempt", attempt)),
+                work=lambda context: encode_blank_mask(
+                    retained_size,
+                    context.cancellation,
+                ),
             )
-
-        def _coalesce(_old, new):
-            """Replace queued blank encode payloads with the most recent request."""
-            return new
-
-        def _throttle(_key: str, nxt_attempt: int, rej: TaskRejected) -> None:
-            """Log and surface throttling while preserving retry attempts."""
-            self.saveThrottled.emit(mask_id, str(path), nxt_attempt)
-            logger.warning(
-                "Blank mask encode for %s throttled again: pending %s limit=%s (total=%s, category=%s)",
-                mask_id,
-                rej.limit_type,
-                rej.limit_value,
-                rej.pending_total,
-                rej.pending_category,
+            handle = self._execution_scope.submit(request)
+            self._blank_encode_entries.setdefault(retained_mask_id, {})[
+                request_id
+            ] = handle
+            handle.add_done_callback(
+                lambda outcome: self._finish_blank_encode(
+                    retained_mask_id,
+                    request_id,
+                    retained_path,
+                    handle,
+                    outcome,
+                )
             )
+            return handle
 
-        self._retry.queueOrCoalesce(
-            key,
+        self._retry.submit_or_coalesce(
+            retry_key,
             (mask_id, size, path),
             submit=_submit,
-            coalesce=_coalesce,
-            throttle=_throttle,
+            rejected=lambda _key, attempt, rejection: self._report_rejection(
+                mask_id,
+                path,
+                attempt,
+                rejection,
+            ),
         )
 
-    @staticmethod
-    def _blank_encode_retry_key(mask_id: str) -> str:
-        """Return the retry-controller key for blank mask encode operations."""
-        return f"blank::{mask_id}"
-
-    def _remove_blank_encode_worker(
-        self, mask_id: str, worker: _BlankMaskEncodeWorker
+    def _finish_blank_encode(
+        self,
+        mask_id: str,
+        request_id: uuid.UUID,
+        path: Path,
+        handle: ExecutionHandle[bytes, object],
+        outcome: ExecutionOutcome[bytes],
     ) -> None:
-        """Drop bookkeeping for a completed blank encode worker."""
-        entries = self._blank_encode_entries.get(mask_id)
-        if not entries:
+        """Settle one blank encode and schedule its atomic file save."""
+        self._remove_handle(self._blank_encode_entries, mask_id, request_id)
+        if not self._is_current(mask_id, request_id):
             return
-        for index, (candidate, handle) in enumerate(entries):
-            if candidate is worker:
-                entries.pop(index)
-                break
-        if not entries:
-            self._blank_encode_entries.pop(mask_id, None)
+        if outcome.state == ExecutionState.CANCELLED:
+            self._release_request(mask_id, request_id)
+            return
+        if outcome.state == ExecutionState.FAILED or outcome.result is None:
+            self._release_request(mask_id, request_id)
+            self._emit_failure(
+                mask_id,
+                path,
+                outcome.error or RuntimeError("Blank mask encode produced no data"),
+            )
+            return
+        self._queue_save(mask_id, request_id, outcome.result, path)
+
+    def _queue_save(
+        self,
+        mask_id: str,
+        request_id: uuid.UUID,
+        payload: MaskImagePayload,
+        path: Path,
+    ) -> None:
+        """Submit or coalesce one atomic mask save."""
+
+        def _submit(
+            retained: object,
+            attempt: int,
+        ) -> ExecutionHandle[Path, object]:
+            """Submit the retained image and target path."""
+            retained_payload, retained_path = retained
+            request = ExecutionRequest[Path, object](
+                operation="editor.mask.autosave.save",
+                requirements=ExecutionRequirements(
+                    resource=ExecutionResource.BLOCKING_IO,
+                    urgency=ExecutionUrgency.BACKGROUND,
+                    exclusive_key=f"mask-autosave:{mask_id}",
+                    estimated_retained_bytes=self._payload_size(retained_payload),
+                ),
+                tags=(("mask_id", mask_id), ("attempt", attempt)),
+                work=lambda context: save_mask_payload(
+                    retained_payload,
+                    retained_path,
+                    context.cancellation,
+                ),
+            )
+            handle = self._execution_scope.submit(request)
+            self._active_entries.setdefault(mask_id, {})[request_id] = handle
+            handle.add_done_callback(
+                lambda outcome: self._finish_save(
+                    mask_id,
+                    request_id,
+                    retained_path,
+                    handle,
+                    outcome,
+                )
+            )
+            return handle
+
+        self._retry.submit_or_coalesce(
+            mask_id,
+            (payload, path),
+            submit=_submit,
+            merge=lambda _old, new: self._mark_coalesced(mask_id, new),
+            rejected=lambda _key, attempt, rejection: self._report_rejection(
+                mask_id,
+                path,
+                attempt,
+                rejection,
+            ),
+        )
+
+    def _finish_save(
+        self,
+        mask_id: str,
+        request_id: uuid.UUID,
+        path: Path,
+        handle: ExecutionHandle[Path, object],
+        outcome: ExecutionOutcome[Path],
+    ) -> None:
+        """Publish one terminal save and release its bookkeeping."""
+        self._remove_handle(self._active_entries, mask_id, request_id)
+        if not self._is_current(mask_id, request_id):
+            return
+        self._release_request(mask_id, request_id)
+        if outcome.state == ExecutionState.CANCELLED:
+            return
+        if outcome.state == ExecutionState.FAILED:
+            self._dirty_masks_for_autosave[mask_id] = mask_id
+            self._emit_failure(
+                mask_id,
+                path,
+                outcome.error or RuntimeError("Mask autosave failed"),
+            )
+            return
+        self._dirty_masks_for_autosave.pop(mask_id, None)
+        self.saveCompleted.emit(mask_id, str(path))
+        self._mark_diagnostics_dirty()
+
+    def _begin_request(self, mask_id: str) -> uuid.UUID | None:
+        """Claim document-wide autosave freshness for one mask."""
+        request_id = uuid.uuid4()
+        claimed = self._latest_requests.claim(
+            self._request_key(mask_id),
+            request_id,
+            lambda reason: self._cancel_request(mask_id, request_id, reason),
+        )
+        if not claimed:
+            return None
+        self._request_ids[mask_id] = request_id
+        return request_id
+
+    def _cancel_request(
+        self,
+        mask_id: str,
+        request_id: uuid.UUID,
+        reason: str,
+    ) -> None:
+        """Cancel one superseded document autosave without touching a sibling."""
+        if self._request_ids.get(mask_id) != request_id:
+            return
+        self._request_ids.pop(mask_id, None)
+        self._cancel_local_request(mask_id, reason=reason)
+
+    def _cancel_local_request(self, mask_id: str, *, reason: str) -> None:
+        """Cancel only work and retry state owned by this manager."""
+        for handle in tuple(self._active_entries.pop(mask_id, {}).values()):
+            handle.cancel(reason=reason)
+        for handle in tuple(self._blank_encode_entries.pop(mask_id, {}).values()):
+            handle.cancel(reason=reason)
+        self._retry.cancel(mask_id)
+        self._retry.cancel(self._blank_retry_key(mask_id))
+
+    def _is_current(self, mask_id: str, request_id: uuid.UUID) -> bool:
+        """Return whether this manager still owns the document autosave."""
+        return self._request_ids.get(
+            mask_id
+        ) == request_id and self._latest_requests.is_current(
+            self._request_key(mask_id),
+            request_id,
+        )
+
+    def _release_request(self, mask_id: str, request_id: uuid.UUID) -> None:
+        """Release terminal autosave freshness from both owners."""
+        if self._request_ids.get(mask_id) == request_id:
+            self._request_ids.pop(mask_id, None)
+        self._latest_requests.release(self._request_key(mask_id), request_id)
+
+    def _report_rejection(
+        self,
+        mask_id: str,
+        path: Path,
+        attempt: int,
+        rejection: ExecutionRejected,
+    ) -> None:
+        """Retain dirty state and report structured execution saturation."""
+        self._dirty_masks_for_autosave[mask_id] = mask_id
+        self.saveThrottled.emit(mask_id, str(path), attempt)
+        logger.warning(
+            "Mask autosave submission rejected for %s (%s): %s",
+            mask_id,
+            rejection.reason.value,
+            rejection,
+        )
+        self._mark_diagnostics_dirty()
+
+    def _mark_coalesced(
+        self,
+        mask_id: str,
+        payload: object,
+    ) -> object:
+        """Retain dirty state while replacing a rejected save payload."""
+        self._dirty_masks_for_autosave[mask_id] = mask_id
+        return payload
+
+    def _emit_failure(
+        self,
+        mask_id: str,
+        path: Path,
+        error: BaseException,
+    ) -> None:
+        """Publish one save failure using the Qt signal's exception contract."""
+        exception = error if isinstance(error, Exception) else RuntimeError(str(error))
+        logger.error("Mask autosave failed for %s to %s: %s", mask_id, path, error)
+        self.saveFailed.emit(mask_id, str(path), exception)
+        self._mark_diagnostics_dirty()
+
+    def _ensure_diagnostics_ticks(self) -> None:
+        """Refresh diagnostics while a debounce countdown remains active."""
+        if not self._diagnostics_tick_timer.isActive():
+            self._diagnostics_tick_timer.start()
+
+    def _maybe_mark_diagnostics_dirty(self) -> None:
+        """Stop countdown telemetry after all pending debounce state settles."""
+        if not self._autosave_timer.isActive() and not self._dirty_masks_for_autosave:
+            self._diagnostics_tick_timer.stop()
+            return
+        self._mark_diagnostics_dirty()
+
+    def _mark_diagnostics_dirty(self) -> None:
+        """Notify the diagnostics broker when autosave state changes."""
+        if self._diagnostics_dirty is not None:
+            self._diagnostics_dirty("mask")
+
+    def _resolveDefaultSavePath(self, mask_id: str) -> Path | None:
+        """Resolve the configured path template for one mask."""
+        template = self._settings.mask_autosave_path_template
+        if not template:
+            return None
+        image_path = self._get_current_image_path()
+        image_name = Path(image_path).stem if image_path else "mask"
         try:
-            worker.deleteLater()
-        except RuntimeError:
-            logger.debug("Blank-mask worker was already deleted", exc_info=True)
+            return Path(template.format(image_name=image_name, mask_id=mask_id))
+        except Exception:
+            logger.exception(
+                "Could not format mask autosave path for mask %s using %r",
+                mask_id,
+                template,
+            )
+            return None
 
     @staticmethod
-    def _coerce_image_dimensions(image_size) -> tuple[int, int]:
-        """Return integer width/height for image_size, defaulting to zeros."""
+    def _remove_handle(
+        entries: dict[str, dict[uuid.UUID, ExecutionHandle]],
+        mask_id: str,
+        task_id: uuid.UUID,
+    ) -> None:
+        """Release one terminal handle from a per-mask task map."""
+        mask_entries = entries.get(mask_id)
+        if mask_entries is None:
+            return
+        mask_entries.pop(task_id, None)
+        if not mask_entries:
+            entries.pop(mask_id, None)
+
+    @staticmethod
+    def _coerce_image_dimensions(image_size: object) -> tuple[int, int]:
+        """Return integer dimensions for QSize-like or pair-like values."""
         if hasattr(image_size, "width") and hasattr(image_size, "height"):
             try:
                 return int(image_size.width()), int(image_size.height())
@@ -289,400 +555,27 @@ class AutosaveManager(QObject):
                 return 0, 0
         return 0, 0
 
-    def _on_blank_mask_encoded(self, worker: _BlankMaskEncodeWorker) -> None:
-        """Handle completion of the blank-mask encode worker."""
-        mask_id = str(worker.mask_id)
-        path = Path(worker.path)
-        key = self._blank_encode_retry_key(mask_id)
-        self._retry.onFailure(key)
-        self._remove_blank_encode_worker(mask_id, worker)
-        if getattr(worker, "is_cancelled", False):
-            logger.info("Blank mask encode cancelled for %s to %s", mask_id, path)
-            return
-        error = getattr(worker, "error", None)
-        if error is not None:
-            logger.error(
-                "Blank mask encode failed for %s to %s: %s", mask_id, path, error
-            )
-            self.saveFailed.emit(mask_id, str(path), error)
-            return
-        image_bytes = getattr(worker, "image_bytes", None)
-        if not image_bytes:
-            err = RuntimeError("Blank mask encode produced no data")
-            logger.error(
-                "Blank mask encode failed for %s to %s: %s", mask_id, path, err
-            )
-            self.saveFailed.emit(mask_id, str(path), err)
-            return
-        self._retry.onSuccess(key)
-        self._queue_save_worker(mask_id, image_bytes, path)
+    @staticmethod
+    def _payload_size(payload: MaskImagePayload) -> int | None:
+        """Estimate retained payload bytes for admission diagnostics."""
+        if isinstance(payload, bytes):
+            return len(payload)
+        if isinstance(payload, QImage):
+            return max(0, int(payload.sizeInBytes()))
+        return None
 
-    def scheduleSave(self, mask_id: str, dirty_rect=None):
-        """Schedules a debounced save for a modified mask."""
-        if not self._settings.mask_autosave_enabled or not mask_id:
-            return
-        self._dirty_masks_for_autosave.add(mask_id)
-        self._autosave_timer.start(self._settings.mask_autosave_debounce_ms)
-        self._ensure_diagnostics_ticks()
-        self._mark_diagnostics_dirty()
+    @staticmethod
+    def _blank_retry_key(mask_id: str) -> str:
+        """Return the independent retry key for blank image encoding."""
+        return f"blank::{mask_id}"
 
-    def performSave(self):
-        """Persist dirty masks using the configured autosave path template."""
-        logger.debug("Autosave timer fired.")
-        if not self._settings.mask_autosave_enabled:
-            return
-        dirty_set_copy = self._dirty_masks_for_autosave.copy()
-        for mask_id in dirty_set_copy:
-            default_path = self._resolveDefaultSavePath(mask_id)
-            if not default_path:
-                logger.warning("No autosave path resolved for mask %s", mask_id)
-                continue
-            logger.info("Autosaving mask %s to %s", mask_id, default_path)
-            self.saveMaskToPath(mask_id, default_path)
-        self._mark_diagnostics_dirty()
-
-    def saveMaskToPath(self, mask_id: str, path: str):
-        """Persist ``mask_id`` to ``path`` using a background worker."""
-        if not mask_id or not path:
-            return
-        self._dirty_masks_for_autosave.discard(mask_id)
-        image_payload = self._snapshot_provider(mask_id)
-        if image_payload is None:
-            return
-        if isinstance(image_payload, QImage):
-            if image_payload.isNull():
-                return
-            image_payload = image_payload.copy()
-        self._queue_save_worker(mask_id, image_payload, path)
-
-    def pending_mask_count(self) -> int:
-        """Return the number of masks waiting to be autosaved."""
-        return len(self._dirty_masks_for_autosave)
-
-    def seconds_until_next_save(self) -> float | None:
-        """Return seconds remaining until the next autosave fires when scheduled."""
-        if not self._autosave_timer.isActive():
-            return None
-        remaining_ms = self._autosave_timer.remainingTime()
-        if remaining_ms < 0:
-            return None
-        return remaining_ms / 1000.0
-
-    def cancelPendingMask(self, mask_id: str) -> None:
-        """Cancel any in-flight autosave tasks for ``mask_id``."""
-        entries = self._active_entries.pop(str(mask_id), [])
-        if not entries:
-            self._retry.cancel(str(mask_id))
-            self._dirty_masks_for_autosave.discard(str(mask_id))
-            return
-        for worker, handle in entries:
-            executor = self._executor
-            if executor is None:
-                raise RuntimeError("AutosaveManager executor is missing")
-            cancelled = executor.cancel(handle)
-            if not cancelled:
-                worker.cancel()
-            logger.info(
-                "Cancelled autosave worker for mask %s (task=%s, cancelled=%s)",
-                mask_id,
-                handle.task_id,
-                cancelled,
-            )
-            if worker in self._active_workers:
-                self._active_workers.remove(worker)
-        self._dirty_masks_for_autosave.discard(str(mask_id))
-        self._retry.cancel(str(mask_id))
-
-    def activeSaveCount(self) -> int:
-        """Return the number of autosave tasks currently active in the executor."""
-        if self._executor is None:
-            return sum(len(entries) for entries in self._active_entries.values())
-        try:
-            return self._executor.active_counts().get("io", 0)
-        except Exception:  # noqa: BLE001 - injected executor metrics are optional
-            return sum(len(entries) for entries in self._active_entries.values())
-
-    def _ensure_diagnostics_ticks(self) -> None:
-        """Start periodic diagnostics updates while autosave countdown is active."""
-        if not self._diagnostics_tick_timer.isActive():
-            self._diagnostics_tick_timer.start()
-
-    def _maybe_mark_diagnostics_dirty(self) -> None:
-        """Refresh diagnostics while the autosave timer counts down."""
-        if not self._autosave_timer.isActive() and not self._dirty_masks_for_autosave:
-            self._diagnostics_tick_timer.stop()
-            return
-        self._mark_diagnostics_dirty()
-
-    def _mark_diagnostics_dirty(self) -> None:
-        """Notify diagnostics about autosave state changes when callbacks are wired."""
-        callback = self._diagnostics_dirty
-        if callback is None:
-            return
-        try:
-            callback("mask")
-        except Exception:  # pragma: no cover - defensive guard
-            logger.debug("Autosave diagnostics dirty callback failed", exc_info=True)
-
-    def _queue_save_worker(
-        self, mask_id: str, image_payload: MaskImagePayload, path: str | Path
-    ) -> None:
-        """Queue a background worker to encode and write the mask to disk."""
-        key = str(mask_id)
-        normalized_path = Path(path)
-
-        def _submit(payload: tuple[MaskImagePayload, Path], attempt: int):
-            """Submit a mask save worker to the executor."""
-            payload_image, path2 = payload
-            worker = _MaskSaveWorker(payload_image, path2, key)
-            worker.setAutoDelete(False)
-            try:
-                BaseWorker.connect_queued(worker.finished, self._on_save_finished)
-            except TypeError:
-                worker.finished.connect(self._on_save_finished)
-            executor = self._executor
-            if executor is None:
-                raise RuntimeError("AutosaveManager executor is missing")
-            handle = executor.submit(worker, category="io")
-            self._active_workers.append(worker)
-            self._active_entries.setdefault(key, []).append((worker, handle))
-            logger.info(
-                "Queued autosave for mask %s to %s (task=%s)",
-                key,
-                path2,
-                handle.task_id,
-            )
-            return handle
-
-        def _coalesce(
-            old: tuple[MaskImagePayload, Path], new: tuple[MaskImagePayload, Path]
-        ) -> tuple[MaskImagePayload, Path]:
-            """Prefer the most recent payload while keeping the mask marked dirty."""
-            self._dirty_masks_for_autosave.add(key)
-            return new
-
-        def _throttle(mid: str, next_attempt: int, rej: TaskRejected):
-            """Record throttling and keep the mask scheduled for saving."""
-            self._dirty_masks_for_autosave.add(mid)
-            self.saveThrottled.emit(mid, str(normalized_path), next_attempt)
-            logger.warning(
-                "Autosave for mask %s throttled: pending %s limit=%s (total=%s, category=%s)",
-                mid,
-                rej.limit_type,
-                rej.limit_value,
-                rej.pending_total,
-                rej.pending_category,
-            )
-
-        self._retry.queueOrCoalesce(
-            key,
-            (image_payload, normalized_path),
-            submit=_submit,
-            coalesce=_coalesce,
-            throttle=_throttle,
-        )
-
-    def _on_save_finished(self, worker_instance):
-        """Handle worker completion by emitting success or failure and cleaning up."""
-        mask_id = str(worker_instance.mask_id)
-        path = str(worker_instance.path)
-        self._retry.onFailure(mask_id)
-        if getattr(worker_instance, "is_cancelled", False):
-            logger.info("Autosave cancelled for mask %s to %s", mask_id, path)
-        elif getattr(worker_instance, "error", None) is not None:
-            logger.error(
-                "Autosave failed for mask %s to %s: %s",
-                mask_id,
-                path,
-                worker_instance.error,
-            )
-            self.saveFailed.emit(mask_id, path, worker_instance.error)
-        else:
-            logger.info("Autosave completed for mask %s to %s", mask_id, path)
-            self.saveCompleted.emit(mask_id, path)
-            self._retry.onSuccess(mask_id)
-        self._dirty_masks_for_autosave.discard(mask_id)
-        self._remove_active_worker(mask_id, worker_instance)
-
-    def _remove_active_worker(self, mask_id: str, worker: _MaskSaveWorker) -> None:
-        """Prune bookkeeping for a completed or cancelled worker."""
-        entries = self._active_entries.get(mask_id)
-        if not entries:
-            return
-        remaining: list[tuple[_MaskSaveWorker, TaskHandle]] = []
-        for existing_worker, handle in entries:
-            if existing_worker is worker:
-                continue
-            remaining.append((existing_worker, handle))
-        if remaining:
-            self._active_entries[mask_id] = remaining
-        else:
-            self._active_entries.pop(mask_id, None)
-        if worker in self._active_workers:
-            self._active_workers.remove(worker)
-
-    def shutdown(self, *, wait: bool = True) -> None:
-        """Cancel all outstanding autosave tasks and optionally wait for completion."""
-        for mask_id in list(self._active_entries.keys()):
-            self.cancelPendingMask(mask_id)
-        self._retry.cancelAll()
-        self._active_workers.clear()
-
-    def _resolveDefaultSavePath(self, mask_id) -> Path | None:
-        """Derive a filesystem path for ``mask_id`` using the active template."""
-        template = getattr(self._settings, "mask_autosave_path_template", None)
-        if not template:
-            return None
-        image_path = self._get_current_image_path()
-        if image_path:
-            try:
-                image_name = Path(image_path).stem
-            except TypeError:
-                image_name = Path(str(image_path)).stem
-        else:
-            image_name = None
-        if not image_name:
-            image_name = "mask"
-        try:
-            return Path(template.format(image_name=image_name, mask_id=mask_id))
-        except Exception:
-            logger.exception(
-                "Could not format mask autosave path for mask %s using template %r",
-                mask_id,
-                template,
-            )
-            return None
+    @staticmethod
+    def _request_key(mask_id: str) -> tuple[str, str]:
+        """Return the document-global autosave replacement key."""
+        return ("mask-autosave", mask_id)
 
 
-class _MaskSaveWorker(QObject, QRunnable, BaseWorker):
-    """Encode and write mask image data to disk on a background thread."""
-
-    finished = Signal(object)  # Emits its own instance upon completion
-
-    def __init__(self, image_payload: MaskImagePayload, path: Path, mask_id: str):
-        """Capture mask payload metadata for deferred disk writes."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self)
-        self.image_payload = image_payload
-        self.path: Path = Path(path)
-        self.mask_id = mask_id
-        self.error: Exception | None = None
-
-    def run(self):
-        """Encode the mask to PNG and write it to disk."""
-        cancelled = False
-        buffer: QBuffer | None = None
-        try:
-            if self.is_cancelled:
-                cancelled = True
-                return
-            image_bytes: bytes | None
-            image_payload = self.image_payload
-            if callable(image_payload):
-                image_payload = image_payload()
-            if isinstance(image_payload, bytes):
-                image_bytes = image_payload
-            else:
-                if image_payload.isNull():
-                    raise RuntimeError("Mask projection returned a null image")
-                buffer = QBuffer()
-                if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
-                    raise RuntimeError("QBuffer failed to open for writing")
-                if not image_payload.save(buffer, "PNG"):
-                    raise RuntimeError("QImage.save returned False while encoding mask")
-                image_bytes = bytes(buffer.data())
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            if self.is_cancelled:
-                cancelled = True
-                return
-            with self.path.open("wb") as f:
-                f.write(image_bytes)
-            if self.is_cancelled:
-                cancelled = True
-                return
-            self.logger.info(
-                "Mask %s saved successfully to %s", self.mask_id, self.path
-            )
-        except Exception as exc:
-            self.error = exc
-            self.logger.exception(
-                "Could not save mask %s to %s", self.mask_id, self.path
-            )
-        finally:
-            if buffer is not None and buffer.isOpen():
-                try:
-                    buffer.close()
-                except Exception:
-                    self.logger.debug(
-                        "Failed to close buffer after mask save", exc_info=True
-                    )
-        if cancelled or self.is_cancelled:
-            self.logger.info("Mask %s save cancelled before completion", self.mask_id)
-            self.emit_finished(False, payload=self)
-            self.finished.emit(self)
-            return
-        succeeded = self.error is None
-        self.emit_finished(succeeded, payload=self, error=self.error)
-        if not succeeded:
-            self.finished.emit(self)
-
-
-class _BlankMaskEncodeWorker(QObject, QRunnable, BaseWorker):
-    """Build blank mask image bytes off the UI thread so autosave stays responsive."""
-
-    finished = Signal(object)
-
-    def __init__(self, mask_id: str, size: tuple[int, int], path: Path) -> None:
-        """Store mask metadata and target path for blank mask encoding."""
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self)
-        self.mask_id = str(mask_id)
-        self._size = (max(0, int(size[0])), max(0, int(size[1])))
-        self.path = Path(path)
-        self.image_bytes: bytes | None = None
-        self.error: Exception | None = None
-
-    def run(self) -> None:
-        """Encode a transparent PNG that represents a blank mask."""
-        cancelled = False
-        buffer = QBuffer()
-        try:
-            if self.is_cancelled:
-                cancelled = True
-                return
-            width, height = self._size
-            image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
-            image.fill(Qt.GlobalColor.transparent)
-            if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
-                raise RuntimeError("QBuffer failed to open for writing")
-            if not image.save(buffer, "PNG"):
-                raise RuntimeError(
-                    "QImage.save returned False while encoding blank mask"
-                )
-            self.image_bytes = bytes(buffer.data())
-        except Exception as exc:
-            self.error = exc
-            self.logger.exception(
-                "Could not encode blank mask %s to %s",
-                self.mask_id,
-                self.path,
-            )
-        finally:
-            try:
-                if buffer.isOpen():
-                    buffer.close()
-            except Exception:
-                self.logger.debug(
-                    "Failed to close QBuffer after blank mask encode",
-                    exc_info=True,
-                )
-        if cancelled or self.is_cancelled:
-            self.emit_finished(False, payload=self)
-            self.finished.emit(self)
-            return
-        succeeded = self.error is None
-        self.emit_finished(succeeded, payload=self, error=self.error)
-        if not succeeded:
-            self.finished.emit(self)
+__all__ = [
+    "AutosaveManager",
+    "MaskImagePayload",
+]

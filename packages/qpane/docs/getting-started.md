@@ -164,7 +164,7 @@ cache scheduling behind this boundary.
 You have a running viewer. Continue with the part that matches your host:
 
 * **Refine the feel:** [Configuration](configuration.md) covers zoom, cache,
-  placeholders, touch navigation, and concurrency.
+  placeholders, touch navigation, and background execution.
 * **Manage a review queue:** [Catalog and Navigation](catalog-and-navigation.md)
   explains selection, linking, comparison, and prefetch.
 * **Build layered presentations:** [Rendering SDK](rendering-sdk.md) teaches

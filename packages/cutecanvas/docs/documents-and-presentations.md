@@ -70,6 +70,18 @@ workspace = CanvasWorkspace(document=document)
 workspace.setTabbedPresentation((first_id, second_id), linked=True)
 ```
 
+Every target in one workspace shares its `CanvasDocumentRuntime`. That binding
+owns document-scoped work and one freshness decision for replaceable
+operations, while each target keeps a receiver-safe view scope. Pass an
+existing `document_runtime` when other editor views mount the same document.
+Otherwise the workspace creates and closes the document binding and its
+bounded standalone execution runtime.
+
+`CuteCanvas.documentRuntime` returns the binding already used by an editor.
+Pass it to another `CuteCanvas` or `CanvasWorkspace` when those views should
+share document mutation freshness while retaining independent viewport and
+tool state.
+
 Linked inspection stores the visible region in normalized composition
 coordinates. Switching from a 1,000-pixel composition at 200% to a
 2,000-pixel composition shows the same detail at 100%. A target-local 100%

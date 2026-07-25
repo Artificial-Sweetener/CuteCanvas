@@ -151,23 +151,29 @@ Testing focus (when implemented)
 - Viewer-only mode remains identical when hosts use only generated default image
   compositions.
 
-## Modularize Core Infrastructure (Concurrency + Cache)
+## Extend Execution and Cache Backends
 
-Goal: split QPane’s concurrency executor and cache coordination into standalone
-packages so host apps can reuse the same architecture without pulling the full viewer.
+Goal: keep QPane's public execution and cache SDKs small enough for host-owned
+physical backends while preserving one lifecycle owner for QPane and
+CuteCanvas work.
 
 Possible integration points
-- `qpane/concurrency/`: extract TaskExecutor, policies, and retry hooks into a dedicated package.
-- `qpane/cache/`: lift cache coordinator + registry into its own package with minimal dependencies.
-- `qpane/core/`: keep QPane as a thin integration layer and treat the extracted packages as optional runtime deps.
+- Add explicitly serializable process-work requests for Python-heavy operations
+  that benefit from process execution.
+- Add host diagnostic enrichment without making diagnostics a requirement for
+  submission.
+- Generalize cache consumer registration while preserving coordinated byte
+  budgets and source-neutral eviction.
 
 Key behaviors to define
-- Stable public APIs for the new packages.
-- QPane remains a consumer, not the owner.
+- Process-safe cancellation, serialization, and result-size limits.
+- Honest backend capability routing with no executor-inside-executor path.
+- Stable cache consumer identity and bounded admission for third-party sources.
 
 Testing focus (when implemented)
-- Backward compatibility for QPane.
-- Standalone adoption in non-QPane apps.
+- Host backend conformance and teardown under saturation.
+- Process crash, cancellation, and oversized-result containment.
+- Standalone QPane and shared CuteCanvas runtime performance.
 
 ## Adjustment Layers (Non-Destructive Editing)
 

@@ -35,13 +35,13 @@ from qpane.vector.model import VectorDocument, VectorObject
 from qpane.vector.public import VectorObjectKind, VectorShapeKind, VectorStyle
 from qpane.vector.tile_source import VectorRenderTileSource
 
-from tests.helpers.executor_stubs import RejectingStubExecutor, StubExecutor
+from tests.helpers.execution_backend import ControlledExecution
 
 
 def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
     """Tile bleed and source projection must reproduce direct raster pixels."""
     document = _document(12)
-    executor = StubExecutor(name="vector-tiles")
+    executor = ControlledExecution()
     cache = RenderTileCache(8 * 1024 * 1024)
     ready_count = 0
 
@@ -50,7 +50,7 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
         ready_count += 1
 
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=_ready,
     )
@@ -100,7 +100,7 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
 
 def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> None:
     """Superseded work cannot publish and cache pressure must evict exactly."""
-    executor = StubExecutor(name="vector-stale")
+    executor = ControlledExecution()
     cache = RenderTileCache(2 * 512 * 512 * 4)
     ready_count = 0
 
@@ -109,7 +109,7 @@ def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> N
         ready_count += 1
 
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=_ready,
     )
@@ -155,7 +155,7 @@ def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> N
 
 def test_rejection_and_shutdown_remain_bounded(qapp: QApplication) -> None:
     """Rejected and teardown work must not retry-loop or publish."""
-    executor = RejectingStubExecutor(reject_counts={"render_refinement": 1})
+    executor = ControlledExecution(rejection_counts={"render.refinement.continuity": 1})
     cache = RenderTileCache()
     ready_count = 0
 
@@ -164,7 +164,7 @@ def test_rejection_and_shutdown_remain_bounded(qapp: QApplication) -> None:
         ready_count += 1
 
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=_ready,
     )
@@ -175,18 +175,18 @@ def test_rejection_and_shutdown_remain_bounded(qapp: QApplication) -> None:
         "panel_rect": QRectF(0.0, 0.0, 256.0, 192.0),
         "device_pixel_ratio": 1.0,
     }
-    assert coordinator.request(**args).pending
+    assert not coordinator.request(**args).pending
     _run_refinement_turn(executor, qapp)
     assert not coordinator.request(**args).pending
     assert len(executor.rejections) == 1
     coordinator.shutdown()
-    executor.drain_all()
+    executor.run_all()
     qapp.processEvents()
     assert ready_count == 1
     assert coordinator.pending_count == 0
 
     disabled = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=RenderTileCache(0),
         ready=_ready,
     )
@@ -200,10 +200,10 @@ def test_fallback_is_atomic_and_limited_to_compatible_source_geometry(
     qapp: QApplication,
 ) -> None:
     """Revisions may reuse settled tiles only when their coordinate space matches."""
-    executor = StubExecutor(name="render-fallback")
+    executor = ControlledExecution()
     cache = RenderTileCache(8 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=lambda: None,
     )
@@ -251,10 +251,10 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
     qapp: QApplication,
 ) -> None:
     """A settled view must already contain the next tiles exposed by panning."""
-    executor = StubExecutor(name="vector-pan-guard")
+    executor = ControlledExecution()
     cache = RenderTileCache(24 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=lambda: None,
     )
@@ -306,10 +306,10 @@ def test_overview_fallback_covers_an_arbitrary_high_zoom_pan(
     qapp: QApplication,
 ) -> None:
     """A distant viewport must retain coarse complete content while refining."""
-    executor = StubExecutor(name="vector-pan-overview")
+    executor = ControlledExecution()
     cache = RenderTileCache(24 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=lambda: None,
     )
@@ -368,10 +368,10 @@ def test_pan_storm_cannot_cancel_whole_source_continuity_work(
     qapp: QApplication,
 ) -> None:
     """Viewport churn must replace detail work without starving stable coverage."""
-    executor = StubExecutor(name="vector-continuity-starvation")
+    executor = ControlledExecution()
     cache = RenderTileCache(24 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=lambda: None,
     )
@@ -403,8 +403,8 @@ def test_pan_storm_cannot_cancel_whole_source_continuity_work(
         _run_refinement_turn(executor, qapp)
         distant = request_at(-6400.0)
         assert distant.products
-        assert not distant.exact
-        assert max(product.key.scale for product in distant.products) < 1.0
+        assert distant.exact
+        assert max(product.key.scale for product in distant.products) >= 1.0
     finally:
         coordinator.shutdown()
 
@@ -413,10 +413,10 @@ def test_pan_storm_keeps_one_fallback_density_until_viewport_settles(
     qapp: QApplication,
 ) -> None:
     """Cached detail and overview products must not alternate during motion."""
-    executor = StubExecutor(name="vector-continuity-density")
+    executor = ControlledExecution()
     cache = RenderTileCache(24 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=lambda: None,
     )
@@ -467,10 +467,10 @@ def test_partial_previous_view_is_never_presented_as_fallback(
     qapp: QApplication,
 ) -> None:
     """A cache without whole-source coverage must not draw unrelated old strips."""
-    executor = StubExecutor(name="vector-non-covering-fallback")
+    executor = ControlledExecution()
     cache = RenderTileCache(3 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
-        executor=executor,
+        execution_scope=executor.scope,
         cache=cache,
         ready=lambda: None,
     )
@@ -538,13 +538,13 @@ def _settle_refinement(qapp: QApplication) -> None:
     qapp.processEvents()
 
 
-def _run_all_refinement(executor: StubExecutor, qapp: QApplication) -> None:
+def _run_all_refinement(executor: ControlledExecution, qapp: QApplication) -> None:
     """Run staged continuity and detail jobs through their queued publications."""
     for _ in range(6):
         pending = tuple(
-            record
-            for record in executor.pending_tasks()
-            if record.handle.category == "render_refinement"
+            job
+            for job in executor.pending_jobs()
+            if job.operation.startswith("render.refinement")
         )
         if not pending:
             return
@@ -552,9 +552,13 @@ def _run_all_refinement(executor: StubExecutor, qapp: QApplication) -> None:
     raise AssertionError("render refinement did not settle")
 
 
-def _run_refinement_turn(executor: StubExecutor, qapp: QApplication) -> None:
+def _run_refinement_turn(executor: ControlledExecution, qapp: QApplication) -> None:
     """Run one queued dispatch or worker generation and publish its result."""
-    executor.run_category("render_refinement")
+    pending = tuple(
+        job.operation.startswith("render.refinement") for job in executor.pending_jobs()
+    )
+    for _ in range(sum(pending)):
+        executor.run_operation("render.refinement")
     qapp.processEvents()
     _settle_refinement(qapp)
 

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPixmap
-from qpane.sdk.concurrency import TaskExecutorProtocol
+from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.types import DiagnosticRecord
 
 from cutecanvas.coverage import CoverageItem, CoverageSnapshot
@@ -37,6 +37,7 @@ from ..composition.layers import CompositionLayerInstance
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from ..painting import BrushStrokeSegment
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..types import DiagnosticsDomain
 from .activation import MaskActivationController
 from .autosave_coordination import MaskAutosaveCoordinator
@@ -73,10 +74,12 @@ class MaskService:
         mask_controller: MaskController,
         config: Config,
         mask_config: MaskConfigSlice | None = None,
-        executor: TaskExecutorProtocol,
+        view_execution_scope: ExecutionScope,
+        document_execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         stroke_diagnostics: MaskStrokeDiagnostics | None = None,
     ) -> None:
-        """Bind qpane collaborators plus mask, autosave, and executor plumbing."""
+        """Bind mask collaborators to their view and document lifetimes."""
         self._qpane = qpane
         self._assets = mask_assets
         self._component_adjustment = MaskComponentAdjustmentTool(mask_assets)
@@ -85,7 +88,6 @@ class MaskService:
         self._mask_controller = mask_controller
         self._config_source = config
         self._config: MaskConfigSlice = mask_config
-        self._executor = executor
         self._projection = MaskCanvasProjectionService(
             assets=mask_assets,
             active_scene=qpane.sceneMutationCoordinator().active_scene,
@@ -99,7 +101,8 @@ class MaskService:
         self._autosave = MaskAutosaveCoordinator(
             qpane=qpane,
             mask_controller=mask_controller,
-            executor=executor,
+            execution_scope=document_execution_scope,
+            latest_requests=latest_requests,
             snapshot_provider=self._projection.deferred,
             publish_status=self._record_status,
         )
@@ -120,7 +123,7 @@ class MaskService:
         self._render_work = MaskRenderWorkCoordinator(
             assets=mask_assets,
             controller=mask_controller,
-            executor=executor,
+            execution_scope=view_execution_scope,
             mask_ids_for_composition=self._layers.mask_ids_for_composition,
             composition_ids_for_mask=self._layers.composition_ids_for_mask,
             current_composition_id=qpane.currentCompositionID,
@@ -153,7 +156,7 @@ class MaskService:
         self._stroke_pipeline = MaskStrokePipeline(
             assets=mask_assets,
             controller=mask_controller,
-            executor=executor,
+            execution_scope=view_execution_scope,
             mask_feature_available=lambda: qpane._masks_controller.mask_feature_available(),
             current_composition_id=qpane.currentCompositionID,
             ensure_active=self._activation.ensure_top_active,
@@ -188,11 +191,6 @@ class MaskService:
     def controller(self) -> MaskController:
         """Expose the active MaskController for callers that need it."""
         return self._mask_controller
-
-    @property
-    def executor(self) -> TaskExecutorProtocol | None:
-        """Expose the executor powering stroke/snippet workers."""
-        return self._executor
 
     @property
     def render_work(self) -> MaskRenderWorkCoordinator:
@@ -414,6 +412,8 @@ class MaskService:
 
     def shutdown(self) -> None:
         """Detach view-local history observation during widget teardown."""
+        self._stroke_pipeline.shutdown()
+        self._render_work.shutdown()
         unsubscribe = self._history_unsubscribe
         self._history_unsubscribe = None
         if unsubscribe is not None:

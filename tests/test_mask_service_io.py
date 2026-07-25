@@ -31,12 +31,13 @@ from cutecanvas.masks.component_adjustment import MaskComponentAdjustmentTool
 from cutecanvas.masks.layer_workflows import random_mask_color
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.resources import ProjectResourceStore
+from cutecanvas.runtime.latest_requests import DocumentLatestRequestRegistry
 from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QImage, Qt
 from qpane.raster.image_conversion import numpy_to_qimage_grayscale8
 from qpane.scene.raster import RasterBounds
 
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import TestExecution
 from tests.helpers.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
 from tests.test_mask_workflows import (
     _cleanup_qpane,
@@ -296,7 +297,7 @@ def test_adjust_component_grows_storage_only_when_extent_policy_allows() -> None
 
 def test_async_strokes_sync_undo_and_autosave(monkeypatch, qapp):
     """Undo/redo stacks and autosave notifications stay consistent with worker commits."""
-    executor = StubExecutor(auto_finish=False)
+    executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = _mask_service(qpane)
     assert service is not None
@@ -364,7 +365,7 @@ class _DummySignal:
 @pytest.mark.usefixtures("qapp")
 def test_mask_autosave_coordinator_uses_shared_executor(monkeypatch) -> None:
     """Mask autosave coordination should wire the provided executor into AutosaveManager."""
-    executor = StubExecutor()
+    executor = TestExecution()
     mask_controller = SimpleNamespace(
         mask_updated=_DummySignal(),
         active_mask_properties_changed=_DummySignal(),
@@ -402,12 +403,13 @@ def test_mask_autosave_coordinator_uses_shared_executor(monkeypatch) -> None:
     coordinator = autosave_coordination.MaskAutosaveCoordinator(
         qpane=qpane,
         mask_controller=mask_controller,
-        executor=executor,
+        execution_scope=executor.scope,
+        latest_requests=DocumentLatestRequestRegistry(),
         snapshot_provider=lambda _mask_id: None,
         publish_status=lambda *_args, **_kwargs: None,
     )
     coordinator.refresh()
     assert isinstance(qpane.autosaveManager(), AutosaveManager)
-    assert qpane.autosaveManager()._executor is executor
+    assert qpane.autosaveManager()._execution_scope.owner_id.endswith(":mask-autosave")
     qpane.autosaveManager().shutdown()
     coordinator._disconnect(force=True)

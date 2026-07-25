@@ -26,7 +26,7 @@ from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
 
 def test_demo_opens_multi_view_inspection_for_shared_document(qapp) -> None:
     """The focused tutorial window exposes every built-in presentation."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     try:
         window.qpane.document().create_composition(
             QRectF(0.0, 0.0, 640.0, 480.0),
@@ -55,7 +55,7 @@ def test_demo_exports_the_visible_presentation_through_projection(
     tmp_path,
 ) -> None:
     """The tutorial export is asynchronous and uses the mounted public canvas."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     destination = tmp_path / "preview.png"
     try:
         window.presentations.show()

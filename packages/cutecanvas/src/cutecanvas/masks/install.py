@@ -64,7 +64,13 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
         mask_controller=mask_controller,
         config=qpane.settings,
         mask_config=mask_config,
-        executor=qpane.executor,
+        view_execution_scope=qpane._execution_binding.scope,
+        document_execution_scope=(
+            qpane._execution_binding.document_runtime.execution_scope
+        ),
+        latest_requests=(
+            qpane._execution_binding.document_runtime._latest_request_registry
+        ),
         stroke_diagnostics=diagnostics_tracker,
     )
     qpane.attachMaskService(service)

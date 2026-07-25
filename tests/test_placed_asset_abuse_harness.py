@@ -27,13 +27,17 @@ from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
 from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
+from qpane.sdk.execution import ExecutionRuntime
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
     absolute_latency_assertions_are_isolated,
     interaction_clock,
 )
-from tests.helpers.executor_stubs import StubExecutor
+from tests.helpers.execution_backend import ControllableExecutionBackend
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _MEDIAN_UPDATE_BUDGET_MS = 16.0
 _ISOLATED_OUTLIER_BUDGET_MS = 100.0
@@ -120,8 +124,9 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
     tmp_path: Path,
 ) -> None:
     """Late cancelled generations must never publish or resurrect removed sources."""
-    executor = StubExecutor(name="placed-abuse")
-    viewer = CuteCanvas(features=(), task_executor=executor)
+    backend = ControllableExecutionBackend()
+    runtime = ExecutionRuntime(backend)
+    viewer = CuteCanvas(features=(), execution_runtime=runtime)
     base = _image(QColor("white"), QSize(64, 64))
     viewer.createCompositionFromImage(
         base,
@@ -140,7 +145,7 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
     try:
         created_id = viewer.placeLinkedAsset(source_paths[0])
         assert created_id is not None
-        executor.run_category("placed_decode")
+        backend.run_operation("editor.placed.decode")
         qapp.processEvents()
         created = next(item for item in completions if item[0] == created_id)
         assert created[3] is True
@@ -149,22 +154,20 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
         assert isinstance(layer_id, uuid.UUID) and scene is not None
 
         request_ids: list[uuid.UUID] = []
-        stale_workers = []
+        stale_jobs = []
         for path in source_paths[1:]:
             pending = [
-                record
-                for record in executor.pending_tasks()
-                if record.handle.category == "placed_decode"
+                job
+                for job in backend.pending_jobs()
+                if job.operation == "editor.placed.decode"
             ]
-            stale_workers.extend(
-                record.runnable for record in pending if record.runnable is not None
-            )
+            stale_jobs.extend(pending)
             request_id = viewer.relinkPlacedAsset(scene.scene_id, layer_id, path)
             assert request_id is not None
             request_ids.append(request_id)
-        for worker in stale_workers:
-            worker.run()
-        executor.run_category("placed_decode")
+        for job in stale_jobs:
+            job.run()
+        backend.run_operation("editor.placed.decode")
         qapp.processEvents()
         qapp.processEvents()
 
@@ -177,14 +180,14 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
 
         refresh_id = viewer.refreshPlacedAsset(scene.scene_id, layer_id)
         assert refresh_id is not None
-        refresh_record = next(
-            record
-            for record in executor.pending_tasks()
-            if record.handle.category == "placed_decode"
+        refresh_job = next(
+            job
+            for job in backend.pending_jobs()
+            if job.operation == "editor.placed.decode"
         )
         assert viewer.undoSceneEdit()
         assert viewer.undoSceneEdit()
-        refresh_record.runnable.run()
+        refresh_job.run()
         qapp.processEvents()
         assert sum(item[0] == refresh_id for item in completions) == 1
         assert next(item for item in completions if item[0] == refresh_id)[3] is False
@@ -192,14 +195,14 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
 
         pending_id = viewer.placeLinkedAsset(source_paths[0])
         assert pending_id is not None
-        pending_record = next(
-            record
-            for record in executor.pending_tasks()
-            if record.handle.category == "placed_decode"
+        pending_job = next(
+            job
+            for job in backend.pending_jobs()
+            if job.operation == "editor.placed.decode"
         )
         before_shutdown = len(completions)
         viewer._placed_asset_workflow.shutdown()
-        pending_record.runnable.run()
+        pending_job.run()
         qapp.processEvents()
         assert len(completions) == before_shutdown + 1
         assert sum(item[0] == pending_id for item in completions) == 1
@@ -209,6 +212,7 @@ def test_link_reload_storm_rejects_stale_workers_delete_and_teardown(
                 document.remove()
         viewer.deleteLater()
         qapp.processEvents()
+        runtime.shutdown()
 
 
 def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
@@ -216,8 +220,9 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
     tmp_path: Path,
 ) -> None:
     """Inactive scenes and deleted layers must reject late work without resurrection."""
-    executor = StubExecutor(name="placed-navigation-abuse")
-    viewer = CuteCanvas(features=(), task_executor=executor)
+    backend = ControllableExecutionBackend()
+    runtime = ExecutionRuntime(backend)
+    viewer = CuteCanvas(features=(), execution_runtime=runtime)
     base = _image(QColor("black"), QSize(1200, 900))
     first_id = viewer.createCompositionFromImage(
         base,
@@ -241,7 +246,7 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
         assert first_scene is not None
         create_id = viewer.placeLinkedAsset(source_path)
         assert create_id is not None
-        executor.run_category("placed_decode")
+        backend.run_operation("editor.placed.decode")
         qapp.processEvents()
         layer_id = next(item for item in completions if item[0] == create_id)[2]
         assert isinstance(layer_id, uuid.UUID)
@@ -256,7 +261,7 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
         assert (
             second_scene is not None and second_scene.scene_id != first_scene.scene_id
         )
-        executor.run_category("placed_decode")
+        backend.run_operation("editor.placed.decode")
         qapp.processEvents()
         refreshed = next(item for item in completions if item[0] == refresh_id)
         assert refreshed[1:4] == (first_scene.scene_id, layer_id, True)
@@ -279,12 +284,12 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
         assert raster_id is not None
         assert submission_ms < _MEDIAN_UPDATE_BUDGET_MS
         assert viewer.undoSceneEdit()
-        raster_record = next(
-            record
-            for record in executor.pending_tasks()
-            if record.handle.category == "layer_rasterization"
+        raster_job = next(
+            job
+            for job in backend.pending_jobs()
+            if job.operation == "editor.placed.rasterize"
         )
-        raster_record.runnable.run()
+        raster_job.run()
         qapp.processEvents()
         raster_completion = next(item for item in completions if item[0] == raster_id)
         assert raster_completion[3] is False
@@ -295,3 +300,4 @@ def test_navigation_shared_refresh_and_rasterization_races_stay_scoped(
     finally:
         viewer.deleteLater()
         qapp.processEvents()
+        runtime.shutdown()

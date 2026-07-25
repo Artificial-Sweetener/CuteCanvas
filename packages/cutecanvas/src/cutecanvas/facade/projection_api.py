@@ -44,7 +44,7 @@ class ProjectionApiMixin:
         service = self._projection_service
         if service is None:
             service = CanvasProjectionService(
-                executor=self.executor,
+                execution_scope=self._execution_binding.scope,
                 resolve_source=self._projection_source,
                 is_current=self._projection_reference_is_current,
                 completed=self.projectionCompleted.emit,

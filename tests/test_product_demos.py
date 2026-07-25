@@ -29,14 +29,14 @@ from examples.qpane_demo import ViewerWindow
 
 
 def test_qpane_demo_restores_catalog_viewer_and_sdk_scene(qapp) -> None:
-    """The core demo preserves viewer workflows and teaches mixed SDK scenes."""
+    """The QPane demo preserves viewer workflows and teaches mixed SDK scenes."""
     window = ViewerWindow()
     window.show()
     qapp.processEvents()
     try:
         pane = window.findChild(QPane)
         assert pane is not None
-        assert window.windowTitle() == "QPane Example (Core)"
+        assert window.windowTitle() == "QPane Example"
         assert pane.scene() is None
 
         first = QImage(QSize(640, 480), QImage.Format.Format_ARGB32_Premultiplied)
@@ -106,7 +106,7 @@ def test_qpane_demo_restores_catalog_viewer_and_sdk_scene(qapp) -> None:
 
 def test_cutecanvas_demo_mounts_an_editable_layered_document(qapp) -> None:
     """The editor demo opens with a usable raster, paint, and vector stack."""
-    window = ExampleWindow(ExampleOptions(feature_set="core"))
+    window = ExampleWindow(ExampleOptions())
     window.show()
     qapp.processEvents()
     try:

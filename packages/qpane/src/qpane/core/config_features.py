@@ -17,8 +17,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
-from copy import deepcopy
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .config import CacheSettings, Config
@@ -35,7 +34,7 @@ def _clone_cache_defaults() -> CacheSettings:
 
 @dataclass
 class CoreConfigSlice:
-    """Settings owned by the viewer, renderer, cache, and scheduler."""
+    """Settings owned by the viewer, renderer, and cache."""
 
     cache: CacheSettings = field(default_factory=_clone_cache_defaults)
     tile_size: int = _BASE_CONFIG.tile_size
@@ -44,9 +43,6 @@ class CoreConfigSlice:
     canvas_expansion_factor: float = _BASE_CONFIG.canvas_expansion_factor
     safe_min_zoom: float = _BASE_CONFIG.safe_min_zoom
     drag_out_enabled: bool = _BASE_CONFIG.drag_out_enabled
-    concurrency: MutableMapping[str, object] = field(
-        default_factory=lambda: deepcopy(_BASE_CONFIG.concurrency)
-    )
 
 
 @dataclass
@@ -114,7 +110,7 @@ CORE_DESCRIPTOR = FeatureConfigDescriptor(
     namespace="core",
     schema=CoreConfigSlice,
     title="Viewer",
-    description="Viewport, cache, and concurrency settings.",
+    description="Viewport and cache settings.",
     validators=(_validate_core_config,),
 )
 INPUT_DESCRIPTOR = FeatureConfigDescriptor(

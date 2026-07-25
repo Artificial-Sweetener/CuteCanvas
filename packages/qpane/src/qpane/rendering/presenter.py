@@ -79,8 +79,8 @@ from .viewport import Viewport, ViewportZoomMode
 
 if TYPE_CHECKING:
     from ..cache.registry import CacheRegistry
-    from ..concurrency import TaskExecutorProtocol
     from ..core import OverlayDrawFn, SceneOverlayDrawFn
+    from ..execution import ExecutionScope
     from ..scene.effects import LayerEffectRenderRegistry
     from ..scene.source_capabilities import (
         HybridPresentationRegistry,
@@ -105,7 +105,7 @@ class RenderingPresenter:
         qpane: QPane,
         pyramid_products: RasterPyramidProducts,
         cache_registry: CacheRegistry | None,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
         scene_provider: Callable[[], SceneDescriptor | None],
         scene_revision: Callable[[], object],
         source_metadata: SourceMetadataRegistry,
@@ -119,8 +119,15 @@ class RenderingPresenter:
     ) -> None:
         """Compose viewport/tile/renderer collaborators owned by the presenter."""
         self._qpane = qpane
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:presenter"
+        )
         self.viewport = Viewport(qpane, qpane.settings)
-        self.tile_manager = TileManager(qpane.settings, parent=qpane, executor=executor)
+        self.tile_manager = TileManager(
+            qpane.settings,
+            parent=qpane,
+            execution_scope=self._execution_scope,
+        )
         if cache_registry is not None:
             cache_registry.attach_tile_manager(self.tile_manager)
         self.renderer = Renderer(qpane)
@@ -157,7 +164,7 @@ class RenderingPresenter:
         if cache_registry is not None:
             cache_registry.attach_render_tile_cache(self._render_tile_cache)
         self._render_refinement = RenderTileWorkCoordinator(
-            executor=executor,
+            execution_scope=self._execution_scope,
             cache=self._render_tile_cache,
             ready=self._handle_render_refinement_ready,
         )
@@ -190,6 +197,8 @@ class RenderingPresenter:
     def shutdown(self) -> None:
         """Cancel presenter-owned asynchronous derived rendering work."""
         self._render_refinement.shutdown()
+        self.tile_manager.shutdown(wait=False)
+        self._execution_scope.close(reason="rendering_presenter_shutdown")
 
     def set_vector_text_layouts(self, layouts: SemanticTextLayoutCache) -> None:
         """Install the vector domain's focused semantic text derivative owner."""

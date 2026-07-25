@@ -21,25 +21,30 @@ from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TypedDict
 
-from PySide6.QtCore import QObject, QRunnable, Signal
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
 
-from ..concurrency import (
-    BaseWorker,
-    RetryController,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
-    makeQtRetryController,
-    qt_retry_dispatcher,
-)
 from ..core import CacheSettings, Config
 from ..core.threading import assert_qt_main_thread
+from ..execution import (
+    CancellationToken,
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
+    RetryController,
+    RetryPolicy,
+)
+from ..execution.qt_delay import QtDelayScheduler
 from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey, SourceRenderAssetKey
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
-from .cache_utils import CacheEvictionCoordinator, ExecutorOwnerMixin
+from .owner_callback import OwnerCallback
 
 logger = logging.getLogger(__name__)
 
@@ -82,77 +87,31 @@ class _SourceTilePayloadKey:
         )
 
 
-class TileWorkerSignals(QObject):
-    """Defines signals available from a running tile worker thread."""
-
-    finished = Signal(Tile)
-    error = Signal(object, str)
-
-
-class TileGeneratorWorker(QRunnable, BaseWorker):
-    """Background worker that crops and packages a single tile image."""
-
-    def __init__(
-        self,
-        key: SceneLayerTileKey,
-        source_image: QImage,
-        tile_size: int,
-        tile_overlap: int,
-    ):
-        """Bind tile metadata and geometry used when cropping from ``source_image``."""
-        QRunnable.__init__(self)
-        BaseWorker.__init__(self)
-        self.signals = TileWorkerSignals()
-        self.key = key
-        self.source_image = source_image
-        self.tile_size = tile_size
-        self.tile_overlap = tile_overlap
-
-    def run(self):
-        """Crop ``tile_size`` pixels from ``source_image`` and emit completion."""
-        try:
-            if self.is_cancelled:
-                self._emit_cancelled()
-                return
-            stride = self.tile_size - self.tile_overlap
-            x = self.key.col * stride
-            y = self.key.row * stride
-            cropped_qimage = self.source_image.copy(
-                x, y, self.tile_size, self.tile_size
-            )
-            if self.is_cancelled:
-                self._emit_cancelled()
-                return
-            tile = Tile(key=self.key, image=cropped_qimage)
-            self.emit_finished(True, payload=tile)
-        except Exception as exc:  # noqa: BLE001 - worker computation boundary
-            self.emit_finished(False, payload=(self.key, str(exc)), error=exc)
-
-    def cancel(self):
-        """Signal cancellation through the BaseWorker helper."""
-        BaseWorker.cancel(self)
-
-    def _emit_cancelled(self) -> None:
-        """Emit the cancellation payload once the worker has been stopped."""
-        if self.is_cancelled:
-            self.emit_finished(False, payload=(self.key, "cancelled"))
+def _generate_tile(
+    key: SceneLayerTileKey,
+    source_image: QImage,
+    tile_size: int,
+    tile_overlap: int,
+    cancellation: CancellationToken,
+) -> Tile:
+    """Crop one detached tile product cooperatively."""
+    cancellation.raise_if_cancelled()
+    stride = tile_size - tile_overlap
+    x = key.col * stride
+    y = key.row * stride
+    cropped_image = source_image.copy(x, y, tile_size, tile_size)
+    cancellation.raise_if_cancelled()
+    return Tile(key=key, image=cropped_image)
 
 
 # Typed aliases for clarity
 TileCache = OrderedDictType[_SourceTilePayloadKey, Tile]
 
 
-class WorkerEntry(TypedDict, total=False):
-    """Structure describing an active worker and its executor handle."""
-
-    worker: "TileGeneratorWorker"
-    handle: TaskHandle
+WorkerState = dict[SceneLayerTileKey, ExecutionHandle[Tile, object]]
 
 
-WorkerState = dict[SceneLayerTileKey, WorkerEntry]
-
-
-class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
+class TileManager(QObject, CacheMetricsMixin):
     """Generate, cache, and serve image tiles with executor-backed workers.
 
     Provides LRU eviction by byte budget, tracks prefetch stats, and emits throttle events when executor limits reject work.
@@ -169,17 +128,11 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         config: Config,
         parent: QObject | None = None,
         *,
-        executor: TaskExecutorProtocol,
-        owns_executor: bool = False,
+        execution_scope: ExecutionScope,
     ):
         """Initialise cache limits, worker pools, and retry bookkeeping."""
         super().__init__(parent)
         CacheMetricsMixin.__init__(self)
-        ExecutorOwnerMixin.__init__(
-            self,
-            executor_logger=logger,
-            owner_name="TileManager",
-        )
         self._config = config
         self.tile_size = config.tile_size
         self.tile_overlap = config.tile_overlap
@@ -196,21 +149,24 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         self._cache_size_bytes: int = 0
         self._cache_limit_bytes: int = 0
         self.cache_limit_bytes = self._resolve_cache_limit_bytes(config)
-        self._executor: TaskExecutorProtocol | None = executor
-        self._owns_executor = bool(owns_executor)
-        # Unified worker state: identifier -> executor handle plus worker reference
-        self._worker_state: WorkerState = {}
-        dispatcher = qt_retry_dispatcher(self._executor, category="tiles_main")
-        self._tile_retry: RetryController[SceneLayerTileKey, QImage] = (
-            makeQtRetryController(
-                "tiles",
-                _TILE_RETRY_BASE_MS,
-                _TILE_RETRY_MAX_MS,
-                parent=self,
-                dispatcher=dispatcher,
-            )
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:tiles"
         )
-        self._eviction = CacheEvictionCoordinator(logger=logger, name="tile cache")
+        self._worker_state: WorkerState = {}
+        self._tile_retry: RetryController[
+            SceneLayerTileKey,
+            QImage,
+            Tile,
+            object,
+        ] = RetryController(
+            "tiles",
+            RetryPolicy(
+                base_ms=_TILE_RETRY_BASE_MS,
+                max_ms=_TILE_RETRY_MAX_MS,
+            ),
+            QtDelayScheduler(self),
+        )
+        self._eviction = OwnerCallback(self)
 
     @property
     def cache_usage_bytes(self) -> int:
@@ -277,7 +233,7 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
 
     def pending_retry_tiles(self) -> list[SceneLayerTileKey]:
         """Return tile keys currently queued for retry."""
-        return list(self._tile_retry.pendingKeys())
+        return list(self._tile_retry.pending_keys())
 
     def _set_cache_usage_bytes(self, value: int) -> None:
         """Clamp and publish cache usage changes."""
@@ -344,38 +300,68 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
             return None
         self._cache_misses += 1
         self._payload_waiters.setdefault(payload_key, set()).add(key)
-        category = "tiles_prefetch" if prefetch else "tiles_visible"
-        # Route through shared retry controller; attempt immediate submit
+        if prefetch:
+            self._prefetch_begin(key)
+        urgency = (
+            ExecutionUrgency.OPPORTUNISTIC if prefetch else ExecutionUrgency.INTERACTIVE
+        )
 
-        def _submit(img: QImage, attempt: int):
-            """Enqueue a TileGeneratorWorker for ``key`` if capacity allows."""
-            worker = TileGeneratorWorker(
-                key=key,
-                source_image=img,
-                tile_size=self.tile_size,
-                tile_overlap=self.tile_overlap,
+        def _submit(
+            image: QImage,
+            attempt: int,
+        ) -> ExecutionHandle[Tile, object]:
+            """Submit one detached tile request through the manager scope."""
+            detached_image = QImage(image)
+            self._mark_submitting(key, payload_key=payload_key)
+            request = ExecutionRequest[Tile, object](
+                operation="render.tile.prefetch" if prefetch else "render.tile.visible",
+                requirements=ExecutionRequirements(
+                    resource=ExecutionResource.NATIVE_CPU,
+                    urgency=urgency,
+                    estimated_retained_bytes=max(
+                        0,
+                        self.tile_size * self.tile_size * 4,
+                    ),
+                ),
+                tags=(("attempt", attempt),),
+                work=lambda context: _generate_tile(
+                    key,
+                    detached_image,
+                    self.tile_size,
+                    self.tile_overlap,
+                    context.cancellation,
+                ),
             )
-            BaseWorker.connect_queued(worker.signals.finished, self._on_tile_generated)
-            BaseWorker.connect_queued(worker.signals.error, self._on_tile_error)
-            executor = self._executor
-            if executor is None:
-                raise RuntimeError("TileManager executor is missing")
-            handle = executor.submit(worker, category=category)
-            self._mark_generating(key, worker, handle, payload_key=payload_key)
-            logger.debug("Queued tile generation for %s (via RetryController)", key)
+            try:
+                handle = self._execution_scope.submit(
+                    request,
+                    adopt=self._on_tile_generated,
+                )
+            except ExecutionRejected:
+                self._discard_submitting(key, payload_key)
+                raise
+            handle.add_done_callback(
+                lambda outcome: self._on_tile_outcome(key, outcome)
+            )
+            if not handle.state.is_terminal:
+                self._worker_state[key] = handle
+                self._prefetch_mark_started(key)
+            logger.debug("Queued tile generation for %s", key)
             return handle
 
-        def _throttle(key: SceneLayerTileKey, next_attempt: int, rej: TaskRejected):
-            """Emit throttle diagnostics when executor limits reject the request."""
+        def _throttle(
+            rejected_key: SceneLayerTileKey,
+            next_attempt: int,
+            rejection: ExecutionRejected,
+        ) -> None:
+            """Emit throttle diagnostics when runtime capacity rejects a tile."""
             logger.warning(
-                "Tile generation for %s throttled: pending %s limit=%s (total=%s, category=%s)",
-                key,
-                rej.limit_type,
-                rej.limit_value,
-                rej.pending_total,
-                rej.pending_category,
+                "Tile generation for %s throttled: %s (%s)",
+                rejected_key,
+                rejection,
+                rejection.reason.value,
             )
-            self.tilesThrottled.emit(key, next_attempt)
+            self.tilesThrottled.emit(rejected_key, next_attempt)
 
         self._queue_tile_retry(
             key,
@@ -414,6 +400,7 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         self._assert_main_thread()
         self._cancel_eviction_task()
         self._cancel_all_tile_retries()
+        self._execution_scope.cancel_all(reason="tile_cache_clear")
         had_entries = bool(self._tile_cache)
         cached_tiles = len(self._tile_cache)
         active_workers = len(self._worker_state)
@@ -643,9 +630,6 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
             return []
         self._assert_main_thread()
         cancelled: list[SceneLayerTileKey] = []
-        executor = self._executor
-        if executor is None:
-            raise RuntimeError("TileManager executor is missing")
         for key in keys:
             if not self._prefetch_pending(key):
                 continue
@@ -704,14 +688,7 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         if self._cache_size_bytes <= self.cache_limit_bytes or not self._tile_cache:
             return
         self._ensure_next_eviction_reason("limit")
-        executor = self._executor
-        if executor is None:
-            raise RuntimeError("TileManager executor is missing")
-        self._eviction.schedule(
-            executor=executor,
-            callback=self._evict_cache_batch,
-            category="maintenance",
-        )
+        self._eviction.schedule(self._evict_cache_batch)
 
     def _evict_cache_batch(self) -> None:
         """Evict a bounded batch of tiles on the main thread."""
@@ -740,7 +717,7 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
 
     def _cancel_eviction_task(self) -> None:
         """Cancel any pending eviction maintenance task."""
-        self._eviction.cancel(self._executor)
+        self._eviction.cancel()
 
     def _on_tile_generated(self, tile: Tile):
         """Slot for when a tile worker successfully finishes."""
@@ -751,7 +728,7 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         waiters = self._payload_waiters.pop(payload_key, {tile.key})
         self._payload_workers.pop(payload_key, None)
         self._worker_state.pop(tile.key, None)
-        self._tile_retry.onSuccess(tile.key)
+        self._tile_retry.complete(tile.key)
         self.add_tile(tile)
         self._payload_layer_keys[payload_key] = set(waiters)
         self._prefetch_finish(tile.key, success=True)
@@ -760,8 +737,19 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
             self._payload_layer_keys.setdefault(payload_key, set()).add(layer_key)
             self.tileReady.emit(layer_key)
 
-    def _on_tile_error(self, key: SceneLayerTileKey, error_message: str):
-        """Slot for when a tile worker encounters an error."""
+    def _on_tile_outcome(
+        self,
+        key: SceneLayerTileKey,
+        outcome: ExecutionOutcome[Tile],
+    ) -> None:
+        """Clean up one tile request after cancellation or failure."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        error_message = (
+            outcome.cancellation_reason
+            if outcome.state == ExecutionState.CANCELLED
+            else str(outcome.error)
+        )
         payload_key = self._worker_payload_keys.pop(
             key,
             _SourceTilePayloadKey.from_layer_key(key),
@@ -769,10 +757,10 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         self._payload_workers.pop(payload_key, None)
         self._payload_waiters.pop(payload_key, None)
         self._worker_state.pop(key, None)
-        self._tile_retry.onFailure(key)
+        self._tile_retry.complete(key)
         self._prefetch_finish(key, success=False)
-        if error_message == "cancelled":
-            logger.info("Tile generation cancelled for %s", key)
+        if outcome.state == ExecutionState.CANCELLED:
+            logger.info("Tile generation cancelled for %s (%s)", key, error_message)
             return
         logger.error("Tile generation failed for %s: %s", key, error_message)
 
@@ -781,12 +769,6 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
         self._assert_main_thread()
         self._cancel_eviction_task()
         self._cancel_all_tile_retries()
-        if not self._worker_state:
-            self._maybe_wait_for_executor(wait)
-            return
-        executor = self._executor
-        if executor is None:
-            raise RuntimeError("TileManager executor is missing")
         for key, entry in list(self._worker_state.items()):
             cancelled = self._stop_worker(
                 key,
@@ -801,13 +783,15 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
             )
         self._worker_state.clear()
         self._prefetch_drop_all()
-        self._maybe_wait_for_executor(wait)
+        self._execution_scope.close(reason="tile_manager_shutdown")
+        if wait:
+            logger.debug("Tile scope does not own the shared runtime")
 
     def _stop_worker(
         self,
         key: SceneLayerTileKey,
         *,
-        entry: WorkerEntry | None = None,
+        entry: ExecutionHandle[Tile, object] | None = None,
         already_removed: bool = False,
         finalize_prefetch: bool = True,
         cancel_retry: bool = True,
@@ -829,54 +813,46 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
             if cancel_retry:
                 self._cancel_tile_retry(key)
             return False
-        executor = self._executor
-        if executor is None:
-            raise RuntimeError("TileManager executor is missing")
-        handle = entry.get("handle")
-        worker = entry.get("worker")
-        cancelled = False
-        if handle is not None:
-            try:
-                cancelled = executor.cancel(handle)
-            except Exception:  # pragma: no cover - defensive guard
-                logger.exception("Executor cancel raised for tile %s", key)
-                cancelled = False
-        if not cancelled and worker is not None:
-            try:
-                worker.cancel()
-            except Exception:  # pragma: no cover - defensive guard
-                logger.exception("Tile worker cancel threw (tile=%s)", key)
+        cancelled = entry.cancel(reason="tile_request_cancelled")
         if finalize_prefetch:
             self._prefetch_finish(key, success=False)
         if cancel_retry:
             self._cancel_tile_retry(key)
         return cancelled
 
-    def _mark_generating(self, key, worker, handle, *, payload_key):
-        """Record a tile as being generated in the unified worker state."""
-        entry: WorkerEntry = {
-            "worker": worker,
-            "handle": handle,
-        }
-        self._worker_state[key] = entry
+    def _mark_submitting(
+        self,
+        key: SceneLayerTileKey,
+        *,
+        payload_key: _SourceTilePayloadKey,
+    ) -> None:
+        """Reserve source-oriented coalescing before backend submission."""
         self._worker_payload_keys[key] = payload_key
         self._payload_workers[payload_key] = key
-        self._prefetch_mark_started(key)
+
+    def _discard_submitting(
+        self,
+        key: SceneLayerTileKey,
+        payload_key: _SourceTilePayloadKey,
+    ) -> None:
+        """Release a reservation after synchronous admission rejection."""
+        self._worker_payload_keys.pop(key, None)
+        self._payload_workers.pop(payload_key, None)
 
     def _queue_tile_retry(
         self,
         key: SceneLayerTileKey,
         source_image: QImage,
         *,
-        submit: Callable[[QImage, int], TaskHandle],
-        throttle: Callable[[SceneLayerTileKey, int, TaskRejected], None],
+        submit: Callable[[QImage, int], ExecutionHandle[Tile, object]],
+        throttle: Callable[[SceneLayerTileKey, int, ExecutionRejected], None],
     ) -> None:
         """Queue tile generation through the retry controller."""
-        self._tile_retry.queueOrCoalesce(
+        self._tile_retry.submit_or_coalesce(
             key,
             source_image,
             submit=submit,
-            throttle=throttle,
+            rejected=throttle,
         )
 
     def _cancel_tile_retry(self, key: SceneLayerTileKey) -> None:
@@ -885,11 +861,11 @@ class TileManager(QObject, CacheMetricsMixin, ExecutorOwnerMixin):
 
     def _cancel_all_tile_retries(self) -> None:
         """Cancel every queued tile retry."""
-        self._tile_retry.cancelAll()
+        self._tile_retry.cancel_all()
 
     def _pending_tile_retry_keys(self) -> list[SceneLayerTileKey]:
         """Return identifiers pending retry without exposing controller internals."""
-        return list(self._tile_retry.pendingKeys())
+        return list(self._tile_retry.pending_keys())
 
     def _assert_main_thread(self) -> None:
         """Raise AssertionError if called off the Qt main thread."""

@@ -102,7 +102,6 @@ class ConfigurationTutorialController:
     ) -> None:
         """Apply live settings and retain restart-only SAM changes."""
         config_snapshot = self._config.as_dict()
-        concurrency_changed = self._persist_concurrency_config(values)
         config_updates = {
             key: value
             for key, value in values.items()
@@ -138,7 +137,6 @@ class ConfigurationTutorialController:
             live_updates,
             overlay_target=target_overlay,
             config_fields=config_fields,
-            concurrency_changed=concurrency_changed,
             config_override=live_config,
             preconfigured=True,
         )
@@ -233,7 +231,6 @@ class ConfigurationTutorialController:
         overlay_target: bool | None = None,
         *,
         config_fields: set[str],
-        concurrency_changed: bool = False,
         config_override: Config | None = None,
         preconfigured: bool = False,
     ) -> None:
@@ -248,7 +245,7 @@ class ConfigurationTutorialController:
             target_config = config_override or self._config
             target_config.configure(**ConfigDialog.collapse_values(live_updates))
         apply_config = config_override or self._config
-        if live_updates or concurrency_changed:
+        if live_updates:
             self._canvas.applySettings(config=apply_config)
             self._refresh_tools()
         if overlay_target is None:
@@ -270,39 +267,6 @@ class ConfigurationTutorialController:
                 "SAM checkpoint changes queued. Restart the demo to apply "
                 "blocking/disabled settings."
             )
-
-    def _persist_concurrency_config(self, values: dict[str, object]) -> bool:
-        """Normalize dialog concurrency values into the typed config tree."""
-        if not values:
-            return False
-        updates: dict[str, object] = {}
-        if "concurrency_max_workers" in values:
-            workers = _coerce_int(values.get("concurrency_max_workers"), minimum=1)
-            if workers is not None:
-                updates["max_workers"] = workers
-        if "concurrency_max_pending_total" in values:
-            pending = _coerce_int(
-                values.get("concurrency_max_pending_total"),
-                minimum=0,
-            )
-            updates["max_pending_total"] = pending if pending and pending > 0 else None
-        for source, target, minimum in (
-            ("concurrency_category_priorities_map", "category_priorities", None),
-            ("concurrency_category_limits_map", "category_limits", 0),
-            ("concurrency_pending_limits_map", "pending_limits", 0),
-        ):
-            normalized = _normalize_map(values.get(source), minimum=minimum)
-            if normalized is not None:
-                updates[target] = normalized
-        device_limits = _filter_sam_device_limits(
-            values.get("concurrency_device_limits_map")
-        )
-        if device_limits:
-            updates["device_limits"] = device_limits
-        if not updates:
-            return False
-        self._config.configure(concurrency=updates)
-        return True
 
     def _apply_overlay_setting(self, enabled: bool, *, announce: bool) -> None:
         """Apply overlay state to config, widget, and matching actions."""
@@ -366,44 +330,3 @@ class ConfigurationTutorialController:
         blocked = action.blockSignals(True)
         action.setChecked(checked)
         action.blockSignals(blocked)
-
-
-def _coerce_int(raw_value: object, *, minimum: int | None = None) -> int | None:
-    """Coerce a dialog value into an optional range-checked integer."""
-    try:
-        value = int(raw_value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    return None if minimum is not None and value < minimum else value
-
-
-def _normalize_map(
-    mapping: object,
-    *,
-    minimum: int | None = None,
-) -> dict[str, int] | None:
-    """Normalize one string-to-integer dialog mapping."""
-    if not isinstance(mapping, Mapping):
-        return None
-    normalized = {
-        str(key): value
-        for key, raw_value in mapping.items()
-        if (value := _coerce_int(raw_value, minimum=minimum)) is not None
-    }
-    return normalized or None
-
-
-def _filter_sam_device_limits(
-    device_limits: object,
-) -> dict[str, dict[str, int]]:
-    """Retain only valid SAM limits from the nested device map."""
-    if not isinstance(device_limits, Mapping):
-        return {}
-    filtered: dict[str, dict[str, int]] = {}
-    for device, category_limits in device_limits.items():
-        if not isinstance(category_limits, Mapping) or "sam" not in category_limits:
-            continue
-        limit = _coerce_int(category_limits["sam"])
-        if limit is not None:
-            filtered[str(device)] = {"sam": limit}
-    return filtered

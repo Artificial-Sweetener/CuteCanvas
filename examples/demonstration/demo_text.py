@@ -28,15 +28,15 @@ COMPOSITIONS_HINT = (
 EXIT_MESSAGE = "Thanks for trying the CuteCanvas example."
 
 CORE_CHAPTER = (
-    "Core: launch CuteCanvas(config=...) with no optional features by default (add features=('mask', 'sam') "
-    "as needed), import images as independent compositions, and navigate them with "
+    "Canvas: launch CuteCanvas(config=..., features=('mask',)), import images as "
+    "independent compositions, and navigate them with "
     "compositionIDs()/openComposition(). The demo occasionally reads Config.as_dict for "
     "small UI toggles; most hosts should treat config as set-and-forget. The status bar's zoom % label is "
     "wired directly to CuteCanvas.zoomChanged so you can copy that pattern into your own hosts."
 )
 
 MASK_CHAPTER = (
-    "Mask: when features include 'mask', create/import/export masks, rotate mask order, "
+    "Masks: create, import, and export masks, rotate mask order, "
     "and observe mask layers through the composition tree and mask signals. Masks render with the image "
     "content while host overlay hooks remain available for separate annotations. The status bar's "
     "undo/redo counter listens to CuteCanvas.maskUndoStackChanged so you can mirror stack depth "
@@ -44,7 +44,7 @@ MASK_CHAPTER = (
 )
 
 SAM_CHAPTER = (
-    "SAM: when features include 'sam', trigger smart select with drag, tune predictor/cache controls, "
+    "SAM: when enabled, trigger smart select with drag, tune predictor/cache controls, "
     "and surface installer guidance if extras are missing. When downloads are enabled, "
     "CuteCanvas preflights the checkpoint and fetches it on demand; connect to "
     "samCheckpointStatusChanged/samCheckpointProgress to mirror readiness and progress in host UI. "
@@ -63,7 +63,7 @@ SAM_CHAPTER = (
 
 DIAGNOSTICS_CHAPTER = (
     "Diagnostics/Config: toggle diagnosticsOverlayEnabled()/setDiagnosticsDomainEnabled, apply settings via CuteCanvas.applySettings, "
-    "pick cache/mask/executor domains in the dialog, and adjust concurrency/cache spec fields grouped by domain. "
+    "pick cache/mask/executor domains in the dialog, and adjust cache and interaction settings grouped by domain. "
     "Cache rows report the raster work CuteCanvas prepares for rendered content."
 )
 

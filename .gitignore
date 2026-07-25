@@ -11,6 +11,7 @@ __pycache__/
 venv*/
 examples/venv-*/
 examples/demo_settings.json
+examples/demo_window_settings.json
 
 # Mask autosave dumps
 **/saved_masks/

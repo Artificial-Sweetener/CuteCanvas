@@ -23,7 +23,12 @@ from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QColor, QImage
 from qpane.sdk.rendering import ViewportZoomMode
 
-from tests.harness.timing import average_interaction_latency_ms
+from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    average_interaction_latency_ms,
+)
+
+pytestmark = INTERACTIVE_PERFORMANCE
 
 _PRESENTATION_SWITCH_BUDGET_MS = 8.0
 

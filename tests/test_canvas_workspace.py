@@ -21,6 +21,7 @@ from cutecanvas import CanvasInteractionMode, EditorCapability
 from cutecanvas.document import CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
 from PySide6.QtCore import QRectF
+from qpane.sdk.execution import create_default_execution_runtime
 from qpane.sdk.types import ComparisonOrientation
 
 
@@ -61,6 +62,27 @@ def test_workspace_switches_presentations_without_mutating_document(qapp) -> Non
     finally:
         workspace.close()
         document.close()
+
+
+def test_workspace_shares_but_does_not_close_host_execution_runtime(qapp) -> None:
+    """Mount every target on one supplied runtime whose lifetime stays host-owned."""
+    document, identifiers = _document()
+    runtime = create_default_execution_runtime()
+    workspace = CanvasWorkspace(
+        document=document,
+        features=(),
+        execution_runtime=runtime,
+    )
+    try:
+        workspace.setGridPresentation(identifiers)
+        qapp.processEvents()
+        assert all(workspace.canvasFor(value) is not None for value in identifiers)
+    finally:
+        workspace.close()
+        qapp.processEvents()
+        document.close()
+    assert not runtime.is_closed
+    runtime.shutdown(wait=True)
 
 
 def test_workspace_presentation_storm_reuses_target_canvases(qapp) -> None:

@@ -18,17 +18,9 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
-from typing import Any
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
-from qpane.sdk.concurrency import (
-    QThreadPoolExecutor,
-    TaskExecutorProtocol,
-    ThreadPolicy,
-    build_thread_policy,
-)
 
 from ..composition.public_policy import (
     internal_document_policy,
@@ -63,23 +55,9 @@ from .references import (
 class CanvasDocument:
     """Own editable content and history independently of any QWidget."""
 
-    def __init__(
-        self,
-        *,
-        task_executor: TaskExecutorProtocol | None = None,
-        thread_policy: ThreadPolicy | Mapping[str, Any] | None = None,
-    ) -> None:
-        """Construct a document and its shared asynchronous resource owners.
-
-        Args:
-            task_executor: Existing executor to share with the document.
-            thread_policy: Policy used only when the document creates an executor.
-        """
+    def __init__(self) -> None:
+        """Construct durable editable state without process-runtime ownership."""
         self._document_id = uuid.uuid4()
-        self._executor, self._owns_executor = _resolve_executor(
-            task_executor,
-            thread_policy,
-        )
         self._events = DocumentEventHub()
         self._content_revisions: dict[uuid.UUID, int] = {}
         self._content_revision_unsubscribe = self._events.subscribe(
@@ -145,11 +123,6 @@ class CanvasDocument:
             promotions=history_promotions,
         )
         self._closed = False
-
-    @property
-    def executor(self) -> TaskExecutorProtocol:
-        """Return the shared executor used by document operations."""
-        return self._executor
 
     @property
     def document_id(self) -> uuid.UUID:
@@ -314,15 +287,13 @@ class CanvasDocument:
         return ResolvedCanvasContent(reference, current)
 
     def close(self) -> None:
-        """Cancel document-owned work and release its executor when owned."""
+        """Release durable document subscriptions and event observers."""
         if self._closed:
             return
         self._closed = True
         self._content_revision_unsubscribe()
         self._mask_history_unsubscribe()
         self._events.clear()
-        if self._owns_executor:
-            self._executor.shutdown(wait=False)
 
     def _composition_scope_for_mask(
         self,
@@ -362,19 +333,3 @@ class CanvasDocument:
             self._content_revisions[composition_id] = (
                 self._content_revisions.get(composition_id, 0) + 1
             )
-
-
-def _resolve_executor(
-    supplied: TaskExecutorProtocol | None,
-    policy: ThreadPolicy | Mapping[str, Any] | None,
-) -> tuple[TaskExecutorProtocol, bool]:
-    """Return one executor and whether the document owns its shutdown."""
-    if supplied is not None:
-        return supplied, False
-    if isinstance(policy, ThreadPolicy):
-        resolved = policy
-    elif isinstance(policy, Mapping):
-        resolved = build_thread_policy(None, **dict(policy))
-    else:
-        resolved = build_thread_policy()
-    return QThreadPoolExecutor(resolved, name="cutecanvas-document"), True

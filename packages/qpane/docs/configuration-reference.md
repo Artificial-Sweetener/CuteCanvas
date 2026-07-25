@@ -66,21 +66,6 @@ config = {
     "diagnostics_overlay_enabled": False,
     "diagnostics_domains_enabled": (),
     "draw_tile_grid": False,
-    "concurrency": {
-        "max_workers": 2,
-        "category_priorities": {
-            "tiles_visible": 40,
-            "pyramid": 30,
-            "tiles_prefetch": 20,
-            "tiles": 20,
-            "io": 10,
-            "maintenance": 0,
-        },
-        "category_limits": {"pyramid": 2},
-        "device_limits": {},
-        "max_pending_total": None,
-        "pending_limits": {},
-    },
 }
 ```
 
@@ -195,18 +180,16 @@ Runtime controls are available through `setDiagnosticsOverlayEnabled()` and
 `setDiagnosticsDomainEnabled()`; changing them does not require rebuilding the
 widget.
 
-## Concurrency
+## Execution Policy
 
-`concurrency.max_workers` is the shared worker count for QPane-owned CPU work.
-The defaults intentionally leave capacity for the host application. Category
-priorities order ready work; visible tiles outrank pyramids, speculative tiles,
-I/O, and maintenance.
+Worker capacity is intentionally absent from `Config`: it belongs to the
+execution runtime rather than a viewer preferences snapshot. Pass
+`DefaultExecutionPolicy` as `execution_policy` when QPane should own its
+standalone runtime. Pass a host-owned `ExecutionRuntime` as
+`execution_runtime` when several widgets or the surrounding application share
+one admission authority.
 
-`category_limits` bounds a class independently of the pool. `device_limits`
-lets a host constrain work associated with a named external device.
-`max_pending_total` and `pending_limits` bound queued work when an application
-needs strict backpressure. `None` keeps QPane's normal adaptive behavior.
-
-Pass a `ThreadPolicy` to the QPane constructor when the host wants to describe
-these limits as a typed value, or provide a `TaskExecutorProtocol` when QPane
-must share the application's existing executor.
+The default policy bounds accepted work and retained bytes, applies fair
+semantic urgency, and limits resource classes independently. See
+[Advanced Renderer Integration](integration-sdk.md) for the complete execution
+contract and custom backend seam.

@@ -113,6 +113,23 @@ identity, and `QPane.removeLayerPresentationEffect()` removes one treatment.
 
 ## Observe Runtime Work
 
+A standalone `QPane` owns a bounded runtime. A host with several viewers can
+create one runtime and pass it to every widget so all rendering participates
+in the same admission budget:
+
+```python
+from qpane import QPane
+from qpane.sdk.execution import create_default_execution_runtime
+
+runtime = create_default_execution_runtime()
+left = QPane(execution_runtime=runtime)
+right = QPane(execution_runtime=runtime)
+```
+
+The host closes that runtime during application teardown. An application with
+its own scheduler can construct `ExecutionRuntime` over a custom public
+`ExecutionBackend`; see [Advanced Renderer Integration](integration-sdk.md).
+
 `QPane.setDiagnosticsOverlayEnabled()` shows or hides the built-in HUD, and
 `QPane.diagnosticsOverlayEnabled()` reports its state.
 `QPane.diagnosticsOverlayToggled` keeps a host action synchronized.

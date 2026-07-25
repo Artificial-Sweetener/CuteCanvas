@@ -23,11 +23,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtGui import QImage
-from qpane.sdk.concurrency import (
-    BaseWorker,
-    TaskExecutorProtocol,
-    TaskHandle,
-    TaskRejected,
+from qpane.sdk.execution import (
+    ExecutionHandle,
+    ExecutionOutcome,
+    ExecutionRejected,
+    ExecutionRequest,
+    ExecutionRequirements,
+    ExecutionResource,
+    ExecutionScope,
+    ExecutionState,
+    ExecutionUrgency,
 )
 from qpane.sdk.scene import LayerInteractionPolicy, LayerPlacement
 
@@ -36,9 +41,10 @@ from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import CompositionLayerStore
 from ..resources import ProjectResourceReference
 from ..resources.raster_instances import imported_raster_instance
+from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from .history import PlacedAssetEdit
 from .model import PlacedAssetSnapshot
-from .reload import PlacedAssetDecodeWorker
+from .reload import PlacedAssetDecode, decode_placed_asset
 from .store import PlacedAssetStore
 
 
@@ -84,8 +90,8 @@ class _ReloadRequest:
 class _PendingDecode:
     """Own one submitted worker and its semantic request."""
 
-    worker: PlacedAssetDecodeWorker
-    handle: TaskHandle
+    path: Path
+    handle: ExecutionHandle[PlacedAssetDecode, object] | None = None
     new_layer: _NewLinkedRequest | None = None
     reload: _ReloadRequest | None = None
 
@@ -100,7 +106,8 @@ class PlacedAssetWorkflow:
         layers: CompositionLayerStore,
         layer_edits: CompositionLayerEditService,
         edits: CompositionEditController,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
+        latest_requests: DocumentLatestRequestRegistry,
         current_scope_id: Callable[[], uuid.UUID | None],
         current_history_scope_id: Callable[[], uuid.UUID | None],
         changed: Callable[[uuid.UUID], None],
@@ -111,13 +118,15 @@ class PlacedAssetWorkflow:
         self._layers = layers
         self._layer_edits = layer_edits
         self._edits = edits
-        self._executor = executor
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:placed-assets"
+        )
+        self._latest_requests = latest_requests
         self._current_scope_id = current_scope_id
         self._current_history_scope_id = current_history_scope_id
         self._changed = changed
         self._completed = completed
         self._pending: dict[uuid.UUID, _PendingDecode] = {}
-        self._latest_by_asset: dict[uuid.UUID, uuid.UUID] = {}
         self._closed = False
 
     def create_embedded(
@@ -253,7 +262,7 @@ class PlacedAssetWorkflow:
         self._closed = True
         for request_id in tuple(self._pending):
             self._cancel(request_id, "placed asset service detached")
-        self._latest_by_asset.clear()
+        self._execution_scope.close(reason="placed_asset_workflow_shutdown")
 
     def _begin_reload(
         self,
@@ -287,10 +296,18 @@ class PlacedAssetWorkflow:
             before,
             record_history,
         )
-        if not self._submit(request_id, resolved_path, reload=request):
+        key = self._reload_key(asset_id)
+        if not self._latest_requests.claim(
+            key,
+            request_id,
+            lambda message: self._cancel(request_id, message),
+        ):
             self._assets.restore(asset_id, before)
             return request_id
-        self._latest_by_asset[asset_id] = request_id
+        if not self._submit(request_id, resolved_path, reload=request):
+            self._latest_requests.release(key, request_id)
+            self._assets.restore(asset_id, before)
+            return request_id
         self._changed(scope_id)
         return request_id
 
@@ -303,13 +320,23 @@ class PlacedAssetWorkflow:
         reload: _ReloadRequest | None = None,
     ) -> bool:
         """Submit one typed decode and retain its lifecycle handle."""
-        worker = PlacedAssetDecodeWorker(request_id, path)
-        BaseWorker.connect_queued(worker.finished, self._finish)
-        BaseWorker.connect_queued(worker.error, self._finish)
+        pending = _PendingDecode(Path(path), None, new_layer, reload)
+        self._pending[request_id] = pending
+        request = ExecutionRequest[PlacedAssetDecode, object](
+            operation="editor.placed.decode",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.BLOCKING_IO,
+                urgency=ExecutionUrgency.FOREGROUND,
+            ),
+            work=lambda context: decode_placed_asset(path, context.cancellation),
+        )
         try:
-            handle = self._executor.submit(worker, category="placed_decode")
-        except TaskRejected as exc:
-            worker.deleteLater()
+            handle = self._execution_scope.submit(
+                request,
+                adopt=lambda result: self._finish(request_id, result),
+            )
+        except ExecutionRejected as exc:
+            self._pending.pop(request_id, None)
             semantic = reload or new_layer
             assert semantic is not None
             self._completed(
@@ -322,40 +349,65 @@ class PlacedAssetWorkflow:
                 )
             )
             return False
-        self._pending[request_id] = _PendingDecode(worker, handle, new_layer, reload)
+        if self._pending.get(request_id) is pending:
+            pending.handle = handle
+        handle.add_done_callback(
+            lambda outcome: self._settle(request_id, handle, outcome)
+        )
         return True
 
-    def _finish(self, worker: PlacedAssetDecodeWorker) -> None:
+    def _finish(self, request_id: uuid.UUID, result: PlacedAssetDecode) -> None:
         """Publish a current decode through source and layer owners."""
-        pending = self._pending.pop(worker.request_id, None)
-        if pending is None or self._closed:
+        pending = self._pending.pop(request_id, None)
+        if pending is None:
+            return
+        if self._closed:
+            semantic = pending.reload or pending.new_layer
+            assert semantic is not None
+            if pending.reload is not None:
+                self._latest_requests.release(
+                    self._reload_key(pending.reload.asset_id),
+                    request_id,
+                )
+            self._completed(
+                PlacedAssetCompletion(
+                    request_id,
+                    semantic.scope_id,
+                    None if pending.new_layer is not None else semantic.layer_id,
+                    False,
+                    "placed asset service detached",
+                )
+            )
             return
         if pending.new_layer is not None:
-            self._finish_new(worker, pending.new_layer)
+            self._finish_new(request_id, result, pending.new_layer)
         elif pending.reload is not None:
-            self._finish_reload(worker, pending.reload)
+            self._finish_reload(request_id, result, pending.reload)
 
     def _finish_new(
-        self, worker: PlacedAssetDecodeWorker, request: _NewLinkedRequest
+        self,
+        request_id: uuid.UUID,
+        result: PlacedAssetDecode,
+        request: _NewLinkedRequest,
     ) -> None:
         """Create an asset and instance only after a successful current decode."""
         if (
-            worker.image is None
-            or worker.fingerprint is None
-            or worker.error_message is not None
+            result.image is None
+            or result.fingerprint is None
+            or result.error_message is not None
         ):
-            self._publish_failure(worker, request.scope_id, None)
+            self._publish_failure(request_id, result, request.scope_id, None)
             return
         self._assets.create_linked(
-            worker.image,
-            worker.path,
-            worker.fingerprint,
+            result.image,
+            result.path,
+            result.fingerprint,
             keep_fallback=request.keep_fallback,
             asset_id=request.asset_id,
         )
         instance = imported_raster_instance(
             request.asset_id,
-            worker.image.size(),
+            result.image.size(),
             layer_id=request.layer_id,
             placement=request.placement,
             interaction=request.interaction,
@@ -369,7 +421,7 @@ class PlacedAssetWorkflow:
             self._assets.remove(request.asset_id)
             self._completed(
                 PlacedAssetCompletion(
-                    worker.request_id,
+                    request_id,
                     request.scope_id,
                     None,
                     False,
@@ -380,7 +432,7 @@ class PlacedAssetWorkflow:
         self._changed(request.scope_id)
         self._completed(
             PlacedAssetCompletion(
-                worker.request_id,
+                request_id,
                 request.scope_id,
                 request.layer_id,
                 True,
@@ -389,18 +441,31 @@ class PlacedAssetWorkflow:
         )
 
     def _finish_reload(
-        self, worker: PlacedAssetDecodeWorker, request: _ReloadRequest
+        self,
+        request_id: uuid.UUID,
+        result: PlacedAssetDecode,
+        request: _ReloadRequest,
     ) -> None:
         """Reject stale work and update every instance of the shared source."""
-        if self._latest_by_asset.get(request.asset_id) != worker.request_id:
+        key = self._reload_key(request.asset_id)
+        if not self._latest_requests.is_current(key, request_id):
+            self._completed(
+                PlacedAssetCompletion(
+                    request_id,
+                    request.scope_id,
+                    request.layer_id,
+                    False,
+                    "replaced by a newer placed reload request",
+                )
+            )
             return
-        self._latest_by_asset.pop(request.asset_id, None)
+        self._latest_requests.release(key, request_id)
         source = ProjectResourceReference(request.asset_id)
         if not self._layers.composition_ids_for_source(source):
             self._assets.restore(request.asset_id, request.before)
             self._completed(
                 PlacedAssetCompletion(
-                    worker.request_id,
+                    request_id,
                     request.scope_id,
                     request.layer_id,
                     False,
@@ -409,15 +474,15 @@ class PlacedAssetWorkflow:
             )
             return
         if (
-            worker.image is None
-            or worker.fingerprint is None
-            or worker.error_message is not None
+            result.image is None
+            or result.fingerprint is None
+            or result.error_message is not None
         ):
             after = self._assets.fail_reload(
                 request.asset_id,
                 request.generation,
-                worker.error_message or "linked image could not be decoded",
-                missing=worker.missing,
+                result.error_message or "linked image could not be decoded",
+                missing=result.missing,
             )
             if after is not None and request.record_history:
                 self._edits.record_applied(
@@ -430,16 +495,30 @@ class PlacedAssetWorkflow:
                 )
             if after is not None:
                 self._changed(request.scope_id)
-            self._publish_failure(worker, request.scope_id, request.layer_id)
+            self._publish_failure(
+                request_id,
+                result,
+                request.scope_id,
+                request.layer_id,
+            )
             return
         after = self._assets.complete_reload(
             request.asset_id,
             request.generation,
-            worker.image,
-            worker.path,
-            worker.fingerprint,
+            result.image,
+            result.path,
+            result.fingerprint,
         )
         if after is None:
+            self._completed(
+                PlacedAssetCompletion(
+                    request_id,
+                    request.scope_id,
+                    request.layer_id,
+                    False,
+                    "placed source changed during reload",
+                )
+            )
             return
         if request.record_history:
             self._edits.record_applied(
@@ -453,7 +532,7 @@ class PlacedAssetWorkflow:
         self._changed(request.scope_id)
         self._completed(
             PlacedAssetCompletion(
-                worker.request_id,
+                request_id,
                 request.scope_id,
                 request.layer_id,
                 True,
@@ -463,36 +542,67 @@ class PlacedAssetWorkflow:
 
     def _publish_failure(
         self,
-        worker: PlacedAssetDecodeWorker,
+        request_id: uuid.UUID,
+        result: PlacedAssetDecode,
         scope_id: uuid.UUID,
         layer_id: uuid.UUID | None,
     ) -> None:
         """Publish one normalized terminal decode failure."""
         self._completed(
             PlacedAssetCompletion(
-                worker.request_id,
+                request_id,
                 scope_id,
                 layer_id,
                 False,
-                worker.error_message or "linked image could not be decoded",
+                result.error_message or "linked image could not be decoded",
             )
         )
 
+    def _settle(
+        self,
+        request_id: uuid.UUID,
+        handle: ExecutionHandle[PlacedAssetDecode, object],
+        outcome: ExecutionOutcome[PlacedAssetDecode],
+    ) -> None:
+        """Normalize execution failure and cancellation through workflow results."""
+        if outcome.state == ExecutionState.SUCCEEDED:
+            return
+        pending = self._pending.get(request_id)
+        if pending is None or (
+            pending.handle is not None and pending.handle is not handle
+        ):
+            return
+        message = (
+            outcome.cancellation_reason
+            if outcome.state == ExecutionState.CANCELLED
+            else str(outcome.error)
+        )
+        result = PlacedAssetDecode(
+            pending.path,
+            None,
+            None,
+            message or "linked image could not be decoded",
+        )
+        self._finish(request_id, result)
+
     def _cancel_asset(self, asset_id: uuid.UUID, message: str) -> None:
         """Cancel the current request for one shared asset when present."""
-        request_id = self._latest_by_asset.pop(asset_id, None)
-        if request_id is not None:
-            self._cancel(request_id, message)
+        self._latest_requests.cancel(self._reload_key(asset_id), reason=message)
 
     def _cancel(self, request_id: uuid.UUID, message: str) -> None:
         """Cancel one pending decode and publish exactly one terminal result."""
         pending = self._pending.pop(request_id, None)
         if pending is None:
             return
-        pending.worker.cancel()
-        self._executor.cancel(pending.handle)
+        if pending.handle is not None:
+            pending.handle.cancel(reason=message)
         semantic = pending.reload or pending.new_layer
         assert semantic is not None
+        if pending.reload is not None:
+            self._latest_requests.release(
+                self._reload_key(pending.reload.asset_id),
+                request_id,
+            )
         layer_id = None if pending.new_layer is not None else semantic.layer_id
         self._completed(
             PlacedAssetCompletion(
@@ -503,6 +613,11 @@ class PlacedAssetWorkflow:
                 message,
             )
         )
+
+    @staticmethod
+    def _reload_key(asset_id: uuid.UUID) -> tuple[str, uuid.UUID]:
+        """Return the document-global replacement key for one linked source."""
+        return ("placed-reload", asset_id)
 
     def _asset_id(self, scope_id: uuid.UUID, layer_id: uuid.UUID) -> uuid.UUID | None:
         """Resolve a placed asset from one exact composition instance."""

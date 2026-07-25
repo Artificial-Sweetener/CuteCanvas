@@ -104,7 +104,7 @@ DIAGNOSTIC_DOMAIN_OPTIONS: tuple[tuple[str, str, str, str | None], ...] = (
     (
         DiagnosticsDomain.SAM.value,
         "SAM",
-        "Show SAM worker pool diagnostics.",
+        "Show SAM execution diagnostics.",
         "sam",
     ),
 )
@@ -613,30 +613,6 @@ DIAGNOSTIC_FIELDS: tuple[FieldSpec, ...] = (
         feature_namespace="diagnostics",
     ),
 )
-CONCURRENCY_FIELDS: tuple[FieldSpec, ...] = (
-    FieldSpec(
-        path="concurrency_max_workers",
-        kind="spin",
-        minimum=1,
-        maximum=128,
-        step=1,
-        tooltip="Number of worker threads for background tasks.",
-        label="Max Workers",
-        internal=True,
-        feature_namespace="core",
-    ),
-    FieldSpec(
-        path="concurrency_max_pending_total",
-        kind="spin",
-        minimum=0,
-        maximum=10000,
-        step=1,
-        tooltip="Upper bound for total pending queue (0 = unbounded).",
-        label="Max Pending Total",
-        internal=True,
-        feature_namespace="core",
-    ),
-)
 CONFIG_DIALOG_SECTIONS: tuple[SectionSpec, ...] = (
     SectionSpec(
         title="Viewer",
@@ -661,10 +637,6 @@ CONFIG_DIALOG_SECTIONS: tuple[SectionSpec, ...] = (
     SectionSpec(
         title="Diagnostics",
         groups=(FieldGroupSpec(title="Overlay & Logging", fields=DIAGNOSTIC_FIELDS),),
-    ),
-    SectionSpec(
-        title="Concurrency",
-        groups=(FieldGroupSpec(title="Executor Settings", fields=CONCURRENCY_FIELDS),),
     ),
 )
 
@@ -744,14 +716,7 @@ def field_sets_for_sections(
     specs = tuple(iter_field_specs(sections))
     spec_map = {spec.path: spec for spec in specs}
     all_fields = set(spec_map.keys())
-    additional_internal: set[str] = {
-        "concurrency_category_priorities",
-        "concurrency_category_limits",
-        "concurrency_pending_limits",
-        "concurrency_device_limits",
-    }
     internal_only = {path for path, spec in spec_map.items() if spec.internal}
-    internal_only.update(additional_internal)
     config_fields = {path for path in all_fields if path not in internal_only}
     return all_fields, config_fields, spec_map
 
@@ -760,16 +725,9 @@ FIELD_SPECS_BY_PATH: dict[str, FieldSpec] = {
     spec.path: spec for spec in iter_field_specs()
 }
 _ALL_FIELDS: set[str] = set(FIELD_SPECS_BY_PATH.keys())
-_ADDITIONAL_INTERNAL_ONLY_FIELDS: set[str] = {
-    "concurrency_category_priorities",
-    "concurrency_category_limits",
-    "concurrency_pending_limits",
-    "concurrency_device_limits",
-}
 _INTERNAL_ONLY_FIELDS: set[str] = {
     path for path, spec in FIELD_SPECS_BY_PATH.items() if spec.internal
 }
-_INTERNAL_ONLY_FIELDS.update(_ADDITIONAL_INTERNAL_ONLY_FIELDS)
 _CONFIG_FIELDS: set[str] = {
     path for path in _ALL_FIELDS if path not in _INTERNAL_ONLY_FIELDS
 }

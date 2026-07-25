@@ -24,8 +24,8 @@ from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QSize, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QWidget
 
-from ..concurrency import TaskExecutorProtocol
 from ..core import Config, OverlayDrawFn, SceneOverlayDrawFn
+from ..execution import ExecutionScope
 from ..scene.effects import LayerEffectRenderRegistry
 from ..scene.identity import SceneLayerTileKey, SourceRenderAssetKey
 from ..scene.presentation_effects import (
@@ -56,19 +56,26 @@ class ViewerRenderingRuntime(QObject):
         self,
         pane: QWidget,
         config: Config,
-        executor: TaskExecutorProtocol,
+        execution_scope: ExecutionScope,
     ) -> None:
         """Assemble QPane's sole scene compiler and renderer collaboration."""
         super().__init__(pane)
         self._pane = pane
+        self._execution_scope = execution_scope.open_child(
+            f"{execution_scope.owner_id}:rendering"
+        )
         self._sources = LayerSourceCapabilities.create()
         self._scenes = RenderSceneController(self._sources)
-        self._pyramids = PyramidManager(config, parent=self, executor=executor)
+        self._pyramids = PyramidManager(
+            config,
+            parent=self,
+            execution_scope=self._execution_scope,
+        )
         self._presenter = RenderingPresenter(
             qpane=pane,
             pyramid_products=self._pyramids,
             cache_registry=None,
-            executor=executor,
+            execution_scope=self._execution_scope,
             scene_provider=self._scenes.scene_descriptor,
             scene_revision=self._scenes.revision,
             source_metadata=self._sources.metadata,
@@ -231,6 +238,7 @@ class ViewerRenderingRuntime(QObject):
         """Stop presenter and derived-product work without waiting on Qt."""
         self._presenter.shutdown()
         self._pyramids.shutdown(wait=False)
+        self._execution_scope.close(reason="viewer_rendering_shutdown")
 
     def discard_sources(self, sources: tuple[RasterSource, ...]) -> None:
         """Discard raster products for resources removed from viewer ownership."""

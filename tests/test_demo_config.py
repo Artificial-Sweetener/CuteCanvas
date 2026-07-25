@@ -38,7 +38,7 @@ def test_live_config_applies_without_rebuild(qapp):
     demo_config = Config()
     demo_config.cache.mode = "hard"
     demo_config.cache.budget_mb = 1024
-    window = ExampleWindow(ExampleOptions(feature_set="core"), config=demo_config)
+    window = ExampleWindow(ExampleOptions(), config=demo_config)
     try:
         sections = build_sections_for_features(window._active_features)
         _, config_fields, _ = field_sets_for_sections(sections)
@@ -99,126 +99,6 @@ def test_live_config_applies_without_rebuild(qapp):
     finally:
         window.close()
         window.deleteLater()
-        qapp.processEvents()
-
-
-def test_demo_persists_concurrency_settings(qapp):
-    """Concurrency tuning from the dialog persists into the demo config."""
-    demo_config = Config()
-    window = ExampleWindow(ExampleOptions(feature_set="masksam"), config=demo_config)
-    try:
-        sections = build_sections_for_features(window._active_features)
-        _, config_fields, _ = field_sets_for_sections(sections)
-        values = {
-            "concurrency_max_workers": 12,
-            "concurrency_max_pending_total": 0,
-            "concurrency_category_priorities_map": {"tiles": 40, "sam": -5},
-            "concurrency_category_limits_map": {"tiles": 3},
-            "concurrency_pending_limits_map": {"sam": 4},
-            "concurrency_device_limits_map": {
-                "cuda": {"sam": 2, "tiles": 99},
-                "cpu": {"sam": 1},
-            },
-        }
-        window.configuration.apply_configuration(
-            values,
-            config_fields=config_fields,
-        )
-        concurrency = demo_config.concurrency
-        assert concurrency["max_workers"] == 12
-        assert concurrency["max_pending_total"] is None
-        assert concurrency["category_priorities"]["tiles"] == 40
-        assert concurrency["category_priorities"]["sam"] == -5
-        assert concurrency["category_limits"]["tiles"] == 3
-        assert concurrency["pending_limits"]["sam"] == 4
-        assert concurrency["device_limits"]["cuda"]["sam"] == 2
-        assert concurrency["device_limits"]["cpu"]["sam"] == 1
-        assert "tiles" not in concurrency["device_limits"]["cuda"]
-    finally:
-        window.close()
-        window.deleteLater()
-        qapp.processEvents()
-
-
-def test_demo_applies_internal_concurrency_live(qapp):
-    """Concurrency map tweaks trigger live CuteCanvas reconfigure even though internal."""
-    demo_config = Config()
-    window = ExampleWindow(ExampleOptions(feature_set="masksam"), config=demo_config)
-    try:
-        sections = build_sections_for_features(window._active_features)
-        _, config_fields, _ = field_sets_for_sections(sections)
-        executor = window.qpane.executor
-        before = executor.snapshot()
-        assert before.category_limits.get("tiles") in (None, 0)
-        window.configuration.apply_configuration(
-            {"concurrency_category_limits_map": {"tiles": 4}},
-            config_fields=config_fields,
-        )
-        after = executor.snapshot()
-        assert after.category_limits.get("tiles") == 4
-    finally:
-        window.close()
-        window.deleteLater()
-        qapp.processEvents()
-
-
-def test_config_dialog_skips_device_limits_without_sam(qapp):
-    """Device limits inputs collapse when SAM feature is inactive."""
-    dialog = ConfigDialog(Config(), active_features=())
-    try:
-        adv = dialog._concurrency_adv
-        assert adv is not None
-        assert adv._devices == []
-        assert not adv._device_widgets
-        widget = next(iter(adv._prio_widgets.values()), None)
-        assert widget is not None
-        widget.setValue(widget.value() + 1)
-        result = dialog.result()
-        assert "concurrency_device_limits_map" not in result.values
-    finally:
-        dialog.close()
-        dialog.deleteLater()
-        qapp.processEvents()
-
-
-def test_config_dialog_exposes_device_limits_with_sam(qapp):
-    dialog = ConfigDialog(Config(), active_features=("mask", "sam"))
-    try:
-        adv = dialog._concurrency_adv
-        assert adv is not None
-        assert "cuda" in adv._devices
-        assert adv._device_widgets
-        maps = dialog._concurrency_maps_from_widget()
-        assert "concurrency_device_limits_map" in maps
-        assert maps["concurrency_device_limits_map"]
-    finally:
-        dialog.close()
-        dialog.deleteLater()
-        qapp.processEvents()
-
-
-def test_config_dialog_limits_device_categories_to_sam(qapp):
-    config = Config()
-    config.concurrency = {
-        "device_limits": {
-            "cuda": {"sam": 5, "tiles": 3},
-            "cpu": {"tiles": 2},
-        }
-    }
-    dialog = ConfigDialog(config, active_features=("mask", "sam"))
-    try:
-        adv = dialog._concurrency_adv
-        assert adv is not None
-        assert adv._device_categories == ["sam"]
-        maps = dialog._concurrency_maps_from_widget()
-        dev_map = maps["concurrency_device_limits_map"]
-        assert set(dev_map["cuda"].keys()) == {"sam"}
-        assert set(dev_map["cpu"].keys()) == {"sam"}
-        assert dev_map["cuda"]["sam"] == 5
-        assert dev_map["cpu"]["sam"] == 0
-    finally:
-        dialog.close()
-        dialog.deleteLater()
         qapp.processEvents()
 
 
@@ -396,55 +276,27 @@ def test_config_dialog_toggles_cache_mode_fields(qapp):
         qapp.processEvents()
 
 
-def test_concurrency_widget_hides_sam_without_feature(qapp):
-    dialog = ConfigDialog(Config(), active_features=("core",))
-    try:
-        widget = dialog._concurrency_adv
-        assert widget is not None
-        assert "sam" not in widget._categories
-        assert "sam" not in widget._prio_widgets
-        assert "cuda" not in widget._devices
-        assert not any(dev == "cuda" for dev, _ in widget._device_widgets)
-    finally:
-        dialog.close()
-        dialog.deleteLater()
-        qapp.processEvents()
-
-
-def test_concurrency_widget_includes_sam_for_full_features(qapp):
-    dialog = ConfigDialog(Config(), active_features=("mask", "sam"))
-    try:
-        widget = dialog._concurrency_adv
-        assert widget is not None
-        assert "sam" in widget._categories
-        assert "sam" in widget._prio_widgets
-        assert "cuda" in widget._devices
-        assert any(dev == "cuda" for dev, _ in widget._device_widgets)
-    finally:
-        dialog.close()
-        dialog.deleteLater()
-        qapp.processEvents()
-
-
 def test_parse_args_enables_config_strict() -> None:
-    opts = parse_args(["--features", "core", "--config-strict"])
-    assert opts.feature_set == "core"
+    opts = parse_args(["--config-strict"])
+    assert opts.sam_enabled is False
     assert opts.config_strict is True
 
 
-def test_demo_window_respects_config_strict(qapp):
+def test_demo_window_includes_masks_under_config_strict(qapp):
     demo_config = Config()
     demo_config.mask_border_enabled = True
-    with pytest.raises(ValueError):
-        ExampleWindow(
-            ExampleOptions(feature_set="core", config_strict=True),
-            config=demo_config,
-        )
+    window = ExampleWindow(ExampleOptions(config_strict=True), config=demo_config)
+    try:
+        assert window.qpane.maskFeatureAvailable()
+    finally:
+        window.close()
+        window.deleteLater()
+        qapp.processEvents()
 
 
 def test_diagnostics_menu_excludes_sam_when_disabled(qapp):
     demo_config = Config()
-    window = ExampleWindow(ExampleOptions(feature_set="core"), config=demo_config)
+    window = ExampleWindow(ExampleOptions(), config=demo_config)
     try:
         assert "sam" not in window.configuration.detail_actions
     finally:

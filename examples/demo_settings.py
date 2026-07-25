@@ -15,116 +15,155 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Shared helpers for reading and writing the demo settings file."""
+"""Persist independent launch preferences and window placement for the demos."""
 
 from __future__ import annotations
 
 import base64
 import binascii
 import json
+import os
 from pathlib import Path
 
 _SETTINGS_FILE = Path(__file__).resolve().parent / "demo_settings.json"
+_WINDOW_SETTINGS_FILE = Path(__file__).resolve().parent / "demo_window_settings.json"
 
 
 def load_demo_settings() -> dict[str, object]:
-    """Load persisted dashboard settings for the demo launcher."""
-    if not _SETTINGS_FILE.exists():
-        return {}
-    try:
-        with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    required_keys = {
-        "tier",
-        "log_level",
-        "sam_download_mode",
-        "sam_model_path",
-        "sam_model_url",
-    }
-    if not required_keys.issubset(data.keys()):
-        return {}
-    if not all(
-        isinstance(data[key], str) for key in ("tier", "log_level", "sam_download_mode")
-    ):
-        return {}
-    if data["sam_model_path"] is not None and not isinstance(
-        data["sam_model_path"], str
-    ):
-        return {}
-    if data["sam_model_url"] is not None and not isinstance(data["sam_model_url"], str):
-        return {}
-    sam_model_hash = data.get("sam_model_hash")
-    if sam_model_hash is not None and not isinstance(sam_model_hash, str):
-        return {}
-    settings: dict[str, object] = {
-        "tier": data["tier"],
-        "log_level": data["log_level"],
-        "sam_download_mode": data["sam_download_mode"],
-        "sam_model_path": data["sam_model_path"],
-        "sam_model_url": data["sam_model_url"],
-        "sam_model_hash": sam_model_hash,
-    }
-    window_geometry = _coerce_geometry_payload(data.get("window_geometry"))
+    """Load validated launcher preferences and window placement."""
+    launch_data = _read_mapping(_SETTINGS_FILE)
+    window_data = _read_mapping(_WINDOW_SETTINGS_FILE)
+    settings: dict[str, object] = {}
+
+    sam_enabled = launch_data.get("sam_enabled")
+    if isinstance(sam_enabled, bool):
+        settings["sam_enabled"] = sam_enabled
+    else:
+        legacy_tier = launch_data.get("tier")
+        if isinstance(legacy_tier, str):
+            settings["sam_enabled"] = legacy_tier == "masksam"
+
+    _copy_string_setting(launch_data, settings, "log_level")
+    _copy_string_setting(launch_data, settings, "sam_download_mode")
+    _copy_optional_string_setting(launch_data, settings, "sam_model_path")
+    _copy_optional_string_setting(launch_data, settings, "sam_model_url")
+    _copy_optional_string_setting(launch_data, settings, "sam_model_hash")
+
+    geometry_source = window_data if window_data else launch_data
+    window_geometry = _coerce_geometry_payload(geometry_source.get("window_geometry"))
     if window_geometry is not None:
         settings["window_geometry"] = window_geometry
-    window_size = _coerce_int_pair(data.get("window_size"), minimum=1)
+    window_size = _coerce_int_pair(geometry_source.get("window_size"), minimum=1)
     if window_size is not None:
         settings["window_size"] = window_size
-    window_position = _coerce_int_pair(data.get("window_position"), minimum=None)
+    window_position = _coerce_int_pair(
+        geometry_source.get("window_position"),
+        minimum=None,
+    )
     if window_position is not None:
         settings["window_position"] = window_position
     return settings
 
 
-def save_demo_settings(
-    tier: str,
+def save_demo_launch_settings(
+    *,
+    sam_enabled: bool,
     log_level: str,
     sam_download_mode: str,
     sam_model_path: str | None,
     sam_model_url: str | None,
     sam_model_hash: str | None,
-    *,
-    window_geometry: str | None = None,
-    window_size: tuple[int, int] | None = None,
-    window_position: tuple[int, int] | None = None,
 ) -> None:
-    """Persist dashboard settings to a local JSON file."""
-    existing = load_demo_settings()
-    if window_geometry is None:
-        existing_geometry = existing.get("window_geometry")
-        if isinstance(existing_geometry, str):
-            window_geometry = existing_geometry
-    if window_size is None:
-        existing_size = existing.get("window_size")
-        if isinstance(existing_size, tuple):
-            window_size = existing_size
-    if window_position is None:
-        existing_position = existing.get("window_position")
-        if isinstance(existing_position, tuple):
-            window_position = existing_position
+    """Persist the complete launcher preference snapshot."""
+    _preserve_legacy_window_settings()
+    _write_mapping(
+        _SETTINGS_FILE,
+        {
+            "sam_enabled": sam_enabled,
+            "log_level": log_level,
+            "sam_download_mode": sam_download_mode,
+            "sam_model_path": sam_model_path,
+            "sam_model_url": sam_model_url,
+            "sam_model_hash": sam_model_hash,
+        },
+    )
+
+
+def save_demo_window_settings(
+    *,
+    window_geometry: str | None,
+    window_size: tuple[int, int],
+    window_position: tuple[int, int],
+) -> None:
+    """Persist window placement without touching launcher preferences."""
     payload: dict[str, object] = {
-        "tier": tier,
-        "log_level": log_level,
-        "sam_download_mode": sam_download_mode,
-        "sam_model_path": sam_model_path,
-        "sam_model_url": sam_model_url,
-        "sam_model_hash": sam_model_hash,
+        "window_size": [int(window_size[0]), int(window_size[1])],
+        "window_position": [int(window_position[0]), int(window_position[1])],
     }
     if window_geometry is not None:
         payload["window_geometry"] = window_geometry
-    if window_size is not None:
-        payload["window_size"] = [int(window_size[0]), int(window_size[1])]
-    if window_position is not None:
-        payload["window_position"] = [int(window_position[0]), int(window_position[1])]
+    _write_mapping(_WINDOW_SETTINGS_FILE, payload)
+
+
+def _read_mapping(path: Path) -> dict[str, object]:
+    """Return one JSON object or an empty mapping when unavailable."""
     try:
-        with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _preserve_legacy_window_settings() -> None:
+    """Move legacy window placement before replacing the old combined record."""
+    if _WINDOW_SETTINGS_FILE.exists():
+        return
+    legacy = _read_mapping(_SETTINGS_FILE)
+    payload = {
+        key: legacy[key]
+        for key in ("window_geometry", "window_size", "window_position")
+        if key in legacy
+    }
+    if payload:
+        _write_mapping(_WINDOW_SETTINGS_FILE, payload)
+
+
+def _write_mapping(path: Path, payload: dict[str, object]) -> None:
+    """Atomically replace one settings record when the filesystem permits."""
+    temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary_path.write_text(
+            json.dumps(payload, indent=2),
+            encoding="utf-8",
+        )
+        temporary_path.replace(path)
     except OSError:
-        pass
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _copy_string_setting(
+    source: dict[str, object],
+    target: dict[str, object],
+    key: str,
+) -> None:
+    """Copy one required string-shaped setting when valid."""
+    value = source.get(key)
+    if isinstance(value, str):
+        target[key] = value
+
+
+def _copy_optional_string_setting(
+    source: dict[str, object],
+    target: dict[str, object],
+    key: str,
+) -> None:
+    """Copy one nullable string-shaped setting when valid."""
+    value = source.get(key)
+    if value is None or isinstance(value, str):
+        target[key] = value
 
 
 def _coerce_int_pair(value: object, *, minimum: int | None) -> tuple[int, int] | None:

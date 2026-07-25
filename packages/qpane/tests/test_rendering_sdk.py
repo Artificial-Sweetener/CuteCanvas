@@ -35,14 +35,15 @@ from qpane.scene.affine import LayerTransform
 from qpane.scene.model import LayerDescriptor
 from qpane.scene.raster import RasterBounds
 from qpane.scene.source_capabilities import LayerSourceCapabilities
+from qpane.sdk.execution import CancellationToken
 from qpane.sdk.raster import (
     qimage_to_numpy_const_view_argb32,
     qimage_to_numpy_const_view_bgra32,
 )
 from qpane.sdk.rendering import (
-    RegionRasterizationWorker,
     SceneLayerRenderScope,
     SceneRegionRasterizer,
+    rasterize_region,
 )
 from qpane.vector.model import VectorDocument, VectorObject
 from qpane.vector.public import (
@@ -120,21 +121,17 @@ def test_raster_source_detaches_simple_image_and_validates_inputs() -> None:
         RasterSource.from_image(QImage())
 
 
-def test_region_rasterization_worker_samples_exact_bounded_output() -> None:
+def test_region_rasterization_samples_exact_bounded_output() -> None:
     """Advanced sampled sources must rasterize without a full source image."""
-    worker = RegionRasterizationWorker(
-        uuid.uuid4(),
+    result = rasterize_region(
         _SolidRegionSource(),
         QRectF(10.0, 20.0, 30.0, 40.0),
         QSize(90, 120),
+        CancellationToken(),
     )
 
-    worker.run()
-
-    assert worker.error_message is None
-    assert worker.result is not None
-    assert worker.result.size() == QSize(90, 120)
-    assert worker.result.pixelColor(45, 60) == QColor("magenta")
+    assert result.size() == QSize(90, 120)
+    assert result.pixelColor(45, 60) == QColor("magenta")
 
 
 def test_render_scene_rejects_invalid_canvas_and_duplicate_layer_ids() -> None:

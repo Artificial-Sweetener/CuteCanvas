@@ -33,7 +33,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -59,169 +58,12 @@ from examples.demonstration.config.spec import (
     field_sets_for_sections,
 )
 
-DEFAULT_CONCURRENCY_CATEGORIES: tuple[str, ...] = (
-    "tiles",
-    "pyramid",
-    "io",
-    "sam",
-    "maintenance",
-)
-DEFAULT_CONCURRENCY_DEVICES: tuple[str, ...] = ("cpu", "cuda")
-DEVICE_LIMIT_CATEGORIES: tuple[str, ...] = ("sam",)
 _SAM_CONFIG_FIELDS: tuple[str, ...] = (
     "sam_download_mode",
     "sam_model_path",
     "sam_model_url",
     "sam_model_hash",
 )
-
-
-def _filter_device_limits(
-    device_limits: Mapping[str, Mapping[str, int]] | None,
-) -> dict[str, dict[str, int]]:
-    """Restrict device limit mappings to supported SAM categories."""
-    if not isinstance(device_limits, Mapping):
-        return {}
-    filtered: dict[str, dict[str, int]] = {}
-    for device, categories in device_limits.items():
-        if not isinstance(categories, Mapping):
-            continue
-        filtered[str(device)] = {
-            category: int(categories.get(category, 0) or 0)
-            for category in DEVICE_LIMIT_CATEGORIES
-        }
-    return filtered
-
-
-class ConcurrencyAdvancedWidget(QWidget):
-    """Composite editor for priorities and limits without JSON inputs."""
-
-    valueChanged = Signal()
-
-    def __init__(
-        self,
-        *,
-        priorities: dict[str, int],
-        category_limits: dict[str, int],
-        pending_limits: dict[str, int],
-        device_limits: dict[str, dict[str, int]],
-        parent: QWidget | None = None,
-        active_features: Sequence[str] | None = None,
-    ) -> None:
-        """Build the advanced concurrency editor with optional feature gating."""
-        super().__init__(parent)
-        device_limits = _filter_device_limits(device_limits)
-        self._active_features = (
-            tuple(active_features) if active_features is not None else None
-        )
-        self._prio_widgets: dict[str, QSpinBox] = {}
-        self._cat_limit_widgets: dict[str, QSpinBox] = {}
-        self._pending_widgets: dict[str, QSpinBox] = {}
-        self._device_widgets: dict[tuple[str, str], QSpinBox] = {}
-        cats = set(DEFAULT_CONCURRENCY_CATEGORIES)
-        cats.update(priorities.keys())
-        cats.update(category_limits.keys())
-        cats.update(pending_limits.keys())
-        if not self._sam_enabled():
-            cats.discard("sam")
-        self._categories = sorted(cats)
-        self._device_categories = [
-            category
-            for category in DEVICE_LIMIT_CATEGORIES
-            if category in self._categories
-        ]
-        devs = set(DEFAULT_CONCURRENCY_DEVICES)
-        devs.update(device_limits.keys())
-        if not self._cuda_enabled():
-            self._devices = []
-        else:
-            self._devices = sorted(devs)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
-        prio_group = QGroupBox("Category Priorities", self)
-        prio_form = QFormLayout(prio_group)
-        for cat in self._categories:
-            sb = QSpinBox(prio_group)
-            sb.setRange(-100, 100)
-            sb.setSingleStep(1)
-            sb.setValue(int(priorities.get(cat, 0)))
-            self._prio_widgets[cat] = sb
-            sb.valueChanged.connect(self.valueChanged)
-            prio_form.addRow(cat, sb)
-        root.addWidget(prio_group)
-        cat_group = QGroupBox("Category Limits (0 = unbounded)", self)
-        cat_form = QFormLayout(cat_group)
-        for cat in self._categories:
-            sb = QSpinBox(cat_group)
-            sb.setRange(0, 128)
-            sb.setSingleStep(1)
-            sb.setValue(int(category_limits.get(cat, 0) or 0))
-            self._cat_limit_widgets[cat] = sb
-            sb.valueChanged.connect(self.valueChanged)
-            cat_form.addRow(cat, sb)
-        root.addWidget(cat_group)
-        pend_group = QGroupBox("Pending Limits (0 = unbounded)", self)
-        pend_form = QFormLayout(pend_group)
-        for cat in self._categories:
-            sb = QSpinBox(pend_group)
-            sb.setRange(0, 10000)
-            sb.setSingleStep(1)
-            sb.setValue(int(pending_limits.get(cat, 0) or 0))
-            self._pending_widgets[cat] = sb
-            sb.valueChanged.connect(self.valueChanged)
-            pend_form.addRow(cat, sb)
-        root.addWidget(pend_group)
-        if self._devices and self._device_categories:
-            dev_group = QGroupBox("Device Limits (0 = unbounded)", self)
-            grid = QGridLayout(dev_group)
-            grid.addWidget(QLabel(""), 0, 0)
-            for j, cat in enumerate(self._device_categories, start=1):
-                grid.addWidget(QLabel(cat), 0, j)
-            for i, dev in enumerate(self._devices, start=1):
-                grid.addWidget(QLabel(dev), i, 0)
-                for j, cat in enumerate(self._device_categories, start=1):
-                    sb = QSpinBox(dev_group)
-                    sb.setRange(0, 128)
-                    sb.setSingleStep(1)
-                    current = (device_limits.get(dev) or {}).get(cat, 0) or 0
-                    sb.setValue(int(current))
-                    self._device_widgets[(dev, cat)] = sb
-                    sb.valueChanged.connect(self.valueChanged)
-                    grid.addWidget(sb, i, j)
-            root.addWidget(dev_group)
-
-    def _sam_enabled(self) -> bool:
-        """Return True when SAM-specific controls should be visible."""
-        if self._active_features is None:
-            return True
-        return "sam" in self._active_features
-
-    def _cuda_enabled(self) -> bool:
-        """Return True when CUDA entries should be exposed for SAM devices."""
-        return self._sam_enabled()
-
-    @staticmethod
-    def _spin_values(pool: dict[str, QSpinBox]) -> dict[str, int]:
-        """Return current spin-box values for a given mapping."""
-        return {name: widget.value() for name, widget in pool.items()}
-
-    def value_maps(
-        self,
-    ) -> tuple[
-        dict[str, int],
-        dict[str, int],
-        dict[str, int],
-        dict[str, dict[str, int]],
-    ]:
-        """Expose the current priority and limit mappings entered by the user."""
-        prios = self._spin_values(self._prio_widgets)
-        cat_limits = self._spin_values(self._cat_limit_widgets)
-        pend_limits = self._spin_values(self._pending_widgets)
-        dev_limits: dict[str, dict[str, int]] = {}
-        for (dev, cat), sb in self._device_widgets.items():
-            dev_limits.setdefault(dev, {})[cat] = sb.value()
-        return prios, cat_limits, pend_limits, dev_limits
 
 
 class LockedSizeWidget(QWidget):
@@ -405,9 +247,6 @@ class ConfigDialog(QDialog):
         self._widgets: dict[str, QWidget] = {}
         self._field_containers: dict[str, QWidget] = {}
         self._field_labels: dict[str, QWidget] = {}
-        self._concurrency_adv: ConcurrencyAdvancedWidget | None = None
-        self._concurrency_initial: dict[str, object] = {}
-        self._concurrency_defaults: dict[str, object] = {}
         self._section_items: dict[str, QWidget] = {}
         self._section_terms: dict[str, set[str]] = {}
         self._tab_indices: dict[str, int] = {}
@@ -496,7 +335,6 @@ class ConfigDialog(QDialog):
                 tab_title, section.groups
             )
             self._tab_indices[tab_title] = index
-        self._add_concurrency_advanced_section()
         self._sync_cache_mode_fields()
 
     def _allowed_diagnostic_domains(self, requested: Sequence[str]) -> tuple[str, ...]:
@@ -570,24 +408,6 @@ class ConfigDialog(QDialog):
                     extensions.get(tail[2]) if isinstance(extensions, Mapping) else None
                 )
             return None
-        if name == "concurrency_max_workers":
-            concurrency = (
-                config_source.get("concurrency")
-                if isinstance(config_source, Mapping)
-                else {}
-            ) or {}
-            try:
-                return int(concurrency.get("max_workers", 8))
-            except (TypeError, ValueError, OverflowError):
-                return 8
-        if name == "concurrency_max_pending_total":
-            concurrency = (
-                config_source.get("concurrency")
-                if isinstance(config_source, Mapping)
-                else {}
-            ) or {}
-            pending = concurrency.get("max_pending_total")
-            return self._positive_int_or_zero(pending)
         value: object = config_source
         for part in parts:
             if value is None:
@@ -764,13 +584,6 @@ class ConfigDialog(QDialog):
         return override or name.replace("_", " ").title()
 
     @staticmethod
-    def _positive_int_or_zero(value: object) -> int:
-        """Return a positive int or 0 when value is not a valid positive int."""
-        if isinstance(value, int) and value > 0:
-            return int(value)
-        return 0
-
-    @staticmethod
     def _normalize_size_value(value: object) -> tuple[int, int] | None:
         """Return a sanitized width/height pair when valid."""
         if isinstance(value, (tuple, list)) and len(value) == 2:
@@ -783,47 +596,9 @@ class ConfigDialog(QDialog):
                 return (width, height)
         return None
 
-    def _add_concurrency_advanced_section(self) -> None:
-        """Insert the advanced concurrency editor and capture its defaults."""
-        data = (
-            self._original_snapshot.get("concurrency")
-            if isinstance(self._original_snapshot, Mapping)
-            else {}
-        ) or {}
-        raw_device_limits = {
-            key: dict(value)
-            for key, value in dict(data.get("device_limits", {})).items()
-        }
-        adv = ConcurrencyAdvancedWidget(
-            priorities=dict(data.get("category_priorities", {})),
-            category_limits=dict(data.get("category_limits", {})),
-            pending_limits=dict(data.get("pending_limits", {})),
-            device_limits=_filter_device_limits(raw_device_limits),
-            parent=self,
-            active_features=self._active_features,
-        )
-        layout = self._tab_layouts.get("Concurrency")
-        if layout is None:
-            return
-        box = QGroupBox("Concurrency (Advanced): Priorities & Limits", self)
-        inner = QVBoxLayout(box)
-        inner.setContentsMargins(8, 8, 8, 8)
-        inner.addWidget(adv)
-        layout.addWidget(box)
-        self._concurrency_adv = adv
-        self._concurrency_initial = self._concurrency_maps_from_widget()
-        defaults = self._concurrency_maps_from_config(self._baseline_snapshot)
-        self._concurrency_defaults = self._normalize_concurrency_reference(
-            defaults,
-            self._concurrency_initial,
-        )
-        adv.valueChanged.connect(self._trigger_preview_update)
-
     def result(self) -> ConfigResult:
         """Return the dialog results plus config metadata for application."""
-        values = self._diff_against(
-            self._original_snapshot, self._concurrency_initial or None
-        )
+        values = self._diff_against(self._original_snapshot)
         restart_fields = self._sam_restart_fields(values)
         return ConfigResult(
             values=values,
@@ -957,9 +732,7 @@ class ConfigDialog(QDialog):
 
     def _update_preview(self) -> None:
         """Render the collapsed config diff in the preview qpane."""
-        preview_values = self._diff_against(
-            self._baseline_snapshot, self._concurrency_defaults or None
-        )
+        preview_values = self._diff_against(self._baseline_snapshot)
         if not preview_values:
             self._preview_status_label.setText("No changes yet")
             self._preview_text.clear()
@@ -977,7 +750,6 @@ class ConfigDialog(QDialog):
     def _diff_against(
         self,
         reference_snapshot: Mapping[str, object],
-        concurrency_reference: dict[str, object] | None,
     ) -> dict[str, object]:
         """Return the flattened config diff relative to the provided baselines."""
         values: dict[str, object] = {}
@@ -991,11 +763,6 @@ class ConfigDialog(QDialog):
             )
             if current != normalized_reference:
                 values[name] = current
-        if self._concurrency_adv is not None and concurrency_reference is not None:
-            current_maps = self._concurrency_maps_from_widget()
-            for key, current_value in current_maps.items():
-                if concurrency_reference.get(key) != current_value:
-                    values[key] = current_value
         return values
 
     def _widget_state(
@@ -1077,95 +844,3 @@ class ConfigDialog(QDialog):
             normalized_reference = self._normalize_size_value(reference_value)
             return current, normalized_reference
         return reference_value, reference_value
-
-    def _concurrency_maps_from_widget(self) -> dict[str, object]:
-        """Return the current concurrency tuning maps from the advanced widget."""
-        prios, cats, pend, devs = self._concurrency_adv.value_maps()
-        result = {
-            "concurrency_category_priorities_map": prios,
-            "concurrency_category_limits_map": cats,
-            "concurrency_pending_limits_map": pend,
-        }
-        if devs:
-            result["concurrency_device_limits_map"] = devs
-        return result
-
-    @staticmethod
-    def _normalize_concurrency_reference(
-        reference: dict[str, object],
-        template: dict[str, object],
-    ) -> dict[str, object]:
-        """Align a reference mapping to the structure of ``template``."""
-        if not reference:
-            return template
-        normalized: dict[str, object] = {}
-        for key, template_map in template.items():
-            if key == "concurrency_device_limits_map":
-                normalized_devices: dict[str, dict[str, int]] = {}
-                ref_devices = reference.get(key)
-                ref_devices = ref_devices if isinstance(ref_devices, dict) else {}
-                for device, template_cats in template_map.items():
-                    template_cats = (
-                        template_cats if isinstance(template_cats, dict) else {}
-                    )
-                    ref_device = (
-                        ref_devices.get(device) if isinstance(ref_devices, dict) else {}
-                    )
-                    normalized_devices[device] = {
-                        category: int((ref_device or {}).get(category, template_value))
-                        for category, template_value in template_cats.items()
-                    }
-                normalized[key] = normalized_devices
-                continue
-            ref_map = reference.get(key)
-            ref_map = ref_map if isinstance(ref_map, dict) else {}
-            normalized[key] = {
-                name: int(ref_map.get(name, template_value))
-                for name, template_value in template_map.items()
-            }
-        return normalized
-
-    @staticmethod
-    def _concurrency_maps_from_config(
-        config_snapshot: Mapping[str, object] | None,
-    ) -> dict[str, object]:
-        """Build normalized concurrency maps from a Config dict snapshot."""
-        data = (
-            config_snapshot.get("concurrency")
-            if isinstance(config_snapshot, Mapping)
-            else {}
-        ) or {}
-        priorities = dict(data.get("category_priorities", {}))
-        category_limits = dict(data.get("category_limits", {}))
-        pending_limits = dict(data.get("pending_limits", {}))
-        device_limits = _filter_device_limits(
-            {
-                device: dict(values)
-                for device, values in dict(data.get("device_limits", {})).items()
-            }
-        )
-        categories = set(DEFAULT_CONCURRENCY_CATEGORIES)
-        categories.update(priorities.keys())
-        categories.update(category_limits.keys())
-        categories.update(pending_limits.keys())
-        devices = set(DEFAULT_CONCURRENCY_DEVICES)
-        devices.update(device_limits.keys())
-        normalized_prios = {cat: int(priorities.get(cat, 0) or 0) for cat in categories}
-        normalized_cat_limits = {
-            cat: int(category_limits.get(cat, 0) or 0) for cat in categories
-        }
-        normalized_pending = {
-            cat: int(pending_limits.get(cat, 0) or 0) for cat in categories
-        }
-        normalized_devices: dict[str, dict[str, int]] = {}
-        for device in devices:
-            source = device_limits.get(device) or {}
-            normalized_devices[device] = {
-                cat: int(source.get(cat, 0) or 0) for cat in DEVICE_LIMIT_CATEGORIES
-            }
-        return {
-            "concurrency_category_priorities_map": normalized_prios,
-            "concurrency_category_limits_map": normalized_cat_limits,
-            "concurrency_pending_limits_map": normalized_pending,
-            "concurrency_device_limits_map": normalized_devices,
-        }

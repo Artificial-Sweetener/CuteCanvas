@@ -21,6 +21,10 @@ import os
 from collections.abc import Callable
 from time import perf_counter, process_time, thread_time
 
+import pytest
+
+INTERACTIVE_PERFORMANCE = pytest.mark.interactive_performance
+
 
 def interaction_clock() -> float:
     """Measure synchronous dispatch work without xdist scheduler contention."""

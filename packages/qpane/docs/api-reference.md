@@ -3,6 +3,8 @@
 ## Viewer
 
 - `QPane` is the focused PySide6 viewer facade.
+- `QPane(execution_policy=...)` configures an owned standalone runtime, while
+  `QPane(execution_runtime=...)` participates in a host-owned runtime.
 - `Config` owns detached viewer and rendering settings.
 - `CacheMode`, `ZoomMode`, and `ViewportZoomMode` describe cache and viewport
   behavior.
@@ -235,17 +237,60 @@ root facade and declarative SDK above.
   per-frame projection values for advanced renderer integrations.
 - `PyramidManager` owns multiresolution product scheduling and cache-backed
   source pyramids.
-- `LayerRasterizationWorker` scales one detached raster source away from the
-  GUI thread.
-- `RegionRasterizationWorker` samples one bounded `RegionSampleSource` away
-  from the GUI thread.
+- `rasterize_layer` scales one detached raster source under a caller-provided
+  cancellation token.
+- `rasterize_region` samples one bounded `RegionSampleSource` under a
+  caller-provided cancellation token.
 - `CacheRegistry`, `CacheCoordinator`, and `CachePriority` coordinate byte-bounded product stores.
 - `EvictableCacheConsumer`, `KeyedCacheConsumer`, and `cache_detail_provider` connect stores to eviction and diagnostics.
-- `BaseWorker`, `TaskExecutorProtocol`, `TaskHandle`, and `TaskRejected` define cancellable bounded background work. `PersistentWorkerPool` supplies stable Python worker-thread identity when a native backend requires it.
-- `QThreadPoolExecutor` and `LiveTunableExecutorProtocol` provide Qt-backed execution and live tuning.
-- `ThreadPolicy` and `build_thread_policy` resolve host and configuration concurrency limits.
-- `RetryContext`, `RetryEntriesView`, `makeQtRetryController`, and `qt_retry_dispatcher` coordinate bounded Qt-safe retries.
-- `retry_diagnostics_provider` and `retry_summary_provider` expose executor retry state consistently.
+- `ExecutionRuntime` admits work once, while `ExecutionScope` binds accepted
+  work to the lifetime of the widget, document runtime, or host service that
+  requested it.
+- `ExecutionRequest` carries one detached callable and semantic requirements.
+  Its `ExecutionHandle` exposes cancellation, progress observation, lifecycle
+  state, timings, and a single terminal outcome.
+- `ExecutionRequirements` describes scheduling facts through
+  `ExecutionResource`, `ExecutionUrgency`, and `ExecutionLeaseRelease`.
+  Affinity, exclusivity, concurrency, and retained-byte fields preserve hard
+  constraints without naming host queues.
+- `ExecutionBackend` is the physical scheduling protocol.
+  `ExecutionBackendCapabilities` reports which hard requirements it honors,
+  `ExecutionJob` is the one runtime-owned activation, and `BackendSubmission`
+  cancels work that remains physically pending.
+- `CancellationToken` gives worker code cooperative cancellation.
+  `ExecutionTaskContext` combines that token with one typed
+  `ExecutionProgressReporter`, whose updates are coalesced before observer
+  delivery.
+- `ExecutionOutcome` records the terminal `ExecutionState`, optional result,
+  and optional `ExecutionFailurePhase`. `ExecutionTimings` separates queue,
+  worker, adoption, and settlement time.
+- `ExecutionRejected` reports pre-admission failure using a stable
+  `ExecutionRejectionReason`. `ExecutionTagValue` is the safe immutable value
+  type accepted by diagnostic request tags.
+- `CompletionDispatcher` defines owner-context delivery.
+  `InlineDispatcher` serves deterministic non-Qt consumers, while
+  `QtOwnerDispatcher` posts to a living receiver and acknowledges delivery
+  discarded during teardown.
+- `DefaultExecutionPolicy` configures the bounded runtime returned by
+  `create_default_execution_runtime`. `create_native_execution_runtime`
+  returns a disjoint runtime for stable thread-affine native work.
+- `ExecutionSnapshot` is a detached utilization sample.
+  `ExecutionDiagnosticsProvider` exposes current samples, and
+  `DiagnosticsSubscription` disconnects one observer without affecting
+  sibling observers.
+- `execution_summary_records` and `execution_detail_records` translate runtime
+  snapshots into standard diagnostics rows without coupling a host backend to
+  QPane's overlay.
+- `DelayHandle` cancels one pending delay, and `DelayScheduler` defines delay
+  ownership. `QtDelayScheduler` schedules producer retry decisions on the
+  receiver's Qt event loop.
+- `RetryContext` describes one retained producer retry, `RetryPolicy` computes
+  its bounded delay, and `RetryController` coalesces the newest payload after
+  structured rejection. `RetrySchedulingError` reports a delay that could not
+  be installed.
+- `RetryCategorySnapshot` and `RetrySnapshot` expose bounded retry state.
+  `retry_summary_records` and `retry_detail_records` translate those snapshots
+  into the same diagnostics presentation used by execution state.
 
 ### Configuration, features, and diagnostics
 
@@ -291,7 +336,8 @@ root facade and declarative SDK above.
 - `OutboundMimeProvider` materializes host payloads synchronously or later.
 - `OutboundDragController` owns cancellation, stale-result rejection, GUI
   delivery, and native execution.
-- `SystemHeadroomWorker` samples memory pressure without blocking the GUI thread.
+- `SystemHeadroomSample` and `sample_system_headroom` provide detached
+  memory-pressure measurements.
 
 ### Inspection and target layout
 
