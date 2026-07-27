@@ -52,7 +52,7 @@ config = {
         },
     },
     # --- Viewport & Rendering ---
-    "tile_size": 1024,  # Tile edge length in pixels for cache/rendering.
+    "tile_size": "auto",  # Physical-viewport-aware tile edge; positive integers stay exact.
     "tile_overlap": 8,  # Overlap in pixels between tiles to avoid seams.
     "min_view_size_px": 128,  # Smallest pyramid/view size (px) before downsampling stops.
     "canvas_expansion_factor": 1.4,  # Pan margin multiplier (>1 lets you pan past edges).

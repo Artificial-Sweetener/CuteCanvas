@@ -23,14 +23,16 @@ import json
 import os
 import random
 import sys
-from collections.abc import Callable, Sequence
+import time
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize
-from PySide6.QtGui import QImage, QPainter, QRegion
+from PySide6.QtCore import QPointF, QRect, QSize
+from PySide6.QtGui import QImage, QRegion, QTransform
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane import QPane
 
@@ -74,6 +76,10 @@ class _RendererBufferSnapshot:
     subpixel_pan_offset: QPointF
     dirty_region: QRegion
     current_render_plan: SceneRenderPlan | None
+    buffer_render_plan: SceneRenderPlan | None
+    buffer_guard_valid: bool
+    buffer_valid_region: QRegion
+    presentation_transform: QTransform
 
 
 class FrameArtifactDetector:
@@ -176,52 +182,92 @@ class HeadlessPanHarness:
         self._configure_qpane = configure_qpane
         self._qpane = self._create_qpane(image, viewport_size)
         self._settle_widget()
+        self._wait_for_raster_idle()
 
     def run(
         self,
         pan_sequence: Sequence[QPointF],
         *,
         stop_on_failure: bool = True,
+        comparison_steps: Collection[int] | None = None,
+        direct_navigation: bool = False,
     ) -> list[PanHarnessFailure]:
-        """Apply pans and return every incremental-render mismatch found."""
+        """Apply pans and return mismatches from the selected oracle checkpoints."""
         failures: list[PanHarnessFailure] = []
         requested_history: list[QPointF] = []
         actual_history: list[QPointF] = []
-        for step_index, requested_pan in enumerate(pan_sequence):
-            requested_history.append(QPointF(requested_pan))
-            self._qpane.setPan(requested_pan)
-            self._qpane.update()
-            self._settle_widget()
-            actual_pan = self._qpane.currentPan()
-            actual_history.append(QPointF(actual_pan))
-            actual_frame = self.capture_visible_frame(self._qpane)
-            snapshot = self._snapshot_incremental_renderer()
-            expected_frame = self._capture_full_redraw_reference()
-            self._restore_incremental_renderer(snapshot)
-            difference = self._detector.compare(actual_frame, expected_frame)
-            if not difference.detected:
-                continue
-            artifact_directory = self._write_failure_artifacts(
-                step_index=step_index,
-                requested_pan=requested_pan,
-                actual_pan=actual_pan,
-                actual_frame=actual_frame,
-                expected_frame=expected_frame,
-                difference=difference,
-                requested_history=requested_history,
-                actual_history=actual_history,
-            )
-            failures.append(
-                PanHarnessFailure(
-                    step_index=step_index,
-                    requested_pan=QPointF(requested_pan),
-                    actual_pan=QPointF(actual_pan),
-                    difference=difference,
-                    artifact_directory=artifact_directory,
+        selected_steps = (
+            None if comparison_steps is None else frozenset(comparison_steps)
+        )
+        presenter = self._qpane._rendering.presenter
+        if direct_navigation:
+            presenter.begin_navigation_interaction()
+        try:
+            for step_index, requested_pan in enumerate(pan_sequence):
+                requested_history.append(QPointF(requested_pan))
+                self._qpane.setPan(requested_pan)
+                self._qpane.update()
+                self._settle_widget()
+                actual_pan = self._qpane.currentPan()
+                actual_history.append(QPointF(actual_pan))
+                if selected_steps is not None and step_index not in selected_steps:
+                    continue
+                actual_frame = self.capture_settled_buffer(self._qpane)
+                snapshot = self._snapshot_incremental_renderer()
+                expected_frame = self._capture_full_redraw_reference(
+                    snapshot.buffer_pan
                 )
-            )
-            if stop_on_failure:
-                break
+                self._restore_incremental_renderer(snapshot)
+                visible_rect = QRect(
+                    presenter.renderer.buffer_overscan_physical_px,
+                    presenter.renderer.buffer_overscan_physical_px,
+                    presenter.renderer._viewport_physical_size.width(),
+                    presenter.renderer._viewport_physical_size.height(),
+                )
+                if (
+                    not QRegion(visible_rect)
+                    .subtracted(snapshot.buffer_valid_region)
+                    .isEmpty()
+                ):
+                    raise AssertionError(
+                        "incremental renderer exposed pixels outside its valid region"
+                    )
+                comparable_actual = _copy_region_onto_reference(
+                    actual_frame,
+                    expected_frame,
+                    snapshot.buffer_valid_region,
+                )
+                difference = self._detector.compare(
+                    comparable_actual,
+                    expected_frame,
+                )
+                if not difference.detected:
+                    continue
+                artifact_directory = self._write_failure_artifacts(
+                    step_index=step_index,
+                    requested_pan=requested_pan,
+                    actual_pan=actual_pan,
+                    actual_frame=comparable_actual,
+                    expected_frame=expected_frame,
+                    difference=difference,
+                    requested_history=requested_history,
+                    actual_history=actual_history,
+                )
+                failures.append(
+                    PanHarnessFailure(
+                        step_index=step_index,
+                        requested_pan=QPointF(requested_pan),
+                        actual_pan=QPointF(actual_pan),
+                        difference=difference,
+                        artifact_directory=artifact_directory,
+                    )
+                )
+                if stop_on_failure:
+                    break
+        finally:
+            if direct_navigation:
+                presenter.finish_navigation_interaction()
+                self._settle_widget()
         return failures
 
     def close(self) -> None:
@@ -231,42 +277,38 @@ class HeadlessPanHarness:
         self._application.processEvents()
 
     @staticmethod
-    def capture_visible_frame(qpane: QPane) -> QImage:
-        """Return the exact viewport crop presented from a QPane render buffer."""
+    def capture_settled_buffer(qpane: QPane) -> QImage:
+        """Return every settled pixel, including the offscreen repair guard."""
+        renderer = qpane._rendering.presenter.renderer
+        base_buffer = renderer.get_base_buffer()
+        if base_buffer is None:
+            raise RuntimeError("QPane has no allocated render buffer")
+        return QImage(base_buffer)
+
+    @staticmethod
+    def capture_settled_buffer_frame(qpane: QPane) -> QImage:
+        """Return the viewport crop represented by the renderer's settled buffer."""
         renderer = qpane._rendering.presenter.renderer
         base_buffer = renderer.get_base_buffer()
         if base_buffer is None:
             raise RuntimeError("QPane has no allocated render buffer")
         viewport_size = renderer._viewport_physical_size
-        frame = QImage(
-            viewport_size,
-            QImage.Format.Format_ARGB32_Premultiplied,
+        margin = renderer.buffer_overscan_physical_px
+        frame = base_buffer.copy(
+            QRect(
+                margin,
+                margin,
+                viewport_size.width(),
+                viewport_size.height(),
+            )
         )
         frame.setDevicePixelRatio(base_buffer.devicePixelRatio())
-        frame.fill(0)
-        margin = renderer._BUFFER_OVERSCAN_PHYSICAL_PX
-        subpixel_offset = renderer.get_subpixel_pan_offset()
-        safe_dpr = max(float(base_buffer.devicePixelRatio()), 1.0)
-        painter = QPainter(frame)
-        try:
-            painter.drawImage(
-                QRectF(
-                    0.0,
-                    0.0,
-                    viewport_size.width() / safe_dpr,
-                    viewport_size.height() / safe_dpr,
-                ),
-                base_buffer,
-                QRectF(
-                    margin - subpixel_offset.x(),
-                    margin - subpixel_offset.y(),
-                    float(viewport_size.width()),
-                    float(viewport_size.height()),
-                ),
-            )
-        finally:
-            painter.end()
         return frame
+
+    @staticmethod
+    def capture_visible_frame(qpane: QPane) -> QImage:
+        """Return the viewport crop of the renderer's settled backing frame."""
+        return HeadlessPanHarness.capture_settled_buffer_frame(qpane)
 
     def _create_qpane(self, image: QImage, viewport_size: QSize) -> QPane:
         """Create one configured QPane used by the differential harness."""
@@ -299,6 +341,33 @@ class HeadlessPanHarness:
         self._application.sendPostedEvents()
         self._application.processEvents()
 
+    def _wait_for_raster_idle(self, *, timeout_seconds: float = 5.0) -> None:
+        """Settle asynchronous pyramid and tile products before comparisons."""
+        deadline = time.perf_counter() + timeout_seconds
+        idle_since: float | None = None
+        view = self._qpane._rendering
+        while time.perf_counter() < deadline:
+            self._settle_widget()
+            tile_metrics = view.presenter.tile_manager.snapshot_metrics()
+            idle = (
+                not view.pyramids.pending_asset_keys()
+                and not view.pyramids.pending_retry_asset_keys()
+                and tile_metrics.active_jobs == 0
+                and tile_metrics.pending_retries == 0
+            )
+            now = time.perf_counter()
+            if idle:
+                idle_since = now if idle_since is None else idle_since
+                if now - idle_since >= 0.025:
+                    view.presenter.mark_dirty()
+                    self._qpane.update()
+                    self._settle_widget()
+                    return
+            else:
+                idle_since = None
+            QTest.qWait(1)
+        raise TimeoutError("pan harness raster products did not settle")
+
     def _snapshot_incremental_renderer(self) -> _RendererBufferSnapshot:
         """Capture the buffer identity needed to continue incremental abuse."""
         renderer = self._qpane._rendering.presenter.renderer
@@ -311,20 +380,21 @@ class HeadlessPanHarness:
             subpixel_pan_offset=QPointF(renderer._subpixel_pan_offset),
             dirty_region=QRegion(renderer._dirty_region),
             current_render_plan=renderer._current_render_plan,
+            buffer_render_plan=renderer._buffer_render_plan,
+            buffer_guard_valid=renderer._buffer_guard_valid,
+            buffer_valid_region=QRegion(renderer._buffer_valid_region),
+            presentation_transform=QTransform(renderer._presentation_transform),
         )
 
-    def _capture_full_redraw_reference(self) -> QImage:
-        """Render and capture a clean frame from the same live QPane state."""
+    def _capture_full_redraw_reference(self, buffer_pan: QPointF) -> QImage:
+        """Render a clean reference at the incremental buffer's settled pan."""
         presenter = self._qpane._rendering.presenter
-        presenter.mark_dirty()
-        presenter.paint(
-            is_blank=False,
-            content_overlays={},
-            scene_overlays={},
-            overlays_suspended=False,
-            draw_tool_overlay=None,
-        )
-        return self.capture_visible_frame(self._qpane)
+        plan = presenter.calculateRenderPlan(use_pan=buffer_pan, is_blank=False)
+        if plan is None:
+            raise RuntimeError("QPane produced no render plan for the redraw oracle")
+        presenter.renderer.markDirty()
+        presenter.renderer.paint(plan)
+        return self.capture_settled_buffer(self._qpane)
 
     def _restore_incremental_renderer(
         self,
@@ -332,11 +402,15 @@ class HeadlessPanHarness:
     ) -> None:
         """Restore the incremental buffer after capturing its redraw oracle."""
         renderer = self._qpane._rendering.presenter.renderer
-        renderer._base_image_buffer = QImage(snapshot.base_buffer)
+        renderer._surface.restore(snapshot.base_buffer)
         renderer._buffer_pan = QPointF(snapshot.buffer_pan)
         renderer._subpixel_pan_offset = QPointF(snapshot.subpixel_pan_offset)
         renderer._dirty_region = QRegion(snapshot.dirty_region)
         renderer._current_render_plan = snapshot.current_render_plan
+        renderer._buffer_render_plan = snapshot.buffer_render_plan
+        renderer._buffer_guard_valid = snapshot.buffer_guard_valid
+        renderer._buffer_valid_region = QRegion(snapshot.buffer_valid_region)
+        renderer._presentation_transform = QTransform(snapshot.presentation_transform)
 
     def _write_failure_artifacts(
         self,
@@ -425,6 +499,27 @@ def random_walk_pans(
         current += QPointF(delta_x, delta_y)
         pans.append(QPointF(current))
     return tuple(pans)
+
+
+def _copy_region_onto_reference(
+    actual: QImage,
+    reference: QImage,
+    region: QRegion,
+) -> QImage:
+    """Return actual valid pixels over an otherwise clean reference frame."""
+    if actual.size() != reference.size():
+        raise ValueError("actual and reference frame sizes must match")
+    actual_pixels = _rgba_pixels(actual)
+    combined = _rgba_pixels(reference)
+    bounds = QRect(0, 0, actual.width(), actual.height())
+    for rect in region:
+        clipped = rect.intersected(bounds)
+        if clipped.isEmpty():
+            continue
+        y_slice = slice(clipped.top(), clipped.bottom() + 1)
+        x_slice = slice(clipped.left(), clipped.right() + 1)
+        combined[y_slice, x_slice] = actual_pixels[y_slice, x_slice]
+    return _image_from_rgba(combined)
 
 
 def _rgba_pixels(image: QImage) -> np.ndarray:

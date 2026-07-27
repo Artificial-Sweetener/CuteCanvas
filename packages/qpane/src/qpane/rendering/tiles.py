@@ -45,6 +45,7 @@ from ..execution.qt_delay import QtDelayScheduler
 from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey, SourceRenderAssetKey
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
 from .owner_callback import OwnerCallback
+from .raster_tile_grid import RasterTileGrid
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ class _SourceTilePayloadKey:
 
     pyramid_asset_key: SourceRenderAssetKey
     pyramid_scale: float
+    tile_size: int
+    tile_overlap: int
     row: int
     col: int
 
@@ -82,6 +85,8 @@ class _SourceTilePayloadKey:
         return cls(
             pyramid_asset_key=key.pyramid_asset_key,
             pyramid_scale=key.pyramid_scale,
+            tile_size=key.tile_size,
+            tile_overlap=key.tile_overlap,
             row=key.row,
             col=key.col,
         )
@@ -90,16 +95,14 @@ class _SourceTilePayloadKey:
 def _generate_tile(
     key: SceneLayerTileKey,
     source_image: QImage,
-    tile_size: int,
-    tile_overlap: int,
     cancellation: CancellationToken,
 ) -> Tile:
     """Crop one detached tile product cooperatively."""
     cancellation.raise_if_cancelled()
-    stride = tile_size - tile_overlap
+    stride = key.tile_size - key.tile_overlap
     x = key.col * stride
     y = key.row * stride
-    cropped_image = source_image.copy(x, y, tile_size, tile_size)
+    cropped_image = source_image.copy(x, y, key.tile_size, key.tile_size)
     cancellation.raise_if_cancelled()
     return Tile(key=key, image=cropped_image)
 
@@ -128,14 +131,13 @@ class TileManager(QObject, CacheMetricsMixin):
         config: Config,
         parent: QObject | None = None,
         *,
+        grid: RasterTileGrid,
         execution_scope: ExecutionScope,
     ):
         """Initialise cache limits, worker pools, and retry bookkeeping."""
         super().__init__(parent)
         CacheMetricsMixin.__init__(self)
-        self._config = config
-        self.tile_size = config.tile_size
-        self.tile_overlap = config.tile_overlap
+        self._grid = grid
         self._cache_admission_guard = None
         self._managed_mode = False
         self._rejected_cache_keys: set[SceneLayerTileKey] = set()
@@ -167,6 +169,21 @@ class TileManager(QObject, CacheMetricsMixin):
             QtDelayScheduler(self),
         )
         self._eviction = OwnerCallback(self)
+
+    @property
+    def grid(self) -> RasterTileGrid:
+        """Return the immutable grid accepted by tile requests."""
+        return self._grid
+
+    @property
+    def tile_size(self) -> int:
+        """Return the active source-product tile edge."""
+        return self._grid.tile_size
+
+    @property
+    def tile_overlap(self) -> int:
+        """Return the active neighboring-pixel overlap."""
+        return self._grid.tile_overlap
 
     @property
     def cache_usage_bytes(self) -> int:
@@ -201,22 +218,29 @@ class TileManager(QObject, CacheMetricsMixin):
         """Install an optional hard-cap guard consulted before caching tiles."""
         self._cache_admission_guard = guard
 
-    def apply_config(self, config: Config) -> None:
-        """Refresh derived values after a configuration update."""
-        previous_tile_size = self.tile_size
-        previous_tile_overlap = self.tile_overlap
-        self._config = config
-        self.tile_size = config.tile_size
-        self.tile_overlap = config.tile_overlap
-        if (self.tile_size != previous_tile_size) or (
-            self.tile_overlap != previous_tile_overlap
-        ):
-            self.clear_caches()
+    def apply_cache_config(self, config: Config) -> None:
+        """Refresh cache budgets without interpreting tile-grid policy."""
         if self._eviction.pending:
             self._cancel_eviction_task()
         self.cache_limit_bytes = self._resolve_cache_limit_bytes(config)
         if not self._managed_mode and self._cache_size_bytes > self.cache_limit_bytes:
             self._schedule_cache_eviction()
+
+    def replace_grid(self, grid: RasterTileGrid) -> bool:
+        """Cancel and invalidate every product from an incompatible grid."""
+        self._assert_main_thread()
+        if grid == self._grid:
+            return False
+        self._grid = grid
+        self.clear_caches()
+        return True
+
+    def _key_matches_grid(self, key: SceneLayerTileKey) -> bool:
+        """Return whether one request belongs to the active grid."""
+        return (
+            key.tile_size == self._grid.tile_size
+            and key.tile_overlap == self._grid.tile_overlap
+        )
 
     def snapshot_metrics(self) -> CacheManagerMetrics:
         """Return cache and prefetch counters for diagnostics and tests."""
@@ -246,6 +270,8 @@ class TileManager(QObject, CacheMetricsMixin):
     def add_tile(self, tile: Tile) -> None:
         """Insert `tile` into the cache while updating bookkeeping."""
         key = tile.key
+        if not self._key_matches_grid(key):
+            return
         if not self._allow_cache_insert(tile.size_bytes, key):
             return
         payload_key = _SourceTilePayloadKey.from_layer_key(key)
@@ -286,6 +312,8 @@ class TileManager(QObject, CacheMetricsMixin):
             May enqueue a worker, update cache, or emit signals.
         """
         self._assert_main_thread()
+        if not self._key_matches_grid(key):
+            raise ValueError("tile key grid does not match the active tile grid")
         payload_key = _SourceTilePayloadKey.from_layer_key(key)
         cached_tile = self._tile_cache.get(payload_key)
         if cached_tile is not None:
@@ -320,15 +348,13 @@ class TileManager(QObject, CacheMetricsMixin):
                     urgency=urgency,
                     estimated_retained_bytes=max(
                         0,
-                        self.tile_size * self.tile_size * 4,
+                        key.tile_size * key.tile_size * 4,
                     ),
                 ),
                 tags=(("attempt", attempt),),
                 work=lambda context: _generate_tile(
                     key,
                     detached_image,
-                    self.tile_size,
-                    self.tile_overlap,
                     context.cancellation,
                 ),
             )
@@ -370,17 +396,6 @@ class TileManager(QObject, CacheMetricsMixin):
             throttle=_throttle,
         )
         return None
-
-    def calculate_grid_dimensions(self, width: int, height: int) -> tuple[int, int]:
-        """Return the tile grid size needed to cover `width` by `height`."""
-        if width <= 0 or height <= 0:
-            return 0, 0
-        tile_size = max(1, int(self.tile_size))
-        overlap = max(0, int(self.tile_overlap))
-        step = max(1, tile_size - overlap)
-        cols = max(1, (max(0, width - overlap) + step - 1) // step)
-        rows = max(1, (max(0, height - overlap) + step - 1) // step)
-        return cols, rows
 
     def _remove_tile_locked(self, key: SceneLayerTileKey) -> None:
         """Remove ``key`` from the cache while updating size tracking."""
@@ -729,6 +744,10 @@ class TileManager(QObject, CacheMetricsMixin):
         self._payload_workers.pop(payload_key, None)
         self._worker_state.pop(tile.key, None)
         self._tile_retry.complete(tile.key)
+        if not self._key_matches_grid(tile.key):
+            self._prefetch_finish(tile.key, success=False)
+            logger.info("Discarded stale tile generated for retired grid: %s", tile.key)
+            return
         self.add_tile(tile)
         self._payload_layer_keys[payload_key] = set(waiters)
         self._prefetch_finish(tile.key, success=True)

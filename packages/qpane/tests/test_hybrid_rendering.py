@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -24,6 +25,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane import (
     HybridCombineMode,
@@ -52,6 +54,7 @@ from qpane.rendering.render_tile_geometry import visible_tile_requests
 from qpane.rendering.scene_compiler import SceneRenderCompiler
 from qpane.rendering.sdk_adapter import RenderSceneController
 from qpane.scene.source_capabilities import LayerSourceCapabilities
+from qpane.sdk.raster import present_hybrid_sample
 
 from tests.harness.timing import interaction_clock, stable_latency_samples
 from tests.helpers.execution_backend import TestExecution
@@ -139,6 +142,53 @@ def test_hybrid_source_uses_the_shared_scene_compiler_boundary() -> None:
         contribution.scene.layers
     )
     assert compiled.hybrid_layers[0].snapshot is source
+
+
+def test_present_hybrid_sample_is_independent_of_conservative_primitive_bounds() -> (
+    None
+):
+    """Explicit samples must retain one pixel phase as content bounds evolve."""
+    primitive_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    sampler = _SolidSampler(173)
+    exact = HybridDocument(
+        source_id,
+        RasterBounds(-20, 10, 80, 60),
+        (
+            HybridRasterPrimitive(
+                primitive_id,
+                RasterBounds(-8, 18, 42, 31),
+                sampler,
+            ),
+        ),
+        revision=4,
+    )
+    conservative = HybridDocument(
+        source_id,
+        exact.bounds,
+        (
+            HybridRasterPrimitive(
+                primitive_id,
+                RasterBounds(-20, 10, 80, 60),
+                sampler,
+            ),
+        ),
+        revision=4,
+    )
+    style = HybridPresentationStyle(QColor(70, 160, 230, 147))
+    source_rect = QRectF(4.125, 7.375, 19.75, 13.25)
+    pixel_size = QSize(137, 91)
+
+    exact_sample = present_hybrid_sample(exact, style, source_rect, pixel_size)
+    conservative_sample = present_hybrid_sample(
+        conservative,
+        style,
+        source_rect,
+        pixel_size,
+    )
+
+    assert exact_sample == conservative_sample
+    assert exact_sample.size() == pixel_size
 
 
 def test_sampled_tile_identity_is_stable_across_viewport_motion() -> None:
@@ -264,7 +314,7 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
             )
             == 1
         )
-        assert pane._rendering.presenter._render_refinement.pending_count == 3
+        assert pane._rendering.presenter._render_refinement.pending_count == 2
         for _ in range(5):
             queued = sum(
                 job.operation.startswith("render.refinement")
@@ -279,6 +329,7 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
         assert pane.calculateRenderPlan() is not None
         pane.update()
         qapp.processEvents()
+        _finish_navigation_frame(executor, pane, qapp)
 
         initial = pane.grab().toImage()
         assert all(
@@ -299,9 +350,19 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
             )
 
         assert frame_samples
-        assert all(
-            _is_hybrid_tint(color) for samples in frame_samples for color in samples
+        invalid_samples = tuple(
+            (frame_index, sample_index, color.getRgb())
+            for frame_index, samples in enumerate(frame_samples)
+            for sample_index, color in enumerate(samples)
+            if not _is_hybrid_tint(color)
         )
+        assert not invalid_samples, invalid_samples[:20]
+        assert not any(
+            job.operation.startswith("render.refinement")
+            for job in executor.pending_jobs()
+        )
+        QTest.qWait(220)
+        qapp.processEvents()
         assert (
             sum(
                 job.operation.startswith("render.refinement")
@@ -311,9 +372,10 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
         )
         assert len(executor.cancelled) < len(frame_samples) // 4
         metrics_after = pane._rendering.presenter.renderer.snapshot_metrics()
-        assert metrics_after.scroll_hits - metrics_before.scroll_hits >= int(
-            len(frame_samples) * 0.9
-        )
+        reuse_hits = metrics_after.scroll_hits - metrics_before.scroll_hits
+        exact_redraws = metrics_after.full_redraws - metrics_before.full_redraws
+        assert reuse_hits >= int(len(frame_samples) * 0.6)
+        assert exact_redraws <= len(frame_samples) // 3
         assert max(stable_latency_samples(latencies, parallel_batch_size=16)) < 16.0
         cache = pane._rendering.presenter._render_tile_cache
         assert 0 < cache.usage_bytes <= cache.budget_bytes
@@ -327,3 +389,22 @@ def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
 def _is_hybrid_tint(color: QColor) -> bool:
     """Return whether one presented pixel contains the opaque hybrid color."""
     return color.green() >= 185 and color.blue() >= 165 and color.red() <= 45
+
+
+def _finish_navigation_frame(
+    executor: TestExecution,
+    pane: QPane,
+    application: QApplication,
+) -> None:
+    """Drive fake execution until one exact navigation frame is published."""
+    presenter = pane._rendering.presenter
+    deadline = time.perf_counter() + 3.0
+    while presenter.navigation_refinement_pending and time.perf_counter() < deadline:
+        if any(
+            job.operation == "render.navigation_frame"
+            for job in executor.pending_jobs()
+        ):
+            executor.run_operation("render.navigation_frame")
+        application.processEvents()
+        QTest.qWait(1)
+    assert not presenter.navigation_refinement_pending

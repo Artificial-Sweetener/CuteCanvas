@@ -41,6 +41,7 @@ from .scene_coordinates import SceneCoordinateSystem, ScenePoint
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
 
+    from ..core import Config
     from ..core.diagnostics_broker import Diagnostics
     from ..execution import ExecutionScope
     from ..rendering import Renderer
@@ -102,9 +103,6 @@ class View:
             hybrid_sources=source_capabilities.hybrids,
             sampled_sources=source_capabilities.sampled,
             layer_effects=layer_effects,
-        )
-        qpane.destroyed.connect(
-            lambda _obj=None, presenter=self.presenter: presenter.shutdown()
         )
         self.coordinates: SceneCoordinateSystem = self.presenter.coordinates
         self.viewport = self.presenter.viewport
@@ -211,6 +209,10 @@ class View:
         """Keep the viewport aligned via the presenter helper."""
         self.presenter.ensure_view_alignment(force=force)
 
+    def apply_config(self, config: Config) -> None:
+        """Apply viewport and adaptive tile-grid settings through their owners."""
+        self.presenter.apply_config(config)
+
     def allocate_buffers(self) -> None:
         """Ask the presenter to allocate renderer buffers."""
         self.presenter.allocate_buffers()
@@ -299,6 +301,8 @@ class View:
 
     def handle_tile_ready(self, key: SceneLayerTileKey) -> None:
         """Invalidate the frame region completed by one derived tile."""
+        if self.presenter.note_navigation_raster_tile_ready(key):
+            return
         self.presenter.invalidate_frame_plan()
         dirty_rect = self.presenter.dirty_rect_for_tile_key(key)
         if dirty_rect is not None:
@@ -307,6 +311,8 @@ class View:
 
     def handle_pyramid_ready(self, asset_key: object | None) -> None:
         """Invalidate the frame after one source pyramid becomes available."""
+        if self.presenter.note_navigation_full_product_ready():
+            return
         self.presenter.invalidate_frame_plan()
         self.presenter.mark_dirty()
         self._qpane.update()

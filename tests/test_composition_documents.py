@@ -179,14 +179,14 @@ def test_image_free_composition_cycles_masks_in_generic_stack(qapp) -> None:
 
         assert viewer.setActiveMaskID(first_id)
         assert [layer.source_id for layer in viewer.currentScene().layers] == [
-            second_id,
             first_id,
+            second_id,
         ]
         assert viewer.cycleMasksForward()
-        assert viewer.activeMaskID() == second_id
+        assert viewer.activeMaskID() == first_id
         assert [layer.source_id for layer in viewer.currentScene().layers] == [
-            first_id,
             second_id,
+            first_id,
         ]
     finally:
         viewer.deleteLater()

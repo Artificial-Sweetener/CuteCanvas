@@ -25,9 +25,11 @@ from ..scene.model import LayerPlacement
 from ..scene.raster import RasterBounds
 from ..scene.render_plan import (
     RasterLayerRenderItem,
+    SampledLayerRenderItem,
     SceneRenderPlan,
     TransientRasterResolvedContribution,
     TransientRasterTransformContribution,
+    TransientSampledResolvedContribution,
 )
 
 _FILTER_FRINGE_PX = 4.0
@@ -66,7 +68,7 @@ def _transient_product_bounds(plan: SceneRenderPlan) -> QRectF | None:
         (
             candidate
             for candidate in plan.render_items
-            if isinstance(candidate, RasterLayerRenderItem)
+            if isinstance(candidate, (RasterLayerRenderItem, SampledLayerRenderItem))
             and candidate.descriptor.scene_id == preview.scene_id
             and candidate.descriptor.layer_id == preview.layer_id
         ),
@@ -74,7 +76,10 @@ def _transient_product_bounds(plan: SceneRenderPlan) -> QRectF | None:
     )
     if item is None:
         return None
-    if isinstance(preview, TransientRasterResolvedContribution):
+    if isinstance(
+        preview,
+        (TransientRasterResolvedContribution, TransientSampledResolvedContribution),
+    ):
         return _map_local_bounds(item, preview.source_bounds)
     if not isinstance(preview, TransientRasterTransformContribution):
         return None
@@ -123,15 +128,16 @@ def _append_visible_placement(
 
 
 def _map_local_bounds(
-    item: RasterLayerRenderItem,
+    item: RasterLayerRenderItem | SampledLayerRenderItem,
     bounds: RasterBounds,
 ) -> QRectF:
     """Map authoritative raster-local bounds through the current source product."""
     raster_bounds = item.descriptor.raster_bounds
     if raster_bounds is None or raster_bounds.width <= 0 or raster_bounds.height <= 0:
         return QRectF()
-    scale_x = item.source_image.width() / raster_bounds.width
-    scale_y = item.source_image.height() / raster_bounds.height
+    source_size = item.source_size
+    scale_x = source_size.width() / raster_bounds.width
+    scale_y = source_size.height() / raster_bounds.height
     product_rect = QRectF(
         (bounds.x - raster_bounds.x) * scale_x,
         (bounds.y - raster_bounds.y) * scale_y,

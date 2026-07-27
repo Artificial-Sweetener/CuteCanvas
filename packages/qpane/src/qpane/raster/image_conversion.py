@@ -49,7 +49,7 @@ def qimage_to_numpy_grayscale8(image: QImage) -> np.ndarray:
 
 
 def qimage_to_numpy_view_grayscale8(image: QImage) -> tuple[np.ndarray, QImage]:
-    """Return a zero-copy grayscale view and its normalized backing image."""
+    """Return a read-only grayscale view and its normalized backing image."""
     normalized, pointer = _prepare_grayscale_bits(image)
     array = np.ndarray(
         (normalized.height(), normalized.width()),
@@ -57,6 +57,7 @@ def qimage_to_numpy_view_grayscale8(image: QImage) -> tuple[np.ndarray, QImage]:
         buffer=pointer,
         strides=(normalized.bytesPerLine(), 1),
     )
+    array.flags.writeable = False
     return array, normalized
 
 
@@ -147,13 +148,10 @@ def numpy_to_qimage_grayscale8(array: np.ndarray) -> QImage:
         raise ValueError("NumPy array must have dtype uint8 for grayscale images")
     contiguous = np.ascontiguousarray(array)
     height, width = contiguous.shape
-    return QImage(
-        contiguous.data,
-        width,
-        height,
-        int(contiguous.strides[0]),
-        QImage.Format_Grayscale8,
-    ).copy()
+    image = QImage(width, height, QImage.Format_Grayscale8)
+    target, backing = _qimage_to_numpy_writable_view_grayscale8(image)
+    np.copyto(target, contiguous)
+    return backing
 
 
 def numpy_to_qimage_argb32(array: np.ndarray) -> QImage:
@@ -163,14 +161,11 @@ def numpy_to_qimage_argb32(array: np.ndarray) -> QImage:
     if array.dtype != np.uint8:
         raise ValueError("NumPy array must have dtype uint8 for ARGB images")
     contiguous = np.ascontiguousarray(array)
-    height, width, channels = contiguous.shape
-    return QImage(
-        contiguous.data,
-        width,
-        height,
-        channels * width,
-        QImage.Format_ARGB32_Premultiplied,
-    ).copy()
+    height, width, _channels = contiguous.shape
+    image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+    target, backing = qimage_to_numpy_view_argb32(image)
+    np.copyto(target, contiguous)
+    return backing
 
 
 def numpy_to_qimage_argb32_at_size(array: np.ndarray, size: QSize) -> QImage:
@@ -235,3 +230,27 @@ def _prepare_grayscale_bits(image: QImage) -> tuple[QImage, object]:
     if callable(set_size):
         set_size(normalized.sizeInBytes())
     return normalized, pointer
+
+
+def _qimage_to_numpy_writable_view_grayscale8(
+    image: QImage,
+) -> tuple[np.ndarray, QImage]:
+    """Return a writable grayscale view for populating an owned image."""
+    if image.isNull():
+        raise ValueError("QImage must not be null")
+    normalized = (
+        image
+        if image.format() == QImage.Format_Grayscale8
+        else image.convertToFormat(QImage.Format_Grayscale8)
+    )
+    pointer = normalized.bits()
+    set_size = getattr(pointer, "setsize", None)
+    if callable(set_size):
+        set_size(normalized.sizeInBytes())
+    array = np.ndarray(
+        (normalized.height(), normalized.width()),
+        dtype=np.uint8,
+        buffer=pointer,
+        strides=(normalized.bytesPerLine(), 1),
+    )
+    return array, normalized

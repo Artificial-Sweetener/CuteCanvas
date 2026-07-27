@@ -152,6 +152,14 @@ def _parse_bootstrap_args(argv: list[str]) -> argparse.Namespace:
         "--sam-model-hash",
         default=None,
     )
+    parser.add_argument(
+        "--navigation-trace-output",
+        default=None,
+    )
+    parser.add_argument(
+        "--navigation-document",
+        default=None,
+    )
     return parser.parse_args(argv)
 
 
@@ -566,6 +574,16 @@ def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
             "Use 'default' to request the built-in MobileSAM hash."
         ),
     )
+    parser.add_argument(
+        "--navigation-trace-output",
+        default=None,
+        help="Enable F9 navigation recording and write the resulting JSON trace here.",
+    )
+    parser.add_argument(
+        "--navigation-document",
+        default=None,
+        help="Open this CuteCanvas composition and bind its hash to the trace.",
+    )
     ns = parser.parse_args(list(argv) if argv is not None else None)
     return options_type(
         sam_enabled=bool(ns.sam),
@@ -575,6 +593,8 @@ def parse_args(argv: Iterable[str] | None = None) -> ExampleOptions:
         sam_model_path=ns.sam_model_path,
         sam_model_url=ns.sam_model_url,
         sam_model_hash=ns.sam_model_hash,
+        navigation_trace_output=ns.navigation_trace_output,
+        navigation_document=ns.navigation_document,
     )
 
 
@@ -617,6 +637,8 @@ def main(argv: Iterable[str] | None = None) -> int:
                 sam_model_path=bootstrap.sam_model_path,
                 sam_model_url=bootstrap.sam_model_url,
                 sam_model_hash=bootstrap.sam_model_hash,
+                navigation_trace_output=bootstrap.navigation_trace_output,
+                navigation_document=bootstrap.navigation_document,
             ),
         )
     _options_type, window_type = _load_example_types()

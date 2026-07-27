@@ -61,7 +61,7 @@ class MaskDelegate:
         service = self._mask_service
         if service is None:
             return False
-        mask_ready = service.ensureTopMaskActiveForComposition(composition_id)
+        mask_ready = service.ensureActiveMaskForComposition(composition_id)
         tools = self._qpane._tools_manager
         if (
             not mask_ready
@@ -129,6 +129,7 @@ class MaskDelegate:
             service.resetStrokePipeline(clear_counter=True, request_redraw=False)
         except Exception:  # pragma: no cover - defensive guard
             logger.exception("Failed to reset mask stroke state during detach.")
+        service.shutdown()
         qpane.mask_service = None
         qpane.mask_controller = None
         qpane.refreshMaskAutosavePolicy()
@@ -212,7 +213,7 @@ class MaskDelegate:
         return service.createBlankMask(size)
 
     def set_active_mask_id(self, mask_id):
-        """Select ``mask_id`` for editing and repaint if it moved."""
+        """Select ``mask_id`` for editing without changing its layer placement."""
         if not self.mask_feature_available():
             return bool(self._fallbacks().get("mask", "setActiveMaskID", default=False))
         service = self._mask_service
@@ -222,10 +223,7 @@ class MaskDelegate:
                 mask_id,
             )
             return False
-        was_moved = service.activateMask(mask_id)
-        if mask_id is not None and was_moved:
-            self._qpane.markDirty()
-            self._qpane.update()
+        service.activateMask(mask_id)
         return True
 
     def prefetch_mask_overlays(

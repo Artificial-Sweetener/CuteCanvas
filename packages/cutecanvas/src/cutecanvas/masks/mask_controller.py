@@ -38,6 +38,7 @@ class MaskController(QObject):
     """Coordinate active selection, feature signals, edits, and derived renders."""
 
     mask_updated = Signal(object, QRect)
+    render_dirty = Signal(object, QRect)
     active_mask_properties_changed = Signal()
     undo_stack_changed = Signal(object)
 
@@ -86,7 +87,7 @@ class MaskController(QObject):
             active_mask_id=lambda: self._active_mask_id,
             async_epoch=self._epochs.current,
             color_for_mask=self.color_for_mask,
-            render_changed=lambda mask_id, rect: self.mask_updated.emit(mask_id, rect),
+            render_changed=lambda mask_id, rect: self.render_dirty.emit(mask_id, rect),
             active_properties_changed=self.active_mask_properties_changed.emit,
         )
         self._edits = MaskEditService(

@@ -25,8 +25,12 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.rendering.render_tile_cache import RenderTileCache
-from qpane.rendering.render_tile_geometry import visible_tile_requests
-from qpane.rendering.render_tile_types import RenderRefinement
+from qpane.rendering.render_tile_geometry import (
+    RenderTileKey,
+    RenderTileRequest,
+    visible_tile_requests,
+)
+from qpane.rendering.render_tile_types import RenderRefinement, RenderTileProduct
 from qpane.rendering.render_tiles import RenderTileWorkCoordinator
 from qpane.scene.affine import LayerTransform
 from qpane.scene.raster import RasterBounds
@@ -62,7 +66,7 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
             panel_rect=QRectF(0.0, 0.0, 1024.0, 768.0),
             device_pixel_ratio=1.0,
         ).pending
-        assert coordinator.pending_count == 3
+        assert coordinator.pending_count == 2
         _run_all_refinement(executor, qapp)
         refinement = coordinator.request(
             source=VectorRenderTileSource(document, (document.revision, 0)),
@@ -72,7 +76,7 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
         )
         assert refinement.products is not None
         products = refinement.products
-        assert ready_count == 3
+        assert ready_count == 2
         tiled = _transparent_image(1024, 768)
         painter = QPainter(tiled)
         try:
@@ -147,8 +151,63 @@ def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> N
         assert refinement.products is not None
         products = refinement.products
         assert all(product.key.revision_key == changed.revision for product in products)
-        assert ready_count == 3
+        assert ready_count == 2
         assert cache.usage_bytes <= 2 * 512 * 512 * 4
+    finally:
+        coordinator.shutdown()
+
+
+def test_completed_superseded_refinement_cannot_retire_latest_request(
+    qapp: QApplication,
+) -> None:
+    """Late owner adoption must not remove a newer request in the same lane."""
+    executor = ControlledExecution()
+    cache = RenderTileCache(8 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        execution_scope=executor.scope,
+        cache=cache,
+        ready=lambda: None,
+    )
+    original = _document(8)
+    changed = original.replace_object(
+        VectorObject(
+            original.objects[0].object_id,
+            VectorObjectKind.SHAPE,
+            (17.0, 13.0, 70.0, 50.0),
+            LayerTransform(),
+            original.objects[0].style,
+            VectorShapeKind.ELLIPSE,
+        )
+    )
+    request_args = {
+        "source_to_panel": QTransform.fromScale(4.0, 4.0),
+        "panel_rect": QRectF(0.0, 0.0, 1024.0, 768.0),
+        "device_pixel_ratio": 1.0,
+    }
+    try:
+        assert coordinator.request(
+            source=VectorRenderTileSource(original, original.revision),
+            **request_args,
+        ).pending
+        executor.run_operation("render.refinement.continuity")
+        assert coordinator.request(
+            source=VectorRenderTileSource(changed, changed.revision),
+            **request_args,
+        ).pending
+
+        qapp.processEvents()
+
+        assert coordinator.pending_count == 2
+        _run_all_refinement(executor, qapp)
+        refinement = coordinator.request(
+            source=VectorRenderTileSource(changed, changed.revision),
+            **request_args,
+        )
+        assert refinement.exact and refinement.products
+        assert all(
+            product.key.revision_key == changed.revision
+            for product in refinement.products
+        )
     finally:
         coordinator.shutdown()
 
@@ -281,6 +340,8 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
         assert initial_tile_count > 1
         _run_all_refinement(executor, qapp)
         assert request_at(0.0).exact
+        QTest.qWait(200)
+        _run_all_refinement(executor, qapp)
 
         first_exposed = request_at(-520.0)
         assert first_exposed.exact
@@ -289,10 +350,11 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
         second_exposed = request_at(-1040.0)
         assert second_exposed.exact
         assert second_exposed.products
-        assert coordinator.pending_count == 1
-        assert 0 < coordinator.pending_tile_count < initial_tile_count
+        assert coordinator.pending_count == 0
+        assert coordinator.pending_tile_count == 0
         assert not executor.cancelled
 
+        QTest.qWait(200)
         _run_all_refinement(executor, qapp)
         third_exposed = request_at(-1560.0)
         assert third_exposed.exact
@@ -364,6 +426,27 @@ def test_overview_fallback_covers_an_arbitrary_high_zoom_pan(
         coordinator.shutdown()
 
 
+def test_visible_tile_requests_cap_pixel_grid_products_at_native_resolution() -> None:
+    """Pixel-grid layers should enlarge native samples instead of baking blur."""
+    source_id = uuid.uuid4()
+    requests = visible_tile_requests(
+        source_kind="pixel-grid",
+        source_id=source_id,
+        revision_key=1,
+        fallback_key=1,
+        bounds=RasterBounds(0, 0, 256, 256),
+        source_to_panel=QTransform.fromScale(4.0, 4.0),
+        panel_rect=QRectF(0.0, 0.0, 512.0, 512.0),
+        device_pixel_ratio=1.0,
+        budget_bytes=64 * 1024 * 1024,
+        maximum_scale=1.0,
+    )
+
+    assert requests is not None
+    assert requests
+    assert {request.key.scale for request in requests} == {1.0}
+
+
 def test_pan_storm_cannot_cancel_whole_source_continuity_work(
     qapp: QApplication,
 ) -> None:
@@ -396,7 +479,7 @@ def test_pan_storm_cannot_cancel_whole_source_continuity_work(
         assert request_at(0.0).pending
         for panel_x in range(-400, -6401, -400):
             assert request_at(float(panel_x)).pending
-        assert coordinator.pending_count == 3
+        assert coordinator.pending_count == 2
         assert len(executor.cancelled) < 16
 
         _run_refinement_turn(executor, qapp)
@@ -409,10 +492,10 @@ def test_pan_storm_cannot_cancel_whole_source_continuity_work(
         coordinator.shutdown()
 
 
-def test_pan_storm_keeps_one_fallback_density_until_viewport_settles(
+def test_pan_uses_exact_cached_tiles_over_fallback_for_newly_exposed_coverage(
     qapp: QApplication,
 ) -> None:
-    """Cached detail and overview products must not alternate during motion."""
+    """Newly exposed fallback must not degrade exact pixels already cached."""
     executor = ControlledExecution()
     cache = RenderTileCache(24 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
@@ -444,18 +527,12 @@ def test_pan_storm_keeps_one_fallback_density_until_viewport_settles(
         assert exact.exact and exact.products
         assert {product.key.scale for product in exact.products} == {4.0}
 
-        distant = request_at(-6400.0)
-        assert not distant.exact and distant.products
-        fallback_scale = {product.key.scale for product in distant.products}
-        assert max(fallback_scale) < 1.0
+        adjacent = request_at(-1200.0)
+        assert not adjacent.exact and adjacent.products
+        scales = {product.key.scale for product in adjacent.products}
+        assert 4.0 in scales
+        assert min(scales) < 1.0
 
-        for panel_x in (0.0, -6400.0) * 12:
-            frame = request_at(panel_x)
-            assert not frame.exact and frame.products
-            assert {product.key.scale for product in frame.products} == fallback_scale
-
-        assert not request_at(0.0).exact
-        _settle_refinement(qapp)
         restored = request_at(0.0)
         assert restored.exact and restored.products
         assert {product.key.scale for product in restored.products} == {4.0}
@@ -501,6 +578,78 @@ def test_partial_previous_view_is_never_presented_as_fallback(
         assert distant.products is None
     finally:
         coordinator.shutdown()
+
+
+def test_partial_fallback_products_are_clipped_to_cold_exact_cores() -> None:
+    """Fallback coverage must never overlap and double-composite exact tiles."""
+    cache = RenderTileCache()
+    source_id = uuid.uuid4()
+    overview_key = RenderTileKey(
+        "vector",
+        source_id,
+        "geometry",
+        "revision",
+        0.5,
+        0,
+        0,
+    )
+    exact_key = RenderTileKey(
+        "vector",
+        source_id,
+        "geometry",
+        "revision",
+        1.0,
+        0,
+        0,
+    )
+    missing_key = RenderTileKey(
+        "vector",
+        source_id,
+        "geometry",
+        "revision",
+        1.0,
+        1,
+        0,
+    )
+    overview_image = _transparent_image(512, 256)
+    exact_image = _transparent_image(512, 512)
+    cache.admit(
+        (
+            RenderTileProduct(
+                overview_key,
+                QRectF(0.0, 0.0, 1024.0, 512.0),
+                overview_image,
+                QRectF(0.0, 0.0, 512.0, 256.0),
+            ),
+            RenderTileProduct(
+                exact_key,
+                QRectF(0.0, 0.0, 512.0, 512.0),
+                exact_image,
+                QRectF(0.0, 0.0, 512.0, 512.0),
+            ),
+        )
+    )
+    requests = (
+        RenderTileRequest(
+            exact_key,
+            QRectF(0.0, 0.0, 512.0, 512.0),
+            QRectF(0.0, 0.0, 512.0, 512.0),
+        ),
+        RenderTileRequest(
+            missing_key,
+            QRectF(512.0, 0.0, 512.0, 512.0),
+            QRectF(512.0, 0.0, 512.0, 512.0),
+        ),
+    )
+
+    products = cache.presentation_products(requests)
+
+    assert products is not None and len(products) == 2
+    fallback, exact = products
+    assert fallback.source_rect == requests[1].source_rect
+    assert fallback.image_source_rect == QRectF(256.0, 0.0, 256.0, 256.0)
+    assert exact.source_rect == requests[0].source_rect
+    assert not fallback.source_rect.intersects(exact.source_rect)
 
 
 def _document(object_count: int) -> VectorDocument:

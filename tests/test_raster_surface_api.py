@@ -113,6 +113,7 @@ def test_mask_coverage_can_select_and_delete_through_generic_layer_editing(
 
 def test_unbounded_mask_selection_projects_only_canvas_relevant_sparse_pixels(
     qpane_with_mask,
+    qapp,
 ) -> None:
     """Saved-selection projection must not materialize distant off-canvas gaps."""
     qpane, manager, image_id = qpane_with_mask
@@ -137,6 +138,7 @@ def test_unbounded_mask_selection_projects_only_canvas_relevant_sparse_pixels(
             storage,
             lambda pixels, _image: pixels.fill(255),
         )
+    qpane.invalidateActiveMaskCache()
     allocated = layer.coverage.raster.allocated_bytes
 
     assert qpane.selectLayerCoverage(info.scene_id, info.layer_id)
@@ -147,14 +149,33 @@ def test_unbounded_mask_selection_projects_only_canvas_relevant_sparse_pixels(
     assert selection.coverage is not None
     assert selection.coverage.size() == QRect(2, 2, 2, 2).size()
     assert layer.coverage.raster.allocated_bytes == allocated
+
+    def visible_sampled_mask_items():
+        """Return sampled products after the asynchronous hybrid source settles."""
+        current_plan = qpane.view().calculateRenderPlan(is_blank=False)
+        if current_plan is None:
+            return []
+        return [
+            item
+            for item in current_plan.render_items
+            if item.descriptor.layer_id == info.layer_id
+            and bool(getattr(item, "tiles", ()))
+        ]
+
+    _wait_for(qapp, lambda: len(visible_sampled_mask_items()) == 1)
     plan = qpane.view().calculateRenderPlan(is_blank=False)
     assert plan is not None
     visible_mask_items = [
-        item for item in plan.render_items if item.descriptor.layer_id == info.layer_id
+        item
+        for item in plan.render_items
+        if item.descriptor.layer_id == info.layer_id
+        and bool(getattr(item, "tiles", ()))
     ]
     assert len(visible_mask_items) == 1
-    assert visible_mask_items[0].source_image.width() <= 514
-    assert visible_mask_items[0].source_image.height() <= 514
+    sampled_tiles = visible_mask_items[0].tiles
+    assert sampled_tiles
+    assert max(tile.image.width() for tile in sampled_tiles) <= 514
+    assert max(tile.image.height() for tile in sampled_tiles) <= 514
 
 
 def test_mask_delete_projects_through_scaled_transform_and_offset_bounds(

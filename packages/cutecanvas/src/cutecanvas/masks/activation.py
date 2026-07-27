@@ -42,10 +42,6 @@ class MaskActivationController:
         assets: MaskAssetStore,
         mask_ids_for_composition: Callable[[uuid.UUID], list[uuid.UUID]],
         invalidate_jobs: Callable[..., None],
-        promote_to_top: Callable[[uuid.UUID], bool],
-        scene_stack_end: Callable[..., int | None],
-        route_reorder: Callable[[uuid.UUID, int], bool | None],
-        reorder: Callable[[uuid.UUID, uuid.UUID, int], bool],
         prefetch: Callable[..., bool],
         prefetch_pending: Callable[[uuid.UUID], bool],
         publish_status: Callable[..., None],
@@ -57,10 +53,6 @@ class MaskActivationController:
         self._assets = assets
         self._mask_ids_for_composition = mask_ids_for_composition
         self._invalidate_jobs = invalidate_jobs
-        self._promote_to_top = promote_to_top
-        self._scene_stack_end = scene_stack_end
-        self._route_reorder = route_reorder
-        self._reorder = reorder
         self._prefetch = prefetch
         self._prefetch_pending = prefetch_pending
         self._publish_status = publish_status
@@ -95,25 +87,24 @@ class MaskActivationController:
         )
 
     def activate(self, mask_id: uuid.UUID | None) -> bool:
-        """Select the mask to edit and keep caches in sync.
+        """Select the mask to edit without changing layer presentation.
 
         Returns:
-            bool: True when the mask changed position in the stack during activation.
+            bool: True when editable-mask selection changed.
         """
         previous_active = self._controller.get_active_mask_id()
         if mask_id is None:
             self._invalidate_jobs(
                 previous_active, reason="mask_deselected", request_redraw=False
             )
-            self._controller.setActiveMaskID(None)
-            return True
+            return self._controller.setActiveMaskID(None)
+        if self._assets.get_layer(mask_id) is None:
+            return False
         if previous_active is not None and previous_active != mask_id:
             self._invalidate_jobs(previous_active, reason="mask_switch")
-        was_moved = self._promote_to_top(mask_id)
-        self._controller.setActiveMaskID(mask_id)
-        return was_moved
+        return self._controller.setActiveMaskID(mask_id)
 
-    def ensure_top_active(self, composition_id: uuid.UUID | None) -> bool:
+    def ensure_active(self, composition_id: uuid.UUID | None) -> bool:
         """Ensure the active mask aligns with the current document before brush use."""
 
         def record_once(message: str, *, label: str) -> None:
@@ -163,43 +154,9 @@ class MaskActivationController:
         prefetch_pending = self._prefetch_pending(composition_id)
         self._pending_compositions.discard(composition_id)
         if active_mask_id in mask_ids:
-            if active_mask_id != mask_ids[-1]:
-                top_scene_index = self._scene_stack_end(forward=True)
-                moved = (
-                    self._route_reorder(
-                        active_mask_id,
-                        top_scene_index,
-                    )
-                    if top_scene_index is not None
-                    else None
-                )
-                if moved is None:
-                    moved = self._reorder(
-                        composition_id,
-                        active_mask_id,
-                        len(mask_ids) - 1,
-                    )
-                if moved:
-                    self._controller.edits.advance_epoch(
-                        active_mask_id, reason="mask_reordered"
-                    )
             return True
         self._invalidate_jobs(active_mask_id, reason="mask_switch")
         top_mask_id = mask_ids[-1]
-        top_scene_index = self._scene_stack_end(forward=True)
-        moved = (
-            self._route_reorder(top_mask_id, top_scene_index)
-            if top_scene_index is not None
-            else None
-        )
-        if moved is None:
-            moved = self._reorder(
-                composition_id,
-                top_mask_id,
-                len(mask_ids) - 1,
-            )
-        if moved:
-            self._controller.edits.advance_epoch(top_mask_id, reason="mask_reordered")
         size_defer = self.should_defer(active_mask_id, top_mask_id)
         scheduled_prefetch = False
         if size_defer:

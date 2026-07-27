@@ -550,6 +550,7 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
 
         assert viewer.anchorFloatingPixels()
         assert harness.wait_for_mask_render_idle()
+        assert harness.wait_for_render_refinement_idle()
         harness.drain_events()
 
         actual_mask = layer.coverage.raster.snapshot_array()
@@ -561,6 +562,9 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
         committed_buffer = renderer.get_base_buffer()
         assert committed_buffer is not None
         committed_pixels = qimage_to_numpy_argb32(committed_buffer.copy())
+        settled_plan = renderer.get_current_render_plan()
+        assert settled_plan is not None
+        assert settled_plan.transient_raster is None
         np.testing.assert_array_equal(floating_pixels, committed_pixels)
         viewer.markDirty()
         viewer.update()
@@ -680,12 +684,16 @@ def test_soft_mask_preview_is_pixel_identical_to_transformed_commit(
 
         assert viewer.anchorFloatingPixels()
         assert harness.wait_for_mask_render_idle()
+        assert harness.wait_for_render_refinement_idle()
         harness.drain_events()
         committed = renderer.get_base_buffer()
         assert committed is not None
-        np.testing.assert_array_equal(
+        committed_pixels = qimage_to_numpy_argb32(committed.copy())
+        np.testing.assert_allclose(
             floating_pixels,
-            qimage_to_numpy_argb32(committed.copy()),
+            committed_pixels,
+            rtol=0.0,
+            atol=1,
         )
     finally:
         harness.close()

@@ -714,7 +714,8 @@ def test_mask_workflow_brush_cursor_respects_viewport(qpane_with_mask, qapp):
     assert qpane.cursor().shape() == Qt.CursorShape.ArrowCursor
 
 
-def test_set_active_mask_promotes_top(qpane_with_mask):
+def test_set_active_mask_preserves_layer_order(qpane_with_mask):
+    """Editable-mask selection must remain independent from layer z-order."""
     qpane, _mask_manager, image_id = qpane_with_mask
     mask_service = _mask_service(qpane)
     base_image = _current_source_image(qpane)
@@ -726,8 +727,7 @@ def test_set_active_mask_promotes_top(qpane_with_mask):
     assert len(order) == 2
     assert order[-1] == second_id
     assert qpane.setActiveMaskID(first_id) is True
-    reordered = mask_service.mask_ids_for_composition(image_id)
-    assert reordered[-1] == first_id
+    assert mask_service.mask_ids_for_composition(image_id) == order
 
 
 def test_remove_active_mask_promotes_next(qpane_with_mask):
@@ -1040,6 +1040,28 @@ def test_mask_promotion_changes_scene_order_without_render_revision(qapp):
 
         assert service.controller.renders.render_revision(lower_mask) == render_revision
         assert service.scene_provider_revision() != scene_revision
+    finally:
+        _cleanup_qpane(qpane, qapp)
+
+
+def test_tool_activation_preserves_mask_order_and_render_revision(qapp):
+    """Tool targeting must preserve both z-order and unchanged render identity."""
+    qpane, image = _prepare_qpane_with_mask_feature()
+    service = qpane.mask_service
+    assert service is not None
+    first_mask = service.createBlankMask(image.size())
+    second_mask = service.createBlankMask(image.size())
+    assert first_mask is not None and second_mask is not None
+    try:
+        assert qpane.setActiveMaskID(first_mask)
+        order = service.mask_ids_for_composition(qpane.currentCompositionID())
+        render_revision = service.controller.renders.render_revision(first_mask)
+
+        assert service.ensureActiveMaskForComposition(qpane.currentCompositionID())
+
+        assert service.getActiveMaskId() == first_mask
+        assert service.mask_ids_for_composition(qpane.currentCompositionID()) == order
+        assert service.controller.renders.render_revision(first_mask) == render_revision
     finally:
         _cleanup_qpane(qpane, qapp)
 
@@ -1581,7 +1603,7 @@ def test_mask_reorder_commit_targets_active_layer(qpane_with_mask):
     )
     assert service.controller.edits.commit_stroke(mask_a)
     mask_a_snapshot = layer_a.mask_image.copy()
-    assert service.layers.reorder_mask_slot_in_composition(image_id, mask_a, 0)
+    assert service.layers.reorder_mask_slot_in_composition(image_id, mask_a, 1)
     assert qpane.setActiveMaskID(mask_b)
     after_b = before.copy()
     after_b[1, 6] = 255
@@ -1971,7 +1993,7 @@ def test_mask_activation_signal_timing(qapp, qpane_with_mask):
     controller.mask_updated.connect(on_mask)
     try:
         emissions.clear()
-        assert service.ensureTopMaskActiveForComposition(small_image_id) is True
+        assert service.ensureActiveMaskForComposition(small_image_id) is True
         assert emissions == []
         qapp.processEvents()
         qapp.processEvents()
@@ -1980,13 +2002,13 @@ def test_mask_activation_signal_timing(qapp, qpane_with_mask):
         emissions.clear()
         controller.setActiveMaskID(small_mask_id)
         emissions.clear()
-        assert service.ensureTopMaskActiveForComposition(large_image_id) is True
+        assert service.ensureActiveMaskForComposition(large_image_id) is True
         assert ("props", large_mask_id) in emissions
         assert ("mask", large_mask_id) in emissions
         emissions.clear()
         controller.setActiveMaskID(large_mask_id)
         emissions.clear()
-        assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
+        assert service.ensureActiveMaskForComposition(maskless_image_id) is False
         assert ("props", None) in emissions
         assert ("mask", None) in emissions
     finally:
@@ -2018,18 +2040,18 @@ def test_mask_activation_set_active_flags(qapp, qpane_with_mask, monkeypatch):
     monkeypatch.setattr(controller, "setActiveMaskID", capture)
     controller.setActiveMaskID(large_mask_id)
     calls.clear()
-    assert service.ensureTopMaskActiveForComposition(small_image_id) is True
+    assert service.ensureActiveMaskForComposition(small_image_id) is True
     assert calls
     assert calls[-1] == (small_mask_id, False, False)
     controller.setActiveMaskID(small_mask_id)
     calls.clear()
-    assert service.ensureTopMaskActiveForComposition(large_image_id) is True
+    assert service.ensureActiveMaskForComposition(large_image_id) is True
     assert calls
     assert calls[-1] == (large_mask_id, True, True)
     controller.setActiveMaskID(large_mask_id)
     calls.clear()
     maskless_image_id = uuid.uuid4()
-    assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
+    assert service.ensureActiveMaskForComposition(maskless_image_id) is False
     assert calls
     assert calls[-1] == (None, False, True)
 
@@ -2057,7 +2079,7 @@ def test_activation_prefetch_runs_when_pending(qapp, qpane_with_mask, monkeypatc
 
     monkeypatch.setattr(service._activation, "_prefetch", recording_prefetch)
     try:
-        result = service.ensureTopMaskActiveForComposition(small_image_id)
+        result = service.ensureActiveMaskForComposition(small_image_id)
         assert result is True
         assert calls
         scheduled_image, reason, _scales = calls[-1]
@@ -2098,15 +2120,15 @@ def test_mask_activation_schedule_usage(qapp, qpane_with_mask, monkeypatch):
     controller = service.controller
     controller.setActiveMaskID(large_mask_id)
     calls.clear()
-    assert service.ensureTopMaskActiveForComposition(small_image_id) is True
+    assert service.ensureActiveMaskForComposition(small_image_id) is True
     assert calls == [(small_mask_id, True)]
     calls.clear()
-    assert service.ensureTopMaskActiveForComposition(large_image_id) is True
+    assert service.ensureActiveMaskForComposition(large_image_id) is True
     assert calls == []
     maskless_image_id = uuid.uuid4()
-    assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
+    assert service.ensureActiveMaskForComposition(maskless_image_id) is False
     assert calls == []
-    assert service.ensureTopMaskActiveForComposition(large_image_id) is True
+    assert service.ensureActiveMaskForComposition(large_image_id) is True
     assert calls == []
 
 
@@ -2136,12 +2158,12 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
     )
     pending_image_id = uuid.uuid4()
     service._activation._pending_compositions.add(pending_image_id)
-    assert service.ensureTopMaskActiveForComposition(pending_image_id) is False
+    assert service.ensureActiveMaskForComposition(pending_image_id) is False
     assert scheduled == [(None, False, pending_image_id)]
     assert resumed == []
     scheduled.clear()
     maskless_image_id = uuid.uuid4()
-    assert service.ensureTopMaskActiveForComposition(maskless_image_id) is False
+    assert service.ensureActiveMaskForComposition(maskless_image_id) is False
     assert scheduled == []
     assert resumed == [maskless_image_id]
     service._activation._pending_compositions.discard(pending_image_id)
@@ -2316,11 +2338,11 @@ def test_commit_prefetched_mask_emits_update(qpane_with_mask):
     def _handler(mid, rect):
         captured.append((mid, rect))
 
-    controller.mask_updated.connect(_handler)
+    controller.render_dirty.connect(_handler)
     try:
         controller.renders.commit_prefetched(mask_id, layer, colorized)
     finally:
-        controller.mask_updated.disconnect(_handler)
+        controller.render_dirty.disconnect(_handler)
     assert captured
     last_id, last_rect = captured[-1]
     assert last_id == mask_id
@@ -2565,7 +2587,7 @@ def test_ensure_top_mask_defers_when_prefetch_active(monkeypatch, qpane_with_mas
 
     monkeypatch.setattr(service._activation, "_schedule_signals", tracking_schedule)
     try:
-        assert service.ensureTopMaskActiveForComposition(image_id) is True
+        assert service.ensureActiveMaskForComposition(image_id) is True
     finally:
         service.render_work._prefetch_handles.pop(image_id, None)
     assert captured_call["args"] == (mask_id, False, False)
@@ -2660,7 +2682,7 @@ def test_document_mask_activation_pending_flag_toggles(qapp, monkeypatch):
             "_schedule_signals",
             MethodType(fake_schedule, service._activation),
         )
-        assert service.ensureTopMaskActiveForComposition(small_composition_id) is True
+        assert service.ensureActiveMaskForComposition(small_composition_id) is True
         assert service.isActivationPending(small_composition_id) is True
         assert called and called[0][2] == small_composition_id
         service._activation._pending_compositions.discard(small_composition_id)
@@ -2838,12 +2860,14 @@ def test_mask_detach_cancels_pending_strokes(qapp):
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
         cancelled_ids = {job.task_id for job in backend.cancelled}
         assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
-        assert backend.pending_count == 0
+        assert backend.pending_count == 0, tuple(
+            job.operation for job in backend.pending_jobs()
+        )
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
-def test_mask_switch_releases_pending_jobs(qapp):
+def test_mask_switch_preserves_released_stroke_commit(qapp):
     executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
@@ -2870,18 +2894,24 @@ def test_mask_switch_releases_pending_jobs(qapp):
         assert service.getActiveMaskId() == mask_b
         assert service.controller.edits.async_epoch(mask_a) == generation_before_switch
         pending_after = service.strokeDebugSnapshot().pending_jobs
-        assert not pending_after.get(mask_a)
+        assert pending_after.get(mask_a) == handles
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
-        assert mask_a not in preview_tokens
+        assert mask_a in preview_tokens
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
-        cancelled_ids = {job.task_id for job in backend.cancelled}
-        assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
-        assert backend.pending_count == 0
+        assert not backend.cancelled
+        backend.run_all()
+        qapp.processEvents()
+        assert layer_a.coverage.raster.snapshot_array()[3, 3] == 255
+        assert mask_a not in service.strokeDebugSnapshot().preview_tokens
+        assert not service.strokeDebugSnapshot().pending_jobs.get(mask_a)
+        assert backend.pending_count == 0, tuple(
+            job.operation for job in backend.pending_jobs()
+        )
     finally:
         _cleanup_qpane(qpane, qapp)
 
 
-def test_cycle_masks_invalidates_pending_jobs(qapp):
+def test_cycle_masks_preserves_released_stroke_commit(qapp):
     executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
@@ -2889,7 +2919,7 @@ def test_cycle_masks_invalidates_pending_jobs(qapp):
     mask_a = service.createBlankMask(image.size())
     mask_b = service.createBlankMask(image.size())
     assert mask_a is not None and mask_b is not None
-    assert qpane.setActiveMaskID(mask_a)
+    assert qpane.setActiveMaskID(mask_b)
     layer_a = service.assets.get_layer(mask_a)
     layer_b = service.assets.get_layer(mask_b)
     assert layer_a is not None and layer_b is not None
@@ -2901,18 +2931,22 @@ def test_cycle_masks_invalidates_pending_jobs(qapp):
     try:
         _queue_pending_stroke(qpane, QPoint(2, 2))
         pending_jobs = service.strokeDebugSnapshot().pending_jobs
-        handles = tuple(pending_jobs.get(mask_a, ()))
+        handles = tuple(pending_jobs.get(mask_b, ()))
         assert handles
         backend = qpane._test_execution_backend
         service.cycleMasks(image_id, forward=True)
-        assert service.getActiveMaskId() == mask_b
+        assert service.getActiveMaskId() == mask_a
         pending_after = service.strokeDebugSnapshot().pending_jobs
-        assert not pending_after.get(mask_a)
+        assert pending_after.get(mask_b) == handles
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
-        assert mask_a not in preview_tokens
+        assert mask_b in preview_tokens
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
-        cancelled_ids = {job.task_id for job in backend.cancelled}
-        assert {handle.task_id for handle in handles}.issubset(cancelled_ids)
+        assert not backend.cancelled
+        backend.run_all()
+        qapp.processEvents()
+        assert layer_b.coverage.raster.snapshot_array()[2, 2] == 255
+        assert mask_b not in service.strokeDebugSnapshot().preview_tokens
+        assert not service.strokeDebugSnapshot().pending_jobs.get(mask_b)
         assert backend.pending_count == 0
     finally:
         _cleanup_qpane(qpane, qapp)
@@ -2957,7 +2991,7 @@ def test_remove_mask_cancels_pending_jobs(qapp):
 
 
 def test_concurrent_strokes_survive_mask_reorder(qapp):
-    """Pending mask jobs should drop cleanly when mask order changes mid-stroke."""
+    """Released strokes must settle on their owners across rapid mask reordering."""
     executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = qpane.mask_service
@@ -2974,17 +3008,17 @@ def test_concurrent_strokes_survive_mask_reorder(qapp):
     layer_b.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     try:
-        assert qpane.setActiveMaskID(mask_a)
+        assert qpane.setActiveMaskID(mask_b)
         _queue_pending_stroke(qpane, QPoint(2, 2))
         service.cycleMasks(image_id, forward=True)
-        assert service.getActiveMaskId() == mask_b
+        assert service.getActiveMaskId() == mask_a
         _queue_pending_stroke(qpane, QPoint(11, 11))
         intermediate_pending, intermediate_tokens = drain_mask_jobs(
             qpane, executor=executor
         )
         assert not intermediate_pending
         assert not intermediate_tokens
-        assert qpane.setActiveMaskID(mask_a)
+        assert qpane.setActiveMaskID(mask_b)
         _queue_pending_stroke(qpane, QPoint(6, 6))
         _queue_pending_stroke(qpane, QPoint(7, 7))
         pending, tokens = drain_mask_jobs(qpane, executor=executor)
@@ -2992,10 +3026,10 @@ def test_concurrent_strokes_survive_mask_reorder(qapp):
         assert not tokens
         snapshot_a = snapshot_mask_layer(layer_a)
         snapshot_b = snapshot_mask_layer(layer_b)
-        assert snapshot_a[7, 7] == 255
-        assert snapshot_a[6, 6] == 255
-        assert snapshot_a[2, 2] == 0
-        assert snapshot_b[11, 11] == 255
+        assert snapshot_a[11, 11] == 255
+        assert snapshot_b[7, 7] == 255
+        assert snapshot_b[6, 6] == 255
+        assert snapshot_b[2, 2] == 255
         invalidated = set(service.strokeDebugSnapshot().invalidated_job_tokens)
         assert all(candidate_mask != mask_a for candidate_mask, _ in invalidated)
         controller = service.controller

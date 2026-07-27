@@ -17,9 +17,11 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from threading import Lock
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from .backend import (
     ExecutionBackend,
@@ -27,7 +29,7 @@ from .backend import (
 )
 from .diagnostics import DiagnosticsSubscription, ExecutionSnapshot
 from .dispatch import CompletionDispatcher, InlineDispatcher
-from .handle import ExecutionHandle
+from .handle import ExecutionHandle, as_object_handle
 from .model import (
     ExecutionRejected,
     ExecutionRejectionReason,
@@ -38,6 +40,36 @@ from .scope import ExecutionScope
 
 TResult = TypeVar("TResult")
 TProgress = TypeVar("TProgress")
+
+
+@dataclass(frozen=True, slots=True)
+class _DeferredFinalization:
+    """Retain one finalizer until physical backend capacity is available."""
+
+    handle: ExecutionHandle[object, object]
+    request: ExecutionRequest[object, object]
+
+
+class _DeferredFinalizationSubmission:
+    """Cancel one runtime-retained finalizer before backend admission."""
+
+    def __init__(
+        self,
+        runtime: ExecutionRuntime,
+        task_id: uuid.UUID,
+    ) -> None:
+        """Bind one deferred task identity to its runtime."""
+
+        self._runtime = runtime
+        self._task_id = task_id
+
+    def cancel(self, *, reason: str) -> bool:
+        """Remove and terminalize one finalizer that remains deferred."""
+
+        return self._runtime._cancel_deferred_finalization(
+            self._task_id,
+            reason=reason,
+        )
 
 
 class ExecutionRuntime:
@@ -57,6 +89,8 @@ class ExecutionRuntime:
             raise ValueError("at least one execution backend is required")
         self._shutdown_backends = shutdown_backends
         self._scopes: set[ExecutionScope] = set()
+        self._deferred_finalizations: dict[uuid.UUID, _DeferredFinalization] = {}
+        self._draining_finalizations = False
         self._closed = False
         self._lock = Lock()
 
@@ -116,6 +150,21 @@ class ExecutionRuntime:
     ) -> ExecutionScope:
         """Create an owner-lifetime task scope."""
 
+        return self._open_scope(
+            owner_id=owner_id,
+            dispatcher=dispatcher,
+            defer_on_saturation=False,
+        )
+
+    def _open_scope(
+        self,
+        *,
+        owner_id: str,
+        dispatcher: CompletionDispatcher | None,
+        defer_on_saturation: bool,
+    ) -> ExecutionScope:
+        """Create one runtime scope with an explicit admission policy."""
+
         with self._lock:
             if self._closed:
                 raise ExecutionRejected(
@@ -126,6 +175,7 @@ class ExecutionRuntime:
                 runtime=self,
                 owner_id=owner_id,
                 dispatcher=dispatcher or InlineDispatcher(),
+                defer_on_saturation=defer_on_saturation,
             )
             self._scopes.add(scope)
         return scope
@@ -152,6 +202,8 @@ class ExecutionRuntime:
         self,
         handle: ExecutionHandle[TResult, TProgress],
         request: ExecutionRequest[TResult, TProgress],
+        *,
+        defer_on_saturation: bool,
     ) -> None:
         """Submit one handle to exactly one capable backend."""
 
@@ -161,6 +213,23 @@ class ExecutionRuntime:
                     ExecutionRejectionReason.RUNTIME_CLOSED,
                     "execution runtime is closed",
                 )
+        try:
+            self._admit(handle, request)
+        except ExecutionRejected as rejection:
+            if (
+                not defer_on_saturation
+                or rejection.reason != ExecutionRejectionReason.SATURATED
+            ):
+                raise
+            self._defer_finalization(handle, request)
+
+    def _admit(
+        self,
+        handle: ExecutionHandle[TResult, TProgress],
+        request: ExecutionRequest[TResult, TProgress],
+    ) -> None:
+        """Attempt physical backend admission for one runtime handle."""
+
         backend = self._select_backend(request.requirements)
         job = ExecutionJob(
             task_id=handle.task_id,
@@ -181,6 +250,78 @@ class ExecutionRuntime:
                 details=(("error_type", type(error).__name__),),
             ) from error
         handle._bind_submission(submission)
+        job.add_settled_callback(self._drain_deferred_finalizations)
+
+    def _defer_finalization(
+        self,
+        handle: ExecutionHandle[TResult, TProgress],
+        request: ExecutionRequest[TResult, TProgress],
+    ) -> None:
+        """Retain a saturated finalizer until backend capacity is available."""
+
+        object_handle = as_object_handle(handle)
+        object_request = cast(ExecutionRequest[object, object], request)
+        with self._lock:
+            if self._closed:
+                raise ExecutionRejected(
+                    ExecutionRejectionReason.RUNTIME_CLOSED,
+                    "execution runtime is closed",
+                )
+            self._deferred_finalizations[handle.task_id] = _DeferredFinalization(
+                object_handle,
+                object_request,
+            )
+        handle._bind_submission(_DeferredFinalizationSubmission(self, handle.task_id))
+
+    def _drain_deferred_finalizations(self) -> None:
+        """Admit retained finalizers after a backend task releases capacity."""
+
+        with self._lock:
+            if self._closed or self._draining_finalizations:
+                return
+            self._draining_finalizations = True
+        try:
+            while True:
+                with self._lock:
+                    deferred = next(
+                        iter(self._deferred_finalizations.values()),
+                        None,
+                    )
+                if deferred is None:
+                    return
+                try:
+                    self._admit(deferred.handle, deferred.request)
+                except ExecutionRejected as rejection:
+                    if rejection.reason == ExecutionRejectionReason.SATURATED:
+                        return
+                    self._cancel_deferred_finalization(
+                        deferred.handle.task_id,
+                        reason=f"finalization_rejected:{rejection.reason.value}",
+                    )
+                    continue
+                with self._lock:
+                    self._deferred_finalizations.pop(
+                        deferred.handle.task_id,
+                        None,
+                    )
+        finally:
+            with self._lock:
+                self._draining_finalizations = False
+
+    def _cancel_deferred_finalization(
+        self,
+        task_id: uuid.UUID,
+        *,
+        reason: str,
+    ) -> bool:
+        """Remove and terminalize one finalizer before backend admission."""
+
+        with self._lock:
+            deferred = self._deferred_finalizations.pop(task_id, None)
+        if deferred is None:
+            return False
+        deferred.handle._cancel_before_start(reason)
+        return True
 
     def _select_backend(
         self,

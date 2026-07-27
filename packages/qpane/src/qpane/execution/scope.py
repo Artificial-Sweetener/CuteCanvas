@@ -46,6 +46,7 @@ class ExecutionScope:
         owner_id: str,
         dispatcher: CompletionDispatcher,
         parent: ExecutionScope | None = None,
+        defer_on_saturation: bool = False,
     ) -> None:
         """Bind one owner lifetime to a runtime and dispatcher."""
 
@@ -55,6 +56,7 @@ class ExecutionScope:
         self._owner_id = owner_id
         self._dispatcher = dispatcher
         self._parent = parent
+        self._defer_on_saturation = bool(defer_on_saturation)
         self._handles: set[ExecutionHandle[object, object]] = set()
         self._children: set[ExecutionScope] = set()
         self._closed = False
@@ -111,7 +113,11 @@ class ExecutionScope:
                 )
             self._handles.add(object_handle)
         try:
-            self._runtime._submit(handle, request)
+            self._runtime._submit(
+                handle,
+                request,
+                defer_on_saturation=self._defer_on_saturation,
+            )
         except BaseException:
             self._release_handle(handle)
             raise
@@ -139,6 +145,31 @@ class ExecutionScope:
             )
             self._children.add(child)
         return child
+
+    def open_finalization_scope(
+        self,
+        owner_id: str,
+        *,
+        dispatcher: CompletionDispatcher | None = None,
+    ) -> ExecutionScope:
+        """Create a runtime-owned scope that can outlive this owner.
+
+        Backend saturation retains submitted finalizers until capacity returns.
+        The caller closes the scope after finalization settles. Runtime
+        shutdown remains the outer lifetime bound.
+        """
+
+        with self._lock:
+            if self._closed:
+                raise ExecutionRejected(
+                    ExecutionRejectionReason.SCOPE_CLOSED,
+                    f"execution scope {self._owner_id} is closed",
+                )
+            return self._runtime._open_scope(
+                owner_id=owner_id,
+                dispatcher=dispatcher or self._dispatcher,
+                defer_on_saturation=True,
+            )
 
     def cancel_all(self, *, reason: str) -> None:
         """Request cancellation for every accepted task and child scope."""

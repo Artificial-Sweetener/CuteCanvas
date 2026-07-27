@@ -131,6 +131,7 @@ def test_qpane_public_api_symbols() -> None:
         "TouchGestureKind",
         "TouchNavigationPort",
         "TouchNavigationSession",
+        "TileSizeSetting",
         "VectorDocument",
         "VectorFillRule",
         "VectorObject",

@@ -165,8 +165,25 @@ def test_decimated_stroke_state_tracks_stride_and_dirty_rect():
     )
     accumulated_rect = dirty_rect.united(second_rect)
     assert state._dirty_rect == accumulated_rect
-    assert accumulated_preview.rect == accumulated_rect
+    assert accumulated_preview.rect == second_rect
     assert len(state._segments) == 2
+    full_preview = state.current_preview(
+        lambda region, stride: _snapshot_array_region(mask_view, region, stride)
+    )
+    assert full_preview is not None
+    assert full_preview.rect == accumulated_rect
+    full_pixels, _ = qimage_to_numpy_view_grayscale8(full_preview.image)
+    _, expected_preview = render_coverage_stroke(
+        before=_snapshot_array_region(mask_view, accumulated_rect, 1),
+        dirty_rect=accumulated_rect,
+        segments=tuple(state._segments),
+        preview_stride=state.stride,
+    )
+    expected_pixels, _ = qimage_to_numpy_view_grayscale8(expected_preview)
+    np.testing.assert_array_equal(
+        full_pixels,
+        expected_pixels,
+    )
 
 
 @pytest.mark.parametrize("brush_size", [3, 5, 6, 11])

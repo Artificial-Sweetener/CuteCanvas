@@ -64,6 +64,7 @@ class _DummyRendererHost:
         return make_render_plan(
             self._qpane_rect,
             source_image=self._base_plan.base_raster_item.source_image,
+            image_id=self._base_plan.base_raster_item.asset_key.source_id,
             transform=QTransform(self._base_plan.base_raster_item.transform),
             strategy=self._base_plan.base_raster_item.strategy,
             current_pan=QPointF(pan),
@@ -105,6 +106,22 @@ def test_mark_dirty_handles_fractional_rectangles():
     assert bounding_rect.top() <= 3
 
 
+def test_canonical_physical_patches_never_remerge(qapp) -> None:
+    """Adjacent patch cells must remain independently time-sliceable."""
+    host = _DummyRendererHost(QRect(0, 0, 1200, 700))
+    renderer = Renderer(host)
+    renderer.allocate_buffers(QSize(1200, 700), 1.0)
+
+    patches = renderer._canonical_patch_rects(QRegion(renderer._surface.pixmap.rect()))
+
+    assert len(patches) > 1
+    assert all(
+        patch.width() <= renderer._COMPOSITING_PATCH_PHYSICAL_PX
+        and patch.height() <= renderer._COMPOSITING_PATCH_PHYSICAL_PX
+        for patch in patches
+    )
+
+
 def test_mark_dirty_supports_qregion_inputs():
     renderer = Renderer(types.SimpleNamespace())
     region = QRegion(QRect(1, 2, 50, 60))
@@ -131,6 +148,16 @@ def test_mark_dirty_whole_view_sentinel():
     bounding_rect = renderer._dirty_region.boundingRect()
     assert bounding_rect.width() >= 200000
     assert bounding_rect.height() >= 200000
+
+
+def test_subpixel_offset_canonicalization_removes_only_numerical_residue():
+    """Pan reuse should discard arithmetic noise without snapping visible fractions."""
+    renderer = Renderer(types.SimpleNamespace())
+
+    assert renderer._canonical_subpixel_offset(QPointF(2.0e-13, -3.0e-13)) == QPointF()
+    assert renderer._canonical_subpixel_offset(QPointF(0.25, -0.75)) == QPointF(
+        0.25, -0.75
+    )
 
 
 def test_redraw_base_image_buffer_resets_buffer_pan_when_full_dirty():
@@ -177,10 +204,7 @@ def test_redraw_base_image_buffer_keeps_buffer_pan_when_partial_dirty():
 def test_paint_skips_redraw_when_clean():
     qpane_rect = QRect(0, 0, 32, 32)
     renderer = Renderer(types.SimpleNamespace())
-    renderer._base_image_buffer = QImage(
-        qpane_rect.size(), QImage.Format_ARGB32_Premultiplied
-    )
-    renderer._base_image_buffer.fill(Qt.transparent)
+    renderer.allocate_buffers(qpane_rect.size(), 1.0)
     plan = _make_render_plan(qpane_rect)
     calls = []
 
@@ -199,10 +223,7 @@ def test_paint_updates_current_plan_when_redraw_is_clean():
     """Clean paints should still refresh geometry used by overlays and hit tests."""
     qpane_rect = QRect(0, 0, 32, 32)
     renderer = Renderer(types.SimpleNamespace())
-    renderer._base_image_buffer = QImage(
-        qpane_rect.size(), QImage.Format_ARGB32_Premultiplied
-    )
-    renderer._base_image_buffer.fill(Qt.transparent)
+    renderer.allocate_buffers(qpane_rect.size(), 1.0)
     previous_plan = _make_render_plan(qpane_rect)
     current_plan = make_render_plan(
         qpane_rect,

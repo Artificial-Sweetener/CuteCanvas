@@ -501,7 +501,12 @@ class MaskEditService:
         applied_delta = False
         if mask_layer is not None and change.has_snippets:
             applied_delta = self._renders.apply_history_delta(mask_layer, change)
-        if not applied_delta:
+        if applied_delta:
+            dirty_rect = QRect(change.snippets[0].rect)
+            for snippet in change.snippets[1:]:
+                dirty_rect = dirty_rect.united(snippet.rect)
+            self._mask_changed(mask_id, dirty_rect)
+        else:
             if mask_layer is not None:
                 self._renders.invalidate_layer(mask_layer)
             self._mask_changed(mask_id, QRect())

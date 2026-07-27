@@ -63,6 +63,8 @@ def test_main_bootstraps_before_importing_demo_window(monkeypatch) -> None:
         sam_model_path=None,
         sam_model_url=None,
         sam_model_hash=None,
+        navigation_trace_output=None,
+        navigation_document=None,
     )
     environment = _DifferentTierEnvironment()
 

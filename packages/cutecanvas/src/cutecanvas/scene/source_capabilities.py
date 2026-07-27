@@ -27,6 +27,22 @@ from qpane.sdk.scene import LayerSourceReference, RasterBounds, SourceCapability
 
 from ..coverage import CoverageSnapshot
 from .pixel_fragments import RasterPixelFormat
+from .pixel_transitions import RasterPixelTransition
+
+
+@dataclass(frozen=True, slots=True)
+class PixelSampleGeometry:
+    """Describe one source-local raster sample and its exact output density."""
+
+    source_rect: QRectF
+    pixel_size: QSize
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt values and reject empty sample geometry."""
+        if self.source_rect.isEmpty() or self.pixel_size.isEmpty():
+            raise ValueError("pixel sample geometry must be positive")
+        object.__setattr__(self, "source_rect", QRectF(self.source_rect))
+        object.__setattr__(self, "pixel_size", QSize(self.pixel_size))
 
 
 class SourceCoverageOwner(Protocol):
@@ -76,6 +92,16 @@ class PixelPresentationOwner(Protocol):
         target_size: QSize | None = None,
     ) -> QImage | None:
         """Return detached display pixels at the requested derived size."""
+        ...
+
+    def present_transition_samples(
+        self,
+        source: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+    ) -> tuple[QImage, ...] | None:
+        """Present one virtual raster transition on exact sampling grids."""
         ...
 
 
@@ -137,6 +163,24 @@ class PixelPresentationRegistry(SourceCapabilityRegistry[PixelPresentationOwner]
         if owner is None:
             return None
         return owner.present_pixels(source, pixel_format, pixels, target_size)
+
+    def present_transition_samples(
+        self,
+        source: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+    ) -> tuple[QImage, ...] | None:
+        """Present a virtual transition through its source-domain sampler."""
+        owner = self.owner_for(source)
+        if owner is None:
+            return None
+        return owner.present_transition_samples(
+            source,
+            pixel_format,
+            transition,
+            samples,
+        )
 
 
 @dataclass(frozen=True, slots=True)

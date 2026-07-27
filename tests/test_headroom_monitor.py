@@ -22,6 +22,8 @@ import time
 from threading import Event
 
 from cutecanvas import CuteCanvas
+from qpane.core import headroom
+from qpane.execution import CancellationToken
 
 from tests.harness.timing import interaction_clock
 
@@ -50,6 +52,22 @@ class _FailingPsutil:
     @staticmethod
     def virtual_memory():
         raise RuntimeError("psutil missing")
+
+
+def test_default_headroom_sampling_prefers_native_windows_observation(
+    monkeypatch,
+) -> None:
+    """Use the bounded native observation before optional system libraries."""
+
+    expected = headroom.SystemHeadroomSample(
+        available_bytes=8 * MB,
+        total_bytes=10 * MB,
+        swap_total_bytes=4 * MB,
+        swap_free_bytes=3 * MB,
+    )
+    monkeypatch.setattr(headroom, "_sample_windows_headroom", lambda: expected)
+
+    assert headroom.sample_system_headroom(CancellationToken()) == expected
 
 
 def _wait_until(qapp, predicate, *, timeout_seconds: float = 2.0) -> None:

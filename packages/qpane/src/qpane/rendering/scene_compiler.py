@@ -101,6 +101,7 @@ class SceneRenderCompiler:
         raster_layers: list[CompiledRenderLayer] = []
         vector_layers: list[CompiledPresentationLayer] = []
         hybrid_layers: list[CompiledPresentationLayer] = []
+        hybrid_fallback_layers: list[CompiledRenderLayer] = []
         sampled_layers: list[CompiledPresentationLayer] = []
         for layer in scene.layers:
             if not layer.visible:
@@ -112,6 +113,19 @@ class SceneRenderCompiler:
             hybrid_snapshot = self._hybrid_sources.hybrid_document(layer.source)
             if hybrid_snapshot is not None:
                 hybrid_layers.append(CompiledPresentationLayer(layer, hybrid_snapshot))
+                presentation = self._raster_sources.presentation_for(layer.source)
+                fallback = (
+                    self._compile_raster_layer(
+                        scene=scene,
+                        base_layer=base_layer,
+                        layer=layer,
+                    )
+                    if presentation
+                    in (RasterPresentation.IMAGE, RasterPresentation.OVERLAY)
+                    else None
+                )
+                if fallback is not None:
+                    hybrid_fallback_layers.append(fallback)
                 continue
             sampled_source = self._sampled_sources.sampled_source(layer.source)
             if sampled_source is not None:
@@ -136,6 +150,7 @@ class SceneRenderCompiler:
             layers=tuple(raster_layers),
             vector_layers=tuple(vector_layers),
             hybrid_layers=tuple(hybrid_layers),
+            hybrid_fallback_layers=tuple(hybrid_fallback_layers),
             sampled_layers=tuple(sampled_layers),
             hit_test_items=hit_test_items_for_scene(scene),
         )

@@ -23,12 +23,14 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 
 def apply_widget_defaults(widget: QWidget) -> None:
-    """Configure QPane's QWidget defaults such as translucency and tracking.
+    """Configure QPane's QWidget drawing, input, and sizing defaults.
 
     Args:
         widget: QWidget that should adopt the baseline drawing and sizing contract.
     """
-    widget.setAttribute(Qt.WA_TranslucentBackground)
+    widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    widget.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+    widget.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
     widget.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
     widget.setMouseTracking(True)
     widget.setTabletTracking(True)

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtWidgets import QApplication
 from qpane import LayerPresentationStyle
 
 from tools.pan_render_harness import (
@@ -103,6 +104,44 @@ def test_headless_pan_harness_matches_clean_full_redraws(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_headless_pan_harness_checks_only_selected_replay_steps(
+    qapp,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Sparse oracle checkpoints should preserve every incremental pan transition."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(256, 256)),
+        viewport_size=QSize(96, 96),
+        zoom=1.75,
+        artifact_root=tmp_path,
+    )
+    oracle_pans: list[QPointF] = []
+    original_oracle = harness._capture_full_redraw_reference
+
+    def capture_oracle(buffer_pan: QPointF) -> QImage:
+        """Record and delegate one selected clean redraw."""
+        oracle_pans.append(QPointF(buffer_pan))
+        return original_oracle(buffer_pan)
+
+    monkeypatch.setattr(harness, "_capture_full_redraw_reference", capture_oracle)
+    pans = tuple(QPointF(index * 7.25, index * -3.5) for index in range(6))
+    try:
+        failures = harness.run(
+            pans,
+            comparison_steps={1, 4},
+            direct_navigation=True,
+        )
+        final_pan = harness._qpane.currentPan()
+    finally:
+        harness.close()
+
+    assert failures == []
+    assert len(oracle_pans) == 2
+    assert final_pan == pans[-1]
+
+
 def test_headless_pan_harness_survives_accumulated_tiled_edge_repairs(
     qapp,
     tmp_path: Path,
@@ -117,6 +156,28 @@ def test_headless_pan_harness_survives_accumulated_tiled_edge_repairs(
     )
     try:
         failures = harness.run(random_walk_pans(steps=437, seed=819))
+    finally:
+        harness.close()
+
+    assert failures == []
+
+
+def test_direct_navigation_survives_accumulated_high_dpi_repairs(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    """Space-style navigation must not retain stale or displaced repair pixels."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(2048, 2048)),
+        viewport_size=QSize(640, 360),
+        device_pixel_ratio=1.75,
+        zoom=5.0,
+        artifact_root=tmp_path,
+    )
+    pans = random_walk_pans(steps=257, seed=20260726, max_step=180)
+    try:
+        failures = harness.run(pans, direct_navigation=True)
     finally:
         harness.close()
 
@@ -171,3 +232,49 @@ def test_headless_pan_harness_keeps_layer_effect_redraws_exact(
         harness.close()
 
     assert failures == []
+
+
+def test_outer_outline_never_changes_translucent_layer_interior(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    """An outer effect must contribute no pixels inside translucent content."""
+    image = QImage(96, 96, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    try:
+        painter.fillRect(QRect(24, 24, 48, 48), QColor(220, 45, 110, 128))
+    finally:
+        painter.end()
+    harness = HeadlessPanHarness(
+        qapp,
+        image,
+        viewport_size=QSize(96, 96),
+        zoom=1.0,
+        artifact_root=tmp_path,
+    )
+    try:
+        pane = harness._qpane
+        baseline = harness.capture_visible_frame(pane)
+        scene = pane._rendering.presenter.current_scene_descriptor()
+        assert scene is not None
+        effect_id = pane.addLayerPresentationEffect(
+            scene.scene_id,
+            scene.layers[0].layer_id,
+            LayerPresentationStyle.outline(
+                QColor(40, 220, 255),
+                width=2.0,
+                opacity=0.9,
+            ),
+        )
+        harness._settle_widget()
+        outlined = harness.capture_visible_frame(pane)
+
+        assert outlined.pixelColor(48, 48) == baseline.pixelColor(48, 48)
+        assert outlined.pixelColor(23, 48) != baseline.pixelColor(23, 48)
+
+        assert pane.removeLayerPresentationEffect(effect_id)
+        harness._settle_widget()
+        assert harness.capture_visible_frame(pane) == baseline
+    finally:
+        harness.close()

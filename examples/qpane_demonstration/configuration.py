@@ -86,6 +86,11 @@ class ViewerSettingsDialog(QDialog):
             touch_inertia_enabled=self.touch_inertia.isChecked(),
             drag_out_enabled=self.drag_out.isChecked(),
             draw_tile_grid=self.tile_grid.isChecked(),
+            tile_size=(
+                "auto"
+                if self.tile_size_mode.currentData() == "auto"
+                else self.tile_size.value()
+            ),
             diagnostics_overlay_enabled=self.diagnostics_overlay.isChecked(),
             diagnostics_domains_enabled=tuple(
                 domain
@@ -142,11 +147,24 @@ class ViewerSettingsDialog(QDialog):
         self.prefetch_depth = QSpinBox()
         self.prefetch_depth.setRange(0, 16)
         self.prefetch_depth.setSpecialValueText("Off")
+        self.tile_size_mode = QComboBox()
+        self.tile_size_mode.addItem("Automatic for viewport", "auto")
+        self.tile_size_mode.addItem("Fixed host override", "fixed")
+        self.tile_size = QSpinBox()
+        self.tile_size.setRange(1, 16_384)
+        self.tile_size.setSuffix(" px")
+        self.tile_size_mode.currentIndexChanged.connect(
+            lambda: self.tile_size.setEnabled(
+                self.tile_size_mode.currentData() == "fixed"
+            )
+        )
         self.tile_grid = QCheckBox("Draw renderer tile boundaries")
         form.addRow(note)
         form.addRow("Cache policy", self.cache_mode)
         form.addRow("Hard cache cap", self.cache_budget)
         form.addRow("Neighbor pyramids", self.prefetch_depth)
+        form.addRow("Tile sizing", self.tile_size_mode)
+        form.addRow("Fixed tile edge", self.tile_size)
         form.addRow("Tile diagnostics", self.tile_grid)
         return tab
 
@@ -200,6 +218,10 @@ class ViewerSettingsDialog(QDialog):
         self.cache_mode.setCurrentText(str(config.cache.mode))
         self.cache_budget.setValue(int(config.cache.budget_mb or 1024))
         self.prefetch_depth.setValue(max(0, int(config.cache.prefetch.pyramids)))
+        automatic_tile_size = config.tile_size == "auto"
+        self.tile_size_mode.setCurrentIndex(0 if automatic_tile_size else 1)
+        self.tile_size.setValue(1024 if automatic_tile_size else int(config.tile_size))
+        self.tile_size.setEnabled(not automatic_tile_size)
         placeholder = config.placeholder
         self.placeholder_path.setText(placeholder.source or "")
         self.placeholder_navigation.setChecked(bool(placeholder.panzoom_enabled))

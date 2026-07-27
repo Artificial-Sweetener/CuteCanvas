@@ -44,3 +44,19 @@ def test_xdist_percentiles_batch_coarse_thread_cpu_samples(monkeypatch) -> None:
         [0.0, 31.25, 0.0, 31.25],
         parallel_batch_size=2,
     ) == (15.625, 15.625)
+
+
+def test_tail_latency_uses_nearest_rank_after_contention_safe_batching(
+    monkeypatch,
+) -> None:
+    """Tail timing must use the same xdist batching policy as strict samples."""
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "timing-proof")
+
+    assert (
+        timing.tail_interaction_latency_ms(
+            [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0],
+            quantile=0.75,
+            parallel_batch_size=2,
+        )
+        == 11.0
+    )

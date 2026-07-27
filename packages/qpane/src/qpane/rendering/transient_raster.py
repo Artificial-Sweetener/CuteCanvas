@@ -22,9 +22,11 @@ from dataclasses import replace
 from ..scene.identity import SceneLayerAssetKey
 from ..scene.render_plan import (
     RasterLayerRenderItem,
+    SampledLayerRenderItem,
     SceneRenderPlan,
     TransientRasterContribution,
     TransientRasterTransformContribution,
+    TransientSampledResolvedContribution,
 )
 
 
@@ -57,6 +59,8 @@ class TransientRasterHandoff:
             ),
             None,
         )
+        if isinstance(pending, TransientSampledResolvedContribution):
+            return self._settled_sampled_plan(plan, item, pending)
         if not isinstance(item, RasterLayerRenderItem):
             self._clear()
             return plan, True
@@ -68,6 +72,36 @@ class TransientRasterHandoff:
             self._clear()
             return plan, True
         if item.source_image == pending.source_image:
+            self._clear()
+            return plan, True
+        return replace(plan, transient_raster=pending), False
+
+    def _settled_sampled_plan(
+        self,
+        plan: SceneRenderPlan,
+        item: object,
+        pending: TransientSampledResolvedContribution,
+    ) -> tuple[SceneRenderPlan, bool]:
+        """Keep sampled edit tiles visible until matching durable tiles arrive."""
+        if not isinstance(item, SampledLayerRenderItem):
+            self._clear()
+            return plan, True
+        descriptor = item.descriptor
+        asset_key = SceneLayerAssetKey(
+            scene_id=descriptor.scene_id,
+            layer_id=descriptor.layer_id,
+            source_id=descriptor.source.resource_id,
+            source_kind=descriptor.source.kind,
+            source_revision=descriptor.source_revision,
+        )
+        if asset_key == pending.source_asset_key:
+            return replace(plan, transient_raster=pending), False
+        if item.tiles == pending.tiles:
+            self._clear()
+            return plan, False
+        if self._durable_asset_key is None:
+            self._durable_asset_key = asset_key
+        elif asset_key != self._durable_asset_key:
             self._clear()
             return plan, True
         return replace(plan, transient_raster=pending), False

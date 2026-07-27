@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 from cutecanvas import Config
+from qpane.rendering.raster_tile_grid import RasterTileGrid
 from qpane.rendering.tiles import TileManager
 
 from tests.helpers.execution_backend import ControlledExecution
@@ -34,7 +35,11 @@ from tests.helpers.render_plan import make_tile_key
 def test_allow_cache_insert_honors_guard(caplog):
     """Admission guards should veto inserts and log only once per key."""
     execution = ControlledExecution()
-    manager = TileManager(config=Config(), execution_scope=execution.scope)
+    manager = TileManager(
+        config=Config(),
+        grid=RasterTileGrid(64, 0),
+        execution_scope=execution.scope,
+    )
     manager.cache_limit_bytes = 100
     manager.set_admission_guard(lambda _size: False)
     image_id = uuid.uuid4()
@@ -54,7 +59,11 @@ def test_allow_cache_insert_honors_guard(caplog):
 def test_schedule_cache_eviction_coalesces_owner_callbacks():
     """Repeated eviction scheduling should retain one owner-loop callback."""
     execution = ControlledExecution()
-    manager = TileManager(config=Config(), execution_scope=execution.scope)
+    manager = TileManager(
+        config=Config(),
+        grid=RasterTileGrid(64, 0),
+        execution_scope=execution.scope,
+    )
     manager.cache_limit_bytes = 10
     manager._cache_size_bytes = 20
     manager._tile_cache = OrderedDict({object(): object()})
@@ -67,7 +76,11 @@ def test_schedule_cache_eviction_coalesces_owner_callbacks():
 def test_evict_cache_batch_drops_entries():
     """Eviction should remove cached tiles and update bytes."""
     execution = ControlledExecution()
-    manager = TileManager(config=Config(), execution_scope=execution.scope)
+    manager = TileManager(
+        config=Config(),
+        grid=RasterTileGrid(64, 0),
+        execution_scope=execution.scope,
+    )
     image_id = uuid.uuid4()
     key = make_tile_key(image_id, Path("a.png"), 1.0, 0, 0)
     manager.cache_limit_bytes = 0

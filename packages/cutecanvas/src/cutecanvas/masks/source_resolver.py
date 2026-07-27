@@ -26,6 +26,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage, QPixmap
 from qpane import HybridPresentationStyle, HybridSource
+from qpane.sdk.raster import present_hybrid_sample
 from qpane.sdk.scene import (
     LayerSourceReference,
     RasterBounds,
@@ -36,6 +37,8 @@ from qpane.sdk.scene import (
 
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat
+from cutecanvas.scene.pixel_transitions import RasterPixelTransition
+from cutecanvas.scene.source_capabilities import PixelSampleGeometry
 
 from ..resources import ProjectResourceReference
 from .hybrid_source import MaskHybridSourceFactory
@@ -201,11 +204,11 @@ class MaskSourceCapabilities:
         return tuple(patches)
 
     def hybrid_document(self, source: LayerSourceReference) -> HybridSource | None:
-        """Return retained coverage through QPane's hybrid renderer."""
+        """Return stable coverage through QPane's hybrid tile renderer."""
         if not isinstance(source, ProjectResourceReference):
             return None
         layer = self.assets.get_layer(source.resource_id)
-        if layer is None or not layer.coverage.has_retained_items:
+        if layer is None or self.renders.is_live_preview(source.resource_id):
             return None
         return self.hybrids.source(
             layer,
@@ -279,6 +282,40 @@ class MaskSourceCapabilities:
         ):
             return None
         return self.renders.present_pixels(source.resource_id, pixels, target_size)
+
+    def present_transition_samples(
+        self,
+        source: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+    ) -> tuple[QImage, ...] | None:
+        """Sample one virtual mask transition through the durable hybrid evaluator."""
+        if (
+            not isinstance(source, ProjectResourceReference)
+            or pixel_format is not RasterPixelFormat.COVERAGE8
+        ):
+            return None
+        layer = self.assets.get_layer(source.resource_id)
+        if layer is None:
+            return None
+        hybrid = self.hybrids.source_with_transition(
+            layer,
+            self.renders.hybrid_style(source.resource_id),
+            self.renders.render_revision(source.resource_id),
+            transition,
+        )
+        if hybrid is None:
+            return None
+        return tuple(
+            present_hybrid_sample(
+                hybrid.document,
+                hybrid.style,
+                sample.source_rect,
+                sample.pixel_size,
+            )
+            for sample in samples
+        )
 
 
 def _rectf(bounds: RasterBounds) -> QRectF:

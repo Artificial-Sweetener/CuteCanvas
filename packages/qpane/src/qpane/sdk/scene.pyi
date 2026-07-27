@@ -33,6 +33,8 @@ from ..scene.providers import SceneContribution as SceneContribution
 from ..scene.raster import RasterBounds as RasterBounds
 from ..scene.registry import SceneProviderRegistry as SceneProviderRegistry
 from ..scene.render_plan import RasterLayerRenderItem as RasterLayerRenderItem
+from ..scene.render_plan import SampledLayerRenderItem as SampledLayerRenderItem
+from ..scene.render_plan import SampledTileRenderData as SampledTileRenderData
 from ..scene.render_plan import SceneLayerHitTestResult as SceneLayerHitTestResult
 from ..scene.render_plan import SceneRenderItem as SceneRenderItem
 from ..scene.render_plan import (
@@ -43,6 +45,9 @@ from ..scene.render_plan import (
 )
 from ..scene.render_plan import (
     TransientRasterTransformContribution as TransientRasterTransformContribution,
+)
+from ..scene.render_plan import (
+    TransientSampledResolvedContribution as TransientSampledResolvedContribution,
 )
 from ..scene.source_capabilities import (
     LayerSourceCapabilities as LayerSourceCapabilities,

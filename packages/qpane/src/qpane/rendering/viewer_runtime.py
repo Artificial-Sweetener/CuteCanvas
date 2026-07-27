@@ -182,11 +182,15 @@ class ViewerRenderingRuntime(QObject):
 
     def apply_config(self, config: Config) -> None:
         """Apply validated renderer and viewport configuration."""
-        self.viewport.applyConfig(config)
+        self._presenter.apply_config(config)
         self._pyramids.apply_config(config)
         self._presenter.mark_dirty()
         self._pane.update()
         self.diagnosticsDirty.emit()
+
+    def validate_config(self, config: Config) -> None:
+        """Validate renderer settings before the widget publishes a snapshot."""
+        self._presenter.validate_config(config)
 
     def calculate_plan(
         self,
@@ -264,6 +268,8 @@ class ViewerRenderingRuntime(QObject):
 
     def _pyramid_ready(self, _asset_key: SourceRenderAssetKey) -> None:
         """Invalidate the frame after a requested source pyramid completes."""
+        if self._presenter.note_navigation_full_product_ready():
+            return
         self._presenter.invalidate_frame_plan()
         self._presenter.mark_dirty()
         self._pane.update()
@@ -271,6 +277,8 @@ class ViewerRenderingRuntime(QObject):
 
     def _tile_ready(self, key: SceneLayerTileKey) -> None:
         """Invalidate only the region covered by one completed tile."""
+        if self._presenter.note_navigation_raster_tile_ready(key):
+            return
         self._presenter.invalidate_frame_plan()
         dirty_rect = self._presenter.dirty_rect_for_tile_key(key)
         if dirty_rect is not None:

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, QSize
+from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter
 
 
@@ -96,19 +96,13 @@ def rendered_overscanned_widget_frame(
     safe_dpr = dpr if dpr > 0 else 1.0
     painter = QPainter(frame)
     try:
-        source_rect = QRectF(
-            overscan_margin - subpixel_offset.x(),
-            overscan_margin - subpixel_offset.y(),
-            float(viewport_size.width()),
-            float(viewport_size.height()),
+        painter.drawImage(
+            QPointF(
+                (-float(overscan_margin) + subpixel_offset.x()) / safe_dpr,
+                (-float(overscan_margin) + subpixel_offset.y()) / safe_dpr,
+            ),
+            base_buffer,
         )
-        destination_rect = QRectF(
-            0.0,
-            0.0,
-            viewport_size.width() / safe_dpr,
-            viewport_size.height() / safe_dpr,
-        )
-        painter.drawImage(destination_rect, base_buffer, source_rect)
     finally:
         painter.end()
     return frame

@@ -21,25 +21,32 @@ import uuid
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QImage, QPainter
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     numpy_to_qimage_grayscale8_at_size,
     qimage_to_numpy_grayscale8,
 )
 from qpane.sdk.scene import (
+    RasterBounds,
     RasterLayerRenderItem,
+    SampledLayerRenderItem,
+    SampledTileRenderData,
     SceneLayerAssetKey,
     SceneRenderItem,
     TransientRasterContribution,
     TransientRasterResolvedContribution,
     TransientRasterTransformContribution,
+    TransientSampledResolvedContribution,
 )
 
 from ..scene.pixel_fragments import RasterPixelFormat
 from ..scene.pixel_move_preview import RasterPixelMovePreview
-from ..scene.source_capabilities import PixelPresentationRegistry
+from ..scene.source_capabilities import (
+    PixelPresentationRegistry,
+    PixelSampleGeometry,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +69,11 @@ class FloatingPixelRenderCompiler:
         self._presentations = presentations
         self._products: _FloatingPixelProducts | None = None
         self._resolved_key: tuple[uuid.UUID, SceneLayerAssetKey, object] | None = None
-        self._resolved: TransientRasterResolvedContribution | None = None
+        self._resolved: (
+            TransientRasterResolvedContribution
+            | TransientSampledResolvedContribution
+            | None
+        ) = None
 
     def compile(
         self,
@@ -85,25 +96,35 @@ class FloatingPixelRenderCompiler:
             None,
         )
         if (
-            not isinstance(item, RasterLayerRenderItem)
+            not isinstance(
+                item,
+                (RasterLayerRenderItem, SampledLayerRenderItem),
+            )
             or item.descriptor.raster_bounds is None
         ):
             return None
         if preview.settled_transition is not None:
             return self._compile_resolved(preview, item)
         fragment_bounds = preview.lift.fragment.bounds
+        scale_x, scale_y = _item_sample_scale(item)
         product_size = QSize(
-            max(1, round(fragment_bounds.width * item.pyramid_scale)),
-            max(1, round(fragment_bounds.height * item.pyramid_scale)),
+            max(1, round(fragment_bounds.width * scale_x)),
+            max(1, round(fragment_bounds.height * scale_y)),
         )
+        asset_key = _item_asset_key(item)
         products = self._products
         if (
             products is None
             or products.session_id != preview.session_id
-            or products.source_asset_key != item.asset_key
+            or products.source_asset_key != asset_key
             or products.product_size != product_size
         ):
-            products = self._build_products(preview, item, product_size)
+            products = self._build_products(
+                preview,
+                item,
+                asset_key,
+                product_size,
+            )
             self._products = products
         if products is None:
             return None
@@ -112,7 +133,7 @@ class FloatingPixelRenderCompiler:
             session_id=preview.session_id,
             scene_id=preview.scene_id,
             layer_id=preview.layer_id,
-            source_asset_key=item.asset_key,
+            source_asset_key=asset_key,
             source_patch=products.source_patch,
             source_bounds=preview.lift.source_transition.patch_bounds,
             fragment_image=products.fragment_image,
@@ -123,15 +144,28 @@ class FloatingPixelRenderCompiler:
             extent_clip_bounds=preview.extent_clip_bounds,
         )
 
+    @staticmethod
+    def target(
+        preview: RasterPixelMovePreview | None,
+    ) -> tuple[uuid.UUID, uuid.UUID] | None:
+        """Return the scene and layer requiring raster edit presentation."""
+        if preview is None:
+            return None
+        return preview.scene_id, preview.layer_id
+
     def _compile_resolved(
         self,
         preview: RasterPixelMovePreview,
-        item: RasterLayerRenderItem,
-    ) -> TransientRasterResolvedContribution | None:
+        item: RasterLayerRenderItem | SampledLayerRenderItem,
+    ) -> (
+        TransientRasterResolvedContribution
+        | TransientSampledResolvedContribution
+        | None
+    ):
         """Materialize one exact settled replacement patch per release position."""
         key = (
             preview.session_id,
-            item.asset_key,
+            _item_asset_key(item),
             preview.fragment_transform,
         )
         if key == self._resolved_key:
@@ -139,11 +173,15 @@ class FloatingPixelRenderCompiler:
         transition = preview.settled_transition
         if transition is None:
             return None
+        if isinstance(item, SampledLayerRenderItem):
+            resolved = self._compile_sampled_resolved(preview, item)
+            self._resolved_key = key
+            self._resolved = resolved
+            return resolved
         product_bounds = item.descriptor.raster_bounds
         if product_bounds is None:
             return None
-        scale_x = item.source_image.width() / product_bounds.width
-        scale_y = item.source_image.height() / product_bounds.height
+        scale_x, scale_y = _item_sample_scale(item)
         replacement_size = QSize(
             max(1, round(transition.patch_bounds.width * scale_x)),
             max(1, round(transition.patch_bounds.height * scale_y)),
@@ -160,7 +198,7 @@ class FloatingPixelRenderCompiler:
             session_id=preview.session_id,
             scene_id=preview.scene_id,
             layer_id=preview.layer_id,
-            source_asset_key=item.asset_key,
+            source_asset_key=_item_asset_key(item),
             source_image=replacement,
             source_bounds=transition.patch_bounds,
         )
@@ -168,10 +206,81 @@ class FloatingPixelRenderCompiler:
         self._resolved = resolved
         return resolved
 
+    def _compile_sampled_resolved(
+        self,
+        preview: RasterPixelMovePreview,
+        item: SampledLayerRenderItem,
+    ) -> TransientSampledResolvedContribution | None:
+        """Patch a settled edit into the sampled source's exact tile products."""
+        transition = preview.settled_transition
+        if transition is None:
+            return None
+        scale_x, scale_y = _item_sample_scale(item)
+        sample_geometry = tuple(
+            _sample_geometry(tile, scale_x, scale_y) for tile in item.tiles
+        )
+        exact_samples = self._presentations.present_transition_samples(
+            item.descriptor.source,
+            preview.pixel_format,
+            transition,
+            sample_geometry,
+        )
+        if exact_samples is not None and len(exact_samples) == len(item.tiles):
+            return TransientSampledResolvedContribution(
+                session_id=preview.session_id,
+                scene_id=preview.scene_id,
+                layer_id=preview.layer_id,
+                source_asset_key=_item_asset_key(item),
+                source_bounds=transition.patch_bounds,
+                tiles=tuple(
+                    SampledTileRenderData(
+                        image,
+                        tile.source_rect,
+                        tile.image_source_rect,
+                    )
+                    for tile, image in zip(
+                        item.tiles,
+                        exact_samples,
+                        strict=True,
+                    )
+                ),
+            )
+        replacement_size = QSize(
+            max(1, round(transition.patch_bounds.width * scale_x)),
+            max(1, round(transition.patch_bounds.height * scale_y)),
+        )
+        replacement = self._presentations.present_pixels(
+            item.descriptor.source,
+            preview.pixel_format,
+            transition.after_pixels,
+            replacement_size,
+        )
+        if replacement is None or replacement.isNull():
+            return None
+        tiles = tuple(
+            _replace_sampled_tile(
+                tile,
+                transition.patch_bounds,
+                replacement,
+                scale_x,
+                scale_y,
+            )
+            for tile in item.tiles
+        )
+        return TransientSampledResolvedContribution(
+            session_id=preview.session_id,
+            scene_id=preview.scene_id,
+            layer_id=preview.layer_id,
+            source_asset_key=_item_asset_key(item),
+            source_bounds=transition.patch_bounds,
+            tiles=tiles,
+        )
+
     def _build_products(
         self,
         preview: RasterPixelMovePreview,
-        item: RasterLayerRenderItem,
+        item: RasterLayerRenderItem | SampledLayerRenderItem,
+        asset_key: SceneLayerAssetKey,
         product_size: QSize,
     ) -> _FloatingPixelProducts | None:
         """Present the source remainder, fragment, and selection exactly once."""
@@ -199,7 +308,7 @@ class FloatingPixelRenderCompiler:
         selection_mask = _alpha_mask(fragment.coverage.pixels, product_size)
         return _FloatingPixelProducts(
             session_id=preview.session_id,
-            source_asset_key=item.asset_key,
+            source_asset_key=asset_key,
             source_patch=source_patch,
             fragment_image=fragment_image,
             selection_mask=selection_mask,
@@ -219,3 +328,85 @@ def _alpha_mask(coverage: np.ndarray, target_size: QSize) -> QImage:
     pixels = np.zeros((*sampled.shape, 4), dtype=np.uint8)
     pixels[:, :, 3] = sampled
     return numpy_to_qimage_argb32(pixels)
+
+
+def _item_asset_key(
+    item: RasterLayerRenderItem | SampledLayerRenderItem,
+) -> SceneLayerAssetKey:
+    """Return stable scene-layer source identity for any rasterized product."""
+    if isinstance(item, RasterLayerRenderItem):
+        return item.asset_key
+    descriptor = item.descriptor
+    return SceneLayerAssetKey(
+        scene_id=descriptor.scene_id,
+        layer_id=descriptor.layer_id,
+        source_id=descriptor.source.resource_id,
+        source_kind=descriptor.source.kind,
+        source_revision=descriptor.source_revision,
+    )
+
+
+def _item_sample_scale(
+    item: RasterLayerRenderItem | SampledLayerRenderItem,
+) -> tuple[float, float]:
+    """Return current product pixels per source unit on each axis."""
+    if isinstance(item, RasterLayerRenderItem):
+        bounds = item.descriptor.raster_bounds
+        if bounds is None or bounds.width <= 0 or bounds.height <= 0:
+            return 1.0, 1.0
+        return (
+            item.source_image.width() / bounds.width,
+            item.source_image.height() / bounds.height,
+        )
+    for tile in item.tiles:
+        if tile.source_rect.width() > 0.0 and tile.source_rect.height() > 0.0:
+            return (
+                tile.image_source_rect.width() / tile.source_rect.width(),
+                tile.image_source_rect.height() / tile.source_rect.height(),
+            )
+    return 1.0, 1.0
+
+
+def _replace_sampled_tile(
+    tile: SampledTileRenderData,
+    patch_bounds: RasterBounds,
+    replacement: QImage,
+    scale_x: float,
+    scale_y: float,
+) -> SampledTileRenderData:
+    """Return one sampled tile with a settled source patch applied in place."""
+    image = tile.image.copy()
+    paint_origin_x = tile.source_rect.x() - tile.image_source_rect.x() / scale_x
+    paint_origin_y = tile.source_rect.y() - tile.image_source_rect.y() / scale_y
+    target = QRectF(
+        (patch_bounds.x - paint_origin_x) * scale_x,
+        (patch_bounds.y - paint_origin_y) * scale_y,
+        patch_bounds.width * scale_x,
+        patch_bounds.height * scale_y,
+    )
+    painter = QPainter(image)
+    try:
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.drawImage(target, replacement, QRectF(replacement.rect()))
+    finally:
+        painter.end()
+    return SampledTileRenderData(
+        image,
+        tile.source_rect,
+        tile.image_source_rect,
+    )
+
+
+def _sample_geometry(
+    tile: SampledTileRenderData,
+    scale_x: float,
+    scale_y: float,
+) -> PixelSampleGeometry:
+    """Recover one sampled tile's complete source footprint including bleed."""
+    source_rect = QRectF(
+        tile.source_rect.x() - tile.image_source_rect.x() / scale_x,
+        tile.source_rect.y() - tile.image_source_rect.y() / scale_y,
+        tile.image.width() / scale_x,
+        tile.image.height() / scale_y,
+    )
+    return PixelSampleGeometry(source_rect, tile.image.size())

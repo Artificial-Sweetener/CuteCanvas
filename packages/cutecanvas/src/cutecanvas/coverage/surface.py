@@ -410,6 +410,17 @@ class CoverageSurface:
         with self._lock:
             return self._grid.read(region)
 
+    def capture_region_strided(
+        self,
+        region: RasterBounds,
+        stride: int,
+    ) -> np.ndarray:
+        """Return a density-bounded sample without materializing transparent gaps."""
+        if not isinstance(region, RasterBounds):
+            raise TypeError("region must be RasterBounds")
+        with self._lock:
+            return self._grid.read_strided(region, max(1, int(stride)))
+
     def sparse_tiles(self, visible: RasterBounds) -> tuple[SparseRasterTile, ...]:
         """Return allocated coverage tiles intersecting visible logical storage."""
         if not isinstance(visible, RasterBounds):

@@ -38,7 +38,7 @@ def test_non_strict_validation_warns_and_uses_defaults(
             installed_features=("mask", "sam"),
             strict=False,
         )
-    assert settings.tile_size == 1024
+    assert settings.tile_size == "auto"
     failures = settings.validation_failures()
     assert failures["core"].lower().startswith("tile_size")
     assert any("Validation failed for feature 'core'" in msg for msg in caplog.messages)

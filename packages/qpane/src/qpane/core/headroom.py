@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import sys
 from dataclasses import dataclass
 
 from ..execution import CancellationToken
@@ -51,13 +53,17 @@ def sample_system_headroom(
 ) -> SystemHeadroomSample:
     """Return one detached system-memory sample outside the GUI thread."""
 
+    if cancellation.is_cancelled:
+        raise RuntimeError(cancellation.reason or "headroom sampling cancelled")
+    if psutil_module is None:
+        native_sample = _sample_windows_headroom()
+        if native_sample is not None:
+            return native_sample
     provider = psutil_module
     if provider is None:
         import psutil  # type: ignore
 
         provider = psutil
-    if cancellation.is_cancelled:
-        raise RuntimeError(cancellation.reason or "headroom sampling cancelled")
     memory = provider.virtual_memory()  # type: ignore[attr-defined]
     swap_total: int | None = None
     swap_free: int | None = None
@@ -71,6 +77,53 @@ def sample_system_headroom(
     return SystemHeadroomSample(
         available_bytes=int(memory.available),
         total_bytes=int(memory.total),
+        swap_total_bytes=swap_total,
+        swap_free_bytes=swap_free,
+    )
+
+
+def _sample_windows_headroom() -> SystemHeadroomSample | None:
+    """Read physical and page-file headroom through one fast native call."""
+
+    if sys.platform != "win32":
+        return None
+
+    class _MemoryStatus(ctypes.Structure):
+        """Match the Windows ``MEMORYSTATUSEX`` binary layout."""
+
+        _fields_ = (
+            ("length", ctypes.c_ulong),
+            ("memory_load", ctypes.c_ulong),
+            ("total_physical", ctypes.c_ulonglong),
+            ("available_physical", ctypes.c_ulonglong),
+            ("total_page_file", ctypes.c_ulonglong),
+            ("available_page_file", ctypes.c_ulonglong),
+            ("total_virtual", ctypes.c_ulonglong),
+            ("available_virtual", ctypes.c_ulonglong),
+            ("available_extended_virtual", ctypes.c_ulonglong),
+        )
+
+    status = _MemoryStatus()
+    status.length = ctypes.sizeof(status)
+    try:
+        succeeded = ctypes.windll.kernel32.GlobalMemoryStatusEx(  # type: ignore[attr-defined]
+            ctypes.byref(status)
+        )
+    except (AttributeError, OSError):
+        return None
+    if not succeeded:
+        return None
+    swap_total = max(0, int(status.total_page_file - status.total_physical))
+    swap_free = max(
+        0,
+        min(
+            swap_total,
+            int(status.available_page_file - status.available_physical),
+        ),
+    )
+    return SystemHeadroomSample(
+        available_bytes=int(status.available_physical),
+        total_bytes=int(status.total_physical),
         swap_total_bytes=swap_total,
         swap_free_bytes=swap_free,
     )

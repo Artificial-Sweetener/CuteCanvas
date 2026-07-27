@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from .config import CacheSettings, Config
+from .config import CacheSettings, Config, TileSizeSetting
 from .config_schema import ConfigFeatureRegistry, FeatureConfigDescriptor
 
 _BASE_CONFIG = Config()
@@ -37,7 +37,7 @@ class CoreConfigSlice:
     """Settings owned by the viewer, renderer, and cache."""
 
     cache: CacheSettings = field(default_factory=_clone_cache_defaults)
-    tile_size: int = _BASE_CONFIG.tile_size
+    tile_size: TileSizeSetting = _BASE_CONFIG.tile_size
     tile_overlap: int = _BASE_CONFIG.tile_overlap
     min_view_size_px: int = _BASE_CONFIG.min_view_size_px
     canvas_expansion_factor: float = _BASE_CONFIG.canvas_expansion_factor
@@ -68,9 +68,13 @@ class DiagnosticsConfigSlice:
 
 def _validate_core_config(settings: CoreConfigSlice) -> None:
     """Validate renderer geometry and cache settings."""
-    if settings.tile_size <= 0:
-        raise ValueError("tile_size must be greater than 0")
-    if settings.tile_overlap < 0 or settings.tile_overlap >= settings.tile_size:
+    tile_size = settings.tile_size
+    if tile_size != "auto" and (
+        isinstance(tile_size, bool) or not isinstance(tile_size, int) or tile_size <= 0
+    ):
+        raise ValueError("tile_size must be 'auto' or a positive integer")
+    minimum_tile_size = 512 if tile_size == "auto" else int(tile_size)
+    if settings.tile_overlap < 0 or settings.tile_overlap >= minimum_tile_size:
         raise ValueError("tile_overlap must be non-negative and smaller than tile_size")
     if settings.min_view_size_px <= 0:
         raise ValueError("min_view_size_px must be greater than 0")

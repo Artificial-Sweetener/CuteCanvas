@@ -143,10 +143,6 @@ class MaskService:
             assets=mask_assets,
             mask_ids_for_composition=self._layers.mask_ids_for_composition,
             invalidate_jobs=self._invalidate_pending_mask_jobs,
-            promote_to_top=self.promoteMaskToTop,
-            scene_stack_end=self._layers.mask_stack_end_index,
-            route_reorder=self._layers.route_reorder,
-            reorder=self._layers.reorder_mask_slot_in_composition,
             prefetch=self._render_work.prefetch,
             prefetch_pending=self._render_work.is_prefetch_pending,
             publish_status=self._record_status,
@@ -159,7 +155,7 @@ class MaskService:
             execution_scope=view_execution_scope,
             mask_feature_available=lambda: qpane._masks_controller.mask_feature_available(),
             current_composition_id=qpane.currentCompositionID,
-            ensure_active=self._activation.ensure_top_active,
+            ensure_active=self._activation.ensure_active,
             mask_ids_for_composition=self._layers.mask_ids_for_composition,
             view=qpane.view,
             update_region=self._render_work.update_region,
@@ -485,12 +481,12 @@ class MaskService:
         """Select the mask edited by tools."""
         return self._activation.activate(mask_id)
 
-    def ensureTopMaskActiveForComposition(
+    def ensureActiveMaskForComposition(
         self,
         composition_id: uuid.UUID | None,
     ) -> bool:
-        """Align the editable mask with one composition's top mask layer."""
-        return self._activation.ensure_top_active(composition_id)
+        """Align editable-mask selection with one composition."""
+        return self._activation.ensure_active(composition_id)
 
     def isActivationPending(self, composition_id: uuid.UUID | None) -> bool:
         """Return whether deferred activation remains pending for a document."""
@@ -522,13 +518,18 @@ class MaskService:
 
     def invalidateActiveMaskCache(self) -> None:
         """Invalidate the colorized pixmap cache for the active mask."""
-        self._mask_controller.renders.invalidate(
-            self._mask_controller.get_active_mask_id()
-        )
+        mask_id = self._mask_controller.get_active_mask_id()
+        self._mask_controller.renders.invalidate(mask_id)
+        if mask_id is not None:
+            self._qpane.view().invalidate_content_cache()
+            self._mask_controller.render_dirty.emit(mask_id, QRect())
 
     def invalidateMaskCache(self, mask_id: uuid.UUID | None) -> None:
         """Invalidate cached mask renders for mask_id when present."""
         self._mask_controller.renders.invalidate(mask_id)
+        if mask_id is not None:
+            self._qpane.view().invalidate_content_cache()
+            self._mask_controller.render_dirty.emit(mask_id, QRect())
 
     def invalidateMaskCachesForComposition(
         self,
@@ -558,6 +559,26 @@ class MaskService:
             sub_mask_image=sub_mask_image,
             force_async_colorize=force_async_colorize,
         )
+        self._mask_controller.mask_updated.emit(
+            mask_layer.mask_id,
+            QRect(dirty_image_rect),
+        )
+
+    def invalidateMaskRenderRegion(
+        self,
+        dirty_image_rect: QRect,
+        mask_layer: MaskLayer,
+    ) -> None:
+        """Invalidate derived products after a durable canonical pixel edit."""
+        if mask_layer is None or dirty_image_rect.isNull():
+            return
+        mask_id = mask_layer.mask_id
+        self._mask_controller.renders.invalidate(
+            mask_id,
+            reason="durable_pixel_edit",
+        )
+        self._mask_controller.render_dirty.emit(mask_id, QRect(dirty_image_rect))
+        self._mask_controller.mask_updated.emit(mask_id, QRect(dirty_image_rect))
 
     def handleGeneratedMask(
         self,
@@ -568,7 +589,7 @@ class MaskService:
         """Merge a generated mask array into the active layer or clear stale overlays."""
         del bbox
         composition_id = self._qpane.currentCompositionID()
-        if not self.ensureTopMaskActiveForComposition(composition_id):
+        if not self.ensureActiveMaskForComposition(composition_id):
             logger.info(
                 "Mask generation skipped: no active mask available for document %s.",
                 composition_id,
@@ -693,7 +714,11 @@ class MaskService:
             request_redraw,
         )
         self._render_work.discard_deferred(mask_id)
-        self._reset_pending_strokes(mask_id, request_redraw=request_redraw)
+        self._stroke_pipeline.reset_state(
+            mask_id,
+            preserve_committed=True,
+            request_redraw=request_redraw,
+        )
 
     def _diagnostics_provider(self, _: CuteCanvas) -> Sequence[DiagnosticRecord]:
         """Surface recent mask service status messages for diagnostics overlays."""

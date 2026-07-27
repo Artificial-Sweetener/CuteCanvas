@@ -120,6 +120,8 @@ class SceneLayerTileKey:
     asset_key: SceneLayerAssetKey
     pyramid_asset_key: SourceRenderAssetKey
     pyramid_scale: float
+    tile_size: int
+    tile_overlap: int
     row: int
     col: int
 
@@ -127,5 +129,11 @@ class SceneLayerTileKey:
         """Validate tile grid metadata."""
         if self.pyramid_scale <= 0:
             raise ValueError("pyramid scale must be positive")
+        if self.tile_size <= 0:
+            raise ValueError("tile_size must be positive")
+        if self.tile_overlap < 0 or self.tile_overlap >= self.tile_size:
+            raise ValueError(
+                "tile_overlap must be non-negative and smaller than tile_size"
+            )
         if self.row < 0 or self.col < 0:
             raise ValueError("tile row and column must be non-negative")

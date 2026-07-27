@@ -17,13 +17,15 @@
 
 from __future__ import annotations
 
+import numpy as np
 from cutecanvas import CuteCanvas
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 
 from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
 from examples.demonstration.compositions.browser import CompositionBrowser
+from tests.harness import MountedQPaneHarness
 
 
 def _image(color: str, size: QSize | None = None) -> QImage:
@@ -291,6 +293,65 @@ def test_browser_selection_and_hover_use_transient_content_effects(qapp) -> None
         browser.deleteLater()
         viewer.deleteLater()
         qapp.processEvents()
+
+
+def test_mask_pixels_never_change_during_browser_layer_selection(qapp) -> None:
+    """Layer-browser emphasis must remain outside translucent mask content."""
+    probe = MountedQPaneHarness(qapp)
+    browser = CompositionBrowser(
+        probe.viewer,
+        on_focus_requested=lambda _focus: None,
+    )
+    try:
+        mask_id = probe.mask_ids[0]
+        service = probe.viewer.mask_service
+        assert service is not None
+        mask_layer = service.assets.get_layer(mask_id)
+        assert mask_layer is not None
+
+        def fill_center(pixels: np.ndarray, _image: QImage) -> None:
+            """Fill a broad mask interior away from its visible boundary."""
+            pixels[100:300, 100:300] = 255
+
+        mask_layer.coverage.raster.mutate(fill_center)
+        service.invalidateMaskCache(mask_id)
+        service.controller.mask_updated.emit(None, QRect())
+        probe.viewer.setControlMode(probe.viewer.CONTROL_MODE_PANZOOM)
+        probe.drain_events(wait_ms=20)
+
+        scene = probe.viewer.currentScene()
+        assert scene is not None
+        rendered_mask = next(
+            layer for layer in scene.layers if layer.source_id == mask_id
+        )
+        background = next(
+            layer for layer in scene.layers if layer.layer_id != rendered_mask.layer_id
+        )
+        assert probe.viewer.setSelectedLayer(scene.scene_id, background.layer_id)
+        probe.drain_events(wait_ms=20)
+        sample = QPoint(200, 200)
+        expected = probe.capture().pixelColor(sample)
+
+        with probe.observe_presented_frames() as frames:
+            for _ in range(8):
+                assert probe.viewer.setSelectedLayer(
+                    scene.scene_id,
+                    rendered_mask.layer_id,
+                )
+                probe.drain_events()
+                assert probe.viewer.setSelectedLayer(
+                    scene.scene_id,
+                    background.layer_id,
+                )
+                probe.drain_events()
+
+        assert frames.frames
+        assert all(frame.color_at(sample) == expected for frame in frames.frames)
+        assert probe.capture().pixelColor(sample) == expected
+    finally:
+        browser.close()
+        browser.deleteLater()
+        probe.close()
 
 
 def test_demo_composition_creation_placement_and_policy_are_intentional(qapp) -> None:

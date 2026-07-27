@@ -31,8 +31,11 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QColor, QImage
 from qpane.sdk.execution import (
     ExecutionLeaseRelease,
+    ExecutionRequest,
+    ExecutionRequirements,
     ExecutionResource,
     ExecutionRuntime,
+    ExecutionState,
     InlineDispatcher,
     QtOwnerDispatcher,
     create_default_execution_runtime,
@@ -390,20 +393,157 @@ def test_real_affinity_lane_preserves_thread_identity_through_cleanup(
     runtime.shutdown(wait=True)
 
 
-def test_shutdown_schedules_native_cleanup_before_closing_scope(
+def test_unused_manager_shutdown_closes_without_native_work(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Manager teardown retains its scope until session cleanup settles."""
+    """A manager that never used its native session needs no cleanup task."""
     checkpoint = tmp_path / "model.pt"
     checkpoint.write_bytes(b"model")
     _install_predictor_stubs(monkeypatch)
     manager, runtime, backend = _manager(checkpoint)
-    manager.shutdown()
-    assert not manager._execution_scope.is_closed
-    assert backend.pending_jobs()[0].operation == "editor.sam.session.close"
-    backend.run_all()
+    handle = manager.shutdown()
+    assert handle is None
+    assert not backend.pending_jobs()
     assert manager._execution_scope.is_closed
+    assert manager._cleanup_scope.is_closed
+    runtime.shutdown()
+
+
+def test_shutdown_can_finalize_after_document_scope_closes(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Keep native cleanup available after document ownership ends."""
+
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    affinity = ControllableAffinityExecutionBackend()
+    runtime = ExecutionRuntime(
+        ControllableExecutionBackend(),
+        capability_backends=(affinity,),
+    )
+    document_scope = runtime.open_scope(
+        owner_id="document",
+        dispatcher=InlineDispatcher(),
+    )
+    manager = SamManager(
+        execution_scope=document_scope,
+        checkpoint_path=checkpoint,
+    )
+    manager.requestPredictor(_image(), uuid.uuid4())
+    affinity.run_all()
+
+    document_scope.close(reason="document_closed")
+    handle = manager.shutdown()
+
+    assert handle is not None
+    assert affinity.pending_jobs()[0].operation == "editor.sam.session.close"
+    affinity.run_all()
+    assert manager._execution_scope.is_closed
+    assert manager._cleanup_scope.is_closed
+    runtime.shutdown()
+
+
+def test_shutdown_is_idempotent_while_native_cleanup_is_pending(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Return one finalizer and never enqueue duplicate native destruction."""
+
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
+    manager.requestPredictor(_image(), uuid.uuid4())
+    backend.run_all()
+
+    first = manager.shutdown()
+    second = manager.shutdown()
+
+    assert first is not None
+    assert second is first
+    assert [job.operation for job in backend.pending_jobs()] == [
+        "editor.sam.session.close"
+    ]
+    backend.run_all()
+    assert manager.shutdown() is first
+    assert manager._execution_scope.is_closed
+    assert manager._cleanup_scope.is_closed
+    runtime.shutdown()
+
+
+def test_shutdown_cancels_pending_preparation_before_native_cleanup(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Prevent pending preparation from outliving its session finalizer."""
+
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    manager, runtime, backend = _manager(checkpoint)
+    manager.requestPredictor(_image(), uuid.uuid4())
+
+    handle = manager.shutdown()
+
+    assert handle is not None
+    assert [job.operation for job in backend.pending_jobs()] == [
+        "editor.sam.session.close"
+    ]
+    backend.run_all()
+    assert manager.activePredictorLoads() == 0
+    assert manager.getCachedPredictorCount() == 0
+    assert manager._execution_scope.is_closed
+    assert manager._cleanup_scope.is_closed
+    runtime.shutdown()
+
+
+def test_shutdown_defers_saturated_native_cleanup_until_capacity_returns(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Retain native cleanup across transient host-executor saturation."""
+
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"model")
+    _install_predictor_stubs(monkeypatch)
+    backend = RejectingAffinityExecutionBackend({"editor.sam.session.close": 1})
+    manager, runtime, _backend = _manager(
+        checkpoint,
+        affinity_backend=backend,
+    )
+    manager.requestPredictor(_image(), uuid.uuid4())
+    backend.run_all()
+
+    cleanup = manager.shutdown()
+
+    assert cleanup is not None
+    assert cleanup.state == ExecutionState.PENDING
+    assert not backend.pending_jobs()
+    wake_scope = runtime.open_scope(owner_id="capacity-release")
+    wake_scope.submit(
+        ExecutionRequest(
+            operation="native.capacity.release",
+            requirements=ExecutionRequirements(
+                resource=ExecutionResource.THREAD_AFFINE_NATIVE,
+                affinity_key="sam:cpu",
+                exclusive_key="sam:cpu",
+                lease_release=ExecutionLeaseRelease.ADOPTION_FINISHED,
+            ),
+            work=lambda _context: None,
+        )
+    )
+    backend.run_next()
+
+    assert [job.operation for job in backend.pending_jobs()] == [
+        "editor.sam.session.close"
+    ]
+    backend.run_all()
+    assert cleanup.state == ExecutionState.SUCCEEDED
+    assert manager._execution_scope.is_closed
+    assert manager._cleanup_scope.is_closed
     runtime.shutdown()
 
 

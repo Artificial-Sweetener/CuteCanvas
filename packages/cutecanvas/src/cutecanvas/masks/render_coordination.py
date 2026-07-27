@@ -372,7 +372,13 @@ class MaskRenderWorkCoordinator:
         if zoom <= 0.0:
             zoom = 1.0
         stride = max(1, round(1.0 / max(zoom, 1e-6))) if zoom < 1.0 else 1
+        generated_snapshot = sub_mask_image is None
         if sub_mask_image is None:
+            dirty_image_rect = self._aligned_snapshot_rect(
+                mask_layer,
+                dirty_image_rect,
+                stride=stride,
+            )
             sub_mask_image = self._snapshot_region(
                 mask_layer,
                 dirty_image_rect,
@@ -381,9 +387,13 @@ class MaskRenderWorkCoordinator:
             if sub_mask_image is not None and stride > 1:
                 sub_mask_image.setText("qpane_preview_stride", str(stride))
                 sub_mask_image.setText("qpane_preview_provisional", "1")
+        preview_provisional = (
+            sub_mask_image is not None
+            and sub_mask_image.text("qpane_preview_provisional") == "1"
+        )
         snippet_source = sub_mask_image
         async_snippet = snippet_source
-        if force_async_colorize:
+        if force_async_colorize or preview_provisional:
             async_snippet = self._snapshot_region(
                 mask_layer,
                 dirty_image_rect,
@@ -396,7 +406,8 @@ class MaskRenderWorkCoordinator:
             and async_available
             and (
                 force_async_colorize
-                or (sub_mask_image is None and area > SNIPPET_ASYNC_THRESHOLD_PX)
+                or preview_provisional
+                or (generated_snapshot and area > SNIPPET_ASYNC_THRESHOLD_PX)
             )
         )
         scheduled = False
@@ -458,6 +469,26 @@ class MaskRenderWorkCoordinator:
             stride=max(1, stride),
         )
         return numpy_to_qimage_grayscale8(pixels)
+
+    @staticmethod
+    def _aligned_snapshot_rect(
+        mask_layer: MaskLayer,
+        dirty_rect: QRect,
+        *,
+        stride: int,
+    ) -> QRect:
+        """Clip a dirty region to the shared source-anchored sample lattice."""
+        bounds = mask_layer.coverage.raster.bounds
+        if bounds is None:
+            return QRect()
+        storage = QRect(0, 0, bounds.width, bounds.height)
+        clipped = dirty_rect.intersected(storage)
+        if clipped.isNull() or clipped.isEmpty():
+            return QRect()
+        sample_stride = max(1, int(stride))
+        left = clipped.left() - clipped.left() % sample_stride
+        top = clipped.top() - clipped.top() % sample_stride
+        return QRect(left, top, clipped.right() - left + 1, clipped.bottom() - top + 1)
 
     def schedule_snippet(
         self,

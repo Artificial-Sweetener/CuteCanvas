@@ -142,6 +142,36 @@ def test_pending_pyramid_uses_one_bounded_preview_product() -> None:
     assert products.usage_bytes == first.sizeInBytes()
 
 
+def test_preview_density_bucket_is_relative_to_non_power_of_two_source_width() -> None:
+    """Dense previews must share source-relative buckets with sampled tiles."""
+    pyramids = _PyramidProducts()
+    tiles = _TileProducts()
+    products = RasterRenderProductStore(pyramids, tiles)
+    key = _key(uuid.uuid4(), "raster", 1)
+    requested_scales: list[float] = []
+
+    def produce(scale: float) -> QImage:
+        """Record the source-relative sample requested by the product store."""
+        requested_scales.append(scale)
+        return QImage(
+            round(3440 * scale),
+            round(1440 * scale),
+            QImage.Format_ARGB32_Premultiplied,
+        )
+
+    preview = products.sampled_image(
+        asset_key=key,
+        source_width=3440,
+        target_width=1720.0,
+        producer=produce,
+    )
+
+    assert preview is not None
+    assert requested_scales == [0.5]
+    assert preview.width() == 1720
+    assert preview.height() == 720
+
+
 def test_sparse_display_sample_is_reused_until_source_revision_changes() -> None:
     """Pointer frames must not resample unchanged sparse authoritative pixels."""
     pyramids = _PyramidProducts()

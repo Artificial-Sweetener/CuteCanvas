@@ -272,18 +272,19 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
 
         deadline = time.perf_counter() + 3.0
         while (
-            time.perf_counter() < deadline and not window.qpane.sceneEditUndoAvailable()
+            time.perf_counter() < deadline
+            and layer.coverage.raster.content_bounds() is None
         ):
             qapp.processEvents()
             QTest.qWait(1)
         commit_ms = (interaction_clock() - release_started) * 1000.0
+        assert layer.coverage.raster.content_bounds() is not None
         assert window.qpane.sceneEditUndoAvailable()
         assert len(feedback_ms) == 2
         if isolated_latency:
             assert max(feedback_ms) < 100.0
             assert max(dispatch_ms) < 100.0
             assert commit_ms < 100.0
-        assert layer.coverage.raster.snapshot_array().any()
         assert window.tools.editor_controls.undo_action.isEnabled()
         assert (
             _rgb_distance(

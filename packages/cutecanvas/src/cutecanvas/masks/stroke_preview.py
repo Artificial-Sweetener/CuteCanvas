@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 import numpy as np
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage, QPainter
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
@@ -61,14 +61,14 @@ class DecimatedStrokePreview:
     constraint: CoverageSnapshot | None = None
     constraint_region: Callable[[QRect, int], np.ndarray] | None = None
     _segments: list[BrushStrokeSegment] = field(default_factory=list)
+    _segment_rects: list[QRect] = field(default_factory=list)
     _dirty_rect: QRect | None = None
-    _preview_image: QImage | None = None
 
     def reset(self) -> None:
         """Clear recorded segments and tracked dirty bounds."""
         self._segments.clear()
+        self._segment_rects.clear()
         self._dirty_rect = None
-        self._preview_image = None
 
     def has_segments(self) -> bool:
         """Return True when the stroke has recorded paint operations."""
@@ -86,9 +86,10 @@ class DecimatedStrokePreview:
             segment.translated(float(delta_x), float(delta_y))
             for segment in self._segments
         ]
+        for rect in self._segment_rects:
+            rect.translate(delta_x, delta_y)
         if self._dirty_rect is not None:
             self._dirty_rect.translate(delta_x, delta_y)
-        self._preview_image = None
 
     def preview_segment(
         self,
@@ -96,9 +97,11 @@ class DecimatedStrokePreview:
         dirty_rect: QRect,
         segment: BrushStrokeSegment,
         snapshot_region: Callable[[QRect, int], np.ndarray],
+        render_accumulated: bool = False,
     ) -> MaskStrokePreview:
-        """Record a segment and render its accumulated provisional mask."""
+        """Record a segment and render only its affected provisional patch."""
         self._segments.append(segment)
+        self._segment_rects.append(QRect(dirty_rect))
         previous_rect = None if self._dirty_rect is None else QRect(self._dirty_rect)
         combined = (
             QRect(dirty_rect)
@@ -106,25 +109,14 @@ class DecimatedStrokePreview:
             else previous_rect.united(dirty_rect)
         )
         self._dirty_rect = self._aligned_preview_rect(combined)
-        if self.constraint_region is not None:
-            self._preview_image = None
-            self._render_constrained_preview(snapshot_region)
-            preview = self.current_preview(snapshot_region)
-            if preview is None:
-                raise RuntimeError("recorded stroke must produce a preview image")
-            return preview
-        previous_image = self._preview_image
-        rebuild = previous_image is None
-        if rebuild or previous_rect != self._dirty_rect:
-            preview_slice = snapshot_region(self._dirty_rect, max(1, self.stride))
-            self._preview_image = numpy_to_qimage_grayscale8(preview_slice)
-            if previous_image is not None and previous_rect is not None:
-                self._copy_previous_preview(previous_image, previous_rect)
-        self._paint_preview_segments(self._segments if rebuild else (segment,))
-        preview = self.current_preview(snapshot_region)
-        if preview is None:
-            raise RuntimeError("recorded stroke must produce a preview image")
-        return preview
+        return self._render_preview(
+            (
+                QRect(self._dirty_rect)
+                if render_accumulated
+                else self._aligned_preview_rect(dirty_rect)
+            ),
+            snapshot_region,
+        )
 
     def current_preview(
         self,
@@ -133,19 +125,7 @@ class DecimatedStrokePreview:
         """Render all recorded segments against the latest durable mask pixels."""
         if not self._segments or self._dirty_rect is None:
             return None
-        rect_copy = QRect(self._dirty_rect)
-        stride = max(1, self.stride)
-        if self._preview_image is None:
-            if self.constraint_region is None:
-                preview_slice = snapshot_region(rect_copy, stride)
-                self._preview_image = numpy_to_qimage_grayscale8(preview_slice)
-                self._paint_preview_segments(self._segments)
-            else:
-                self._render_constrained_preview(snapshot_region)
-        preview_image = self._preview_image
-        preview_image.setText("qpane_preview_stride", str(stride))
-        preview_image.setText("qpane_preview_provisional", "1")
-        return MaskStrokePreview(rect=rect_copy, image=preview_image)
+        return self._render_preview(QRect(self._dirty_rect), snapshot_region)
 
     def flush_to_mask(
         self,
@@ -209,27 +189,35 @@ class DecimatedStrokePreview:
         self.reset()
         return queued
 
-    def _render_constrained_preview(
+    def _render_preview(
         self,
+        rect: QRect,
         snapshot_region: Callable[[QRect, int], np.ndarray],
-    ) -> None:
-        """Rebuild accumulated preview once through immutable selection coverage."""
-        dirty_rect = self._dirty_rect
-        constraint_region = self.constraint_region
-        if dirty_rect is None or constraint_region is None:
-            return
+    ) -> MaskStrokePreview:
+        """Render relevant recorded segments into one durable-backed patch."""
         stride = max(1, self.stride)
-        before = snapshot_region(dirty_rect, stride)
-        self._preview_image = numpy_to_qimage_grayscale8(before)
-        self._paint_preview_segments(self._segments)
-        preview = self._preview_image
-        if preview is None:
-            return
-        painted = qimage_to_numpy_grayscale8(preview)
-        constraint = constraint_region(dirty_rect, stride)
-        self._preview_image = numpy_to_qimage_grayscale8(
-            apply_coverage_constraint(before, painted, constraint)
+        before = snapshot_region(rect, stride)
+        image = numpy_to_qimage_grayscale8(before)
+        segments = tuple(
+            segment
+            for segment, segment_rect in zip(
+                self._segments,
+                self._segment_rects,
+                strict=True,
+            )
+            if segment_rect.intersects(rect)
         )
+        self._paint_preview_segments(image, rect, segments)
+        constraint_region = self.constraint_region
+        if constraint_region is not None:
+            painted = qimage_to_numpy_grayscale8(image)
+            constraint = constraint_region(rect, stride)
+            image = numpy_to_qimage_grayscale8(
+                apply_coverage_constraint(before, painted, constraint)
+            )
+        image.setText("qpane_preview_stride", str(stride))
+        image.setText("qpane_preview_provisional", "1")
+        return MaskStrokePreview(rect=QRect(rect), image=image)
 
     def _aligned_preview_rect(self, rect: QRect) -> QRect:
         """Keep preview sampling anchored to the storage origin as bounds grow."""
@@ -238,33 +226,13 @@ class DecimatedStrokePreview:
         top = rect.top() - rect.top() % stride
         return QRect(left, top, rect.right() - left + 1, rect.bottom() - top + 1)
 
-    def _copy_previous_preview(self, image: QImage, rect: QRect) -> None:
-        """Overlay the prior provisional pixels into an enlarged preview image."""
-        preview = self._preview_image
-        dirty_rect = self._dirty_rect
-        if preview is None or dirty_rect is None:
-            return
-        stride = max(1, self.stride)
-        painter = QPainter(preview)
-        painter.setCompositionMode(QPainter.CompositionMode_Source)
-        painter.drawImage(
-            QPoint(
-                (rect.left() - dirty_rect.left()) // stride,
-                (rect.top() - dirty_rect.top()) // stride,
-            ),
-            image,
-        )
-        painter.end()
-
     def _paint_preview_segments(
         self,
+        preview: QImage,
+        dirty_rect: QRect,
         segments: tuple[BrushStrokeSegment, ...] | list[BrushStrokeSegment],
     ) -> None:
         """Paint only the supplied semantic segments into the cached preview."""
-        preview = self._preview_image
-        dirty_rect = self._dirty_rect
-        if preview is None or dirty_rect is None:
-            return
         if any(segment.texture_strength > 0.0 for segment in segments):
             self._paint_textured_preview(preview, dirty_rect, segments)
             return
@@ -314,7 +282,11 @@ class DecimatedStrokePreview:
                 dabs=dabs,
                 operation=segment.operation,
             )
-        self._preview_image = numpy_to_qimage_grayscale8(pixels)
+        updated = numpy_to_qimage_grayscale8(pixels)
+        painter = QPainter(preview)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.drawImage(0, 0, updated)
+        painter.end()
 
     def _build_payload(self) -> MaskStrokePayload:
         """Return the recorded segments packaged for worker execution."""

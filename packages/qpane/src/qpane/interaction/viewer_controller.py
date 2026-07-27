@@ -86,6 +86,8 @@ class ViewerInteractionHost:
     handle_external_mouse_move: Callable[[QMouseEvent], bool] = _false_mouse
     handle_external_mouse_release: Callable[[QMouseEvent], bool] = _false_mouse
     external_cursor: Callable[[], QCursor | None] = _no_cursor
+    begin_navigation: Callable[[], None] = _nothing
+    finish_navigation: Callable[[], None] = _nothing
 
 
 class ViewerInteractionController:
@@ -261,6 +263,8 @@ class ViewerInteractionController:
         signals.cursor_update_requested.connect(self.refresh_cursor)
         signals.drag_out_requested.connect(self._host.emit_drag_out_requested)
         signals.mode_changed.connect(self._host.emit_mode_changed)
+        signals.navigation_started.connect(self._host.begin_navigation)
+        signals.navigation_finished.connect(self._host.finish_navigation)
 
     def _navigation_port(self) -> NavigationInteractionPort:
         """Resolve current viewport behavior for built-in navigation."""

@@ -24,7 +24,7 @@ from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from enum import Enum
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QTimer
 from PySide6.QtGui import QTransform
 
 from ..execution import (
@@ -41,7 +41,6 @@ from ..execution import (
 )
 from ..scene.raster import RasterBounds
 from .render_tile_cache import RenderTileCache
-from .render_tile_continuity import RenderTileContinuity
 from .render_tile_geometry import (
     RenderTileKey,
     RenderTileRequest,
@@ -61,18 +60,25 @@ from .render_tile_types import (
 
 logger = logging.getLogger(__name__)
 
+_REFINEMENT_CHUNK_TILES = 4
+_PREFETCH_CHUNK_TILES = 1
+_PREFETCH_SETTLE_MS = 150
+
 
 class _RefinementLane(str, Enum):
     """Separate stable continuity work from replaceable viewport detail."""
 
     CONTINUITY = "continuity"
     DETAIL = "detail"
+    PREFETCH = "prefetch"
 
 
 def _render_tiles(
     source: RenderTileBatchSource,
     requests: tuple[RenderTileRequest, ...],
     cancellation: CancellationToken,
+    *,
+    chunk_size: int = _REFINEMENT_CHUNK_TILES,
 ) -> tuple[RenderTileProduct, ...]:
     """Evaluate one complete refinement batch cooperatively."""
     batches: OrderedDict[float, list[RenderTileRequest]] = OrderedDict()
@@ -80,13 +86,14 @@ def _render_tiles(
         batches.setdefault(request.key.scale, []).append(request)
     products: list[RenderTileProduct] = []
     for batch in batches.values():
-        cancellation.raise_if_cancelled()
-        products.extend(
-            source.render_tiles(
-                tuple(batch),
-                lambda: cancellation.is_cancelled,
+        for offset in range(0, len(batch), chunk_size):
+            cancellation.raise_if_cancelled()
+            products.extend(
+                source.render_tiles(
+                    tuple(batch[offset : offset + chunk_size]),
+                    lambda: cancellation.is_cancelled,
+                )
             )
-        )
     cancellation.raise_if_cancelled()
     result = tuple(products)
     if len(result) != len(requests):
@@ -126,6 +133,22 @@ class _OverviewRequestBatch:
     requests: tuple[RenderTileRequest, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _DeferredPrefetch:
+    """Retain the latest settled-view guard request for one source."""
+
+    source: RenderTileBatchSource
+    source_to_panel: QTransform
+    panel_rect: QRectF
+    visible_requests: tuple[RenderTileRequest, ...]
+    overview_signature: tuple[RenderTileKey, ...]
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt geometry from the caller's frame."""
+        object.__setattr__(self, "source_to_panel", QTransform(self.source_to_panel))
+        object.__setattr__(self, "panel_rect", QRectF(self.panel_rect))
+
+
 class RenderTileWorkCoordinator:
     """Coordinate stable coverage plus latest-only viewport refinement."""
 
@@ -142,19 +165,27 @@ class RenderTileWorkCoordinator:
         )
         self._cache = cache
         self._ready = ready
-        self._continuity = RenderTileContinuity(ready)
         self._pending: dict[tuple[str, uuid.UUID, _RefinementLane], _PendingTiles] = {}
         self._deferred: dict[tuple[str, uuid.UUID, _RefinementLane], _DeferredTiles] = (
             {}
         )
         self._overview_requests: dict[tuple[str, uuid.UUID], _OverviewRequestBatch] = {}
+        self._deferred_prefetch: dict[tuple[str, uuid.UUID], _DeferredPrefetch] = {}
         self._rejected: set[tuple[RenderTileKey, ...]] = set()
+        self._prefetch_timer = QTimer()
+        self._prefetch_timer.setSingleShot(True)
+        self._prefetch_timer.setInterval(_PREFETCH_SETTLE_MS)
+        self._prefetch_timer.timeout.connect(self._start_deferred_prefetch)
+        self._navigation_suspended = False
         self._closed = False
 
     @property
     def pending_count(self) -> int:
-        """Return pending worker jobs plus an unsettled presentation transition."""
-        return len(self._pending) + len(self._deferred) + int(self._continuity.pending)
+        """Return work that can still change the visible presentation."""
+        return sum(
+            pending.lane is not _RefinementLane.PREFETCH
+            for pending in self._pending.values()
+        ) + len(self._deferred)
 
     @property
     def pending_tile_count(self) -> int:
@@ -163,6 +194,34 @@ class RenderTileWorkCoordinator:
             len(deferred.requests) for deferred in self._deferred.values()
         )
 
+    @property
+    def prefetch_pending(self) -> bool:
+        """Return whether speculative guard refinement can still publish."""
+        return (
+            self._prefetch_timer.isActive()
+            or bool(self._deferred_prefetch)
+            or any(
+                pending.lane is _RefinementLane.PREFETCH
+                for pending in self._pending.values()
+            )
+        )
+
+    def suspend_for_navigation(self) -> None:
+        """Cancel sampled refinement while viewport input owns responsiveness."""
+        if self._closed:
+            return
+        self._navigation_suspended = True
+        self._prefetch_timer.stop()
+        self._deferred_prefetch.clear()
+        for identity in tuple(self._pending):
+            self._cancel(identity)
+
+    def resume_after_navigation(self) -> None:
+        """Allow the next settled frame to schedule current sampled refinement."""
+        if self._closed or not self._navigation_suspended:
+            return
+        self._navigation_suspended = False
+
     def request(
         self,
         *,
@@ -170,6 +229,7 @@ class RenderTileWorkCoordinator:
         source_to_panel: QTransform,
         panel_rect: QRectF,
         device_pixel_ratio: float,
+        maximum_scale: float | None = None,
     ) -> RenderRefinement:
         """Return, schedule, or explicitly decline one visible tile set."""
         visible_requests = _visible_tile_requests(
@@ -182,6 +242,7 @@ class RenderTileWorkCoordinator:
             panel_rect=panel_rect,
             device_pixel_ratio=device_pixel_ratio,
             budget_bytes=self._cache.budget_bytes,
+            maximum_scale=maximum_scale,
         )
         if visible_requests is None:
             return RenderRefinement.unavailable()
@@ -196,13 +257,14 @@ class RenderTileWorkCoordinator:
             overview_bytes = 0
         overview_signature = tuple(request.key for request in overview_requests)
         cached = self._cache.products(visible_signature)
-        self._ensure_work(
-            lane=_RefinementLane.CONTINUITY,
-            source=source,
-            requests=overview_requests,
-            required_signature=overview_signature,
-            retained_signature=overview_signature,
-        )
+        if not self._navigation_suspended:
+            self._ensure_work(
+                lane=_RefinementLane.CONTINUITY,
+                source=source,
+                requests=overview_requests,
+                required_signature=overview_signature,
+                retained_signature=overview_signature,
+            )
         continuity_identity = (
             source.source_kind,
             source.source_id,
@@ -221,28 +283,19 @@ class RenderTileWorkCoordinator:
         ):
             detail_retained_signature = pending_detail.retained_signature
         else:
-            guarded_requests = guarded_tile_requests(
-                source_kind=source.source_kind,
-                source_id=source.source_id,
-                revision_key=source.revision_key,
-                fallback_key=source.fallback_key,
-                bounds=source.bounds,
-                source_to_panel=source_to_panel,
-                panel_rect=panel_rect,
-                budget_bytes=self._cache.budget_bytes - overview_bytes,
-                visible_requests=visible_requests,
-            )
             overview_keys = frozenset(overview_signature)
             detail_requests = tuple(
                 request
-                for request in unique_requests(guarded_requests)
+                for request in unique_requests(visible_requests)
                 if request.key not in overview_keys
             )
             detail_signature = tuple(request.key for request in detail_requests)
             detail_retained_signature = tuple(
                 dict.fromkeys((*overview_signature, *detail_signature))
             )
-            if continuity_pending and self._cache.products(overview_signature) is None:
+            if self._navigation_suspended or (
+                continuity_pending and self._cache.products(overview_signature) is None
+            ):
                 self._defer_detail(
                     source=source,
                     requests=detail_requests,
@@ -258,24 +311,18 @@ class RenderTileWorkCoordinator:
                     required_signature=visible_signature,
                     retained_signature=detail_retained_signature,
                 )
-        stable_fallback = (
-            self._cache.products(overview_signature) if overview_signature else None
-        )
-        fallback = self._cache.covering_products(visible_requests)
+        if cached is not None and not self._navigation_suspended:
+            self._schedule_prefetch(
+                source=source,
+                source_to_panel=source_to_panel,
+                panel_rect=panel_rect,
+                visible_requests=visible_requests,
+                overview_signature=overview_signature,
+            )
         identity = (source.source_kind, source.source_id)
-        prefer_fallback = self._continuity.prefer_fallback(
-            identity,
-            visible_signature,
-            exact_available=cached is not None,
-        )
-        if cached is not None and (
-            not prefer_fallback
-            or stable_fallback is None
-            or _same_products(cached, stable_fallback)
-        ):
-            return RenderRefinement.ready(cached)
         if cached is not None:
-            return RenderRefinement.waiting(stable_fallback)
+            return RenderRefinement.ready(cached)
+        fallback = self._cache.presentation_products(visible_requests)
         if fallback is not None:
             return RenderRefinement.waiting(fallback)
         work_available = (
@@ -293,6 +340,97 @@ class RenderTileWorkCoordinator:
                 else RenderRefinement.unavailable()
             )
         return RenderRefinement.waiting(fallback)
+
+    def _schedule_prefetch(
+        self,
+        *,
+        source: RenderTileBatchSource,
+        source_to_panel: QTransform,
+        panel_rect: QRectF,
+        visible_requests: tuple[RenderTileRequest, ...],
+        overview_signature: tuple[RenderTileKey, ...],
+    ) -> None:
+        """Debounce speculative work until the viewport has stopped changing."""
+        identity = (source.source_kind, source.source_id)
+        self._cancel((*identity, _RefinementLane.PREFETCH))
+        self._deferred_prefetch[identity] = _DeferredPrefetch(
+            source,
+            source_to_panel,
+            panel_rect,
+            visible_requests,
+            overview_signature,
+        )
+        self._prefetch_timer.start()
+
+    def _start_deferred_prefetch(self) -> None:
+        """Submit latest guard requests after one navigation settle interval."""
+        pending = tuple(self._deferred_prefetch.values())
+        self._deferred_prefetch.clear()
+        if self._navigation_suspended:
+            return
+        for request in pending:
+            self._ensure_prefetch(
+                source=request.source,
+                source_to_panel=request.source_to_panel,
+                panel_rect=request.panel_rect,
+                visible_requests=request.visible_requests,
+                overview_signature=request.overview_signature,
+            )
+
+    def _ensure_prefetch(
+        self,
+        *,
+        source: RenderTileBatchSource,
+        source_to_panel: QTransform,
+        panel_rect: QRectF,
+        visible_requests: tuple[RenderTileRequest, ...],
+        overview_signature: tuple[RenderTileKey, ...],
+    ) -> None:
+        """Warm a bounded guard only after current viewport detail is complete."""
+        overview_bytes = estimated_request_bytes(
+            tuple(
+                request
+                for request in self._overview_requests_for(source)
+                if request.key in frozenset(overview_signature)
+            )
+        )
+        guarded = guarded_tile_requests(
+            source_kind=source.source_kind,
+            source_id=source.source_id,
+            revision_key=source.revision_key,
+            fallback_key=source.fallback_key,
+            bounds=source.bounds,
+            source_to_panel=source_to_panel,
+            panel_rect=panel_rect,
+            budget_bytes=max(0, self._cache.budget_bytes - overview_bytes),
+            visible_requests=visible_requests,
+        )
+        occupied = frozenset(
+            (*overview_signature, *(request.key for request in visible_requests))
+        )
+        prefetch_requests = tuple(
+            request
+            for request in unique_requests(guarded)
+            if request.key not in occupied
+        )
+        prefetch_signature = tuple(request.key for request in prefetch_requests)
+        if not prefetch_signature:
+            return
+        self._ensure_work(
+            lane=_RefinementLane.PREFETCH,
+            source=source,
+            requests=prefetch_requests,
+            required_signature=prefetch_signature,
+            retained_signature=tuple(
+                dict.fromkeys(
+                    (
+                        *overview_signature,
+                        *(request.key for request in visible_requests),
+                        *prefetch_signature,
+                    )
+                )
+            ),
+        )
 
     def _pending_covers(
         self,
@@ -376,19 +514,30 @@ class RenderTileWorkCoordinator:
             operation=f"render.refinement.{lane.value}",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,
-                urgency=ExecutionUrgency.FOREGROUND,
+                resource_id=f"render-{lane.value}",
+                urgency=(
+                    ExecutionUrgency.BACKGROUND
+                    if lane is _RefinementLane.PREFETCH
+                    else ExecutionUrgency.FOREGROUND
+                ),
+                maximum_concurrency=1,
                 estimated_retained_bytes=estimated_request_bytes(missing_requests),
             ),
             work=lambda context: _render_tiles(
                 source,
                 missing_requests,
                 context.cancellation,
+                chunk_size=(
+                    _PREFETCH_CHUNK_TILES
+                    if lane is _RefinementLane.PREFETCH
+                    else _REFINEMENT_CHUNK_TILES
+                ),
             ),
         )
         try:
             handle = self._execution_scope.submit(
                 request,
-                adopt=lambda products: self._finish(identity, products),
+                adopt=lambda products: self._finish(identity, pending, products),
             )
         except ExecutionRejected:
             if self._pending.get(identity) is pending:
@@ -399,7 +548,8 @@ class RenderTileWorkCoordinator:
                     source.source_kind,
                     source.source_id,
                 )
-            self._ready()
+            if pending.lane is not _RefinementLane.PREFETCH:
+                self._ready()
             return
         if self._pending.get(identity) is pending:
             pending.handle = handle
@@ -437,10 +587,14 @@ class RenderTileWorkCoordinator:
         if self._closed:
             return
         self._closed = True
-        self._continuity.shutdown()
+        try:
+            self._prefetch_timer.stop()
+        except RuntimeError:
+            pass
         for identity in tuple(self._pending):
             self._cancel(identity)
         self._deferred.clear()
+        self._deferred_prefetch.clear()
         self._overview_requests.clear()
         self._rejected.clear()
         self._execution_scope.close(reason="render_refinement_shutdown")
@@ -448,11 +602,12 @@ class RenderTileWorkCoordinator:
     def _finish(
         self,
         identity: tuple[str, uuid.UUID, _RefinementLane],
+        expected: _PendingTiles,
         products: tuple[RenderTileProduct, ...],
     ) -> None:
         """Publish only the exact latest complete request for a source."""
         pending = self._pending.get(identity)
-        if pending is None:
+        if pending is not expected:
             return
         self._pending.pop(identity, None)
         if (
@@ -463,19 +618,8 @@ class RenderTileWorkCoordinator:
                 products,
                 retain_keys=pending.retained_signature,
             )
-            source_identity = (
-                pending.source.source_kind,
-                pending.source.source_id,
-            )
-            visible_signature = self._continuity.visible_signature(source_identity)
-            if visible_signature is not None:
-                self._continuity.note_exact_available(
-                    source_identity,
-                    exact_available=all(
-                        self._cache.contains(key) for key in visible_signature
-                    ),
-                )
-            self._ready()
+            if pending.lane is not _RefinementLane.PREFETCH:
+                self._ready()
         if pending.lane is _RefinementLane.CONTINUITY:
             self._start_deferred_detail(
                 pending.source.source_kind,
@@ -507,7 +651,8 @@ class RenderTileWorkCoordinator:
                 pending.source.source_kind,
                 pending.source.source_id,
             )
-        self._ready()
+        if pending.lane is not _RefinementLane.PREFETCH:
+            self._ready()
 
     def _start_deferred_detail(
         self,
@@ -516,9 +661,10 @@ class RenderTileWorkCoordinator:
     ) -> None:
         """Submit the latest detail work after its continuity lane settles."""
         identity = (source_kind, source_id, _RefinementLane.DETAIL)
-        deferred = self._deferred.pop(identity, None)
-        if deferred is None or self._closed:
+        deferred = self._deferred.get(identity)
+        if deferred is None or self._closed or self._navigation_suspended:
             return
+        self._deferred.pop(identity, None)
         self._ensure_work(
             lane=_RefinementLane.DETAIL,
             source=deferred.source,
@@ -537,13 +683,3 @@ class RenderTileWorkCoordinator:
             return
         if pending.handle is not None:
             pending.handle.cancel(reason="render_refinement_superseded")
-
-
-def _same_products(
-    first: tuple[RenderTileProduct, ...],
-    second: tuple[RenderTileProduct, ...],
-) -> bool:
-    """Return whether two batches identify the same cached products."""
-    return tuple(product.key for product in first) == tuple(
-        product.key for product in second
-    )

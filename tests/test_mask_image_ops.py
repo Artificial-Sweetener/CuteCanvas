@@ -24,7 +24,6 @@ import numpy as np
 import pytest
 from cutecanvas.masks.image_ops import (
     adjust_connected_component,
-    outer_mask_border,
     resize_mask_nearest,
 )
 
@@ -48,29 +47,6 @@ def test_component_adjustment_matches_independent_reference(grow: bool) -> None:
             np.testing.assert_array_equal(actual, expected)
 
 
-def test_outer_border_matches_square_dilation_reference() -> None:
-    """Border pixels are the exact one-pixel exterior of a square dilation."""
-    random = np.random.default_rng(42)
-    for shape in ((1, 1), (2, 7), (19, 23)):
-        mask = np.where(random.random(shape) > 0.7, 255, 0).astype(np.uint8)
-        padded = np.pad(mask, 1)
-        dilated = np.zeros_like(mask)
-        for y_offset in range(3):
-            for x_offset in range(3):
-                np.maximum(
-                    dilated,
-                    padded[
-                        y_offset : y_offset + shape[0],
-                        x_offset : x_offset + shape[1],
-                    ],
-                    out=dilated,
-                )
-        np.testing.assert_array_equal(
-            outer_mask_border(mask),
-            dilated - mask,
-        )
-
-
 def test_nearest_resize_uses_legacy_floor_sampling() -> None:
     """Every destination coordinate samples floor(index * source / target)."""
     source = np.arange(5 * 7, dtype=np.uint8).reshape(5, 7)
@@ -87,7 +63,6 @@ def test_4k_mask_operations_stay_within_background_work_bound() -> None:
     mask[512:3584, 512:3584] = 255
 
     operations = (
-        ("border", lambda: outer_mask_border(mask)),
         ("resize", lambda: resize_mask_nearest(mask, (2048, 2048))),
         (
             "grow",

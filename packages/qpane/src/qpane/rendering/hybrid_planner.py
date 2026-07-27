@@ -17,7 +17,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize
+import uuid
+from dataclasses import dataclass
+
+from PySide6.QtCore import QSize
 
 from ..hybrid.tile_source import HybridRenderTileSource
 from ..scene.model import LayerDescriptor
@@ -25,9 +28,21 @@ from ..scene.render_plan import SampledLayerRenderItem, SampledTileRenderData
 from .compiled_scene import CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
+from .raster_sampling import (
+    raster_sample_scale_limit,
+    smooth_raster_sampling_enabled,
+)
 from .render_tile_types import RenderTileBatchSource
 from .render_tiles import RenderTileWorkCoordinator
 from .sdk import HybridSource
+
+
+@dataclass(frozen=True, slots=True)
+class SampledFramePlan:
+    """Carry sampled items plus layers awaiting their first complete product."""
+
+    items: tuple[SampledLayerRenderItem, ...]
+    pending_layer_ids: frozenset[uuid.UUID] = frozenset()
 
 
 class HybridRenderPlanner:
@@ -47,9 +62,10 @@ class HybridRenderPlanner:
         self,
         compiled: CompiledRenderScene,
         frame: RenderFrameGeometry,
-    ) -> tuple[SampledLayerRenderItem, ...]:
+    ) -> SampledFramePlan:
         """Return sampled primitives for every compiled hybrid layer."""
         items: list[SampledLayerRenderItem] = []
+        pending_layer_ids: set[uuid.UUID] = set()
         for compiled_layer in compiled.hybrid_layers:
             layer = compiled_layer.descriptor
             snapshot = compiled_layer.snapshot
@@ -63,6 +79,12 @@ class HybridRenderPlanner:
                 source_size=source_size,
                 frame=frame,
             )
+            render_hint_enabled = smooth_raster_sampling_enabled(
+                layer_to_panel,
+                frame.device_pixel_ratio,
+            )
+            if not document.primitives:
+                continue
             refinement = self._refinement.request(
                 source=HybridRenderTileSource(
                     document,
@@ -70,10 +92,16 @@ class HybridRenderPlanner:
                     snapshot.presentation_revision,
                 ),
                 source_to_panel=layer_to_panel,
-                panel_rect=QRectF(frame.qpane_rect),
-                device_pixel_ratio=_device_pixel_ratio(frame),
+                panel_rect=frame.sampling_panel_rect,
+                device_pixel_ratio=frame.device_pixel_ratio,
+                maximum_scale=raster_sample_scale_limit(
+                    layer_to_panel,
+                    frame.device_pixel_ratio,
+                ),
             )
             products = refinement.products
+            if refinement.pending:
+                pending_layer_ids.add(layer.layer_id)
             if products is None:
                 continue
             items.append(
@@ -83,6 +111,7 @@ class HybridRenderPlanner:
                     placement=layer.placement,
                     clip=layer.clip,
                     source_size=source_size,
+                    render_hint_enabled=render_hint_enabled,
                     tiles=tuple(
                         SampledTileRenderData(
                             product.image,
@@ -97,12 +126,14 @@ class HybridRenderPlanner:
             source = compiled_layer.snapshot
             if not isinstance(source, RenderTileBatchSource):
                 continue
-            item = self._sampled_item(
+            item, pending = self._sampled_item(
                 compiled, frame, compiled_layer.descriptor, source
             )
+            if pending:
+                pending_layer_ids.add(compiled_layer.descriptor.layer_id)
             if item is not None:
                 items.append(item)
-        return tuple(items)
+        return SampledFramePlan(tuple(items), frozenset(pending_layer_ids))
 
     def _sampled_item(
         self,
@@ -110,7 +141,7 @@ class HybridRenderPlanner:
         frame: RenderFrameGeometry,
         layer: LayerDescriptor,
         source: RenderTileBatchSource,
-    ) -> SampledLayerRenderItem | None:
+    ) -> tuple[SampledLayerRenderItem | None, bool]:
         """Plan one generic sampled source through the shared tile coordinator."""
         source_size = QSize(source.bounds.width, source.bounds.height)
         layer_to_panel = self._projector.layer_to_panel(
@@ -119,35 +150,39 @@ class HybridRenderPlanner:
             source_size=source_size,
             frame=frame,
         )
+        render_hint_enabled = smooth_raster_sampling_enabled(
+            layer_to_panel,
+            frame.device_pixel_ratio,
+        )
         refinement = self._refinement.request(
             source=source,
             source_to_panel=layer_to_panel,
-            panel_rect=QRectF(frame.qpane_rect),
-            device_pixel_ratio=_device_pixel_ratio(frame),
-        )
-        if refinement.products is None and not refinement.pending:
-            return None
-        products = refinement.products or ()
-        return SampledLayerRenderItem(
-            descriptor=layer,
-            transform=layer_to_panel,
-            placement=layer.placement,
-            clip=layer.clip,
-            source_size=source_size,
-            tiles=tuple(
-                SampledTileRenderData(
-                    product.image,
-                    product.source_rect,
-                    product.image_source_rect,
-                )
-                for product in products
+            panel_rect=frame.sampling_panel_rect,
+            device_pixel_ratio=frame.device_pixel_ratio,
+            maximum_scale=raster_sample_scale_limit(
+                layer_to_panel,
+                frame.device_pixel_ratio,
             ),
         )
-
-
-def _device_pixel_ratio(frame: RenderFrameGeometry) -> float:
-    """Derive physical/logical scale from detached frame geometry."""
-    logical_width = frame.qpane_rect.width()
-    if logical_width <= 0:
-        return 1.0
-    return max(0.01, frame.physical_viewport_rect.width() / logical_width)
+        if refinement.products is None:
+            return None, refinement.pending
+        products = refinement.products or ()
+        return (
+            SampledLayerRenderItem(
+                descriptor=layer,
+                transform=layer_to_panel,
+                placement=layer.placement,
+                clip=layer.clip,
+                source_size=source_size,
+                render_hint_enabled=render_hint_enabled,
+                tiles=tuple(
+                    SampledTileRenderData(
+                        product.image,
+                        product.source_rect,
+                        product.image_source_rect,
+                    )
+                    for product in products
+                ),
+            ),
+            refinement.pending,
+        )

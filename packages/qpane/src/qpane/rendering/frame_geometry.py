@@ -36,6 +36,7 @@ class RenderFrameGeometry:
     native_zoom: float
     current_pan: QPointF
     qpane_rect: QRect
+    sampling_panel_rect: QRectF
     physical_viewport_rect: QRectF
     visible_scene_rect: QRectF
     debug_draw_tile_grid: bool
@@ -48,10 +49,23 @@ class RenderFrameGeometry:
         object.__setattr__(self, "qpane_rect", QRect(self.qpane_rect))
         object.__setattr__(
             self,
+            "sampling_panel_rect",
+            QRectF(self.sampling_panel_rect),
+        )
+        object.__setattr__(
+            self,
             "physical_viewport_rect",
             QRectF(self.physical_viewport_rect),
         )
         object.__setattr__(self, "visible_scene_rect", QRectF(self.visible_scene_rect))
+
+    @property
+    def device_pixel_ratio(self) -> float:
+        """Return physical pixels per logical panel pixel for this frame."""
+        logical_width = self.qpane_rect.width()
+        if logical_width <= 0:
+            return 1.0
+        return max(0.01, self.physical_viewport_rect.width() / logical_width)
 
 
 def visible_scene_rect(

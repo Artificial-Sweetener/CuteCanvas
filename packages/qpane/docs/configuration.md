@@ -63,6 +63,30 @@ config = Config().configure(user_preferences)
 That strictness is deliberate. A misspelled performance setting should not
 quietly fall back to a different runtime policy.
 
+## Raster Tile Sizing
+
+`TileSizeSetting` is the public configuration type for this choice: use
+`"auto"` for adaptive sizing or a positive integer for a strict host grid.
+
+The default `tile_size="auto"` follows the physical viewport rather than its
+logical Qt size. QPane selects from 512, 1024, 2048, and 4096 source pixels.
+Above physical 4K it reduces the target viewport tile count to amortize
+software-rendering overhead. Bucket changes are debounced and use hysteresis;
+when a stable change is accepted, QPane cancels incompatible work, retires the
+old tile cache, and replans one complete frame.
+
+Hosts that require a fixed grid can provide any positive integer. The value is
+strict and does not adapt:
+
+```python
+fixed_grid = Config(tile_size=1536, tile_overlap=12)
+viewer = QPane(config=fixed_grid)
+```
+
+Automatic sizing may choose a smaller bucket when the tile cache could not
+retain a useful working set. Explicit integer settings remain exact even under
+a small cache budget.
+
 ## Managing Memory
 
 QPane counts retained raster products and coordinates them through one byte
@@ -231,6 +255,25 @@ The public backend seam is documented in
 [Advanced Renderer Integration](integration-sdk.md). Tune capacity only after
 profiling. Synchronous decode or raster work in an interaction handler is an
 ownership bug, not a reason to add threads.
+
+Components that own thread-affine native resources can reserve finalization
+work independently of a shorter document or widget lifetime:
+
+```python
+cleanup = document_scope.open_finalization_scope(
+    owner_id="document:native-cleanup"
+)
+document_scope.close(reason="document_closed")
+handle = cleanup.submit(cleanup_request)
+handle.add_done_callback(
+    lambda _outcome: cleanup.close(reason="cleanup_complete")
+)
+```
+
+The finalization scope remains bounded by the shared runtime. Temporary backend
+saturation retains its cleanup request until accepted work releases capacity.
+The component that opens it closes it after cleanup settles; host shutdown
+remains the final lifetime boundary.
 
 ## Diagnostics and Discovery
 

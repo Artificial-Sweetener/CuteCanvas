@@ -130,7 +130,6 @@ class CuteCanvasState:
         )
         self._compose_settings_view()
         self._missing_view_logged = False
-        self._missing_presenter_logged = False
         self._headroom = HeadroomMonitor(
             owner=qpane,
             execution_scope=execution_scope,
@@ -423,49 +422,24 @@ class CuteCanvasState:
             return cache_settings
         return CacheSettings()
 
-    def _resolve_view_collaborators(
-        self,
-    ) -> tuple[object | None, object | None, object | None, object | None]:
-        """Return view, presenter, viewport, and tile manager via the facade."""
+    def _resolve_view(self) -> object | None:
+        """Return the QPane rendering view through the editor facade."""
         try:
-            view = self._qpane.view()
+            return self._qpane.view()
         except AttributeError:
             if not self._missing_view_logged:
                 logger.warning(
                     "Skipping settings application because the view is unavailable"
                 )
                 self._missing_view_logged = True
-            return None, None, None, None
-        try:
-            presenter = self._qpane.presenter()
-        except AttributeError:
-            presenter = None
-        if presenter is None and not self._missing_presenter_logged:
-            logger.warning(
-                "Skipping settings application because the presenter is unavailable"
-            )
-            self._missing_presenter_logged = True
-        viewport = (
-            getattr(presenter, "viewport", None) if presenter is not None else None
-        )
-        tile_manager = (
-            getattr(presenter, "tile_manager", None) if presenter is not None else None
-        )
-        return view, presenter, viewport, tile_manager
+            return None
 
     def _apply_settings_to_components(self, old_settings: FeatureAwareConfig) -> None:
         """Push updated settings to collaborators and refresh default brush size when used."""
         qpane = self._qpane
-        (
-            _view,
-            _presenter,
-            viewport,
-            tile_manager,
-        ) = self._resolve_view_collaborators()
-        if viewport is not None:
-            viewport.applyConfig(self.settings)
-        if tile_manager is not None:
-            tile_manager.apply_config(self.settings)
+        view = self._resolve_view()
+        if view is not None:
+            view.apply_config(self.settings)
         masks = qpane._masks_controller
         masks.apply_config(self.settings)
         if qpane.interaction.brush_size == old_settings.default_brush_size:

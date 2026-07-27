@@ -305,6 +305,7 @@ def test_vector_effect_remains_stable_when_refined_tiles_replace_picture() -> No
         placement=raster_item.placement,
         clip=None,
         source_size=QSize(20, 20),
+        render_hint_enabled=True,
     )
     effect = LayerPresentationEffect(
         plan.scene_id,
@@ -355,6 +356,7 @@ def test_sampled_source_effect_uses_the_resolved_tile_alpha() -> None:
         placement=raster_item.placement,
         clip=None,
         source_size=QSize(20, 20),
+        render_hint_enabled=True,
         tiles=(
             SampledTileRenderData(
                 sample,

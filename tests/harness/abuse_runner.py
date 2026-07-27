@@ -322,6 +322,8 @@ class MaskAbuseRunner:
 
     def _run_idle(self, action: IdleAction) -> None:
         """Require a settled widget composition to remain pixel-identical."""
+        if not self._harness.wait_for_render_refinement_idle():
+            self._fail("idle", "Renderer did not settle before the idle baseline")
         before = self._harness.capture()
         self._harness.drain_events(wait_ms=action.wait_ms)
         after = self._harness.capture()

@@ -116,6 +116,19 @@ def test_set_zoom_and_pan_commits_one_atomic_view_change():
     assert snapshots == [(2.0, QPointF(75, -50))]
 
 
+def test_pan_commit_removes_arithmetic_residue() -> None:
+    """Equivalent pan calculations should resolve to one render coordinate."""
+    viewport, _ = _make_viewport(
+        dpr=1.0,
+        content_size=(1200, 1200),
+        zoom=2.0,
+    )
+
+    viewport.setPan(QPointF(2.7291666666667425, -2.0e-13))
+
+    assert viewport.pan == QPointF(2.729166667, 0.0)
+
+
 def test_noop_direct_manipulation_preserves_semantic_zoom_mode() -> None:
     """A stationary touch update must not turn Fit into Custom mode."""
     viewport, _ = _make_viewport(

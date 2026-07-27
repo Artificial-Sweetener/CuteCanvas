@@ -67,6 +67,7 @@ class Viewport(QObject):
     _SMOOTH_ZOOM_FAST_THRESHOLD_MS = 40.0
     _SMOOTH_ZOOM_SLOW_THRESHOLD_MS = 160.0
     _PAN_EPSILON_PX = 1e-6
+    _PAN_PRECISION_DECIMALS = 9
     _MAX_ZOOM = 10.0
 
     def __init__(self, qpane: QWidget, config: Config):
@@ -560,7 +561,9 @@ class Viewport(QObject):
     ) -> bool:
         """Commit one changed view state and optionally assign its semantic mode."""
         panel_size = self._physical_viewport_size()
-        clamped_pan = self.clampPan(pan, zoom, panel_size, self.content_size)
+        clamped_pan = self.canonical_pan(
+            self.clampPan(pan, zoom, panel_size, self.content_size)
+        )
         if self.zoom == zoom and self.pan == clamped_pan:
             return False
         if zoom_mode is not None:
@@ -570,6 +573,14 @@ class Viewport(QObject):
         self.viewChanged.emit()
         self._mark_diagnostics_dirty()
         return True
+
+    @classmethod
+    def canonical_pan(cls, pan: QPointF) -> QPointF:
+        """Remove sub-pixel arithmetic residue from authoritative pan state."""
+        return QPointF(
+            round(pan.x(), cls._PAN_PRECISION_DECIMALS),
+            round(pan.y(), cls._PAN_PRECISION_DECIMALS),
+        )
 
     def _apply_inertial_pan(self, pan: QPointF) -> None:
         """Apply one kinetic pan frame without restarting motion ownership."""

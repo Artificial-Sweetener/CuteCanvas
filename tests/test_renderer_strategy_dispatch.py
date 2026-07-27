@@ -86,7 +86,7 @@ def test_redraw_base_image_buffer_respects_strategy(
     monkeypatch.setattr(
         renderer._items,
         "_draw_tiled_view",
-        lambda painter, plan, item: tile_calls.append((plan, item)),
+        lambda painter, plan, item, **_kwargs: tile_calls.append((plan, item)),
     )
     renderer._redraw_base_image_buffer(dirty_region, plan)
     assert len(direct_calls) == expected_direct_calls

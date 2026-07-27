@@ -31,7 +31,7 @@ from qpane import (
     ViewerCatalogEntry,
 )
 
-from tests.harness.timing import interaction_clock
+from tests.harness.timing import INTERACTIVE_PERFORMANCE, interaction_clock
 
 
 def _image(width: int, height: int, color: QColor) -> QImage:
@@ -293,6 +293,7 @@ def test_comparison_divider_drag_is_qpane_owned_and_preserves_view(qapp) -> None
     pane.deleteLater()
 
 
+@INTERACTIVE_PERFORMANCE
 def test_catalog_comparison_abuse_stays_synchronous_and_coherent(qapp) -> None:
     """Rapid selection, split, orientation, and removal never leave stale scenes."""
     pane, entries = _mounted_catalog(qapp)

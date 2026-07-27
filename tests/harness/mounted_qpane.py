@@ -27,7 +27,7 @@ from pathlib import Path
 from types import MethodType, TracebackType
 
 from cutecanvas import CuteCanvas
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
@@ -52,6 +52,7 @@ class PresentedMaskFrame:
     overscan_margin: int
     mask_layer_count: int
     mask_sample_scales: tuple[float, ...]
+    mask_item_states: tuple[tuple[str, int, int, int, int, int], ...]
 
     def color_at(self, point: QPoint) -> QColor:
         """Return the backing-buffer color presented at a widget point."""
@@ -64,11 +65,32 @@ class PresentedMaskFrame:
 class PresentedFrameProbe:
     """Record every backing frame rendered while the probe is active."""
 
-    def __init__(self, harness: MountedQPaneHarness) -> None:
-        """Bind the mounted pane without changing its rendering policy."""
-        self._renderer = harness.viewer.view().presenter.renderer
+    def __init__(self, viewer: CuteCanvas) -> None:
+        """Bind a mounted canvas without changing its rendering policy."""
+        self._renderer = viewer.view().presenter.renderer
         self._original_paint: Callable[[SceneRenderPlan], None] | None = None
         self.frames: list[PresentedMaskFrame] = []
+
+    @staticmethod
+    def _mask_item_state(item: object) -> tuple[str, int, int, int, int, int]:
+        """Return compact raster-product diagnostics for one mask render item."""
+        source_image = getattr(item, "source_image", QImage())
+        center_alpha = (
+            0
+            if source_image.isNull()
+            else source_image.pixelColor(
+                source_image.width() // 2,
+                source_image.height() // 2,
+            ).alpha()
+        )
+        return (
+            type(item).__name__,
+            len(getattr(item, "tiles", ())),
+            len(getattr(item, "tiles_to_draw", ())),
+            source_image.width(),
+            source_image.height(),
+            center_alpha,
+        )
 
     def __enter__(self) -> Self:
         """Begin recording frames after normal renderer painting completes."""
@@ -94,12 +116,18 @@ class PresentedFrameProbe:
                 for tile in getattr(item, "tiles", ())
                 if tile.source_rect.width() > 0.0
             )
+            mask_item_states = tuple(
+                self._mask_item_state(item)
+                for item in plan.render_items
+                if item.descriptor.kind is LayerKind.MASK
+            )
             self.frames.append(
                 PresentedMaskFrame(
                     image=buffer.copy(),
-                    overscan_margin=self._renderer._BUFFER_OVERSCAN_PHYSICAL_PX,
+                    overscan_margin=self._renderer.buffer_overscan_physical_px,
                     mask_layer_count=mask_layer_count,
                     mask_sample_scales=mask_sample_scales,
+                    mask_item_states=mask_item_states,
                 )
             )
 
@@ -117,6 +145,82 @@ class PresentedFrameProbe:
         if self._original_paint is not None:
             self._renderer.paint = self._original_paint
             self._original_paint = None
+
+
+class RendererPaintDurationProbe:
+    """Record synchronous renderer work without copying presented frames."""
+
+    def __init__(self, viewer: CuteCanvas) -> None:
+        """Bind one mounted canvas renderer."""
+        self._renderer = viewer.view().presenter.renderer
+        self._original_paint: Callable[[SceneRenderPlan], None] | None = None
+        self.durations_ms: list[float] = []
+
+    def __enter__(self) -> Self:
+        """Begin timing every production renderer invocation."""
+        original_paint = self._renderer.paint
+        self._original_paint = original_paint
+
+        def timed_paint(_renderer: object, plan: SceneRenderPlan) -> None:
+            """Delegate one render and retain its synchronous duration."""
+            started = time.perf_counter()
+            original_paint(plan)
+            self.durations_ms.append((time.perf_counter() - started) * 1000.0)
+
+        self._renderer.paint = MethodType(timed_paint, self._renderer)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Restore the production renderer method."""
+        del exc_type, exc_value, traceback
+        if self._original_paint is not None:
+            self._renderer.paint = self._original_paint
+            self._original_paint = None
+
+
+class NavigationTransformDurationProbe:
+    """Record synchronous composited-buffer transforms during zoom."""
+
+    def __init__(self, viewer: CuteCanvas) -> None:
+        """Bind one mounted canvas renderer."""
+        self._renderer = viewer.view().presenter.renderer
+        self._original_transform: Callable[[SceneRenderPlan], bool] | None = None
+        self.durations_ms: list[float] = []
+
+    def __enter__(self) -> Self:
+        """Begin timing every production zoom-buffer transform."""
+        original_transform = self._renderer.tryTransformBuffers
+        self._original_transform = original_transform
+
+        def timed_transform(_renderer: object, plan: SceneRenderPlan) -> bool:
+            """Delegate one transform and retain its synchronous duration."""
+            started = time.perf_counter()
+            result = original_transform(plan)
+            self.durations_ms.append((time.perf_counter() - started) * 1000.0)
+            return result
+
+        self._renderer.tryTransformBuffers = MethodType(
+            timed_transform,
+            self._renderer,
+        )
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Restore the production transform method."""
+        del exc_type, exc_value, traceback
+        if self._original_transform is not None:
+            self._renderer.tryTransformBuffers = self._original_transform
+            self._original_transform = None
 
 
 class MountedQPaneHarness:
@@ -184,6 +288,7 @@ class MountedQPaneHarness:
         self.host.close()
         self.viewer.deleteLater()
         self.host.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.qapp.processEvents()
 
     def activate_mask(self, index: int) -> uuid.UUID:
@@ -208,7 +313,17 @@ class MountedQPaneHarness:
 
     def observe_presented_frames(self) -> PresentedFrameProbe:
         """Return a scoped probe for every renderer frame during an operation."""
-        return PresentedFrameProbe(self)
+        return PresentedFrameProbe(self.viewer)
+
+    def observe_renderer_paint_durations(self) -> RendererPaintDurationProbe:
+        """Return a scoped probe for synchronous frame-render durations."""
+        return RendererPaintDurationProbe(self.viewer)
+
+    def observe_navigation_transform_durations(
+        self,
+    ) -> NavigationTransformDurationProbe:
+        """Return a scoped probe for synchronous zoom-preview transforms."""
+        return NavigationTransformDurationProbe(self.viewer)
 
     def capture_active_mask_render(self) -> QImage:
         """Return the cached mask render nearest the pane's displayed scale."""
@@ -260,13 +375,25 @@ class MountedQPaneHarness:
         self,
         *,
         timeout_ms: int = 3000,
+        include_prefetch: bool = False,
     ) -> bool:
-        """Wait until QPane has no queued vector or hybrid tile refinement."""
+        """Wait through a continuous sampled-render refinement quiescence."""
         deadline = time.perf_counter() + timeout_ms / 1000.0
+        idle_since: float | None = None
         while time.perf_counter() < deadline:
             self.qapp.processEvents()
-            coordinator = self.viewer.view().presenter._render_refinement
-            if coordinator.pending_count == 0:
+            presenter = self.viewer.view().presenter
+            coordinator = presenter._render_refinement
+            idle = (
+                coordinator.pending_count == 0
+                and not presenter.navigation_refinement_pending
+                and (not include_prefetch or not coordinator.prefetch_pending)
+            )
+            now = time.perf_counter()
+            idle_since = now if idle and idle_since is None else idle_since
+            if not idle:
+                idle_since = None
+            if idle_since is not None and now - idle_since >= 0.025:
                 self.qapp.processEvents()
                 return True
             QTest.qWait(1)

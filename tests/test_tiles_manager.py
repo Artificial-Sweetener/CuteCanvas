@@ -22,8 +22,11 @@ import time
 import uuid
 from dataclasses import replace
 
+import pytest
 from PySide6.QtGui import QImage, Qt
 from qpane.rendering import TileManager
+from qpane.rendering.raster_tile_grid import RasterTileGrid
+from qpane.rendering.tiles import Tile
 
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.execution_backend import ControlledExecution
@@ -41,6 +44,7 @@ def _manager(execution: ControlledExecution) -> TileManager:
     """Return a tile manager bound to controlled public execution."""
     return TileManager(
         config=fixed_cache_config(),
+        grid=RasterTileGrid(64, 0),
         execution_scope=execution.scope,
     )
 
@@ -101,6 +105,46 @@ def test_clear_caches_cancels_pending_tile_and_prevents_adoption(qapp) -> None:
     assert not execution.pending_jobs()
     assert execution.cancelled
     assert not manager._tile_cache
+
+
+def test_grid_replacement_cancels_work_and_invalidates_cached_tiles(qapp) -> None:
+    """A grid transition should retire every product and reject old-grid keys."""
+    execution = ControlledExecution()
+    manager = _manager(execution)
+    old_key = make_tile_key()
+    manager.add_tile(Tile(old_key, _image().copy(0, 0, 64, 64)))
+    manager.get_tile(replace(old_key, row=1), _image())
+
+    assert manager.cache_usage_bytes > 0
+    assert execution.pending_jobs()
+
+    assert manager.replace_grid(RasterTileGrid(128, 8))
+    qapp.processEvents()
+
+    assert manager.grid == RasterTileGrid(128, 8)
+    assert manager.cache_usage_bytes == 0
+    assert not manager._tile_cache
+    assert not execution.pending_jobs()
+    assert execution.cancelled
+    with pytest.raises(ValueError, match="does not match"):
+        manager.get_tile(old_key, _image())
+
+
+def test_retired_grid_result_cannot_publish_after_transition(qapp) -> None:
+    """Late executor adoption should not cache or signal a retired tile grid."""
+    execution = ControlledExecution()
+    manager = _manager(execution)
+    old_key = make_tile_key()
+    ready: list[object] = []
+    manager.tileReady.connect(ready.append)
+
+    manager.replace_grid(RasterTileGrid(128, 8))
+    manager._on_tile_generated(Tile(old_key, _image().copy(0, 0, 64, 64)))
+    qapp.processEvents()
+
+    assert manager.cache_usage_bytes == 0
+    assert not manager._tile_cache
+    assert ready == []
 
 
 def test_prefetch_uses_opportunistic_operation_and_metrics(qapp) -> None:

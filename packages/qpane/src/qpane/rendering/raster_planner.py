@@ -50,6 +50,11 @@ from .compiled_scene import CompiledRenderLayer, CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
 from .raster_products import RasterRenderProductStore
+from .raster_sampling import (
+    smooth_raster_sampling_enabled,
+    smooth_raster_sampling_for_physical_scale,
+)
+from .render_tile_geometry import scale_bucket
 from .scene_compiler import SceneRenderCompiler
 from .tiles import TileManager
 from .viewport import Viewport
@@ -146,11 +151,14 @@ class RasterRenderPlanner:
         self,
         compiled: CompiledRenderScene,
         frame: RenderFrameGeometry,
+        *,
+        layers: tuple[CompiledRenderLayer, ...] | None = None,
     ) -> tuple[RasterLayerRenderItem, ...]:
         """Build ordered raster primitives for one viewport frame."""
+        planned_layers = compiled.layers if layers is None else layers
         results = tuple(
             result
-            for layer in compiled.layers
+            for layer in planned_layers
             for result in self._build_layer_items(
                 compiled=compiled,
                 layer=layer,
@@ -226,7 +234,7 @@ class RasterRenderPlanner:
         geometries: list[RasterLayerGeometry] = []
         for candidate, patch in candidates:
             source_product = (
-                self._source_image(candidate, frame)
+                self._source_image(compiled, candidate, frame)
                 if patch is None
                 else self._patch_product(candidate, patch, frame)
             )
@@ -257,7 +265,7 @@ class RasterRenderPlanner:
         qpane_rect: QRectF,
     ) -> RasterLayerGeometry | None:
         """Resolve one compiled raster layer's visible panel geometry."""
-        source_product = self._source_image(layer, frame)
+        source_product = self._source_image(compiled, layer, frame)
         if source_product is None:
             return None
         return self._layer_geometry_for_product(
@@ -321,7 +329,7 @@ class RasterRenderPlanner:
         frame: RenderFrameGeometry,
     ) -> _RasterPlanningResult | None:
         """Build one raster primitive and its requested tile identities."""
-        source_product = self._source_image(layer, frame)
+        source_product = self._source_image(compiled, layer, frame)
         if source_product is None:
             return None
         return self._build_product_item(
@@ -390,10 +398,13 @@ class RasterRenderPlanner:
             transform=transform,
             strategy=strategy,
         )
+        device_pixel_ratio = frame.device_pixel_ratio
         render_hint_enabled = (
-            frame.zoom < frame.native_zoom * 2.0
+            smooth_raster_sampling_for_physical_scale(
+                frame.zoom / max(frame.native_zoom, 1e-9)
+            )
             if layer.is_base_raster
-            else self._should_smooth(source_image.size(), transform)
+            else smooth_raster_sampling_enabled(transform, device_pixel_ratio)
         )
         descriptor_bounds = layer.descriptor.raster_bounds
         source_clip_rect = None
@@ -532,20 +543,23 @@ class RasterRenderPlanner:
 
     def _source_image(
         self,
+        compiled: CompiledRenderScene,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
     ) -> _RasterSourceProduct | None:
         """Resolve the best-fit image and its scale from authoritative pixels."""
         source = layer.descriptor.source
+        layer_to_panel = self._projector.layer_to_panel(
+            scene=compiled.scene,
+            layer=layer.descriptor,
+            source_size=layer.source_size,
+            frame=frame,
+        )
         requested_scale = min(
             1.0,
-            max(
-                1e-6,
-                layer.descriptor.placement.width
-                * frame.zoom
-                / max(1, layer.source_size.width()),
-            ),
+            scale_bucket(layer_to_panel, frame.device_pixel_ratio),
         )
+        target_width = layer.source_size.width() * requested_scale
         policy = self._raster_sources.product_policy(source)
         if policy is RasterProductPolicy.VOLATILE:
             sampled_image = self._raster_sources.source_image(
@@ -559,7 +573,7 @@ class RasterRenderPlanner:
             sampled_image = self._products.sampled_image(
                 asset_key=layer.pyramid_asset_key,
                 source_width=layer.source_size.width(),
-                target_width=(layer.descriptor.placement.width * frame.zoom),
+                target_width=target_width,
                 producer=lambda scale: self._raster_sources.source_image(
                     source,
                     scale=scale,
@@ -571,7 +585,7 @@ class RasterRenderPlanner:
         source_image = self._products.best_fit_image(
             asset_key=layer.pyramid_asset_key,
             full_image=full_image,
-            target_width=layer.descriptor.placement.width * frame.zoom,
+            target_width=target_width,
         )
         pyramid_scale = (
             source_image.width() / layer.source_size.width()
@@ -663,8 +677,9 @@ class RasterRenderPlanner:
         """Return tile payloads and visible identities for one raster layer."""
         if strategy == RenderStrategy.DIRECT:
             return _TilePlan((), frozenset(), 0, 0, None)
-        max_cols, max_rows = self._tile_manager.calculate_grid_dimensions(
-            source_image.width(), source_image.height()
+        max_cols, max_rows = self._tile_manager.grid.dimensions_for(
+            source_image.width(),
+            source_image.height(),
         )
         visible_source_rect = self._visible_source_rect(
             compiled=compiled,
@@ -690,6 +705,8 @@ class RasterRenderPlanner:
                     asset_key=layer.asset_key,
                     pyramid_asset_key=layer.pyramid_asset_key,
                     pyramid_scale=pyramid_scale,
+                    tile_size=frame.tile_size,
+                    tile_overlap=frame.tile_overlap,
                     row=row,
                     col=col,
                 )
@@ -797,17 +814,3 @@ class RasterRenderPlanner:
         if start_col > end_col or start_row > end_row:
             return 0, -1, 0, -1
         return start_row, end_row, start_col, end_col
-
-    @staticmethod
-    def _should_smooth(source_size: QSize, transform: QTransform) -> bool:
-        """Return whether raster scaling should use filtered interpolation."""
-        source_width = float(source_size.width())
-        source_height = float(source_size.height())
-        if source_width <= 0.0 or source_height <= 0.0:
-            return False
-        panel_rect = transform.mapRect(QRectF(0.0, 0.0, source_width, source_height))
-        if panel_rect.isEmpty():
-            return False
-        scale_x = abs(panel_rect.width() / source_width)
-        scale_y = abs(panel_rect.height() / source_height)
-        return max(scale_x, scale_y) < 2.0

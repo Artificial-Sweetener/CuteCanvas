@@ -153,6 +153,7 @@ class VectorLayerRenderItem:
     placement: LayerPlacement
     clip: LayerClip | None
     source_size: QSize
+    render_hint_enabled: bool
     effect_clip_path: QPainterPath | None = None
     preview_picture: QPicture | None = None
     trailing_picture: QPicture | None = None
@@ -189,6 +190,7 @@ class SampledLayerRenderItem:
     placement: LayerPlacement
     clip: LayerClip | None
     source_size: QSize
+    render_hint_enabled: bool
     tiles: tuple[SampledTileRenderData, ...]
     effect_clip_path: QPainterPath | None = None
 
@@ -251,8 +253,26 @@ class TransientRasterResolvedContribution:
         object.__setattr__(self, "source_image", QImage(self.source_image))
 
 
+@dataclass(frozen=True, slots=True)
+class TransientSampledResolvedContribution:
+    """Carry one settled edit through the sampled source's exact tile geometry."""
+
+    session_id: uuid.UUID
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    source_asset_key: SceneLayerAssetKey
+    source_bounds: RasterBounds
+    tiles: tuple[SampledTileRenderData, ...]
+
+    def __post_init__(self) -> None:
+        """Detach the immutable sampled tile batch."""
+        object.__setattr__(self, "tiles", tuple(self.tiles))
+
+
 TransientRasterContribution: TypeAlias = (
-    TransientRasterTransformContribution | TransientRasterResolvedContribution
+    TransientRasterTransformContribution
+    | TransientRasterResolvedContribution
+    | TransientSampledResolvedContribution
 )
 
 

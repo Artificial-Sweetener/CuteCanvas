@@ -35,6 +35,8 @@ from qpane.sdk.scene import (
 )
 
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat
+from cutecanvas.scene.pixel_transitions import RasterPixelTransition
+from cutecanvas.scene.source_capabilities import PixelSampleGeometry
 
 from ..resources import ProjectResourceReference
 from .assets import EditableRasterAssetStore
@@ -175,6 +177,17 @@ class EditableRasterSourceCapabilities:
             if target_size is None
             else numpy_to_qimage_argb32_at_size(pixels, target_size)
         )
+
+    def present_transition_samples(
+        self,
+        source: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+    ) -> tuple[QImage, ...] | None:
+        """Defer exact virtual sampling until editable rasters require it."""
+        del source, pixel_format, transition, samples
+        return None
 
     def _asset(self, source: LayerSourceReference):
         """Resolve an editable asset from a typed layer source."""

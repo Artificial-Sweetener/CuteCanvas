@@ -26,6 +26,10 @@ from dataclasses import dataclass
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 
+from ..raster.image_conversion import (
+    qimage_to_numpy_const_view_argb32,
+    qimage_to_numpy_view_argb32,
+)
 from ..scene.presentation_effects import (
     LayerPresentationEffect,
     LayerPresentationEffectKind,
@@ -337,7 +341,21 @@ def _offset_effect(
         painter.setCompositionMode(
             QPainter.CompositionMode.CompositionMode_DestinationOut
         )
-        painter.drawImage(QPointF(), coverage)
+        painter.drawImage(QPointF(), _opaque_support(coverage))
     finally:
         painter.end()
     return result
+
+
+def _opaque_support(coverage: QImage) -> QImage:
+    """Return full alpha wherever rendered layer coverage is nonzero."""
+    coverage_pixels, coverage_backing = qimage_to_numpy_const_view_argb32(coverage)
+    support = QImage(
+        coverage_backing.size(),
+        QImage.Format.Format_ARGB32_Premultiplied,
+    )
+    support.setDevicePixelRatio(coverage_backing.devicePixelRatioF())
+    support.fill(Qt.GlobalColor.transparent)
+    support_pixels, support_backing = qimage_to_numpy_view_argb32(support)
+    support_pixels[coverage_pixels[..., 3] != 0] = 255
+    return support_backing

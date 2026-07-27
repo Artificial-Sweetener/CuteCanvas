@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from math import ceil
 from time import perf_counter, process_time, thread_time
 
 import pytest
@@ -74,3 +75,23 @@ def stable_latency_samples(
         for start in range(0, len(latencies_ms), batch_size)
         if (batch := latencies_ms[start : start + batch_size])
     )
+
+
+def tail_interaction_latency_ms(
+    latencies_ms: list[float],
+    *,
+    quantile: float = 0.9,
+    parallel_batch_size: int = 8,
+) -> float:
+    """Return one nearest-rank tail sample under the shared timing policy."""
+    if not latencies_ms:
+        raise ValueError("latencies_ms must not be empty")
+    if not 0.0 < quantile <= 1.0:
+        raise ValueError("quantile must be in the interval (0, 1]")
+    samples = sorted(
+        stable_latency_samples(
+            latencies_ms,
+            parallel_batch_size=parallel_batch_size,
+        )
+    )
+    return samples[min(len(samples) - 1, ceil(quantile * len(samples)) - 1)]

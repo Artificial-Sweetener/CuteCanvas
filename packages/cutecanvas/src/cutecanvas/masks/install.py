@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from ..core.config_features import require_mask_config
@@ -76,15 +77,39 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
     qpane.attachMaskService(service)
     service.configureStrokeDiagnostics(qpane.settings)
     controller = service.controller
+    live_source_modes: dict[uuid.UUID, bool] = {}
 
-    def _handle_mask_updated(mask_id, rect=None):
-        """Mark the CuteCanvas dirty when mask scene content changes."""
+    def _handle_render_dirty(mask_id, rect=None):
+        """Apply presentation damage that is already in panel coordinates."""
+        if isinstance(mask_id, uuid.UUID):
+            live_source = controller.renders.is_live_preview(mask_id)
+            if live_source_modes.get(mask_id, False) != live_source:
+                live_source_modes[mask_id] = live_source
+                qpane._handle_scene_source_changed()
+                qpane.markDirty()
+                qpane.update()
+                return
+        else:
+            qpane._handle_scene_source_changed()
         if rect is None or rect.isNull() or rect.isEmpty():
+            qpane._handle_scene_source_changed()
             qpane.markDirty()
         else:
             qpane.markDirty(dirty_rect=rect)
         qpane.update()
 
+    def _handle_mask_updated(mask_id, _rect=None):
+        """Recompile durable mask state without interpreting source-space damage."""
+        if isinstance(mask_id, uuid.UUID):
+            live_source = controller.renders.is_live_preview(mask_id)
+            live_source_modes[mask_id] = live_source
+            if live_source:
+                return
+        qpane.view().invalidate_content_cache()
+        qpane.markDirty()
+        qpane.update()
+
+    controller.render_dirty.connect(_handle_render_dirty)
     controller.mask_updated.connect(_handle_mask_updated)
     controller.active_mask_properties_changed.connect(qpane.refreshCursor)
     controller.active_mask_properties_changed.connect(

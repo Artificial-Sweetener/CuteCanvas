@@ -79,6 +79,7 @@ class _BudgetedCacheConsumer:
         self._missing_batch_label = missing_batch_label
         self._warn_message = warn_message
         self._pre_trim = pre_trim
+        self._applying_coordinator_budget = False
         callbacks = CacheConsumerCallbacks(
             get_usage=self._get_usage,
             set_budget=self._set_budget,
@@ -103,6 +104,8 @@ class _BudgetedCacheConsumer:
 
     def _update_preferred_budget(self, new_limit: int | None = None) -> None:
         """Refresh the preferred budget after config changes apply."""
+        if self._applying_coordinator_budget:
+            return
         self._coordinator.set_consumer_preferred(
             self._consumer_id,
             _safe_int(
@@ -167,15 +170,26 @@ class _BudgetedCacheConsumer:
 
     def _set_budget(self, target_bytes: int) -> None:
         """Apply ``target_bytes`` as the cache limit."""
-        self._manager.cache_limit_bytes = _safe_int(
-            target_bytes,
-            label=self._limit_label,
-        )
+        self._applying_coordinator_budget = True
+        try:
+            self._manager.cache_limit_bytes = _safe_int(
+                target_bytes,
+                label=self._limit_label,
+            )
+        finally:
+            self._applying_coordinator_budget = False
 
     def _trim_to(self, target_bytes: int) -> None:
         """Attempt to shrink usage to ``target_bytes`` and warn if it fails."""
         target = _safe_int(target_bytes, label=self._trim_target_label)
-        self._manager.cache_limit_bytes = min(self._manager.cache_limit_bytes, target)
+        self._applying_coordinator_budget = True
+        try:
+            self._manager.cache_limit_bytes = min(
+                self._manager.cache_limit_bytes,
+                target,
+            )
+        finally:
+            self._applying_coordinator_budget = False
         if self._pre_trim is not None:
             try:
                 self._pre_trim()

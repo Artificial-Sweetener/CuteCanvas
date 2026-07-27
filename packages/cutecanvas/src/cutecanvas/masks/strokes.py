@@ -69,6 +69,16 @@ class MaskStrokeDebugSnapshot:
     invalidated_job_tokens: tuple[tuple[UUID, int], ...] = ()
 
 
+@dataclass(slots=True)
+class _PendingStrokeRequest:
+    """Own one queued stroke request and its adoption policy."""
+
+    mask_id: UUID
+    job_token: int
+    commit: bool
+    handle: ExecutionHandle[MaskStrokeJobResult, object] | None = None
+
+
 class MaskStrokePipeline:
     """Own mask stroke preview state, worker submission, and diagnostics."""
 
@@ -106,11 +116,7 @@ class MaskStrokePipeline:
         self._preview_states: dict[UUID, DecimatedStrokePreview] = {}
         self._preview_tokens: dict[UUID, int] = {}
         self._pending_jobs: dict[UUID, set[UUID]] = {}
-        self._pending_handles: dict[
-            UUID,
-            ExecutionHandle[MaskStrokeJobResult, object],
-        ] = {}
-        self._pending_job_tokens: dict[UUID, int] = {}
+        self._pending_requests: dict[UUID, _PendingStrokeRequest] = {}
         self._invalidated_job_tokens: set[tuple[UUID, int]] = set()
         self._job_token_counter = count(1)
         self._diagnostics = diagnostics
@@ -165,9 +171,10 @@ class MaskStrokePipeline:
         """Expose pending state for tests without leaking internal dicts."""
         pending = {
             mask_id: tuple(
-                self._pending_handles[request_id]
+                request.handle
                 for request_id in request_ids
-                if request_id in self._pending_handles
+                if (request := self._pending_requests.get(request_id)) is not None
+                and request.handle is not None
             )
             for mask_id, request_ids in self._pending_jobs.items()
             if request_ids
@@ -184,15 +191,16 @@ class MaskStrokePipeline:
         mask_id: UUID | None,
         *,
         clear_counter: bool = False,
+        preserve_committed: bool = False,
         request_redraw: bool = True,
     ) -> None:
-        """Cancel pending stroke jobs and drop preview state."""
+        """Cancel transient stroke work while optionally retaining final commits."""
         preview_states: MutableMapping[UUID, DecimatedStrokePreview] = (
             self._preview_states
         )
         preview_tokens: MutableMapping[UUID, int] = self._preview_tokens
         pending_jobs = self._pending_jobs
-        pending_job_tokens = self._pending_job_tokens
+        pending_requests = self._pending_requests
         invalidated_job_tokens = self._invalidated_job_tokens
         manager = self._assets
         diagnostics = self._diagnostics
@@ -206,12 +214,21 @@ class MaskStrokePipeline:
         for target in tuple(target_ids):
             had_state = False
             handles = pending_jobs.get(target)
-            had_pending_jobs = bool(handles)
+            preserved_ids = {
+                request_id
+                for request_id in handles or ()
+                if preserve_committed
+                and (request := pending_requests.get(request_id)) is not None
+                and request.commit
+            }
+            cancelled_ids = set(handles or ()) - preserved_ids
+            had_pending_jobs = bool(cancelled_ids)
             if handles:
-                had_state = True
-                for request_id in tuple(handles):
-                    job_token = pending_job_tokens.pop(request_id, None)
-                    handle = self._pending_handles.pop(request_id, None)
+                had_state = bool(cancelled_ids)
+                for request_id in cancelled_ids:
+                    request = pending_requests.pop(request_id, None)
+                    job_token = None if request is None else request.job_token
+                    handle = None if request is None else request.handle
                     cancelled = (
                         False
                         if handle is None
@@ -219,8 +236,17 @@ class MaskStrokePipeline:
                     )
                     if not cancelled and job_token is not None:
                         invalidated_job_tokens.add((target, job_token))
-                handles.clear()
-                pending_jobs.pop(target, None)
+                    if diagnostics is not None and preserved_ids:
+                        diagnostics.record_completed(
+                            mask_id=target,
+                            job_token=job_token,
+                            status="cancelled",
+                            detail="interaction ownership changed",
+                        )
+                if preserved_ids:
+                    pending_jobs[target] = preserved_ids
+                else:
+                    pending_jobs.pop(target, None)
             else:
                 pending_jobs.pop(target, None)
             preview_state = preview_states.pop(target, None)
@@ -229,10 +255,18 @@ class MaskStrokePipeline:
             )
             if preview_state is not None:
                 had_state = True
-            if target in preview_tokens:
+            preserved_tokens = {
+                request.job_token
+                for request_id in preserved_ids
+                if (request := pending_requests.get(request_id)) is not None
+            }
+            if (
+                target in preview_tokens
+                and preview_tokens[target] not in preserved_tokens
+            ):
                 had_state = True
                 preview_tokens.pop(target, None)
-            if had_state:
+            if had_state and not preserved_ids:
                 if request_redraw and manager is not None:
                     layer = manager.get_layer(target)
                     if layer is not None and not layer.mask_image.isNull():
@@ -248,11 +282,11 @@ class MaskStrokePipeline:
                 if diagnostics is not None:
                     diagnostics.cancel_mask_jobs(target)
         if mask_id is None:
-            pending_jobs.clear()
-            self._pending_handles.clear()
-            pending_job_tokens.clear()
             preview_states.clear()
-            preview_tokens.clear()
+            if not preserve_committed:
+                pending_jobs.clear()
+                pending_requests.clear()
+                preview_tokens.clear()
             if clear_counter and not invalidated_job_tokens:
                 self._job_token_counter = count(1)
                 if diagnostics is not None:
@@ -321,7 +355,11 @@ class MaskStrokePipeline:
             source,
         )
         pending_jobs.setdefault(spec.mask_id, set()).add(request_id)
-        self._pending_job_tokens[request_id] = job_token
+        self._pending_requests[request_id] = _PendingStrokeRequest(
+            mask_id=spec.mask_id,
+            job_token=job_token,
+            commit=commit,
+        )
         request = ExecutionRequest[MaskStrokeJobResult, object](
             operation="editor.mask.stroke",
             requirements=ExecutionRequirements(
@@ -346,7 +384,7 @@ class MaskStrokePipeline:
             )
         except ExecutionRejected:
             pending_jobs.get(spec.mask_id, set()).discard(request_id)
-            self._pending_job_tokens.pop(request_id, None)
+            self._pending_requests.pop(request_id, None)
             logger.exception(
                 "Failed to queue mask stroke work (mask=%s source=%s)",
                 spec.mask_id,
@@ -354,7 +392,9 @@ class MaskStrokePipeline:
             )
             return False
         if request_id in pending_jobs.get(spec.mask_id, set()):
-            self._pending_handles[request_id] = handle
+            pending_request = self._pending_requests.get(request_id)
+            if pending_request is not None:
+                pending_request.handle = handle
         handle.add_done_callback(
             lambda outcome: self._settle_stroke_job(
                 spec.mask_id,
@@ -387,12 +427,15 @@ class MaskStrokePipeline:
             pending.discard(request_id)
             if not pending:
                 self._pending_jobs.pop(mask_id, None)
-        self._pending_handles.pop(request_id, None)
+        pending_request = self._pending_requests.pop(request_id, None)
         metadata_mapping = (
             result.metadata if isinstance(result.metadata, Mapping) else {}
         )
-        job_token = metadata_mapping.get("job_token")
-        self._pending_job_tokens.pop(request_id, None)
+        job_token = (
+            pending_request.job_token
+            if pending_request is not None
+            else metadata_mapping.get("job_token")
+        )
 
         def _clear_pending_token(target_mask_id: UUID, token_value: int | None) -> None:
             """Drop preview token if it matches the finalized job token."""
@@ -459,22 +502,6 @@ class MaskStrokePipeline:
             )
             _clear_pending_token(mask_id, job_token)
             _record_drop("missing_layer")
-            _notify_idle()
-            return
-        active_mask_id = controller.get_active_mask_id()
-        if commit and active_mask_id is not None and active_mask_id != mask_id:
-            logger.info(
-                "Discarding stroke finalize for mask %s; active mask changed to %s.",
-                mask_id,
-                active_mask_id,
-            )
-            self._update_region(result.dirty_rect, mask_layer)
-            controller.edits.commit_stroke(mask_id)
-            _clear_pending_token(mask_id, job_token)
-            _record_drop(
-                "mask_changed",
-                detail=f"active={active_mask_id}",
-            )
             _notify_idle()
             return
         expected_generation = controller.edits.async_epoch(mask_id)
@@ -602,8 +629,12 @@ class MaskStrokePipeline:
         """Clear failed or cancelled stroke execution without leaving preview state."""
         if outcome.state == ExecutionState.SUCCEEDED:
             return
-        current = self._pending_handles.get(request_id)
-        if current is not None and current is not handle:
+        pending_request = self._pending_requests.get(request_id)
+        if (
+            pending_request is not None
+            and pending_request.handle is not None
+            and pending_request.handle is not handle
+        ):
             return
         pending = self._pending_jobs.get(mask_id)
         if pending is None or request_id not in pending:
@@ -611,8 +642,8 @@ class MaskStrokePipeline:
         pending.discard(request_id)
         if not pending:
             self._pending_jobs.pop(mask_id, None)
-        self._pending_handles.pop(request_id, None)
-        job_token = self._pending_job_tokens.pop(request_id, None)
+        pending_request = self._pending_requests.pop(request_id, None)
+        job_token = None if pending_request is None else pending_request.job_token
         if job_token is not None and self._preview_tokens.get(mask_id) == job_token:
             self._preview_tokens.pop(mask_id, None)
         layer = self._assets.get_layer(mask_id)
@@ -752,6 +783,7 @@ class MaskStrokePipeline:
         preview = state.preview_segment(
             dirty_rect=dirty_rect,
             segment=segment,
+            render_accumulated=bool(prepared.rebase_x or prepared.rebase_y),
             snapshot_region=lambda rect, preview_stride: (
                 mask_layer.coverage.raster.snapshot_storage_region(
                     RasterBounds.from_qrect(rect),

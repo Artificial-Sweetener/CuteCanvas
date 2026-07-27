@@ -70,6 +70,7 @@ def visible_tile_requests(
     panel_rect: QRectF,
     device_pixel_ratio: float,
     budget_bytes: int,
+    maximum_scale: float | None = None,
 ) -> tuple[RenderTileRequest, ...] | None:
     """Build a bounded complete request on one stable source-local grid."""
     panel_to_source, invertible = source_to_panel.inverted()
@@ -82,6 +83,10 @@ def visible_tile_requests(
     if budget_bytes <= 0:
         return None
     scale = scale_bucket(source_to_panel, device_pixel_ratio)
+    if maximum_scale is not None:
+        if maximum_scale <= 0.0:
+            raise ValueError("maximum_scale must be positive")
+        scale = min(scale, maximum_scale)
     while True:
         requests = _requests_for_scale(
             source_kind,
@@ -222,6 +227,20 @@ def scale_bucket(transform: QTransform, device_pixel_ratio: float) -> float:
         return _MIN_SCALE
     bucket = 2.0 ** math.ceil(math.log2(exact))
     return min(_MAX_SCALE, max(_MIN_SCALE, bucket))
+
+
+def source_rect_for_tile_key(
+    key: RenderTileKey,
+    bounds: RasterBounds,
+) -> QRectF:
+    """Return one stable tile core clipped to its source-local bounds."""
+    span = _TILE_PIXELS / key.scale
+    return QRectF(
+        bounds.x + key.column * span,
+        bounds.y + key.row * span,
+        span,
+        span,
+    ).intersected(_bounds_rect(bounds))
 
 
 def _estimated_bytes(

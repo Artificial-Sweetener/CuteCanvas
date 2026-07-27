@@ -412,15 +412,7 @@ def test_large_visible_path_refines_asynchronously_without_stale_frames(
         )
         harness.drain_events(wait_ms=10)
 
-        deadline = 3000
-        while deadline > 0:
-            harness.drain_events(wait_ms=2)
-            presenter = viewer.view().presenter
-            if presenter._render_refinement.pending_count == 0:
-                break
-            deadline -= 2
-        assert viewer.view().presenter._render_refinement.pending_count == 0
-        harness.drain_events(wait_ms=10)
+        assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
         renderer = viewer.view().presenter.renderer
         incremental = renderer.get_base_buffer()
         assert incremental is not None
@@ -430,7 +422,23 @@ def test_large_visible_path_refines_asynchronously_without_stale_frames(
         harness.drain_events(wait_ms=10)
         full = renderer.get_base_buffer()
         assert full is not None
-        assert (qimage_to_numpy_argb32(full.copy()) == before).all()
+        after = qimage_to_numpy_argb32(full.copy())
+        mismatch = (after != before).any(axis=2)
+        mismatch_y, mismatch_x = mismatch.nonzero()
+        mismatch_bounds = (
+            None
+            if not mismatch_x.size
+            else (
+                int(mismatch_x.min()),
+                int(mismatch_y.min()),
+                int(mismatch_x.max()),
+                int(mismatch_y.max()),
+            )
+        )
+        assert not mismatch.any(), (
+            f"incremental redraw drifted across {mismatch.sum()} pixels "
+            f"within {mismatch_bounds}"
+        )
         cache = viewer.view().presenter._render_tile_cache
         assert 0 < cache.usage_bytes <= cache.budget_bytes
         assert statistics.median(samples) < _SUBMISSION_BUDGET_MS / 2.0

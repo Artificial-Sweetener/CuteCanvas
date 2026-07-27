@@ -18,26 +18,13 @@
 
 from __future__ import annotations
 
-import numpy as np
 from PySide6.QtGui import QColor, QImage
-from qpane.sdk.raster import (
-    numpy_to_qimage_argb32,
-    qimage_to_numpy_grayscale8,
-)
-
-from .image_ops import outer_mask_border
+from qpane import HybridPresentationStyle
+from qpane.sdk.raster import present_hybrid_pixels, qimage_to_numpy_grayscale8
 
 
 class MaskRasterizer:
     """Build premultiplied ARGB overlays from grayscale mask pixels."""
-
-    def __init__(self) -> None:
-        """Precompute the alpha multiplication table shared by all renders."""
-        alpha_values = np.arange(256, dtype=np.uint16)[:, None]
-        color_values = np.arange(256, dtype=np.uint16)[None, :]
-        self._premultiplied_alpha = ((alpha_values * color_values) // 255).astype(
-            np.uint8
-        )
 
     def rasterize(
         self,
@@ -47,24 +34,9 @@ class MaskRasterizer:
         draw_border: bool,
     ) -> QImage:
         """Return a detached premultiplied image for one mask presentation."""
-        mask_pixels = qimage_to_numpy_grayscale8(mask_image)
-        height, width = mask_pixels.shape
-        output = np.zeros((height, width, 4), dtype=np.uint8)
-        output[..., 0] = self._premultiplied_alpha[mask_pixels, color.blue()]
-        output[..., 1] = self._premultiplied_alpha[mask_pixels, color.green()]
-        output[..., 2] = self._premultiplied_alpha[mask_pixels, color.red()]
-        output[..., 3] = mask_pixels
-        if draw_border:
-            border_alpha = outer_mask_border(mask_pixels)
-            border_color = color.darker(120)
-            border = np.zeros_like(output)
-            border[..., 0] = self._premultiplied_alpha[
-                border_alpha, border_color.blue()
-            ]
-            border[..., 1] = self._premultiplied_alpha[
-                border_alpha, border_color.green()
-            ]
-            border[..., 2] = self._premultiplied_alpha[border_alpha, border_color.red()]
-            border[..., 3] = border_alpha
-            np.add(output, border, out=output, casting="unsafe")
-        return numpy_to_qimage_argb32(output)
+        pixels = qimage_to_numpy_grayscale8(mask_image)
+        outline = color.darker(120) if draw_border else None
+        return present_hybrid_pixels(
+            pixels,
+            HybridPresentationStyle(color, outline),
+        )

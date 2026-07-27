@@ -235,7 +235,6 @@ class CacheRegistry:
                 set_budget=cache.set_budget,
                 trim_to=cache.trim_to,
             ),
-            preferred_bytes=32 * 1024 * 1024,
         )
         self.consumers[consumer_id] = cache
         return cache

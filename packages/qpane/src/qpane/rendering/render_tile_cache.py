@@ -126,6 +126,39 @@ class RenderTileCache:
                 return self.products(keys)
         return None
 
+    def presentation_products(
+        self,
+        requests: tuple[RenderTileRequest, ...],
+    ) -> tuple[RenderTileProduct, ...] | None:
+        """Layer exact tiles over fallback products covering only cold cores."""
+        exact_requests = tuple(
+            request for request in requests if request.key in self._entries
+        )
+        missing_requests = tuple(
+            request for request in requests if request.key not in self._entries
+        )
+        exact = self.products(tuple(request.key for request in exact_requests)) or ()
+        if not missing_requests:
+            return exact
+        fallback = self.covering_products(missing_requests)
+        if fallback is None:
+            return None
+        fallback_slices = tuple(
+            _clip_product_to_request(
+                max(
+                    (
+                        product
+                        for product in fallback
+                        if _contains_rect(product.source_rect, request.source_rect)
+                    ),
+                    key=lambda product: product.key.scale,
+                ),
+                request,
+            )
+            for request in missing_requests
+        )
+        return (*fallback_slices, *exact)
+
     def admit(
         self,
         products: tuple[RenderTileProduct, ...],
@@ -174,4 +207,30 @@ def _contains_rect(container: QRectF, candidate: QRectF) -> bool:
         and container.top() <= candidate.top() + tolerance
         and container.right() + tolerance >= candidate.right()
         and container.bottom() + tolerance >= candidate.bottom()
+    )
+
+
+def _clip_product_to_request(
+    product: RenderTileProduct,
+    request: RenderTileRequest,
+) -> RenderTileProduct:
+    """Return a shared-image presentation view limited to one cold tile core."""
+    target = request.source_rect
+    if product.source_rect == target:
+        return product
+    horizontal_scale = product.image_source_rect.width() / product.source_rect.width()
+    vertical_scale = product.image_source_rect.height() / product.source_rect.height()
+    image_source_rect = QRectF(
+        product.image_source_rect.x()
+        + (target.x() - product.source_rect.x()) * horizontal_scale,
+        product.image_source_rect.y()
+        + (target.y() - product.source_rect.y()) * vertical_scale,
+        target.width() * horizontal_scale,
+        target.height() * vertical_scale,
+    )
+    return RenderTileProduct(
+        product.key,
+        target,
+        product.image,
+        image_source_rect,
     )

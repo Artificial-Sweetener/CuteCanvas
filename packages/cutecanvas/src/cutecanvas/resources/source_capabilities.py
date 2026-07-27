@@ -33,6 +33,8 @@ from qpane.sdk.scene import (
 
 from ..coverage import CoverageSnapshot
 from ..scene.pixel_fragments import RasterPixelFormat
+from ..scene.pixel_transitions import RasterPixelTransition
+from ..scene.source_capabilities import PixelSampleGeometry
 from .model import ProjectResourceKind, ProjectResourceReference
 from .store import ProjectResourceStore
 
@@ -82,6 +84,16 @@ class ProjectResourceCapabilityOwner(Protocol):
 
     def authored_bounds(self, source: LayerSourceReference) -> QRectF | None:
         """Return authored bounds."""
+        ...
+
+    def present_transition_samples(
+        self,
+        source: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+    ) -> tuple[QImage, ...] | None:
+        """Present one virtual edit through the payload's native sampler."""
         ...
 
 
@@ -221,6 +233,26 @@ class ProjectResourceSourceCapabilities:
             None
             if not callable(method)
             else method(source, pixel_format, pixels, target_size)
+        )
+
+    def present_transition_samples(
+        self,
+        source: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+    ) -> tuple[QImage, ...] | None:
+        """Present a virtual edit through the current payload owner."""
+        owner = self._owner(source)
+        method = (
+            None
+            if owner is None
+            else getattr(owner, "present_transition_samples", None)
+        )
+        return (
+            None
+            if not callable(method)
+            else method(source, pixel_format, transition, samples)
         )
 
     def _owner(

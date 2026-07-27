@@ -29,7 +29,7 @@ from ..rendering.render_tile_types import RenderTileProduct
 from ..scene.raster import RasterBounds
 from .evaluation import HybridDocumentEvaluator
 from .model import HybridDocument, HybridPresentationStyle
-from .presentation import present_hybrid_coverage
+from .presentation import present_hybrid_pixels
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,14 +80,14 @@ class HybridRenderTileSource:
             batch_rect = batch_rect.united(request.paint_rect)
         document_rect = _to_document_rect(batch_rect, self.document.bounds)
         batch_size = _sample_size(batch_rect, scale)
-        coverage = HybridDocumentEvaluator().evaluate(
+        coverage = HybridDocumentEvaluator().evaluate_pixels(
             self.document,
             document_rect,
             batch_size,
         )
         if is_cancelled():
             return ()
-        presented = present_hybrid_coverage(coverage, self.style)
+        presented = present_hybrid_pixels(coverage, self.style)
         products: list[RenderTileProduct] = []
         for request in requests:
             if is_cancelled():

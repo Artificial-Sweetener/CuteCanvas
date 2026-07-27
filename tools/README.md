@@ -1,6 +1,135 @@
 # Maintenance Tools
 
-This directory contains scripts to enforce code quality, architectural boundaries, and documentation consistency. These tools are designed to be run during CI or before committing changes.
+This directory contains scripts for local profiling plus enforcement of code
+quality, architectural boundaries, and documentation consistency.
+
+## Headless pan performance harness
+
+`pan_performance_harness.py` forces Qt's `offscreen` platform before importing
+PySide and drives a production QPane through real Qt mouse pan events without
+opening a desktop window. It measures wall latency across input dispatch,
+render planning, surface scrolling, edge repair, backing-buffer painting,
+widget presentation, and the complete paint event. The measured pass performs
+no frame capture or clean redraw.
+
+After timing finishes, the harness replays the exact measured pan history
+through selected checkpoints in `pan_render_harness.py`. Those differential
+checks compare incremental pixels with clean redraws without contaminating the
+performance samples.
+
+Run the reported 4K/500% workload and save a baseline:
+
+```powershell
+.venv\Scripts\python tools\pan_performance_harness.py `
+    --profile 4k-5x `
+    --output pan-performance-artifacts\4k-baseline.json
+```
+
+Compare a later renderer change against that baseline:
+
+```powershell
+.venv\Scripts\python tools\pan_performance_harness.py `
+    --profile 4k-5x `
+    --compare pan-performance-artifacts\4k-baseline.json `
+    --output pan-performance-artifacts\4k-after.json
+```
+
+The command exits with status 1 for a material baseline regression or a pixel
+mismatch. JSON contains every raw frame, p90/p95/p99/max phase summaries,
+repair-frame summaries, viewport and backing-buffer geometry, correctness
+checkpoints, and artifact paths for failures.
+
+The command rejects any Qt platform other than `offscreen`, keeping recursive
+profiling fully headless and results comparable with baselines produced by the
+same workload. Use `--no-correctness` only when repeatedly profiling a known
+code path and run the default correctness replay before accepting an
+optimization.
+
+`cutecanvas_pan_performance_harness.py` drives the production CuteCanvas
+document path with the same headless timing boundary. Its default workload is a
+3840×2160 logical viewport at DPR 1.75 and 500% zoom. The immutable primary
+metric is synchronous pointer dispatch through the presented paint event; the
+acceptance target is p95 below 30 ms with no 100 ms frame.
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+$env:QT_SCALE_FACTOR = "1.75"
+$env:PYTHONPATH = "$PWD\packages\qpane\src;$PWD\packages\cutecanvas\src"
+.venv\Scripts\python tools\cutecanvas_pan_performance_harness.py `
+    --document C:\Users\imkno\test.cutecanvas `
+    --output pan-performance-artifacts\cutecanvas-4k-5x.json
+```
+
+The document replay reports exact mismatch checkpoints separately while
+accepting a maximum one-channel delta of one from Qt smooth-pixmap rounding.
+Any larger difference fails, saves both frames, and exits with status 1. The
+exact small-viewport pan oracle remains bit-for-bit and catches stale rows,
+columns, wrapping faults, and alpha corruption.
+
+## Record and replay real navigation
+
+The demo can record the exact Qt event stream delivered while a person pans and
+zooms. Launch it with an output trace and the composition being profiled:
+
+```powershell
+.venv\Scripts\python examples\cutecanvas_demo.py --skip-menu `
+    --navigation-document C:\Users\imkno\test.cutecanvas `
+    --navigation-trace-output pan-performance-artifacts\user-navigation.json
+```
+
+Press `F9`, reproduce the slow interaction, then press `F9` again. The trace
+stores delivered mouse, wheel, and Space-key events with their real cadence,
+logical viewport, DPR, display refresh rate, navigation settings, initial and
+final zoom/pan, and the composition SHA-256.
+
+Replay the trace through the production input and rendering path with offscreen
+Qt:
+
+```powershell
+.venv\Scripts\python tools\cutecanvas_navigation_trace_harness.py `
+    --trace pan-performance-artifacts\user-navigation.json `
+    --correctness-steps 8 `
+    --output pan-performance-artifacts\user-navigation-replay.json
+```
+
+Replay configures the recorded DPR before importing Qt, preserves recorded
+event cadence by default, measures each input-to-present frame, verifies final
+navigation-state drift, and checks completed pan releases against independently
+composed reference frames at the full physical viewport resolution. Each
+correctness checkpoint reconstructs its ring-buffer history independently,
+replays the original time interval, and derives the expected current
+presentation geometry from the retained buffer plan. Settled checkpoints allow
+only Qt's one-channel rounding difference. Active checkpoints additionally
+allow a bounded sparse population of filtered tile-edge pixels: no more than
+0.1 percent may differ by more than eight channel values, and no more than 512
+physical pixels or 0.01 percent of the physical viewport, whichever is larger,
+may differ by more than 64. A displaced tile, stale strip, opaque background,
+or settled mismatch exceeds those bounds and fails. Pass
+`--correctness-event 359` to isolate one exact event or repeat that option for
+several events. Pass `--no-cadence` only when intentionally stress-testing the
+same event sequence at maximum delivery rate.
+
+JSON reports all navigation timing under `summaries` and left-button
+mouse-move timing under `pan_summaries`. The sub-30 ms target uses only those
+pan frames, so wheel zoom and post-zoom redraws do not contaminate the pan
+latency result.
+
+The default raster tile size is automatic and resolves from physical viewport
+size, including DPR. Pass `--tile-size 1536` to benchmark a strict host tile
+size without changing the document configuration. The JSON workload records
+the resolved size used by the renderer.
+
+The same trace can be projected into a larger logical viewport and DPR. Replay
+scales pointer coordinates and physical pan state so the captured gestures
+retain their relative path:
+
+```powershell
+.venv\Scripts\python tools\cutecanvas_navigation_trace_harness.py `
+    --trace pan-performance-artifacts\user-navigation.json `
+    --logical-width 3840 --logical-height 2160 `
+    --device-pixel-ratio 1.75 `
+    --output pan-performance-artifacts\user-navigation-4k-dpr175.json
+```
 
 ## 1. `check_consistency.py` (The "Trinity" Check)
 

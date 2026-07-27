@@ -224,6 +224,12 @@ class QPane(QWidget):
                     self._compare_interaction.handle_mouse_release
                 ),
                 external_cursor=self._compare_interaction.cursor,
+                begin_navigation=(
+                    self._rendering.presenter.begin_navigation_interaction
+                ),
+                finish_navigation=(
+                    self._rendering.presenter.finish_navigation_interaction
+                ),
             )
         )
         self._catalog.changed.connect(self.catalogChanged)
@@ -355,6 +361,7 @@ class QPane(QWidget):
         if overrides:
             candidate.configure(**overrides)
         self._viewer_diagnostics.validate_preferences(candidate)
+        self._rendering.validate_config(candidate)
         self.settings = candidate
         self._rendering.apply_config(candidate)
         self._catalog_prefetch.apply_config(candidate)

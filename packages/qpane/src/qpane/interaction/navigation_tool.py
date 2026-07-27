@@ -75,6 +75,7 @@ class PanZoomTool(ViewerTool):
         self._last_position = position
         if not self._port.is_drag_out_allowed() and self._port.can_pan():
             self._panning = True
+            self.signals.navigation_started.emit()
             self.signals.cursor_update_requested.emit()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -104,7 +105,10 @@ class PanZoomTool(ViewerTool):
         if self._port.is_navigation_locked():
             return
         if event.button() is Qt.MouseButton.LeftButton:
+            was_panning = self._panning
             self._panning = False
+            if was_panning:
+                self.signals.navigation_finished.emit()
             self.signals.cursor_update_requested.emit()
         self._last_position = None
         self._drag_start_position = None

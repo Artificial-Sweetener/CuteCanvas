@@ -261,6 +261,74 @@ def test_allows_borrowing_when_within_budget():
     assert secondary.usage == 5
 
 
+def test_unbounded_consumer_can_borrow_the_global_budget_and_follow_growth() -> None:
+    """A shared cache without a private target must use the global capacity."""
+    coordinator = CacheCoordinator(active_budget_bytes=100)
+    consumer = FakeConsumer(usage=0)
+    coordinator.register_consumer(
+        "shared",
+        priority=CachePriority.VECTOR_PRODUCTS,
+        callbacks=consumer.callbacks(),
+    )
+
+    assert consumer.budget == 100
+
+    coordinator.set_active_budget(240)
+
+    assert consumer.budget == 240
+
+
+def test_idle_consumers_do_not_reserve_cache_entitlement() -> None:
+    """Zero-usage caches must not force active rendering data out of memory."""
+    coordinator = CacheCoordinator(active_budget_bytes=100)
+    active = FakeConsumer(usage=100)
+    idle = FakeConsumer(usage=0)
+    coordinator.register_consumer(
+        "active",
+        priority=CachePriority.VECTOR_PRODUCTS,
+        callbacks=active.callbacks(),
+    )
+    coordinator.register_consumer(
+        "idle",
+        priority=CachePriority.VECTOR_PRODUCTS,
+        callbacks=idle.callbacks(),
+    )
+
+    coordinator.update_usage("active", active.usage)
+
+    assert active.usage == 100
+    assert not active.trim_history
+    snapshot = coordinator.snapshot()
+    assert snapshot["consumers"]["active"]["entitlement_bytes"] == 100
+    assert snapshot["consumers"]["idle"]["entitlement_bytes"] == 0
+
+
+def test_global_pressure_trim_restores_borrowing_capacity() -> None:
+    """Pressure may evict allocations without permanently shrinking caches."""
+    coordinator = CacheCoordinator(active_budget_bytes=100)
+    first = FakeConsumer(usage=0)
+    second = FakeConsumer(usage=0)
+    coordinator.register_consumer(
+        "first",
+        priority=CachePriority.VECTOR_PRODUCTS,
+        callbacks=first.callbacks(),
+    )
+    coordinator.register_consumer(
+        "second",
+        priority=CachePriority.VECTOR_PRODUCTS,
+        callbacks=second.callbacks(),
+    )
+
+    first.usage = 80
+    coordinator.update_usage("first", first.usage)
+    second.usage = 80
+    coordinator.update_usage("second", second.usage)
+
+    assert first.usage + second.usage <= 100
+    assert first.budget == 100
+    assert second.budget == 100
+
+
 def test_trim_handles_reentrant_usage_updates():
     coordinator = CacheCoordinator(active_budget_bytes=50)
 

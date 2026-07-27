@@ -53,38 +53,27 @@ class MaskPixelAssetLookup(Protocol):
         ...
 
 
-class MaskPixelRenderCache(Protocol):
-    """Derived mask cache capable of retaining pixels across a revision."""
-
-    def promote_revision(self, mask_id: uuid.UUID) -> None:
-        """Carry current cached rasters into the source's new revision."""
-        ...
-
-
 class MaskPixelRenderSynchronizer:
-    """Refresh derived mask rasters after durable local pixel mutations."""
+    """Invalidate derived mask products after durable local pixel mutations."""
 
     def __init__(
         self,
         assets: MaskPixelAssetLookup,
-        renders: MaskPixelRenderCache,
-        update_region: Callable[[QRect, MaskLayer], None],
+        invalidate_region: Callable[[QRect, MaskLayer], None],
     ) -> None:
-        """Bind authoritative storage, derived cache, and render scheduling."""
+        """Bind authoritative storage and durable render invalidation."""
         self._assets = assets
-        self._renders = renders
-        self._update_region = update_region
+        self._invalidate_region = invalidate_region
 
     def refresh(self, mask_id: uuid.UUID, local_bounds: RasterBounds) -> None:
-        """Patch cached rasters for one durable layer-local region."""
+        """Invalidate derived products intersecting one durable local mutation."""
         layer = self._assets.get_layer(mask_id)
         if layer is None:
             return
         storage_bounds = layer.coverage.raster.storage_rect(local_bounds)
         if storage_bounds is None:
             return
-        self._renders.promote_revision(mask_id)
-        self._update_region(storage_bounds.to_qrect(), layer)
+        self._invalidate_region(storage_bounds.to_qrect(), layer)
 
 
 class MaskLayerPixelMutationOwner:

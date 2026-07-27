@@ -113,18 +113,6 @@ def connected_component_extent(
     )
 
 
-def outer_mask_border(mask: np.ndarray) -> np.ndarray:
-    """Return the one-pixel outer border produced by a 3x3 square dilation."""
-    source = _grayscale_array(mask)
-    horizontal = np.array(source, copy=True, order="C")
-    np.maximum(horizontal[:, 1:], source[:, :-1], out=horizontal[:, 1:])
-    np.maximum(horizontal[:, :-1], source[:, 1:], out=horizontal[:, :-1])
-    dilated = np.array(horizontal, copy=True, order="C")
-    np.maximum(dilated[1:, :], horizontal[:-1, :], out=dilated[1:, :])
-    np.maximum(dilated[:-1, :], horizontal[1:, :], out=dilated[:-1, :])
-    return np.subtract(dilated, source, dtype=np.uint8)
-
-
 def _extract_connected_spans(
     working: np.ndarray,
     *,

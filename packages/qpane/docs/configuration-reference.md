@@ -45,7 +45,7 @@ config = {
         "max_display_size": None,
         "scale_factor": 1.0,
     },
-    "tile_size": 1024,
+    "tile_size": "auto",
     "tile_overlap": 8,
     "min_view_size_px": 128,
     "canvas_expansion_factor": 1.4,
@@ -125,8 +125,22 @@ placeholder is active.
 
 ## Tiles and Canvas
 
-`tile_size` is the nominal source-space tile edge. Larger tiles reduce index
-overhead; smaller tiles reduce overdraw and make narrow damage cheaper.
+`tile_size` accepts `"auto"` or a positive integer. The default automatic
+policy selects a bounded power-of-two source-space tile edge from the
+viewport's physical pixel area: 512 pixels for typical 1080p viewports, 1024
+pixels around physical 4K, 2048 pixels for intermediate high-resolution
+viewports, and at most 4096 pixels for ultra-high-DPR viewports. Above physical
+4K, the policy deliberately reduces the target number of viewport tiles to
+amortize software-rendering overhead. It uses resize debounce and hysteresis so
+ordinary window movement does not churn the cache. The active cache allocation
+can lower an automatic choice to retain a useful working set.
+
+A positive integer is a strict host override. QPane preserves that exact tile
+edge across viewport and DPR changes. Changing between automatic buckets, or
+changing an explicit tile size, cancels incompatible tile work and invalidates
+the old grid before the next frame is planned; tiles from different grids are
+never merged or reused as if they were equivalent.
+
 `tile_overlap` supplies neighboring pixels for filtered transforms so seams do
 not appear between independently sampled products.
 

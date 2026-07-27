@@ -203,10 +203,10 @@ root facade and declarative SDK above.
 - `LayerContentCapabilities`, `LayerInteractionPolicy`, and `LayerHitTest` carry generic behavior and hit-test policy.
 - `SceneProviderRegistry`, `SceneContribution`, and `SourceCapabilityRegistry` compose independent scene and source owners.
 - `LayerSourceCapabilities` routes renderer capabilities for each supported `LayerSourceReference` value.
-- `SceneRenderItem`, `RasterLayerRenderItem`, and `SceneLayerHitTestResult` are detached presentation products.
+- `SceneRenderItem`, `RasterLayerRenderItem`, `SampledLayerRenderItem`, `SampledTileRenderData`, and `SceneLayerHitTestResult` are detached presentation products.
+- `TransientRasterContribution`, `TransientRasterResolvedContribution`, `TransientSampledResolvedContribution`, and `TransientRasterTransformContribution` carry editor-owned raster edits through normal scene presentation.
 - `SceneLayerAssetKey` separates reusable source identity from placed layer identity.
 - `RasterPresentation`, `RasterProductPolicy`, and `RasterSourcePatch` describe sampling, reuse, and bounded damage.
-- `TransientRasterContribution`, `TransientRasterResolvedContribution`, and `TransientRasterTransformContribution` preserve renderer rules during interactive previews.
 - `AffineTransformGeometry`, `TransformOperation`, and `TransformOperationKind` own exact affine interaction math.
 - `TransformHandle`, `TransformLocalBounds`, and `TransformModifiers` describe one transform gesture without rounded coordinates.
 - `LayerEffectReference` and `LayerEffectRenderRegistry` connect generic layer effects to the compositor.
@@ -245,7 +245,10 @@ root facade and declarative SDK above.
 - `EvictableCacheConsumer`, `KeyedCacheConsumer`, and `cache_detail_provider` connect stores to eviction and diagnostics.
 - `ExecutionRuntime` admits work once, while `ExecutionScope` binds accepted
   work to the lifetime of the widget, document runtime, or host service that
-  requested it.
+  requested it. `ExecutionScope.open_finalization_scope()` reserves
+  caller-closed cleanup ownership that can outlive its originating scope but
+  never the shared runtime. Finalization submissions remain pending through
+  temporary backend saturation.
 - `ExecutionRequest` carries one detached callable and semantic requirements.
   Its `ExecutionHandle` exposes cancellation, progress observation, lifecycle
   state, timings, and a single terminal outcome.
@@ -294,7 +297,7 @@ root facade and declarative SDK above.
 
 ### Configuration, features, and diagnostics
 
-- `Config`, `CacheSettings`, `FeatureAwareConfig`, and `diff_config_fields` define and compare renderer settings.
+- `Config`, `CacheSettings`, `FeatureAwareConfig`, `TileSizeSetting`, and `diff_config_fields` define and compare renderer settings. `TileSizeSetting` is a strict positive integer or the `"auto"` physical-viewport policy.
 - `FeatureConfigDescriptor`, `ConfigFeatureRegistry`, `iter_descriptors`, and `require_feature_slice` support typed configuration extensions.
 - `FeatureDefinition`, `FeatureRegistry`, `resolve_feature_order`, and `FeatureInstallError` coordinate optional integration slices.
 - `Diagnostics`, `DiagnosticsRegistry`, `DiagnosticsProvider`, and `DiagnosticsSnapshot` own live and gathered diagnostics.
@@ -320,7 +323,13 @@ root facade and declarative SDK above.
 - `AffineImageResampler` performs bounded worker-side affine sampling.
 - `qimage_to_numpy_argb32` and `qimage_to_numpy_grayscale8` return detached arrays.
 - `qimage_to_numpy_const_view_argb32` exposes normalized premultiplied BGRA pixels; `qimage_to_numpy_const_view_bgra32` preserves compatible 32-bit storage to avoid needless large-image conversion.
-- `qimage_to_numpy_view_argb32` and `qimage_to_numpy_view_grayscale8` expose writable scoped zero-copy views.
+- `qimage_to_numpy_view_argb32` exposes a writable scoped zero-copy view;
+  `qimage_to_numpy_view_grayscale8` exposes a read-only scoped zero-copy view.
+- `present_hybrid_pixels` applies the same color and optional outline
+  presentation used by sampled hybrid layers.
+- `present_hybrid_sample` evaluates and presents one hybrid document over an
+  explicit source rectangle and output size while preserving its stable
+  source-space sampling grid.
 - `numpy_to_qimage_argb32`, `numpy_to_qimage_grayscale8`, `numpy_to_qimage_argb32_at_size`, and `numpy_to_qimage_grayscale8_at_size` create validated QImage values.
 - `VectorPresentationSnapshot`, `SemanticTextLayoutCache`, `TextFontResolution`, and `text_caret_rect` share immutable vector presentation and text layout.
 - `VectorNodeRole`, `object_path`, and `object_contains` provide semantic node and geometry queries.

@@ -441,8 +441,7 @@ class CanvasLifecycleMixin:
         self._mask_raster_mutation_owner = raster_owner
         render_synchronizer = MaskPixelRenderSynchronizer(
             service.assets,
-            service.controller.renders,
-            service.updateMaskRegion,
+            service.invalidateMaskRenderRegion,
         )
         pixel_owner = MaskLayerPixelMutationOwner(
             service.assets,

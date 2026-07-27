@@ -182,6 +182,7 @@ class MaskLayerWorkflow:
                 label="Mask Error",
             )
             return False
+        self._render_work.prioritize_interaction(mask_id)
         self._controller.renders.invalidate_layer(layer)
         self._controller.edits.advance_epoch(mask_id, reason="mask_removed")
         self._reset_strokes(mask_id, request_redraw=False)

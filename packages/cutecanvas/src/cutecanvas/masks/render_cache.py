@@ -40,6 +40,8 @@ from qpane.sdk.scene import RasterBounds
 
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
+from ..coverage.raster_sampling import CoverageSurfaceSampler
+from .live_preview_raster import LiveMaskPreviewRaster
 from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
 from .rasterizer import MaskRasterizer
@@ -121,7 +123,8 @@ class MaskRenderCache:
         self._total_bytes = 0
         self._mask_index: dict[uuid.UUID, set[MaskRenderCacheKey]] = {}
         self._requested_scales: dict[uuid.UUID, float] = {}
-        self._live_preview_masks: set[uuid.UUID] = set()
+        self._live_previews: dict[uuid.UUID, LiveMaskPreviewRaster] = {}
+        self._live_preview_products: dict[uuid.UUID, QPixmap] = {}
         self._prefetched_images: OrderedDict[uuid.UUID, QImage] = OrderedDict()
         self._prefetched_scaled: OrderedDict[uuid.UUID, OrderedDict[float, QImage]] = (
             OrderedDict()
@@ -196,21 +199,26 @@ class MaskRenderCache:
 
     def preview_stride(self, mask_id: uuid.UUID, viewport_zoom: float) -> int:
         """Return a preview stride satisfying the active render resolution."""
-        required_scale = max(
-            max(1e-6, float(viewport_zoom)),
-            self._requested_scales.get(mask_id, 1.0),
+        viewport_scale = max(1e-6, float(viewport_zoom))
+        viewport_density = min(
+            1.0,
+            2.0 ** math.ceil(math.log2(viewport_scale)),
         )
-        return 1 if required_scale >= 1.0 else max(1, math.floor(1 / required_scale))
+        required_scale = max(
+            viewport_density,
+            self._requested_scales.get(mask_id, viewport_density),
+        )
+        return 1 if required_scale >= 1.0 else max(1, round(1 / required_scale))
 
     def is_live_preview(self, mask_id: uuid.UUID) -> bool:
         """Return whether cached pixels include an in-flight provisional preview."""
-        return mask_id in self._live_preview_masks
+        return mask_id in self._live_previews
 
     def discard_source(self, mask_id: uuid.UUID) -> None:
         """Forget render state associated with a deleted source."""
         self.cancel_async(mask_id)
         self._requested_scales.pop(mask_id, None)
-        self._live_preview_masks.discard(mask_id)
+        self._discard_live_preview(mask_id)
         self.invalidate(mask_id)
 
     def set_cache_usage_callback(self, callback: Callable[[], None] | None) -> None:
@@ -416,7 +424,7 @@ class MaskRenderCache:
         """Invalidate every cached scale for a source."""
         if mask_id is None:
             return
-        self._live_preview_masks.discard(mask_id)
+        self._discard_live_preview(mask_id)
         self._forget_prefetched(mask_id)
         for key in list(self._mask_index.get(mask_id, ())):
             self._drop(key, reason=reason)
@@ -583,9 +591,16 @@ class MaskRenderCache:
                 sub_mask_image.text("qpane_preview_provisional") == "1"
             )
         if preview_provisional:
-            self._live_preview_masks.add(mask_id)
+            if preview_stride is not None and sub_mask_image is not None:
+                self._update_live_preview(
+                    dirty_rect,
+                    layer,
+                    sub_mask_image,
+                    stride=preview_stride,
+                )
+                return
         else:
-            self._live_preview_masks.discard(mask_id)
+            self._discard_live_preview(mask_id)
         base_key = self._key(mask_id, None)
         base_pixmap = self._cache.get(base_key)
         if preview_stride is not None and preview_stride > 1:
@@ -593,13 +608,16 @@ class MaskRenderCache:
                 self._drop(base_key, reason="decimated_preview")
             base_pixmap = None
         self._forget_prefetched(mask_id)
-        region = sub_mask_image or layer.mask_image.copy(dirty_rect)
-        colorized = colorized_image or self.colorize_image(
-            region,
-            self._color_for_mask(mask_id),
-            mask_id=mask_id,
-            source="snippet_provisional" if preview_provisional else "snippet",
-        )
+        if colorized_image is not None and not colorized_image.isNull():
+            colorized = colorized_image
+        else:
+            region = sub_mask_image or layer.mask_image.copy(dirty_rect)
+            colorized = self.colorize_image(
+                region,
+                self._color_for_mask(mask_id),
+                mask_id=mask_id,
+                source="snippet_provisional" if preview_provisional else "snippet",
+            )
         snippet = QPixmap.fromImage(colorized)
         if base_pixmap is not None and not base_pixmap.isNull():
             painter = QPainter(base_pixmap)
@@ -744,7 +762,8 @@ class MaskRenderCache:
         self._entry_bytes.clear()
         self._total_bytes = 0
         self._rejected_keys.clear()
-        self._live_preview_masks.clear()
+        self._live_previews.clear()
+        self._live_preview_products.clear()
         self._notify_usage()
 
     def drop_oldest(self, *, reason: str, exclude: set[uuid.UUID] | None = None) -> int:
@@ -914,17 +933,100 @@ class MaskRenderCache:
         requested_scale: float | None,
     ) -> QPixmap | None:
         """Return the nearest cache containing an in-flight stroke preview."""
-        if mask_id not in self._live_preview_masks:
+        if mask_id not in self._live_previews:
             return None
-        target_scale = 1.0 if requested_scale is None else requested_scale
-        candidates = self._latest_entries(mask_id)
-        if not candidates:
+        del requested_scale
+        product = self._live_preview_products.get(mask_id)
+        if product is None or product.isNull():
             return None
-        _, (_, pixmap, _) = min(
-            candidates.items(),
-            key=lambda item: abs((1.0 if item[0] is None else item[0]) - target_scale),
+        return product
+
+    def _update_live_preview(
+        self,
+        dirty_rect: QRect,
+        layer: MaskLayer,
+        patch: QImage,
+        *,
+        stride: int,
+    ) -> None:
+        """Accumulate and publish one provisional patch on a stable sample lattice."""
+        mask_id = layer.mask_id
+        surface = layer.coverage.raster
+        bounds = surface.bounds
+        if bounds is None:
+            return
+        normalized_stride = max(1, int(stride))
+        preview = self._live_previews.get(mask_id)
+        source_size = QSize(bounds.width, bounds.height)
+        if (
+            preview is None
+            or preview.stride != normalized_stride
+            or preview.source_size != source_size
+        ):
+            pixels = surface.snapshot_storage_region(
+                RasterBounds(0, 0, bounds.width, bounds.height),
+                stride=normalized_stride,
+            )
+            preview = LiveMaskPreviewRaster(
+                source_size=source_size,
+                stride=normalized_stride,
+                base_pixels=pixels,
+            )
+            self._live_previews[mask_id] = preview
+
+        preview_scale = self.normalize_scale(1.0 / normalized_stride)
+        preview_key = self._key(mask_id, preview_scale)
+        target = self._live_preview_products.get(mask_id)
+        if target is None or target.isNull() or target.size() != preview.image.size():
+            if surface.content_bounds() is None:
+                target = QPixmap(preview.image.size())
+                target.fill(QColor(0, 0, 0, 0))
+            else:
+                target = self._colorize_pixmap(
+                    preview.image,
+                    mask_id,
+                    "preview_base",
+                )
+            self._live_preview_products[mask_id] = target
+            self._insert(preview_key, target, mask_id=mask_id)
+
+        for key in tuple(self._mask_index.get(mask_id, set())):
+            if key != preview_key and key.patch_bounds is None:
+                self._drop(key, reason="live_preview_density")
+
+        update = preview.apply_patch(dirty_rect, patch)
+        colorized_context = self.colorize_image(
+            update.context,
+            self._color_for_mask(mask_id),
+            mask_id=None,
+            source="snippet_provisional",
         )
-        return pixmap
+        colorized = colorized_context.copy(update.context_core)
+        painter = QPainter(target)
+        target_scale = 1.0 if preview_scale is None else preview_scale
+        source_rect = preview.source_rect(update.destination)
+        destination = self._scaled_source_rect(source_rect, target_scale)
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.drawImage(destination.topLeft(), colorized)
+        painter.end()
+        self._cache[preview_key] = target
+        self._cache.move_to_end(preview_key)
+        self._forget_prefetched(mask_id)
+        self._emit_dirty_rect(mask_id, source_rect)
+
+    def _discard_live_preview(self, mask_id: uuid.UUID) -> None:
+        """Release volatile coverage and its revision-independent product together."""
+        self._live_previews.pop(mask_id, None)
+        self._live_preview_products.pop(mask_id, None)
+
+    @staticmethod
+    def _scaled_source_rect(source_rect: QRect, scale: float) -> QRect:
+        """Project source endpoints onto one shared scaled-pixel lattice."""
+        left = round(source_rect.left() * scale)
+        top = round(source_rect.top() * scale)
+        right = round((source_rect.right() + 1) * scale)
+        bottom = round((source_rect.bottom() + 1) * scale)
+        return QRect(left, top, max(1, right - left), max(1, bottom - top))
 
     def _scaled_surface_pixmap(
         self,
@@ -937,14 +1039,23 @@ class MaskRenderCache:
             return QPixmap()
         source_size = QSize(bounds.width, bounds.height)
         target_size = self.target_scaled_size(source_size, scale)
-        stride = max(1, int(1.0 / min(1.0, scale)))
-        pixels = layer.coverage.snapshot(bounds).pixels[::stride, ::stride]
-        scaled = numpy_to_qimage_grayscale8(pixels)
-        if scaled.size() != target_size:
-            scaled = scaled.scaled(
+        if layer.coverage.has_retained_items:
+            scaled = numpy_to_qimage_grayscale8(
+                layer.coverage.snapshot(bounds).pixels
+            ).scaled(
                 target_size,
                 Qt.AspectRatioMode.IgnoreAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
+            )
+        else:
+            scaled = CoverageSurfaceSampler(layer.coverage.raster).sample(
+                QRectF(
+                    float(bounds.x),
+                    float(bounds.y),
+                    float(bounds.width),
+                    float(bounds.height),
+                ),
+                target_size,
             )
         return self._colorize_pixmap(scaled, layer.mask_id, "scaled_cache_miss")
 

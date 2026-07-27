@@ -17,11 +17,19 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import uuid
+from pathlib import Path
 
+import numpy as np
+import pytest
 from cutecanvas.coverage import CoverageGeometryFactory
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
-from PySide6.QtGui import QColor, QTransform
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QTransform, QWheelEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane import (
     HybridDocument,
@@ -30,6 +38,7 @@ from qpane import (
     RasterBounds,
 )
 from qpane.hybrid.tile_source import HybridRenderTileSource
+from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.rendering.render_tile_geometry import visible_tile_requests
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
@@ -38,12 +47,20 @@ from tests.harness.timing import (
     average_interaction_latency_ms,
     interaction_clock,
     stable_latency_samples,
+    tail_interaction_latency_ms,
 )
 
 pytestmark = INTERACTIVE_PERFORMANCE
 
 _INTERACTION_BUDGET_MS = 16.0
+_SIXTY_HZ_FRAME_BUDGET_MS = 1000.0 / 60.0
+_LARGE_VIEWPORT_AVERAGE_BUDGET_MS = 35.0
+_LARGE_VIEWPORT_TAIL_BUDGET_MS = 60.0
+_FOUR_K_VIEWPORT_AVERAGE_BUDGET_MS = 50.0
+_FOUR_K_VIEWPORT_TAIL_BUDGET_MS = 75.0
+_NAVIGATION_STALL_BUDGET_MS = 150.0
 _MANY_SHAPE_REFINEMENT_BUDGET_MS = 100.0
+_HIGH_DPI_RESULT_PREFIX = "HIGH_DPI_NAVIGATION_RESULT="
 
 
 def test_retained_vector_mask_zoom_storm_never_presents_blank_or_partial_frames(
@@ -243,7 +260,7 @@ def test_rapid_mask_pan_keeps_pixels_and_sampling_density_stable(
         assert probe.frames
         assert all(frame.mask_layer_count == 1 for frame in probe.frames)
         assert all(frame.mask_sample_scales for frame in probe.frames)
-        assert len({frame.mask_sample_scales for frame in probe.frames}) == 1
+        assert all(set(frame.mask_sample_scales) == {1.0} for frame in probe.frames)
         assert all(
             frame.color_at(point).getRgb() == expected
             for frame in probe.frames
@@ -253,3 +270,426 @@ def test_rapid_mask_pan_keeps_pixels_and_sampling_density_stable(
         assert 0 < cache.usage_bytes <= cache.budget_bytes
     finally:
         harness.close()
+
+
+@pytest.mark.parametrize(
+    (
+        "widget_size",
+        "cache_budget_mb",
+        "center",
+        "initial_zoom",
+        "probe_zooms",
+        "measured_zooms",
+        "average_budget_ms",
+        "tail_budget_ms",
+    ),
+    (
+        (
+            QSize(1920, 1080),
+            192,
+            QPoint(960, 540),
+            0.75,
+            (0.8, 0.7, 0.85, 0.75),
+            (0.78, 0.81, 0.78, 0.75),
+            _LARGE_VIEWPORT_AVERAGE_BUDGET_MS,
+            _LARGE_VIEWPORT_TAIL_BUDGET_MS,
+        ),
+        (
+            QSize(3840, 2160),
+            384,
+            QPoint(1920, 1080),
+            1.25,
+            (1.2, 1.1, 1.3, 1.25),
+            (1.28, 1.31, 1.28, 1.25),
+            _FOUR_K_VIEWPORT_AVERAGE_BUDGET_MS,
+            _FOUR_K_VIEWPORT_TAIL_BUDGET_MS,
+        ),
+    ),
+    ids=("1080p-viewport", "4k-viewport"),
+)
+def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
+    qapp: QApplication,
+    widget_size: QSize,
+    cache_budget_mb: int,
+    center: QPoint,
+    initial_zoom: float,
+    probe_zooms: tuple[float, ...],
+    measured_zooms: tuple[float, ...],
+    average_budget_ms: float,
+    tail_budget_ms: float,
+) -> None:
+    """Large presented frames must keep every mask while pan and zoom stay fluid."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(3840, 2160),
+        widget_size=widget_size,
+        mask_count=4,
+        cache_budget_mb=cache_budget_mb,
+    )
+    viewer = harness.viewer
+    initial_cache_preferences = {
+        consumer_id: consumer["preferred_bytes"]
+        for consumer_id, consumer in viewer.cacheCoordinator.snapshot()[
+            "consumers"
+        ].items()
+    }
+    try:
+        colors = (
+            QColor(230, 65, 90),
+            QColor(45, 195, 120),
+            QColor(65, 105, 235),
+            QColor(220, 155, 35),
+        )
+        for index, (mask_id, color) in enumerate(
+            zip(harness.mask_ids, colors, strict=True)
+        ):
+            harness.activate_mask(index)
+            assert viewer.setMaskProperties(mask_id, color=color, opacity=0.3)
+            assert viewer.editor.coverage.rectangle(QRectF(0.0, 0.0, 3840.0, 2160.0))
+        harness.activate_mask(0)
+        viewer.applyZoom(initial_zoom, center)
+        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        harness.drain_events(wait_ms=30)
+
+        with harness.observe_presented_frames() as probe:
+            for pan in (
+                QPointF(-360.0, -180.0),
+                QPointF(360.0, -180.0),
+                QPointF(360.0, 180.0),
+                QPointF(-360.0, 180.0),
+                QPointF(0.0, 0.0),
+            ):
+                viewer.setPan(pan)
+                harness.drain_events()
+            for zoom in probe_zooms:
+                viewer.applyZoom(zoom, center)
+                harness.drain_events()
+        assert probe.frames
+        assert all(frame.mask_layer_count == 4 for frame in probe.frames)
+        center_colors = tuple(frame.color_at(center).getRgb() for frame in probe.frames)
+        assert all(
+            not harness.is_background(frame.color_at(center)) for frame in probe.frames
+        ), center_colors
+        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        harness.drain_events(wait_ms=30)
+
+        pan_latencies: list[float] = []
+        zoom_latencies: list[float] = []
+        viewer.setPan(QPointF())
+        harness.drain_events()
+        metrics_before = viewer.view().renderer.snapshot_metrics()
+        for _ in range(3):
+            for pan in (
+                QPointF(48.0, 0.0),
+                QPointF(96.0, 0.0),
+                QPointF(144.0, 0.0),
+                QPointF(192.0, 0.0),
+                QPointF(192.0, 48.0),
+                QPointF(192.0, 96.0),
+                QPointF(144.0, 96.0),
+                QPointF(96.0, 96.0),
+                QPointF(48.0, 96.0),
+                QPointF(0.0, 96.0),
+                QPointF(0.0, 48.0),
+                QPointF(0.0, 0.0),
+            ):
+                started = interaction_clock()
+                viewer.setPan(pan)
+                harness.drain_events()
+                pan_latencies.append((interaction_clock() - started) * 1000.0)
+        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        harness.drain_events(wait_ms=30)
+        for _ in range(3):
+            for zoom in measured_zooms:
+                started = interaction_clock()
+                viewer.applyZoom(zoom, center)
+                harness.drain_events()
+                zoom_latencies.append((interaction_clock() - started) * 1000.0)
+        metrics_after = viewer.view().renderer.snapshot_metrics()
+
+        stable_pan = stable_latency_samples(pan_latencies, parallel_batch_size=4)
+        stable_zoom = stable_latency_samples(zoom_latencies, parallel_batch_size=4)
+        assert sum(stable_pan) / len(stable_pan) < average_budget_ms, (
+            stable_pan,
+            metrics_before,
+            metrics_after,
+        )
+        assert sum(stable_zoom) / len(stable_zoom) < average_budget_ms, (
+            stable_zoom,
+            metrics_before,
+            metrics_after,
+        )
+        assert (
+            tail_interaction_latency_ms(
+                pan_latencies,
+                parallel_batch_size=4,
+            )
+            < tail_budget_ms
+        ), (
+            stable_pan,
+            metrics_before,
+            metrics_after,
+        )
+        assert (
+            tail_interaction_latency_ms(
+                zoom_latencies,
+                parallel_batch_size=4,
+            )
+            < tail_budget_ms
+        ), (
+            stable_zoom,
+            metrics_before,
+            metrics_after,
+        )
+        assert max(stable_pan) < _NAVIGATION_STALL_BUDGET_MS
+        assert max(stable_zoom) < _NAVIGATION_STALL_BUDGET_MS
+        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        harness.drain_events()
+        renderer = viewer.view().renderer
+        settled = renderer.get_base_buffer().copy()
+        viewer.view().renderer.markDirty()
+        viewer.update()
+        harness.drain_events()
+        clean = renderer.get_base_buffer().copy()
+        assert settled == clean, _image_difference_summary(settled, clean)
+        cache = viewer.view().presenter._render_tile_cache
+        assert 0 < cache.usage_bytes <= cache.budget_bytes
+        final_cache_preferences = {
+            consumer_id: consumer["preferred_bytes"]
+            for consumer_id, consumer in viewer.cacheCoordinator.snapshot()[
+                "consumers"
+            ].items()
+        }
+        assert final_cache_preferences == initial_cache_preferences
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("mask_count", (1, 2))
+def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
+    qapp: QApplication,
+    mask_count: int,
+) -> None:
+    """Warm raster masks must pan and zoom fluidly at a true 4K viewport."""
+    viewport_size = QSize(3840, 2160)
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(2560, 1440),
+        widget_size=viewport_size,
+        mask_count=mask_count,
+        cache_budget_mb=384,
+    )
+    viewer = harness.viewer
+    center = QPoint(viewport_size.width() // 2, viewport_size.height() // 2)
+    try:
+        for index, mask_id in enumerate(harness.mask_ids):
+            layer = viewer.mask_service.assets.get_layer(mask_id)
+            assert layer is not None
+
+            def paint_mask(
+                pixels: np.ndarray,
+                _image: QImage,
+                *,
+                layer_index: int = index,
+            ) -> None:
+                """Paint broad intersecting raster coverage like a real brush session."""
+                pixels.fill(0)
+                pixels[
+                    120 + layer_index * 140 : 1260,
+                    180 : 2380 - layer_index * 120,
+                ] = 255
+                pixels[
+                    360:1080,
+                    640 + layer_index * 220 : 1920 + layer_index * 180,
+                ] = 0
+
+            layer.coverage.raster.mutate(paint_mask)
+            viewer.mask_service.invalidateMaskCache(mask_id)
+        viewer.mask_service.controller.mask_updated.emit(None, QRect())
+        viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
+        viewer.applyZoom(2.0, center)
+        assert harness.wait_for_mask_render_idle(timeout_ms=8000)
+        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_raster_render_idle(timeout_ms=8000)
+        harness.drain_events(wait_ms=60)
+
+        positions = tuple(
+            center + QPoint(step * 8, ((step % 5) - 2) * 5) for step in range(1, 31)
+        )
+        metrics_before = viewer.view().renderer.snapshot_metrics()
+        pan_latencies = _drive_pointer_pan(harness, center, positions)
+        metrics_after = viewer.view().renderer.snapshot_metrics()
+
+        zoom_latencies: list[float] = []
+        with harness.observe_navigation_transform_durations() as zoom_probe:
+            for delta in (120, 120, -120, -120, 120, -120):
+                wheel = QWheelEvent(
+                    QPointF(center),
+                    QPointF(viewer.mapToGlobal(center)),
+                    QPoint(),
+                    QPoint(0, delta),
+                    Qt.NoButton,
+                    Qt.NoModifier,
+                    Qt.ScrollPhase.ScrollUpdate,
+                    False,
+                )
+                started = interaction_clock()
+                QApplication.sendEvent(viewer, wheel)
+                harness.drain_events()
+                zoom_latencies.append((interaction_clock() - started) * 1000.0)
+                harness.drain_events(wait_ms=35)
+        assert zoom_probe.durations_ms
+
+        stable_pan = stable_latency_samples(
+            pan_latencies,
+            parallel_batch_size=4,
+        )
+        stable_zoom = stable_latency_samples(
+            zoom_latencies,
+            parallel_batch_size=4,
+        )
+        assert sum(stable_pan) / len(stable_pan) < _SIXTY_HZ_FRAME_BUDGET_MS, (
+            stable_pan,
+            metrics_before,
+            metrics_after,
+        )
+        assert (
+            tail_interaction_latency_ms(
+                pan_latencies,
+                parallel_batch_size=4,
+            )
+            < 30.0
+        ), (
+            stable_pan,
+            metrics_before,
+            metrics_after,
+        )
+        assert metrics_after.scroll_hits - metrics_before.scroll_hits >= 28
+        assert sum(stable_zoom) / len(stable_zoom) < _SIXTY_HZ_FRAME_BUDGET_MS, (
+            stable_zoom,
+            viewer.view().renderer.snapshot_metrics(),
+        )
+        assert (
+            tail_interaction_latency_ms(
+                zoom_latencies,
+                parallel_batch_size=4,
+            )
+            < 30.0
+        ), stable_zoom
+        assert max(stable_latency_samples(zoom_probe.durations_ms)) < 2.0
+        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        harness.drain_events()
+        settled = viewer.view().renderer.get_base_buffer().copy()
+        viewer.view().renderer.markDirty()
+        viewer.update()
+        harness.drain_events()
+        clean = viewer.view().renderer.get_base_buffer().copy()
+        assert settled == clean, _image_difference_summary(settled, clean)
+    finally:
+        harness.close()
+
+
+def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
+    """The 4K physical, 175%-DPR, 5x workflow must reuse every warm frame."""
+    root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "QT_QPA_PLATFORM": "offscreen",
+            "QT_SCALE_FACTOR": "1.75",
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(root / "packages" / "cutecanvas" / "src"),
+                    str(root / "packages" / "qpane" / "src"),
+                    str(root),
+                )
+            ),
+        }
+    )
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "tests.harness.high_dpi_navigation",
+        ),
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert completed.returncode == 0, (completed.stdout, completed.stderr)
+    result_line = next(
+        (
+            line
+            for line in completed.stdout.splitlines()
+            if line.startswith(_HIGH_DPI_RESULT_PREFIX)
+        ),
+        None,
+    )
+    assert result_line is not None, completed.stdout
+    result = json.loads(result_line.removeprefix(_HIGH_DPI_RESULT_PREFIX))
+    pan_latencies = result["pan_latencies_ms"]
+    zoom_latencies = result["zoom_latencies_ms"]
+    assert result["physical_width"] >= 3839.0
+    assert result["physical_height"] >= 2159.0
+    assert result["device_pixel_ratio"] == pytest.approx(1.75)
+    assert sum(pan_latencies) / len(pan_latencies) < _SIXTY_HZ_FRAME_BUDGET_MS
+    assert sum(zoom_latencies) / len(zoom_latencies) < _SIXTY_HZ_FRAME_BUDGET_MS
+    assert tail_interaction_latency_ms(pan_latencies) < 25.0
+    assert tail_interaction_latency_ms(zoom_latencies) < 25.0
+    assert result["scroll_attempts"] >= 29
+    assert result["scroll_hits"] >= result["scroll_attempts"]
+    assert result["scroll_misses"] == 0
+    assert result["scroll_repairs"] >= 8
+    assert result["full_redraws"] == 0
+    assert result["staged_maximum_step_ms"] < 16.0
+    assert result["staged_maximum_publish_ms"] < 16.0
+    assert result["staged_maximum_worker_ms"] > 0.0
+    assert result["settled_matches_clean"]
+
+
+def _image_difference_summary(actual: QImage, expected: QImage) -> dict[str, object]:
+    """Return compact geometry and channel magnitude for unequal render buffers."""
+    actual_pixels = qimage_to_numpy_argb32(actual.copy())
+    expected_pixels = qimage_to_numpy_argb32(expected.copy())
+    changed = np.any(actual_pixels != expected_pixels, axis=2)
+    rows, columns = np.nonzero(changed)
+    if not rows.size:
+        return {"changed_pixels": 0}
+    delta = np.abs(actual_pixels.astype(np.int16) - expected_pixels.astype(np.int16))
+    return {
+        "changed_pixels": int(rows.size),
+        "bounds": (
+            int(columns.min()),
+            int(rows.min()),
+            int(columns.max()),
+            int(rows.max()),
+        ),
+        "maximum_channel_delta": int(delta.max()),
+    }
+
+
+def _drive_pointer_pan(
+    harness: MountedQPaneHarness,
+    origin: QPoint,
+    positions: tuple[QPoint, ...],
+) -> list[float]:
+    """Return per-frame latency for one real navigation-tool drag."""
+    latencies: list[float] = []
+    QTest.mousePress(harness.viewer, Qt.LeftButton, Qt.NoModifier, origin)
+    try:
+        for position in positions:
+            started = interaction_clock()
+            QTest.mouseMove(harness.viewer, position, delay=0)
+            harness.drain_events()
+            latencies.append((interaction_clock() - started) * 1000.0)
+    finally:
+        QTest.mouseRelease(
+            harness.viewer,
+            Qt.LeftButton,
+            Qt.NoModifier,
+            positions[-1],
+        )
+    return latencies

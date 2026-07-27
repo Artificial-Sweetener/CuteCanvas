@@ -179,6 +179,12 @@ class ToolInteractionDelegate:
         tm_signals.drag_out_requested.connect(self.handle_drag_start_request)
         tm_signals.cursor_update_requested.connect(self.update_cursor)
         tm_signals.repaint_overlay_requested.connect(qpane.update)
+        tm_signals.navigation_started.connect(
+            qpane.view().presenter.begin_navigation_interaction
+        )
+        tm_signals.navigation_finished.connect(
+            qpane.view().presenter.finish_navigation_interaction
+        )
 
     def registerOverlay(self, name: str, draw_fn: OverlayDrawFn) -> None:
         """Register an overlay draw hook under the provided identifier."""
@@ -286,7 +292,7 @@ class ToolInteractionDelegate:
                 and mask_service is not None
             ):
                 composition_id = qpane.currentCompositionID()
-                if mask_service.ensureTopMaskActiveForComposition(composition_id):
+                if mask_service.ensureActiveMaskForComposition(composition_id):
                     mask_service.prepareBrushInteraction()
                     qpane.view().coordinate_scene_descriptor()
                     resolution = qpane.editorOperationResolver().resolve(

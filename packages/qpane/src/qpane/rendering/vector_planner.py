@@ -27,6 +27,7 @@ from ..vector.tile_source import VectorRenderTileSource
 from .compiled_scene import CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
+from .raster_sampling import smooth_raster_sampling_enabled
 from .render_tiles import RenderTileWorkCoordinator
 
 
@@ -78,7 +79,7 @@ class VectorRenderPlanner:
                         ),
                         source_to_panel=layer_to_panel,
                         panel_rect=QRectF(frame.qpane_rect),
-                        device_pixel_ratio=_device_pixel_ratio(frame),
+                        device_pixel_ratio=frame.device_pixel_ratio,
                     )
                     if refinement.products is None and not refinement.pending:
                         product = self._cache.product(
@@ -117,6 +118,10 @@ class VectorRenderPlanner:
                         document.bounds.width,
                         document.bounds.height,
                     ),
+                    render_hint_enabled=smooth_raster_sampling_enabled(
+                        layer_to_panel,
+                        frame.device_pixel_ratio,
+                    ),
                     preview_picture=preview_picture,
                     trailing_picture=trailing_picture,
                     refined_tiles=refined_tiles,
@@ -136,11 +141,3 @@ def _needs_refinement(document: VectorDocument) -> bool:
         for item in document.objects
     )
     return complexity >= 512
-
-
-def _device_pixel_ratio(frame: RenderFrameGeometry) -> float:
-    """Derive physical/logical scale from detached frame geometry."""
-    logical_width = frame.qpane_rect.width()
-    if logical_width <= 0:
-        return 1.0
-    return max(0.01, frame.physical_viewport_rect.width() / logical_width)

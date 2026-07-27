@@ -38,6 +38,8 @@ from dataclasses import dataclass, field, fields
 from enum import Enum
 from typing import (
     Any,
+    Literal,
+    TypeAlias,
     TypeVar,
 )
 
@@ -47,6 +49,8 @@ from ..features import FeatureInstallError
 from ..types import CacheMode, DiagnosticsDomain, PlaceholderScaleMode, ZoomMode
 
 logger = logging.getLogger(__name__)
+
+TileSizeSetting: TypeAlias = int | Literal["auto"]
 
 _PSUTIL_WARNING_EMITTED = False
 
@@ -606,7 +610,7 @@ class PlaceholderSettings:
 _DEFAULTS: dict[str, Any] = {
     "cache": CacheSettings(),
     "placeholder": PlaceholderSettings(),
-    "tile_size": 1024,
+    "tile_size": "auto",
     "tile_overlap": 8,
     "min_view_size_px": 128,
     "canvas_expansion_factor": 1.4,

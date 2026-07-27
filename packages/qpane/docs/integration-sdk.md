@@ -32,10 +32,22 @@ routes its source values through focused `SourceCapabilityRegistry` instances.
 `LayerInteractionPolicy`, and `LayerHitTest` carry source-neutral behavior and
 input policy rather than editor-specific state.
 
-`SceneRenderItem`, `RasterLayerRenderItem`, and `SceneLayerHitTestResult` are
-detached products for presentation and hit testing. `SceneLayerAssetKey`
-separates reusable source identity from a placed layer instance, which prevents
-one resource used twice from sharing the wrong transient products.
+`SceneRenderItem`, `RasterLayerRenderItem`, and `SampledLayerRenderItem` are
+detached products for presentation and hit testing. A sampled layer carries
+immutable `SampledTileRenderData` values, so a renderer can reuse refined
+regions without granting the frame access to mutable source state.
+`SceneLayerHitTestResult` reports the matching detached item and source-local
+point without exposing a live scene owner.
+`SceneLayerAssetKey` separates reusable source identity from a placed layer
+instance, which prevents one resource used twice from sharing the wrong
+transient products.
+
+Raster-grid policy belongs to QPane's rendering lifecycle. The viewport-aware
+grid owner selects and debounces automatic sizes; the tile-product owner only
+accepts one immutable grid, generates products for that identity, and cancels
+or rejects work from retired grids. Host integrations configure the policy
+through `Config.tile_size` and must not reproduce grid selection, cache
+invalidation, or stale-result rules.
 
 ## Damage and transient raster presentation
 
@@ -49,6 +61,15 @@ being edited. `TransientRasterResolvedContribution` carries already resolved
 content, while `TransientRasterTransformContribution` moves an existing
 product without resampling it on every pointer event. These values let the
 normal compositor preserve clip, ordering, and damage rules during previews.
+`TransientSampledResolvedContribution` provides the same preview contract for
+tile-backed sampled content, including the layer clip and source geometry
+needed for a stable temporary edit.
+When a host must sample immutable hybrid content for a transient product,
+`present_hybrid_sample()` evaluates the requested source rectangle at an
+explicit output size using the same source-space phase as settled hybrid
+presentation.
+For an already evaluated coverage array, `present_hybrid_pixels()` applies the
+document's color and outline presentation without repeating source evaluation.
 
 ## Affine editing geometry
 
@@ -169,6 +190,14 @@ The host remains the only physical admission owner. It does not wrap a QPane
 pool, publish domain results, marshal Qt adoption, or duplicate cancellation
 state. QPane never configures or shuts down a supplied runtime.
 
+Native resources sometimes require affinity-bound destruction after a widget
+or document has already closed. An owner can reserve that lifetime with
+`ExecutionScope.open_finalization_scope()`, submit cleanup after the
+originating scope closes, and close the finalization scope when its handle
+settles. Temporary backend saturation leaves finalization pending until an
+accepted task releases capacity. Runtime shutdown remains the outer bound and
+closes every outstanding finalization scope.
+
 `RetryPolicy` computes bounded deterministic delays. `RetryController` retains
 at most one coalesced payload per producer key and retries only structured
 rejection through a `DelayScheduler`. `QtDelayScheduler` keeps those producer
@@ -279,8 +308,9 @@ return detached arrays. `qimage_to_numpy_const_view_argb32` provides a
 read-only zero-copy view and its normalized backing image.
 `qimage_to_numpy_const_view_bgra32` preserves compatible 32-bit storage when
 only channel values, rather than premultiplication, matter.
-`qimage_to_numpy_view_argb32` and `qimage_to_numpy_view_grayscale8` provide
-writable scoped zero-copy views when the caller can honor the image lifetime.
+`qimage_to_numpy_view_argb32` provides a writable scoped zero-copy view.
+`qimage_to_numpy_view_grayscale8` provides a read-only scoped zero-copy view.
+Both require the caller to honor the image lifetime.
 
 For the reverse direction, `numpy_to_qimage_argb32` and
 `numpy_to_qimage_grayscale8` preserve the array's intrinsic size, while

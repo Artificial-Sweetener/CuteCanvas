@@ -25,6 +25,7 @@ from .model import (
     HybridRasterSampler,
     HybridVectorPrimitive,
 )
+from .presentation import present_hybrid_pixels, present_hybrid_sample
 
 __all__ = [
     "HybridCombineMode",
@@ -36,4 +37,6 @@ __all__ = [
     "HybridRasterSampler",
     "HybridVectorPrimitive",
     "combine_hybrid_coverage",
+    "present_hybrid_pixels",
+    "present_hybrid_sample",
 ]

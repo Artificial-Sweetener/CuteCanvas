@@ -47,6 +47,8 @@ class DemoLaunchSettings:
     sam_model_path: str | None = None
     sam_model_url: str | None = None
     sam_model_hash: str | None = None
+    navigation_trace_output: str | None = None
+    navigation_document: str | None = None
 
 
 DEMO_TIERS: Mapping[str, DemoTier] = MappingProxyType(
@@ -150,6 +152,16 @@ class DemoEnvironmentManager:
             command.append("--sam")
         if settings.config_strict:
             command.append("--config-strict")
+        self._append_option(
+            command,
+            "--navigation-trace-output",
+            settings.navigation_trace_output,
+        )
+        self._append_option(
+            command,
+            "--navigation-document",
+            settings.navigation_document,
+        )
         if definition.sam_enabled:
             self._append_option(
                 command,

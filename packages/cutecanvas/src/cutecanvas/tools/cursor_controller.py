@@ -66,10 +66,10 @@ class EditorCursorController:
         """Apply the highest-priority cursor for the current editor state."""
         canvas = self._canvas
         if canvas._is_blank:
-            canvas.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self._apply_cursor(QCursor(Qt.CursorShape.ArrowCursor))
             return
         if self._cursor_suppressed():
-            canvas.setCursor(QCursor(Qt.CursorShape.BlankCursor))
+            self._apply_cursor(QCursor(Qt.CursorShape.BlankCursor))
             return
         active_tool = canvas._tools_manager.get_active_tool()
         if active_tool and hasattr(active_tool, "getCursor"):
@@ -79,7 +79,7 @@ class EditorCursorController:
                 logger.exception("Active tool failed to provide cursor")
             else:
                 if cursor is not None:
-                    canvas.setCursor(cursor)
+                    self._apply_cursor(cursor)
                     return
         mode = canvas._tools_manager.get_control_mode()
         provider = self._providers.get(mode)
@@ -90,7 +90,7 @@ class EditorCursorController:
                 logger.exception("Cursor provider failed for mode %s", mode)
             else:
                 if cursor is not None:
-                    canvas.setCursor(cursor)
+                    self._apply_cursor(cursor)
                     return
         if mode in (
             Tools.CONTROL_MODE_DRAW_BRUSH,
@@ -102,13 +102,13 @@ class EditorCursorController:
                 )
             )
         elif mode == Tools.CONTROL_MODE_SMART_SELECT:
-            canvas.setCursor(
+            self._apply_cursor(
                 canvas.cursor_builder.create_smart_select_cursor(
                     erase_indicator=self.alt_held
                 )
             )
         else:
-            canvas.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self._apply_cursor(QCursor(Qt.CursorShape.ArrowCursor))
 
     def update_brush(self, *, erase_indicator: bool = False) -> None:
         """Render target-neutral brush feedback for the active paint destination."""
@@ -116,12 +116,12 @@ class EditorCursorController:
         resolution = canvas.editorOperationResolver().resolve(EditorOperation.PAINT)
         if not resolution.allowed:
             self.custom_cursor = None
-            canvas.setCursor(QCursor(Qt.CursorShape.ForbiddenCursor))
+            self._apply_cursor(QCursor(Qt.CursorShape.ForbiddenCursor))
             return
         color = canvas.paintingCoordinator().preview_color()
         if color is None:
             self.custom_cursor = None
-            canvas.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self._apply_cursor(QCursor(Qt.CursorShape.ArrowCursor))
             return
         zoom = max(1e-6, float(canvas.view().viewport.zoom))
         dpr = max(1e-6, float(canvas.devicePixelRatioF()))
@@ -129,7 +129,7 @@ class EditorCursorController:
         viewport_size = canvas.size()
         if logical_size > min(viewport_size.width(), viewport_size.height()):
             self.custom_cursor = None
-            canvas.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+            self._apply_cursor(QCursor(Qt.CursorShape.ArrowCursor))
             return
         cursor = canvas.cursor_builder.create_brush_cursor(
             max(2, round(logical_size)),
@@ -137,7 +137,7 @@ class EditorCursorController:
             erase_indicator=erase_indicator,
         )
         self.custom_cursor = cursor
-        canvas.setCursor(cursor)
+        self._apply_cursor(cursor)
 
     def update_for_modifiers(self) -> None:
         """Refresh cursor feedback when mode-sensitive modifiers change."""
@@ -158,6 +158,12 @@ class EditorCursorController:
         if self._states_match(window.cursor(), desired):
             return
         window.setCursor(desired)
+
+    def _apply_cursor(self, desired: QCursor) -> None:
+        """Mutate QWidget cursor state only when its appearance changes."""
+        if self._states_match(self._canvas.cursor(), desired):
+            return
+        self._canvas.setCursor(desired)
 
     @staticmethod
     def _states_match(current: QCursor, desired: QCursor) -> bool:

@@ -168,6 +168,8 @@ def make_tile_key(
     col: int = 0,
     *,
     revision: int = 0,
+    tile_size: int = 64,
+    tile_overlap: int = 0,
 ) -> SceneLayerTileKey:
     """Return a source-neutral tile key for tests."""
     if image_id is None:
@@ -190,6 +192,8 @@ def make_tile_key(
             source_path=source_path,
         ),
         pyramid_scale=pyramid_scale,
+        tile_size=tile_size,
+        tile_overlap=tile_overlap,
         row=row,
         col=col,
     )

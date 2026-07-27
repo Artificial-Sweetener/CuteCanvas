@@ -556,6 +556,9 @@ class EditorCompositionRoot:
                 render_items,
             )
         )
+        view.presenter.set_transient_raster_target_provider(
+            lambda: floating_pixels.target(selected_pixel_movement.raster_preview)
+        )
         active_mask_coordinates = ActiveMaskLayerCoordinates(
             active_mask_id=callbacks.active_mask_id,
             active_scene=view.coordinate_scene_descriptor,

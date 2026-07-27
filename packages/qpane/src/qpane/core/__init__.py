@@ -17,7 +17,13 @@
 """Core orchestration, configuration, and diagnostics helpers for QPane."""
 
 from ..types import DiagnosticRecord
-from .config import CacheSettings, CacheWeights, Config, PrefetchSettings
+from .config import (
+    CacheSettings,
+    CacheWeights,
+    Config,
+    PrefetchSettings,
+    TileSizeSetting,
+)
 from .diagnostics import (
     DiagnosticsProvider,
     DiagnosticsRegistry,
@@ -41,6 +47,7 @@ __all__ = [
     "OverlayRegistry",
     "PrefetchSettings",
     "SceneOverlayDrawFn",
+    "TileSizeSetting",
     "build_core_diagnostics",
     "pyramid_level_record",
 ]

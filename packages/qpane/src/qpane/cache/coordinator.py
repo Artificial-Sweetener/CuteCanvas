@@ -67,6 +67,7 @@ class _ConsumerState:
     registration: ConsumerRegistration
     usage_bytes: int = 0
     last_trim: TrimRecord | None = None
+    capacity_bytes: int | None = None
 
     @property
     def consumer_id(self) -> str:
@@ -137,6 +138,13 @@ class CacheCoordinator:
                 zero before being applied.
         """
         self._active_budget_bytes = max(0, active_budget_bytes)
+        for state in self._consumers.values():
+            registration = state.registration
+            if (
+                registration.override_bytes is None
+                and registration.preferred_bytes is None
+            ):
+                self._apply_capacity(state, self._active_budget_bytes)
         self._enforce_budget()
 
     def register_consumer(
@@ -182,10 +190,11 @@ class CacheCoordinator:
                 override_bytes if override_bytes is None else max(0, override_bytes)
             ),
         )
-        self._consumers[consumer_id] = _ConsumerState(registration=registration)
+        state = _ConsumerState(registration=registration)
+        self._consumers[consumer_id] = state
         target = self._resolve_target_bytes(registration)
         if target is not None:
-            registration.callbacks.set_budget(target)
+            self._apply_capacity(state, target)
         self._refresh_usage(consumer_id)
         return registration
 
@@ -229,7 +238,7 @@ class CacheCoordinator:
         )
         target = self._resolve_target_bytes(registration)
         if target is not None:
-            registration.callbacks.set_budget(target)
+            self._apply_capacity(state, target)
         self._enforce_budget()
 
     def set_consumer_weight(self, consumer_id: str, weight: float) -> None:
@@ -263,7 +272,7 @@ class CacheCoordinator:
         if registration.override_bytes is None:
             target = self._resolve_target_bytes(registration)
             if target is not None:
-                registration.callbacks.set_budget(target)
+                self._apply_capacity(state, target)
         self._enforce_budget()
 
     def snapshot(self) -> dict[str, object]:
@@ -273,14 +282,7 @@ class CacheCoordinator:
             Dictionary describing the budget, usage, and per-consumer stats.
         """
         consumers: dict[str, dict[str, object]] = {}
-        weights = {
-            consumer_id: max(0.0, state.registration.weight)
-            for consumer_id, state in self._consumers.items()
-        }
-        total_weight = sum(weights.values())
-        if total_weight <= 0.0 and weights:
-            total_weight = float(len(weights))
-            weights = {consumer_id: 1.0 for consumer_id in weights}
+        weights, total_weight = self._active_weights()
         for consumer_id, state in self._consumers.items():
             registration = state.registration
             trim_record = (
@@ -366,7 +368,9 @@ class CacheCoordinator:
         """Return the active target for ``registration`` (override beats preferred)."""
         if registration.override_bytes is not None:
             return registration.override_bytes
-        return registration.preferred_bytes
+        if registration.preferred_bytes is not None:
+            return registration.preferred_bytes
+        return self._active_budget_bytes
 
     def _entitlement_bytes(
         self,
@@ -380,6 +384,36 @@ class CacheCoordinator:
         weight = weights.get(consumer_id, 0.0)
         return (weight / total_weight) * self._active_budget_bytes
 
+    def _active_weights(self) -> tuple[dict[str, float], float]:
+        """Return weights only for caches currently retaining allocations."""
+        weights = {
+            consumer_id: max(0.0, state.registration.weight)
+            for consumer_id, state in self._consumers.items()
+            if state.usage_bytes > 0
+        }
+        total_weight = sum(weights.values())
+        if total_weight <= 0.0 and weights:
+            weights = {consumer_id: 1.0 for consumer_id in weights}
+            total_weight = float(len(weights))
+        return weights, total_weight
+
+    def _apply_capacity(self, state: _ConsumerState, target_bytes: int) -> None:
+        """Apply one cache ceiling only when the effective capacity changes."""
+        target = max(0, int(target_bytes))
+        if state.capacity_bytes == target:
+            return
+        state.registration.callbacks.set_budget(target)
+        state.capacity_bytes = target
+
+    def _restore_capacities(self) -> None:
+        """Restore configured ceilings after temporary global-pressure trims."""
+        if self._total_usage() > self._active_budget_bytes:
+            return
+        for state in self._consumers.values():
+            target = self._resolve_target_bytes(state.registration)
+            if target is not None:
+                self._apply_capacity(state, target)
+
     def _enforce_budget(self) -> None:
         """Enforce overrides first, then trim by weighted entitlement to honor the budget."""
         if self._enforcing:
@@ -392,14 +426,7 @@ class CacheCoordinator:
                 self._last_trim_events = ()
                 events: list[dict[str, object]] = []
                 usage_before = self._total_usage()
-                weights = {
-                    consumer_id: max(0.0, state.registration.weight)
-                    for consumer_id, state in self._consumers.items()
-                }
-                total_weight = sum(weights.values())
-                if total_weight <= 0.0 and weights:
-                    weights = {consumer_id: 1.0 for consumer_id in weights}
-                    total_weight = float(len(weights))
+                weights, total_weight = self._active_weights()
                 for state in self._consumers.values():
                     override = state.registration.override_bytes
                     if override is not None and state.usage_bytes > override:
@@ -491,6 +518,8 @@ class CacheCoordinator:
                         self._active_budget_bytes,
                         self._total_usage(),
                     )
+                if self._total_usage() <= self._active_budget_bytes:
+                    self._restore_capacities()
                 self._mark_dirty()
                 if not self._pending_enforce:
                     break
@@ -513,7 +542,7 @@ class CacheCoordinator:
         registration = state.registration
         usage_before = state.usage_bytes
         try:
-            registration.callbacks.set_budget(target)
+            self._apply_capacity(state, target)
             registration.callbacks.trim_to(target)
             new_usage = registration.callbacks.get_usage()
         except Exception:  # pragma: no cover - defensive guard

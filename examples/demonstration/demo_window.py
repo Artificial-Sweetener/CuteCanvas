@@ -69,6 +69,7 @@ from examples.demonstration.status_tutorial import StatusTutorialController
 from examples.demonstration.tool_mode_tutorial import ToolModeTutorialController
 from examples.demonstration.welcome_document import seed_welcome_document
 from examples.demonstration.workspace_tutorial import WorkspaceTutorialController
+from tools.navigation_trace import NavigationTraceRecorder
 
 MASK_KEY_LOOKUP = {
     Qt.Key_1: 0,
@@ -98,6 +99,8 @@ class ExampleOptions:
     sam_model_path: str | None = None
     sam_model_url: str | None = None
     sam_model_hash: str | None = None
+    navigation_trace_output: str | None = None
+    navigation_document: str | None = None
 
 
 class ExampleWindow(QMainWindow):
@@ -126,6 +129,7 @@ class ExampleWindow(QMainWindow):
         self._execution_closed = False
         self._reference_dialog: QuickReferenceDialog | None = None
         self._shortcuts: list[QShortcut] = []
+        self._navigation_trace: NavigationTraceRecorder | None = None
         self._configure_window_frame()
         self._build_qpane()
         self._configure_dialog_fields()
@@ -225,6 +229,7 @@ class ExampleWindow(QMainWindow):
         self.commands.connect_signals()
         self._install_shortcuts()
         self._finalize_startup()
+        self._configure_navigation_trace()
 
     def _configure_window_frame(self) -> None:
         """Apply the window title and initial sizing."""
@@ -391,6 +396,38 @@ class ExampleWindow(QMainWindow):
                 QKeySequence(key),
                 partial(self.workspace.select_mask_by_index, index),
             )
+        if self.options.navigation_trace_output:
+            _add_shortcut(QKeySequence(Qt.Key_F9), self._toggle_navigation_trace)
+
+    def _configure_navigation_trace(self) -> None:
+        """Open the requested document and arm opt-in F9 navigation recording."""
+        document = (
+            None
+            if not self.options.navigation_document
+            else Path(self.options.navigation_document).resolve()
+        )
+        if document is not None and not self.workspace.open_composition(document):
+            return
+        output = self.options.navigation_trace_output
+        if not output:
+            return
+        self._navigation_trace = NavigationTraceRecorder(
+            self.qpane,
+            Path(output),
+            document_path=document,
+            status=self.status_ui.show_message,
+            parent=self,
+        )
+        self.status_ui.show_message(
+            f"Navigation recorder armed · press F9, reproduce the lag, then press F9 "
+            f"again · {self._navigation_trace.output_path}"
+        )
+
+    def _toggle_navigation_trace(self) -> None:
+        """Toggle the optional navigation recorder."""
+        recorder = self._navigation_trace
+        if recorder is not None:
+            recorder.toggle()
 
     def _connect_qpane_signals(self) -> None:
         """Wire qpane signals to window/UI slots."""
@@ -428,6 +465,8 @@ class ExampleWindow(QMainWindow):
 
     def closeEvent(self, event: QEvent) -> None:
         """Close helper dialogs and emit a farewell message on exit."""
+        if self._navigation_trace is not None and self._navigation_trace.active:
+            self._navigation_trace.stop()
         if self._reference_dialog is not None:
             self._reference_dialog.close()
         self.application_input.close()

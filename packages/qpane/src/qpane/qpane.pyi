@@ -29,6 +29,7 @@ from .core import Config as Config
 from .core import Diagnostics as Diagnostics
 from .core import DiagnosticsProvider, OverlayDrawFn, SceneOverlayDrawFn
 from .core import DiagnosticsSnapshot as DiagnosticsSnapshot
+from .core import TileSizeSetting as TileSizeSetting
 from .execution import (
     BackendSubmission as BackendSubmission,
 )

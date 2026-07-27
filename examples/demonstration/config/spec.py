@@ -304,16 +304,6 @@ VIEWER_PREFETCH_FIELDS: tuple[FieldSpec, ...] = (
 )
 VIEWER_VIEWPORT_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec(
-        path="tile_size",
-        kind="spin",
-        minimum=64,
-        maximum=4096,
-        step=64,
-        tooltip="Edge length for generated tiles in pixels.",
-        label="Tile Size (px)",
-        feature_namespace="core",
-    ),
-    FieldSpec(
         path="tile_overlap",
         kind="spin",
         minimum=0,

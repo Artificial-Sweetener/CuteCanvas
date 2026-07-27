@@ -41,6 +41,8 @@ class ViewerToolSignals(QObject):
     drag_out_requested = Signal(QMouseEvent)
     repaint_overlay_requested = Signal()
     cursor_update_requested = Signal()
+    navigation_started = Signal()
+    navigation_finished = Signal()
 
 
 class ViewerTool(abc.ABC):

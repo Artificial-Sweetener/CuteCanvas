@@ -131,7 +131,7 @@ class SamManager(QObject):
         self._execution_scope = execution_scope.open_child(
             f"{execution_scope.owner_id}:sam:{self._device}"
         )
-        self._cleanup_scope = self._execution_scope.open_child(
+        self._cleanup_scope = execution_scope.open_finalization_scope(
             f"{self._execution_scope.owner_id}:cleanup",
             dispatcher=InlineDispatcher(),
         )
@@ -156,6 +156,7 @@ class SamManager(QObject):
         self._cache_misses = 0
         self._evictions = 0
         self._evicted_bytes = 0
+        self._session_may_own_native_resources = False
         self._closing = False
         self._shutdown_handle: (
             ExecutionHandle[SamCacheMutationProduct, object] | None
@@ -385,6 +386,9 @@ class SamManager(QObject):
             handle.cancel(reason="SAM manager shutdown")
         self._inference_handles.clear()
         self._cache_handles.clear()
+        if not self._session_may_own_native_resources:
+            self._close_execution_scopes(reason="sam_shutdown_empty")
+            return None
         request = ExecutionRequest[SamCacheMutationProduct, object](
             operation="editor.sam.session.close",
             requirements=self._native_requirements(
@@ -394,12 +398,16 @@ class SamManager(QObject):
         )
         try:
             handle = self._cleanup_scope.submit(request)
-        except ExecutionRejected:
-            logger.exception("Could not schedule native SAM session cleanup")
-            self._execution_scope.close(reason="sam_shutdown_rejected")
+        except ExecutionRejected as rejection:
+            logger.warning("Native SAM session cleanup was rejected: %s", rejection)
+            self._close_execution_scopes(reason="sam_shutdown_rejected")
             return None
         self._shutdown_handle = handle
-        handle.add_done_callback(lambda _outcome: self._close_execution_scope())
+        handle.add_done_callback(
+            lambda _outcome: self._close_execution_scopes(
+                reason="sam_shutdown_complete"
+            )
+        )
         return handle
 
     def _submit_preparation(
@@ -435,6 +443,7 @@ class SamManager(QObject):
                 product,
             ),
         )
+        self._session_may_own_native_resources = True
         pending.handle = handle
         self._pending[payload.image_id] = pending
         handle.add_done_callback(
@@ -602,9 +611,10 @@ class SamManager(QObject):
         """Return the stable retry identity for one image and device."""
         return image_id, self._device
 
-    def _close_execution_scope(self) -> None:
-        """Close native task ownership after cleanup work settles."""
-        self._execution_scope.close(reason="sam_shutdown_complete")
+    def _close_execution_scopes(self, *, reason: str) -> None:
+        """Close operation and finalization ownership after cleanup settles."""
+        self._execution_scope.close(reason=reason)
+        self._cleanup_scope.close(reason=reason)
 
     @staticmethod
     def _sanitize_cache_limit(limit: int | None) -> int:

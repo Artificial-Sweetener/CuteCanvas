@@ -351,3 +351,40 @@ def test_panzoom_tool_emits_drag_out_via_shared_path(qapp):
     assert tool._drag_start_position is None
     assert tool_drag_events, "Pan/zoom tool should emit drag-out attempts"
     assert manager_drag_events, "Pan/zoom drag-out should reach manager signals"
+
+
+def test_switching_modes_finishes_an_active_navigation_drag(
+    qapp: QApplication,
+) -> None:
+    """Releasing hold-Space before the mouse must still close navigation."""
+    manager = Tools()
+    ports = ToolActivationPorts(
+        cursor=CursorInteractionPort(
+            is_drag_out_allowed=lambda: False,
+            is_content_empty=lambda: False,
+        ),
+        navigation=NavigationInteractionPort(
+            is_navigation_locked=lambda: False,
+            is_content_empty=lambda: False,
+            is_drag_out_allowed=lambda: False,
+            can_pan=lambda: True,
+        ),
+    )
+    manager.set_mode(Tools.CONTROL_MODE_PANZOOM, ports)
+    started: list[None] = []
+    finished: list[None] = []
+    manager.signals.navigation_started.connect(lambda: started.append(None))
+    manager.signals.navigation_finished.connect(lambda: finished.append(None))
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(10, 10),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    manager.mousePressEvent(press)
+    manager.set_mode(Tools.CONTROL_MODE_CURSOR)
+
+    assert started == [None]
+    assert finished == [None]

@@ -39,6 +39,28 @@ from qpane.raster.image_conversion import qimage_to_numpy_grayscale8
 from qpane.scene.raster import RasterBounds
 
 
+def test_preview_stride_defaults_to_visible_density_before_cache_warmup(qapp) -> None:
+    """A fresh mask must not build a native-resolution preview unnecessarily."""
+    assets = MaskAssetStore(ProjectResourceStore())
+    image = QImage(4096, 4096, QImage.Format.Format_Grayscale8)
+    image.fill(0)
+    mask_id = assets.create_mask(image)
+    layer = assets.get_layer(mask_id)
+    assert layer is not None
+    controller = MaskController(
+        assets,
+        source_to_panel_point=lambda point: QPointF(point),
+        config=Config(),
+        mask_config=MaskConfigSlice(),
+    )
+
+    assert controller.renders.preview_stride(mask_id, 0.125) == 8
+
+    controller.renders.get_best_by_id(mask_id, scale=0.5)
+
+    assert controller.renders.preview_stride(mask_id, 0.125) == 2
+
+
 def test_scaled_mask_render_does_not_materialize_full_surface(
     qapp, monkeypatch
 ) -> None:
@@ -69,8 +91,43 @@ def test_scaled_mask_render_does_not_materialize_full_surface(
     assert pixmap.size() == QSize(16, 12)
 
 
-def test_live_preview_reuses_nearest_cache_during_scale_transition(qapp) -> None:
-    """A stroke stays visible while the requested viewport scale changes."""
+def test_worker_colorized_mask_patch_does_not_materialize_full_surface(
+    qapp,
+    monkeypatch,
+) -> None:
+    """Adopting a prepared patch must not copy pixels that the worker replaced."""
+    assets = MaskAssetStore(ProjectResourceStore())
+    image = QImage(8192, 8192, QImage.Format.Format_Grayscale8)
+    image.fill(255)
+    mask_id = assets.create_mask(image)
+    layer = assets.get_layer(mask_id)
+    assert layer is not None
+    controller = MaskController(
+        assets,
+        source_to_panel_point=lambda point: QPointF(point),
+        config=Config(),
+        mask_config=MaskConfigSlice(),
+    )
+    dirty_rect = QRect(2048, 2048, 1024, 1024)
+    colorized = QImage(dirty_rect.size(), QImage.Format.Format_ARGB32_Premultiplied)
+    colorized.fill(QColor(30, 170, 220, 140))
+
+    def reject_full_snapshot() -> QImage:
+        raise AssertionError("prepared patch adoption copied the full mask")
+
+    monkeypatch.setattr(layer.coverage.raster, "snapshot_qimage", reject_full_snapshot)
+
+    controller.renders.update_region(
+        dirty_rect,
+        layer,
+        colorized_image=colorized,
+    )
+
+
+def test_live_preview_uses_one_exact_sample_lattice_during_scale_transition(
+    qapp,
+) -> None:
+    """A stroke must not resample independent patches into another cache density."""
     assets = MaskAssetStore(ProjectResourceStore())
     image = QImage(64, 48, QImage.Format.Format_Grayscale8)
     image.fill(0)
@@ -95,11 +152,24 @@ def test_live_preview_reuses_nearest_cache_during_scale_transition(qapp) -> None
     preview.setText("qpane_preview_stride", "1")
     preview.setText("qpane_preview_provisional", "1")
     controller.renders.update_region(dirty_rect, layer, sub_mask_image=preview)
+    adjacent_rect = QRect(16, 8, 8, 8)
+    controller.renders.update_region(
+        adjacent_rect,
+        layer,
+        sub_mask_image=preview,
+    )
 
     live_pixmap = controller.renders.get(layer, scale=1.0)
 
-    assert live_pixmap is fit_pixmap
-    assert live_pixmap.toImage().pixelColor(5, 5).alpha() > 0
+    assert live_pixmap is not fit_pixmap
+    assert live_pixmap is not None
+    assert live_pixmap.size() == image.size()
+    assert live_pixmap.toImage().pixelColor(8, 8).alpha() > 0
+    row = tuple(
+        live_pixmap.toImage().pixelColor(x_position, 12).rgba()
+        for x_position in range(8, 24)
+    )
+    assert len(set(row)) == 1
 
 
 def test_retained_mask_publishes_hybrid_source_without_visible_patch_evaluation(

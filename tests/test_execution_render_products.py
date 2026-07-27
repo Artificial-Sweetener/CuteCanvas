@@ -23,6 +23,7 @@ import uuid
 from PySide6.QtGui import QColor, QImage
 from qpane import Config
 from qpane.rendering import PyramidManager, PyramidStatus, TileManager
+from qpane.rendering.raster_tile_grid import RasterTileGrid
 from qpane.scene.identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
@@ -56,6 +57,8 @@ def _tile_key(source: SourceRenderAssetKey) -> SceneLayerTileKey:
         ),
         pyramid_asset_key=source,
         pyramid_scale=1.0,
+        tile_size=1024,
+        tile_overlap=8,
         row=0,
         col=0,
     )
@@ -73,7 +76,11 @@ def test_tile_generation_adopts_once_and_cancels_on_shutdown(qapp) -> None:
     backend = ControllableExecutionBackend()
     runtime = ExecutionRuntime(backend)
     scope = runtime.open_scope(owner_id="tile-test")
-    manager = TileManager(Config(), execution_scope=scope)
+    manager = TileManager(
+        Config(),
+        grid=RasterTileGrid(1024, 8),
+        execution_scope=scope,
+    )
     source = _source_key()
     first = _tile_key(source)
 
@@ -86,6 +93,8 @@ def test_tile_generation_adopts_once_and_cancels_on_shutdown(qapp) -> None:
         asset_key=first.asset_key,
         pyramid_asset_key=source,
         pyramid_scale=1.0,
+        tile_size=first.tile_size,
+        tile_overlap=first.tile_overlap,
         row=0,
         col=1,
     )

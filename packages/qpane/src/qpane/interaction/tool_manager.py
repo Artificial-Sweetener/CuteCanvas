@@ -39,6 +39,8 @@ class ToolManagerSignals(QObject):
     repaint_overlay_requested = Signal()
     cursor_update_requested = Signal()
     mode_changed = Signal(str)
+    navigation_started = Signal()
+    navigation_finished = Signal()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +69,7 @@ class ToolManager(QObject):
         self._instances: dict[str, ViewerTool] = {}
         self._active_mode: str | None = None
         self._active_tool: ViewerTool | None = None
+        self._navigation_active = False
 
     def register(
         self,
@@ -124,6 +127,7 @@ class ToolManager(QObject):
             self.signals.cursor_update_requested.emit()
             return
         if self._active_tool is not None and self._active_mode is not None:
+            self._finish_navigation()
             self._disconnect(self._active_mode, self._active_tool)
             self._safe_invoke("deactivate", self._active_tool.deactivate)
         self._connect(mode, tool)
@@ -189,6 +193,7 @@ class ToolManager(QObject):
     def shutdown(self) -> None:
         """Deactivate tools and release cached instances during host teardown."""
         if self._active_tool is not None and self._active_mode is not None:
+            self._finish_navigation()
             self._disconnect(self._active_mode, self._active_tool)
             self._safe_invoke("deactivate", self._active_tool.deactivate)
         self._active_tool = None
@@ -216,6 +221,20 @@ class ToolManager(QObject):
         except Exception:
             logger.exception("Tool %r raised during %s", self._active_mode, method_name)
 
+    def _begin_navigation(self) -> None:
+        """Publish one active navigation lifetime from the current tool."""
+        if self._navigation_active:
+            return
+        self._navigation_active = True
+        self.signals.navigation_started.emit()
+
+    def _finish_navigation(self) -> None:
+        """Close the active navigation lifetime before its tool is detached."""
+        if not self._navigation_active:
+            return
+        self._navigation_active = False
+        self.signals.navigation_finished.emit()
+
     def _connect(self, mode: str, tool: ViewerTool) -> None:
         """Route the active tool's source-neutral requests through the manager."""
         mappings = (
@@ -231,6 +250,8 @@ class ToolManager(QObject):
                 tool.signals.cursor_update_requested,
                 self.signals.cursor_update_requested,
             ),
+            (tool.signals.navigation_started, self._begin_navigation),
+            (tool.signals.navigation_finished, self._finish_navigation),
         )
         for source, target in mappings:
             source.connect(target)
@@ -258,6 +279,8 @@ class ToolManager(QObject):
                 tool.signals.cursor_update_requested,
                 self.signals.cursor_update_requested,
             ),
+            (tool.signals.navigation_started, self._begin_navigation),
+            (tool.signals.navigation_finished, self._finish_navigation),
         )
         for source, target in mappings:
             try:

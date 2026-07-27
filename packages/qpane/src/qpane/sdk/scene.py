@@ -36,11 +36,14 @@ from ..scene.raster import RasterBounds
 from ..scene.registry import SceneProviderRegistry
 from ..scene.render_plan import (
     RasterLayerRenderItem,
+    SampledLayerRenderItem,
+    SampledTileRenderData,
     SceneLayerHitTestResult,
     SceneRenderItem,
     TransientRasterContribution,
     TransientRasterResolvedContribution,
     TransientRasterTransformContribution,
+    TransientSampledResolvedContribution,
 )
 from ..scene.source_capabilities import (
     LayerSourceCapabilities,
@@ -80,6 +83,8 @@ __all__ = (
     "RasterPresentation",
     "RasterProductPolicy",
     "RasterSourcePatch",
+    "SampledLayerRenderItem",
+    "SampledTileRenderData",
     "SceneContribution",
     "SceneDescriptor",
     "SceneKind",
@@ -96,4 +101,5 @@ __all__ = (
     "TransientRasterContribution",
     "TransientRasterResolvedContribution",
     "TransientRasterTransformContribution",
+    "TransientSampledResolvedContribution",
 )

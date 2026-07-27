@@ -25,7 +25,7 @@ from PySide6.QtGui import QImage, QPainter, QTransform
 
 from ..raster.image_conversion import (
     numpy_to_qimage_grayscale8,
-    qimage_to_numpy_grayscale8,
+    qimage_to_numpy_view_grayscale8,
 )
 from ..vector.geometry import object_path
 from .model import (
@@ -43,9 +43,20 @@ class HybridDocumentEvaluator:
         self, document: HybridDocument, source_rect: QRectF, size: QSize
     ) -> QImage:
         """Return exact grayscale coverage for one source-local sample."""
+        pixels = self.evaluate_pixels(document, source_rect, size)
+        return QImage() if pixels.size == 0 else numpy_to_qimage_grayscale8(pixels)
+
+    def evaluate_pixels(
+        self,
+        document: HybridDocument,
+        source_rect: QRectF,
+        size: QSize,
+    ) -> np.ndarray:
+        """Return contiguous grayscale coverage without an intermediate Qt copy."""
         if size.isEmpty() or source_rect.isEmpty():
-            return QImage()
+            return np.zeros((0, 0), dtype=np.uint8)
         pixels = np.zeros((size.height(), size.width()), dtype=np.uint8)
+        has_coverage = False
         primitive_index = 0
         while primitive_index < len(document.primitives):
             primitive = document.primitives[primitive_index]
@@ -60,11 +71,15 @@ class HybridDocumentEvaluator:
                     source_rect,
                     size,
                 )
-                pixels = combine_hybrid_coverage(
-                    pixels,
-                    incoming,
-                    HybridCombineMode.ADD,
-                )
+                if has_coverage:
+                    pixels = combine_hybrid_coverage(
+                        pixels,
+                        incoming,
+                        HybridCombineMode.ADD,
+                    )
+                else:
+                    pixels = incoming
+                    has_coverage = True
                 primitive_index = batch_end
                 continue
             primitive_rect = QRectF(
@@ -80,35 +95,48 @@ class HybridDocumentEvaluator:
                     HybridCombineMode.INTERSECT,
                 }:
                     pixels.fill(0)
+                    has_coverage = False
                 primitive_index += 1
                 continue
-            sample_rect, rows, columns = _sample_region(source_rect, size, overlap)
-            sample_size = QSize(columns.stop - columns.start, rows.stop - rows.start)
-            incoming = (
-                qimage_to_numpy_grayscale8(
-                    primitive.sampler.sample(sample_rect, sample_size)
+            sample_rect = source_rect
+            rows = slice(0, size.height())
+            columns = slice(0, size.width())
+            sample_size = size
+            if isinstance(primitive, HybridRasterPrimitive):
+                sampled_image = primitive.sampler.sample(sample_rect, sample_size)
+                incoming, sampled_backing = qimage_to_numpy_view_grayscale8(
+                    sampled_image
                 )
-                if isinstance(primitive, HybridRasterPrimitive)
-                else self._vector_pixels(primitive, sample_rect, sample_size)
-            )
+            else:
+                sampled_backing = None
+                incoming = self._vector_pixels(primitive, sample_rect, sample_size)
             expected_shape = (sample_size.height(), sample_size.width())
             if incoming.shape != expected_shape:
                 raise ValueError("hybrid sampler must return the requested pixel size")
-            if primitive.combine_mode in {
+            operation = primitive.combine_mode
+            if operation in {
                 HybridCombineMode.REPLACE,
                 HybridCombineMode.INTERSECT,
             }:
                 previous = np.array(pixels[rows, columns], copy=True, order="C")
                 pixels.fill(0)
+            elif operation is HybridCombineMode.ADD and not has_coverage:
+                pixels[rows, columns] = incoming
+                has_coverage = True
+                primitive_index += 1
+                del sampled_backing
+                continue
             else:
                 previous = pixels[rows, columns]
             pixels[rows, columns] = combine_hybrid_coverage(
                 previous,
                 incoming,
-                primitive.combine_mode,
+                operation,
             )
+            has_coverage = True
             primitive_index += 1
-        return numpy_to_qimage_grayscale8(pixels)
+            del sampled_backing
+        return np.ascontiguousarray(pixels)
 
     @staticmethod
     def _vector_batch_pixels(
@@ -151,7 +179,10 @@ class HybridDocumentEvaluator:
                 painter.drawPath(object_path(primitive.geometry))
         finally:
             painter.end()
-        return qimage_to_numpy_grayscale8(image)
+        pixels, backing = qimage_to_numpy_view_grayscale8(image)
+        result = np.array(pixels, copy=True, order="C")
+        del backing
+        return result
 
     @staticmethod
     def _vector_pixels(
@@ -188,50 +219,22 @@ class HybridDocumentEvaluator:
             painter.drawPath(object_path(primitive.geometry))
         finally:
             painter.end()
-        pixels = qimage_to_numpy_grayscale8(image)
+        pixels, backing = qimage_to_numpy_view_grayscale8(image)
         if primitive.feather_radius > 0.0:
             pixels = _gaussian_box_blur(
                 pixels,
                 primitive.feather_radius * max(scale_x, scale_y),
             )
-        return np.ascontiguousarray(
+        result = np.array(
             pixels[
                 padding_y : padding_y + size.height(),
                 padding_x : padding_x + size.width(),
-            ]
+            ],
+            copy=True,
+            order="C",
         )
-
-
-def _sample_region(
-    source_rect: QRectF,
-    size: QSize,
-    overlap: QRectF,
-) -> tuple[QRectF, slice, slice]:
-    """Return exact output-aligned sampling geometry for one bounded primitive."""
-    scale_x = size.width() / source_rect.width()
-    scale_y = size.height() / source_rect.height()
-    left = max(0, math.floor((overlap.left() - source_rect.left()) * scale_x))
-    top = max(0, math.floor((overlap.top() - source_rect.top()) * scale_y))
-    right = min(
-        size.width(),
-        math.ceil((overlap.right() - source_rect.left()) * scale_x),
-    )
-    bottom = min(
-        size.height(),
-        math.ceil((overlap.bottom() - source_rect.top()) * scale_y),
-    )
-    columns = slice(left, max(left + 1, right))
-    rows = slice(top, max(top + 1, bottom))
-    return (
-        QRectF(
-            source_rect.left() + columns.start / scale_x,
-            source_rect.top() + rows.start / scale_y,
-            (columns.stop - columns.start) / scale_x,
-            (rows.stop - rows.start) / scale_y,
-        ),
-        rows,
-        columns,
-    )
+        del backing
+        return result
 
 
 def _is_batchable_vector(

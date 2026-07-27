@@ -18,16 +18,31 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
 import pytest
 from cutecanvas import CuteCanvas
-from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, Qt
-from PySide6.QtGui import QInputDevice, QMouseEvent, QPointingDevice, QTabletEvent
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtGui import (
+    QColor,
+    QImage,
+    QInputDevice,
+    QMouseEvent,
+    QPointingDevice,
+    QTabletEvent,
+)
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qpane.scene.render_plan import SampledLayerRenderItem
 
 from tests.harness import MountedQPaneHarness
 from tests.harness.abuse_model import HarnessPoint, PointerKind, StrokeAction
 from tests.harness.input_driver import QtStrokeDriver
+from tests.harness.timing import INTERACTIVE_PERFORMANCE, interaction_clock
+
+_ZOOMED_OUT_4K_AVERAGE_POINTER_BUDGET_MS = 10.0
+_ZOOMED_OUT_4K_COLD_CONTACT_BUDGET_MS = 25.0
 
 
 class MountedMaskFeedbackProbe(MountedQPaneHarness):
@@ -267,6 +282,538 @@ def test_decimated_drag_preview_presents_each_move_without_forced_grab(
     finally:
         if pressed:
             driver.end(action)
+        probe.close()
+
+
+def test_cold_decimated_preview_accumulates_without_internal_patch_edges(
+    qapp: QApplication,
+) -> None:
+    """A held first stroke must remain cumulative and visually seamless."""
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(4096, 4096),
+        widget_size=QSize(320, 500),
+        brush_size=320,
+    )
+    points = tuple(QPoint(x_position, 250) for x_position in range(56, 281, 16))
+    pressed = False
+    try:
+        mask_id = probe.mask_ids[0]
+        probe.viewer.mask_service.controller.renders.invalidate(mask_id)
+        started = interaction_clock()
+        QTest.mousePress(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            points[0],
+        )
+        qapp.processEvents()
+        contact_ms = (interaction_clock() - started) * 1000.0
+        pressed = True
+        assert contact_ms < _ZOOMED_OUT_4K_COLD_CONTACT_BUDGET_MS
+        for point_index, point in enumerate(points[1:], start=1):
+            QTest.mouseMove(probe.viewer, point, delay=0)
+            qapp.processEvents()
+            frame = probe.capture()
+            assert all(
+                probe.is_mask_tint(frame.pixelColor(previous))
+                for previous in points[: point_index + 1]
+            ), f"preview lost accumulated coverage after move {point_index}"
+
+        live = probe.capture()
+        center_colors = tuple(
+            live.pixelColor(x_position, 250).getRgb()
+            for x_position in range(points[0].x() + 8, points[-1].x() - 7)
+        )
+        assert len(set(center_colors)) == 1
+
+        QTest.mouseRelease(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            points[-1],
+        )
+        pressed = False
+        assert probe.wait_for_mask_undo_depth(mask_id, 1)
+        assert probe.wait_for_mask_render_idle()
+        assert probe.wait_for_raster_render_idle()
+        settled = probe.capture()
+        assert all(probe.is_mask_tint(settled.pixelColor(point)) for point in points)
+        settled_colors = tuple(
+            settled.pixelColor(x_position, 250).getRgb()
+            for x_position in range(points[0].x() + 8, points[-1].x() - 7)
+        )
+        assert len(set(settled_colors)) == 1
+    finally:
+        if pressed:
+            QTest.mouseRelease(
+                probe.viewer,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                points[-1],
+            )
+        probe.close()
+
+
+def test_intersecting_mask_previews_preserve_both_layers_while_held(
+    qapp: QApplication,
+) -> None:
+    """A second cold preview must not corrupt its own or another mask's pixels."""
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(4096, 4096),
+        widget_size=QSize(320, 500),
+        mask_count=2,
+        brush_size=384,
+    )
+    horizontal = tuple(QPoint(x_position, 250) for x_position in range(64, 273, 16))
+    vertical = tuple(QPoint(168, y_position) for y_position in range(146, 355, 16))
+    second_pressed = False
+    try:
+        QTest.mousePress(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            horizontal[0],
+        )
+        for point in horizontal[1:]:
+            QTest.mouseMove(probe.viewer, point, delay=0)
+            qapp.processEvents()
+        QTest.mouseRelease(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            horizontal[-1],
+        )
+        assert probe.wait_for_mask_undo_depth(probe.mask_ids[0], 1)
+        before_second = probe.capture()
+        preserved_points = (QPoint(80, 250), QPoint(256, 250))
+        preserved_colors = tuple(
+            before_second.pixelColor(point).getRgb() for point in preserved_points
+        )
+
+        second_id = probe.activate_mask(1)
+        probe.viewer.mask_service.controller.renders.invalidate(second_id)
+        QTest.mousePress(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            vertical[0],
+        )
+        second_pressed = True
+        for point_index, point in enumerate(vertical[1:], start=1):
+            QTest.mouseMove(probe.viewer, point, delay=0)
+            qapp.processEvents()
+            frame = probe.capture()
+            assert all(
+                probe.is_mask_tint(frame.pixelColor(previous))
+                for previous in vertical[: point_index + 1]
+            ), f"intersecting preview lost coverage after move {point_index}"
+
+        held = probe.capture()
+        assert (
+            tuple(held.pixelColor(point).getRgb() for point in preserved_points)
+            == preserved_colors
+        )
+        assert probe.is_mask_tint(held.pixelColor(QPoint(168, 250)))
+    finally:
+        if second_pressed:
+            QTest.mouseRelease(
+                probe.viewer,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                vertical[-1],
+            )
+        probe.close()
+
+
+def test_settled_mask_tiles_stay_seamless_when_another_mask_is_added(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    """Settled mask alpha must remain uniform across refinement and layer changes."""
+    image_size = QSize(2048, 2048)
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=image_size,
+        widget_size=QSize(800, 600),
+    )
+    mask_path = tmp_path / "uniform-mask.png"
+    uniform_mask = QImage(image_size, QImage.Format.Format_Grayscale8)
+    uniform_mask.fill(Qt.GlobalColor.white)
+    assert uniform_mask.save(str(mask_path))
+    try:
+        loaded_mask_id = probe.viewer.loadMaskFromFile(str(mask_path))
+        assert loaded_mask_id is not None
+        probe.viewer.setZoom1To1()
+        probe.viewer.view().viewport.applyZoom(1.37)
+        assert probe.wait_for_mask_render_idle()
+        assert probe.wait_for_raster_render_idle()
+        assert probe.wait_for_render_refinement_idle(), (
+            probe.viewer.view().presenter._render_refinement.pending_count,
+            tuple(probe.viewer.view().presenter._render_refinement._pending),
+            tuple(probe.viewer.view().presenter._render_refinement._deferred),
+        )
+        render_plan = probe.viewer.view().calculateRenderPlan()
+        assert render_plan is not None
+        loaded_mask_items = tuple(
+            item
+            for item in render_plan.render_items
+            if isinstance(item, SampledLayerRenderItem)
+            and getattr(item.descriptor.source, "resource_id", None) == loaded_mask_id
+        )
+        assert len(loaded_mask_items) == 1, tuple(
+            (
+                item.descriptor.source,
+                len(item.tiles),
+            )
+            for item in render_plan.render_items
+            if isinstance(item, SampledLayerRenderItem)
+        )
+        assert len(loaded_mask_items[0].tiles) >= 2
+
+        for offset_index in range(12):
+            probe.viewer.setPan(
+                QPointF(
+                    offset_index / 8.0,
+                    (offset_index * 3 % 12) / 8.0,
+                )
+            )
+            probe.drain_events()
+            swept = probe.capture()
+            assert (
+                len(
+                    {
+                        swept.pixelColor(x_position, 300).rgba()
+                        for x_position in range(32, 768)
+                    }
+                )
+                == 1
+            ), f"vertical mask seam at pan sample {offset_index}"
+            assert (
+                len(
+                    {
+                        swept.pixelColor(400, y_position).rgba()
+                        for y_position in range(32, 568)
+                    }
+                )
+                == 1
+            ), f"horizontal mask seam at pan sample {offset_index}"
+        probe.viewer.setPan(QPointF())
+        probe.drain_events()
+        before = probe.capture()
+        horizontal_before = tuple(
+            before.pixelColor(x_position, 300).rgba() for x_position in range(32, 768)
+        )
+        vertical_before = tuple(
+            before.pixelColor(400, y_position).rgba() for y_position in range(32, 568)
+        )
+        assert len(set(horizontal_before)) == 1
+        assert len(set(vertical_before)) == 1
+
+        added_mask_id = probe.viewer.createBlankMask(image_size)
+        assert added_mask_id is not None
+        assert probe.wait_for_mask_render_idle()
+        assert probe.wait_for_raster_render_idle()
+        after = probe.capture()
+
+        assert (
+            tuple(
+                after.pixelColor(x_position, 300).rgba()
+                for x_position in range(32, 768)
+            )
+            == horizontal_before
+        )
+        assert (
+            tuple(
+                after.pixelColor(400, y_position).rgba()
+                for y_position in range(32, 568)
+            )
+            == vertical_before
+        )
+    finally:
+        probe.close()
+
+
+def test_mask_stays_visually_stable_during_layer_creation_and_tool_switches(
+    qapp: QApplication,
+) -> None:
+    """Unchanged mask pixels must survive every frame of adjacent UI transitions."""
+    image_size = QSize(4096, 4096)
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=image_size,
+        widget_size=QSize(640, 480),
+        brush_size=768,
+    )
+    start = QPoint(120, 240)
+    end = QPoint(520, 240)
+    retained_point = QPoint(320, 240)
+    painted_mask_id = probe.mask_ids[0]
+    pressed = False
+    try:
+        QTest.mousePress(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            start,
+        )
+        pressed = True
+        for x_position in range(140, end.x() + 1, 20):
+            QTest.mouseMove(probe.viewer, QPoint(x_position, 240), delay=0)
+            qapp.processEvents()
+        held_color = probe.capture().pixelColor(retained_point)
+        assert probe.is_mask_tint(held_color)
+
+        with probe.observe_presented_frames() as presented:
+            QTest.mouseRelease(
+                probe.viewer,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                end,
+            )
+            pressed = False
+            for layer_index in range(6):
+                added_mask_id = probe.viewer.createBlankMask(image_size)
+                assert added_mask_id is not None
+                assert probe.viewer.setMaskProperties(
+                    added_mask_id,
+                    color=QColor.fromHsv(layer_index * 45, 200, 255),
+                )
+                assert probe.viewer.setActiveMaskID(added_mask_id)
+                for mode in (
+                    probe.viewer.CONTROL_MODE_MOVE,
+                    probe.viewer.CONTROL_MODE_PANZOOM,
+                    probe.viewer.CONTROL_MODE_DRAW_BRUSH,
+                ):
+                    probe.viewer.setControlMode(mode)
+                    qapp.processEvents()
+            assert probe.wait_for_mask_render_idle()
+            assert probe.wait_for_raster_render_idle()
+
+        assert presented.frames
+        unstable = tuple(
+            (
+                frame_index,
+                frame.color_at(retained_point).getRgb(),
+                frame.mask_layer_count,
+                frame.mask_item_states,
+                frame.mask_sample_scales,
+            )
+            for frame_index, frame in enumerate(presented.frames)
+            if frame.color_at(retained_point) != held_color
+        )
+        assert unstable == ()
+        assert probe.wait_for_mask_undo_depth(painted_mask_id, 1)
+        painted_layer = probe.viewer.mask_service.assets.get_layer(painted_mask_id)
+        assert painted_layer is not None
+        assert np.any(painted_layer.coverage.raster.snapshot_array())
+
+        assert probe.viewer.setActiveMaskID(painted_mask_id)
+        render_revision = probe.viewer.mask_service.controller.renders.render_revision(
+            painted_mask_id
+        )
+        with probe.observe_presented_frames() as reordered:
+            assert probe.viewer.createBlankMask(image_size) is not None
+            assert probe.viewer.mask_service.ensureActiveMaskForComposition(
+                probe.viewer.currentCompositionID()
+            )
+            probe.drain_events()
+        assert reordered.frames
+        assert all(
+            frame.color_at(retained_point) == held_color for frame in reordered.frames
+        )
+        assert (
+            probe.viewer.mask_service.controller.renders.render_revision(
+                painted_mask_id
+            )
+            == render_revision
+        )
+    finally:
+        if pressed:
+            QTest.mouseRelease(
+                probe.viewer,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                end,
+            )
+        probe.close()
+
+
+def test_mask_color_change_never_presents_uncovered_pixels(
+    qapp: QApplication,
+) -> None:
+    """Appearance replacement must retain mask coverage in every presented frame."""
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(4096, 4096),
+        widget_size=QSize(640, 480),
+        brush_size=768,
+    )
+    point = QPoint(320, 240)
+    try:
+        QTest.mouseClick(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            point,
+        )
+        assert probe.wait_for_mask_undo_depth(probe.mask_ids[0], 1)
+        before = probe.capture().pixelColor(point)
+        background = QColor(Qt.GlobalColor.white)
+        assert before != background
+
+        with probe.observe_presented_frames() as presented:
+            assert probe.viewer.setMaskProperties(
+                probe.mask_ids[0],
+                color=QColor.fromHsv(120, 220, 255),
+            )
+            assert probe.wait_for_mask_render_idle()
+            assert probe.wait_for_raster_render_idle()
+            assert probe.wait_for_render_refinement_idle()
+
+        assert presented.frames
+        assert all(frame.color_at(point) != background for frame in presented.frames)
+        assert probe.capture().pixelColor(point) != before
+    finally:
+        probe.close()
+
+
+def test_mask_selection_and_layer_creation_preserve_composited_colors(
+    qapp: QApplication,
+) -> None:
+    """Selecting or adding masks must not mutate existing presentation order."""
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 400),
+        widget_size=QSize(400, 400),
+        mask_count=2,
+    )
+    first_mask, second_mask = probe.mask_ids
+    try:
+        first_layer = probe.viewer.mask_service.assets.get_layer(first_mask)
+        second_layer = probe.viewer.mask_service.assets.get_layer(second_mask)
+        assert first_layer is not None and second_layer is not None
+
+        def fill_first(pixels: np.ndarray, _image: QImage) -> None:
+            """Fill the left three quarters of the first mask."""
+            pixels[:, :300] = 255
+
+        def fill_second(pixels: np.ndarray, _image: QImage) -> None:
+            """Fill the right three quarters of the second mask."""
+            pixels[:, 100:] = 255
+
+        first_layer.coverage.raster.mutate(fill_first)
+        second_layer.coverage.raster.mutate(fill_second)
+        assert probe.viewer.setMaskProperties(first_mask, color=QColor(255, 40, 40))
+        assert probe.viewer.setMaskProperties(second_mask, color=QColor(40, 220, 80))
+        probe.viewer.mask_service.invalidateMaskCache(first_mask)
+        probe.viewer.mask_service.invalidateMaskCache(second_mask)
+        probe.viewer.mask_service.controller.mask_updated.emit(None, QRect())
+        probe.viewer.setControlMode(probe.viewer.CONTROL_MODE_PANZOOM)
+        assert probe.wait_for_mask_render_idle()
+        assert probe.wait_for_render_refinement_idle()
+        probe.drain_events()
+
+        sample_points = (QPoint(50, 200), QPoint(200, 200), QPoint(350, 200))
+        order_before = tuple(probe.viewer.maskIDsForComposition(probe.image_id))
+        colors_before = tuple(
+            probe.capture().pixelColor(point).rgba() for point in sample_points
+        )
+
+        for mask_id in (second_mask, first_mask, second_mask):
+            assert probe.viewer.setActiveMaskID(mask_id)
+            probe.drain_events()
+            assert (
+                tuple(probe.viewer.maskIDsForComposition(probe.image_id))
+                == order_before
+            )
+            assert (
+                tuple(
+                    probe.capture().pixelColor(point).rgba() for point in sample_points
+                )
+                == colors_before
+            )
+
+        added_mask = probe.viewer.createBlankMask(QSize(400, 400))
+        assert added_mask is not None
+        assert probe.viewer.setActiveMaskID(added_mask)
+        probe.drain_events()
+        order_after = tuple(probe.viewer.maskIDsForComposition(probe.image_id))
+        assert order_after[:-1] == order_before
+        assert (
+            tuple(probe.capture().pixelColor(point).rgba() for point in sample_points)
+            == colors_before
+        )
+    finally:
+        probe.close()
+
+
+@INTERACTIVE_PERFORMANCE
+def test_zoomed_out_4k_mask_scribble_keeps_pointer_work_bounded(
+    qapp: QApplication,
+) -> None:
+    """A broad live stroke must not scale pointer latency with its prior envelope."""
+    probe = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(3840, 2160),
+        widget_size=QSize(1280, 720),
+        brush_size=96,
+    )
+    points = [QPoint(100 + round(index * 1080 / 79), 100) for index in range(80)]
+    points.extend(QPoint(1180, 100 + round(index * 520 / 79)) for index in range(1, 80))
+    points.extend(
+        QPoint(1180 - round(index * 1080 / 79), 620) for index in range(1, 80)
+    )
+    points.extend(QPoint(100, 620 - round(index * 520 / 79)) for index in range(1, 80))
+    pressed = False
+    try:
+        assert probe.viewer.currentZoom() == pytest.approx(1.0 / 3.0)
+        QTest.mousePress(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            points[0],
+        )
+        pressed = True
+        for point in points[1:160]:
+            QTest.mouseMove(probe.viewer, point, delay=0)
+            qapp.processEvents()
+
+        started = interaction_clock()
+        for point in points[160:]:
+            QTest.mouseMove(probe.viewer, point, delay=0)
+            qapp.processEvents()
+        average_ms = (interaction_clock() - started) * 1000.0 / len(points[160:])
+
+        QTest.mouseRelease(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            points[-1],
+        )
+        pressed = False
+        assert probe.wait_for_mask_undo_depth(probe.mask_ids[0], 1)
+        frame = probe.capture()
+        for point in (points[40], points[120], points[200], points[280]):
+            assert probe.is_mask_tint(frame.pixelColor(point))
+        assert average_ms < _ZOOMED_OUT_4K_AVERAGE_POINTER_BUDGET_MS
+        assert probe.viewer.undoSceneEdit()
+        undo_feedback = probe.wait_for_background(points[40], timeout_ms=3000)
+        assert undo_feedback.latency_ms is not None
+        assert undo_feedback.latency_ms < 150.0
+        assert probe.viewer.redoSceneEdit()
+        redo_feedback = probe.wait_for_mask_tint(points[40], timeout_ms=3000)
+        assert redo_feedback.latency_ms is not None
+        assert redo_feedback.latency_ms < 150.0
+    finally:
+        if pressed:
+            QTest.mouseRelease(
+                probe.viewer,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                points[-1],
+            )
         probe.close()
 
 

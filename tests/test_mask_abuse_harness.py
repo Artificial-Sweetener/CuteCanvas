@@ -1386,7 +1386,7 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
         buffer = renderer.get_base_buffer()
         assert plan is not None
         assert buffer is not None
-        margin = renderer._BUFFER_OVERSCAN_PHYSICAL_PX
+        margin = renderer.buffer_overscan_physical_px
         retained_color = buffer.pixelColor(
             retained_point.x() + margin,
             retained_point.y() + margin,

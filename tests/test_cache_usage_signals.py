@@ -25,6 +25,7 @@ from PySide6.QtGui import QImage
 from qpane.cache.consumers import TileCacheConsumer
 from qpane.cache.coordinator import CacheCoordinator
 from qpane.rendering.pyramid import PyramidManager
+from qpane.rendering.raster_tile_grid import RasterTileGrid
 from qpane.rendering.tiles import Tile, TileManager
 
 from tests.helpers.config import fixed_cache_config
@@ -45,7 +46,11 @@ def _make_tile(image: QImage) -> Tile:
 
 def test_tile_manager_emits_usage_changed(qapp, small_image: QImage) -> None:
     execution = ControlledExecution()
-    manager = TileManager(config=fixed_cache_config(), execution_scope=execution.scope)
+    manager = TileManager(
+        config=fixed_cache_config(),
+        grid=RasterTileGrid(64, 0),
+        execution_scope=execution.scope,
+    )
     usages: list[int] = []
     manager.usageChanged.connect(usages.append)
 
@@ -59,7 +64,11 @@ def test_tile_manager_emits_usage_changed(qapp, small_image: QImage) -> None:
 
 def test_tile_manager_emits_cache_limit_changed(qapp) -> None:
     execution = ControlledExecution()
-    manager = TileManager(config=fixed_cache_config(), execution_scope=execution.scope)
+    manager = TileManager(
+        config=fixed_cache_config(),
+        grid=RasterTileGrid(64, 0),
+        execution_scope=execution.scope,
+    )
     limits: list[int] = []
     manager.cacheLimitChanged.connect(limits.append)
 
@@ -90,7 +99,11 @@ def test_tile_consumer_updates_coordinator_via_signals(
     qapp, small_image: QImage
 ) -> None:
     execution = ControlledExecution()
-    manager = TileManager(config=fixed_cache_config(), execution_scope=execution.scope)
+    manager = TileManager(
+        config=fixed_cache_config(),
+        grid=RasterTileGrid(64, 0),
+        execution_scope=execution.scope,
+    )
     coordinator = CacheCoordinator(active_budget_bytes=16_384)
     TileCacheConsumer(manager, coordinator)
 

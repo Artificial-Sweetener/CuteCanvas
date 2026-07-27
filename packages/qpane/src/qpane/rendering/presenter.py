@@ -24,8 +24,8 @@ from collections.abc import Callable, Mapping
 from math import isclose
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF
-from PySide6.QtGui import QPainter, Qt, QTransform
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF, QTimer
+from PySide6.QtGui import QPainter, QRegion, Qt, QTransform
 from PySide6.QtWidgets import QWidget
 
 from ..scene.identity import (
@@ -41,13 +41,12 @@ from ..scene.presentation_effects import (
 )
 from ..scene.render_plan import (
     RasterLayerRenderItem,
-    SampledLayerRenderItem,
     SceneContentSnapshot,
     SceneLayerHitTestResult,
     SceneRenderItem,
     SceneRenderPlan,
     TransientRasterContribution,
-    VectorLayerRenderItem,
+    TransientRasterTransformContribution,
 )
 from ..types import OverlayState, SceneSnapshotOverlayLayer, SceneSnapshotOverlayState
 from ..vector.render_cache import VectorRenderCache
@@ -55,15 +54,20 @@ from .compiled_scene import CompiledRenderScene
 from .coordinates import CoordinateContext, PanelHitTest
 from .frame_geometry import RenderFrameGeometry, visible_scene_rect
 from .frame_projector import SceneFrameProjector
-from .hybrid_planner import HybridRenderPlanner
+from .hybrid_planner import HybridRenderPlanner, SampledFramePlan
 from .layer_effects import LayerEffectFrameCompiler
+from .navigation_plan import (
+    translated_navigation_plan,
+)
 from .presentation_effect_registry import LayerPresentationEffectRegistry
 from .raster_planner import RasterRenderPlanner
 from .raster_products import RasterPyramidProducts, RasterRenderProductStore
+from .raster_tile_grid import resolve_raster_tile_grid
+from .raster_tile_grid_runtime import RasterTileGridRuntime
 from .render import Renderer
 from .render_tile_cache import RenderTileCache
 from .render_tiles import RenderTileWorkCoordinator
-from .sampled_tile_identity import sampled_tile_batch_identity
+from .sampled_frame_continuity import SampledFrameContinuity
 from .scene_compiler import SceneRenderCompiler
 from .scene_coordinates import (
     LayerCoordinateProjection,
@@ -79,7 +83,7 @@ from .viewport import Viewport, ViewportZoomMode
 
 if TYPE_CHECKING:
     from ..cache.registry import CacheRegistry
-    from ..core import OverlayDrawFn, SceneOverlayDrawFn
+    from ..core import Config, OverlayDrawFn, SceneOverlayDrawFn
     from ..execution import ExecutionScope
     from ..scene.effects import LayerEffectRenderRegistry
     from ..scene.source_capabilities import (
@@ -123,14 +127,30 @@ class RenderingPresenter:
             f"{execution_scope.owner_id}:presenter"
         )
         self.viewport = Viewport(qpane, qpane.settings)
+        initial_physical_size = self._qpane_physical_size()
         self.tile_manager = TileManager(
             qpane.settings,
             parent=qpane,
+            grid=resolve_raster_tile_grid(
+                qpane.settings.tile_size,
+                qpane.settings.tile_overlap,
+                initial_physical_size,
+            ),
             execution_scope=self._execution_scope,
         )
         if cache_registry is not None:
             cache_registry.attach_tile_manager(self.tile_manager)
-        self.renderer = Renderer(qpane)
+        self.renderer = Renderer(
+            qpane,
+            execution_scope=self._execution_scope,
+        )
+        self._tile_grid_runtime = RasterTileGridRuntime(
+            config=qpane.settings,
+            initial_physical_size=initial_physical_size,
+            consumer=self.tile_manager,
+            changed=self._handle_tile_grid_changed,
+            parent=qpane,
+        )
         self._raster_products = RasterRenderProductStore(
             pyramid_products,
             self.tile_manager,
@@ -183,12 +203,27 @@ class RenderingPresenter:
         self._last_view_size = QSize()
         self._last_device_pixel_ratio = float(qpane.devicePixelRatioF())
         self._last_scroll_reuse_signature: tuple[object, ...] | None = None
+        self._pending_navigation_plan: SceneRenderPlan | None = None
+        self._navigation_refinement_timer = QTimer(qpane)
+        self._navigation_refinement_timer.setSingleShot(True)
+        self._navigation_refinement_timer.setInterval(50)
+        self._navigation_refinement_timer.timeout.connect(self._refine_navigation_frame)
+        self._navigation_interaction_active = False
+        self._navigation_exact_frame_required = False
+        self._navigation_full_damage_required = False
+        self._navigation_raster_tile_keys: set[SceneLayerTileKey] = set()
+        self._transient_refinement_pending = False
+        self._transient_refinement_release_scheduled = False
         self._hybrid_items_compiled: CompiledRenderScene | None = None
         self._hybrid_items_geometry: RenderFrameGeometry | None = None
-        self._hybrid_items: tuple[SampledLayerRenderItem, ...] = ()
+        self._hybrid_items = SampledFramePlan(())
+        self._sampled_frame_continuity = SampledFrameContinuity()
         self._transient_raster_provider: Callable[
             [tuple[SceneRenderItem, ...]], TransientRasterContribution | None
         ] = lambda _items: None
+        self._transient_raster_target_provider: Callable[
+            [], tuple[uuid.UUID, uuid.UUID] | None
+        ] = lambda: None
         self.coordinates = SceneCoordinateSystem(
             scene_projection=self._scene_coordinate_projection,
             layer_projection=self._layer_coordinate_projection,
@@ -196,7 +231,13 @@ class RenderingPresenter:
 
     def shutdown(self) -> None:
         """Cancel presenter-owned asynchronous derived rendering work."""
+        try:
+            self._navigation_refinement_timer.stop()
+        except RuntimeError:
+            pass
+        self.renderer.cancel_navigation_refinement()
         self._render_refinement.shutdown()
+        self._tile_grid_runtime.shutdown()
         self.tile_manager.shutdown(wait=False)
         self._execution_scope.close(reason="rendering_presenter_shutdown")
 
@@ -214,6 +255,13 @@ class RenderingPresenter:
         """Install a source-neutral transient raster contribution provider."""
         self._transient_raster_provider = provider
 
+    def set_transient_raster_target_provider(
+        self,
+        provider: Callable[[], tuple[uuid.UUID, uuid.UUID] | None],
+    ) -> None:
+        """Install the active transient raster target resolver."""
+        self._transient_raster_target_provider = provider
+
     def calculateRenderPlan(
         self,
         *,
@@ -223,6 +271,11 @@ class RenderingPresenter:
         """Build the active scene render plan for the current viewport."""
         if is_blank:
             return None
+        transient_target = self._transient_raster_target_provider()
+        if self._transient_refinement_pending and transient_target is None:
+            self._transient_refinement_pending = False
+            self._invalidate_frame_items()
+            self.renderer.markDirty()
         compiled = self._scene_compiler.compiled_scene()
         if compiled is None:
             self._presentation_effects.reconcile(None)
@@ -232,11 +285,52 @@ class RenderingPresenter:
             (layer.layer_id for layer in compiled.scene.layers),
         )
         frame = self._frame_geometry_for(compiled, use_pan=use_pan)
-        raster_items = self._raster_planner.build_frame_items(compiled, frame)
+        hybrid_plan = self._hybrid_items_for_frame(compiled, frame)
+        source_transition_ids = self._sampled_frame_continuity.changed_layer_ids(
+            (layer.descriptor for layer in compiled.hybrid_layers),
+            previous_plan=self.renderer.get_current_render_plan(),
+        )
+        transient_layer_ids = (
+            frozenset((transient_target[1],))
+            if transient_target is not None
+            and transient_target[0] == compiled.scene.scene_id
+            else frozenset()
+        )
+        sampled_layer_ids = frozenset(
+            item.descriptor.layer_id for item in hybrid_plan.items
+        )
+        fallback_ids = (hybrid_plan.pending_layer_ids & source_transition_ids) | (
+            transient_layer_ids - sampled_layer_ids
+        )
+        fallback_layers = tuple(
+            layer
+            for layer in compiled.hybrid_fallback_layers
+            if layer.descriptor.layer_id in fallback_ids
+        )
+        raster_items = self._raster_planner.build_frame_items(
+            compiled,
+            frame,
+            layers=(*compiled.layers, *fallback_layers),
+        )
+        fallback_layer_ids = frozenset(
+            item.descriptor.layer_id
+            for item in raster_items
+            if item.descriptor.layer_id in fallback_ids
+        )
         vector_items = self._vector_planner.build_frame_items(compiled, frame)
-        hybrid_items = self._hybrid_items_for_frame(compiled, frame)
+        hybrid_items = tuple(
+            item
+            for item in hybrid_plan.items
+            if item.descriptor.layer_id not in fallback_layer_ids
+        )
         effect_items = self._layer_effects.apply(
             (*raster_items, *vector_items, *hybrid_items)
+        )
+        effect_items = self._sampled_frame_continuity.resolve(
+            effect_items,
+            pending_layer_ids=hybrid_plan.pending_layer_ids - fallback_layer_ids,
+            previous_plan=self.renderer.get_current_render_plan(),
+            frame=frame,
         )
         items_by_layer_id: dict[uuid.UUID, list[SceneRenderItem]] = {}
         for item in effect_items:
@@ -246,7 +340,7 @@ class RenderingPresenter:
             for layer in compiled.scene.layers
             for item in items_by_layer_id.get(layer.layer_id, ())
         )
-        return SceneRenderPlan(
+        plan = SceneRenderPlan(
             scene_id=compiled.scene.scene_id,
             scene_bounds=compiled.scene.bounds,
             content_bounds=compiled.scene.bounds,
@@ -262,6 +356,12 @@ class RenderingPresenter:
                 scene_id=compiled.scene.scene_id
             ),
         )
+        if self._transient_refinement_pending and not isinstance(
+            plan.transient_raster,
+            TransientRasterTransformContribution,
+        ):
+            self._schedule_transient_refinement_release()
+        return plan
 
     def add_layer_presentation_effect(
         self,
@@ -361,7 +461,9 @@ class RenderingPresenter:
             finally:
                 painter.end()
             return render_plan
-        render_plan = self.calculateRenderPlan(is_blank=is_blank)
+        render_plan = self._take_pending_navigation_plan()
+        if render_plan is None:
+            render_plan = self.calculateRenderPlan(is_blank=is_blank)
         if render_plan:
             self._ensure_buffer_matches_widget()
             self.renderer.paint(render_plan)
@@ -514,6 +616,38 @@ class RenderingPresenter:
 
     def _handle_render_refinement_ready(self) -> None:
         """Publish one atomic refined tile batch on the GUI thread."""
+        current_plan = self.renderer.get_current_render_plan()
+        if current_plan is not None and isinstance(
+            current_plan.transient_raster,
+            TransientRasterTransformContribution,
+        ):
+            self._transient_refinement_pending = True
+            return
+        if self.note_navigation_sampled_tiles_ready():
+            return
+        self._navigation_exact_frame_required = True
+        self._navigation_full_damage_required = True
+        self._defer_navigation_refinement()
+
+    def _schedule_transient_refinement_release(self) -> None:
+        """Publish deferred products after the settled transient frame is painted."""
+        if self._transient_refinement_release_scheduled:
+            return
+        self._transient_refinement_release_scheduled = True
+        QTimer.singleShot(0, self._release_transient_refinement)
+
+    def _release_transient_refinement(self) -> None:
+        """Promote deferred products once pointer-motion presentation has ended."""
+        self._transient_refinement_release_scheduled = False
+        if not self._transient_refinement_pending:
+            return
+        current_plan = self.renderer.get_current_render_plan()
+        if current_plan is not None and isinstance(
+            current_plan.transient_raster,
+            TransientRasterTransformContribution,
+        ):
+            return
+        self._transient_refinement_pending = False
         self._invalidate_frame_items()
         self.renderer.markDirty()
         self._qpane.update()
@@ -527,36 +661,194 @@ class RenderingPresenter:
         previous_plan = self.renderer.get_current_render_plan()
         if previous_plan is None:
             return False
-        if not isclose(
+        zoom_changed = not isclose(
             previous_plan.zoom,
             self.viewport.zoom,
             rel_tol=1e-9,
             abs_tol=1e-9,
-        ):
-            return False
+        )
+        if zoom_changed:
+            self._navigation_exact_frame_required = True
+            candidate_plan = self.calculateRenderPlan(
+                use_pan=QPointF(self.viewport.pan),
+                is_blank=False,
+            )
+            if candidate_plan is None or not self._plans_share_navigation_content(
+                previous_plan,
+                candidate_plan,
+            ):
+                return False
+            if not self.renderer.tryTransformBuffers(candidate_plan):
+                return False
+            self._pending_navigation_plan = candidate_plan
+            self._defer_navigation_refinement()
+            self._last_scroll_reuse_signature = self._scroll_reuse_signature_for_plan(
+                candidate_plan
+            )
+            return True
         current_signature = self._scroll_reuse_signature_for_plan(previous_plan)
         if current_signature != self._last_scroll_reuse_signature:
             return False
-        if self.renderer.get_base_buffer() is None:
+        if not self.renderer.has_base_buffer():
             return False
         if not self.renderer.has_scroll_buffer_overlap(QPointF(self.viewport.pan)):
             return False
-        candidate_plan = self.calculateRenderPlan(
-            use_pan=QPointF(self.viewport.pan),
-            is_blank=False,
-        )
+        target_pan = QPointF(self.viewport.pan)
+        candidate_plan: SceneRenderPlan | None = None
+        if self._navigation_interaction_active:
+            projected_plan = translated_navigation_plan(
+                previous_plan,
+                target_pan,
+                device_pixel_ratio=float(self._qpane.devicePixelRatioF()),
+            )
+            if self.renderer.tryPresentGuardedPan(projected_plan):
+                self._pending_navigation_plan = projected_plan
+                self._defer_navigation_refinement()
+                self._last_scroll_reuse_signature = (
+                    self._scroll_reuse_signature_for_plan(projected_plan)
+                )
+                return True
+            candidate_plan = projected_plan
+        if candidate_plan is None:
+            candidate_plan = self.calculateRenderPlan(
+                use_pan=target_pan,
+                is_blank=False,
+            )
         candidate_signature = self._scroll_reuse_signature_for_plan(candidate_plan)
         if candidate_signature != self._last_scroll_reuse_signature:
             return False
         result = self.renderer.tryScrollBuffers(
-            QPointF(self.viewport.pan),
+            target_pan,
             repair_plan=candidate_plan,
         )
+        if result:
+            self._navigation_exact_frame_required = True
+            self._pending_navigation_plan = candidate_plan
+            self._defer_navigation_refinement()
         return result
+
+    def _defer_navigation_refinement(self) -> None:
+        """Keep derived tile work off the critical path of reused navigation frames."""
+        self._render_refinement.suspend_for_navigation()
+        if self._navigation_interaction_active:
+            self._navigation_refinement_timer.stop()
+        else:
+            self._navigation_refinement_timer.start()
+
+    def begin_navigation_interaction(self) -> None:
+        """Suspend derived work for the full lifetime of a direct navigation drag."""
+        self._navigation_interaction_active = True
+        self._navigation_refinement_timer.stop()
+        self._render_refinement.suspend_for_navigation()
+
+    def finish_navigation_interaction(self) -> None:
+        """Schedule one exact frame after a direct navigation drag finishes."""
+        if not self._navigation_interaction_active:
+            return
+        self._navigation_interaction_active = False
+        self._navigation_refinement_timer.start()
+
+    def _refine_navigation_frame(self) -> None:
+        """Resume refinement and redraw only when presented products changed."""
+        self._render_refinement.resume_after_navigation()
+        full_damage_required = self._navigation_full_damage_required
+        raster_tile_keys = tuple(self._navigation_raster_tile_keys)
+        exact_frame_requested = self._navigation_exact_frame_required
+        self._navigation_exact_frame_required = False
+        self._navigation_full_damage_required = False
+        self._navigation_raster_tile_keys.clear()
+        self._invalidate_frame_items()
+        refined_plan = self.calculateRenderPlan(
+            use_pan=QPointF(self.viewport.pan),
+            is_blank=False,
+        )
+        exact_frame_required = bool(
+            exact_frame_requested
+            and (
+                refined_plan is None
+                or not self.renderer.settle_equivalent_navigation_presentation(
+                    refined_plan
+                )
+            )
+        )
+        if exact_frame_required or full_damage_required:
+            if refined_plan is not None and self.renderer.refine_navigation_frame(
+                refined_plan
+            ):
+                return
+            self.renderer.markDirty()
+            self._qpane.update()
+            return
+        damage = QRegion()
+        for key in raster_tile_keys:
+            dirty_rect = self.dirty_rect_for_tile_key(key)
+            if dirty_rect is not None:
+                damage += dirty_rect
+        if not damage.isEmpty():
+            self.renderer.markDirty(damage)
+            self._qpane.update()
+
+    def note_navigation_raster_tile_ready(self, key: SceneLayerTileKey) -> bool:
+        """Defer one raster tile arrival until navigation settles."""
+        if not self.navigation_refinement_deferred:
+            return False
+        self._restart_staged_navigation_refinement()
+        self._navigation_raster_tile_keys.add(key)
+        return True
+
+    def note_navigation_sampled_tiles_ready(self) -> bool:
+        """Defer one atomic sampled-product transition until navigation settles."""
+        if not self.navigation_refinement_deferred:
+            return False
+        self._restart_staged_navigation_refinement()
+        self._navigation_full_damage_required = True
+        return True
+
+    def note_navigation_full_product_ready(self) -> bool:
+        """Defer one source-wide product arrival until navigation settles."""
+        if not self.navigation_refinement_deferred:
+            return False
+        self._restart_staged_navigation_refinement()
+        self._navigation_full_damage_required = True
+        return True
+
+    def _restart_staged_navigation_refinement(self) -> None:
+        """Replace an in-flight staged frame when newer products arrive."""
+        if not self.renderer.navigation_refinement_pending:
+            return
+        self.renderer.cancel_navigation_refinement()
+        self._navigation_exact_frame_required = True
+        self._navigation_refinement_timer.start()
+
+    @property
+    def navigation_refinement_pending(self) -> bool:
+        """Return whether a transformed frame still awaits exact replacement."""
+        return (
+            self._navigation_refinement_timer.isActive()
+            or self.renderer.navigation_refinement_pending
+        )
+
+    @property
+    def navigation_refinement_deferred(self) -> bool:
+        """Return whether derived raster and sampled arrivals must stay latent."""
+        return (
+            self._navigation_interaction_active
+            or self._navigation_refinement_timer.isActive()
+            or self.renderer.navigation_refinement_pending
+        )
 
     def allocate_buffers(self) -> None:
         """Allocate the renderer buffers to match the current widget size."""
         self._refresh_backing_buffers()
+
+    def apply_config(self, config: Config) -> None:
+        """Apply viewport settings and the rendering-owned tile-grid policy."""
+        self.viewport.applyConfig(config)
+        self._tile_grid_runtime.apply_config(config)
+
+    def validate_config(self, config: Config) -> None:
+        """Validate rendering-owned settings without mutating collaborators."""
+        self._tile_grid_runtime.validate_config(config)
 
     def ensure_view_alignment(self, *, force: bool = False) -> None:
         """Reapply FIT/custom zoom and buffers when the qpane geometry changes."""
@@ -567,6 +859,7 @@ class RenderingPresenter:
         )
         if not force and current_size == self._last_view_size and not dpr_changed:
             return
+        self._tile_grid_runtime.observe_viewport(self._qpane_physical_size())
         zoom_mode = self.viewport.get_zoom_mode()
         if zoom_mode == ViewportZoomMode.FIT:
             self.viewport.setZoomFit()
@@ -713,6 +1006,12 @@ class RenderingPresenter:
 
     def invalidate_content_cache(self) -> None:
         """Drop cached active scene/content geometry."""
+        self._navigation_refinement_timer.stop()
+        self._render_refinement.resume_after_navigation()
+        self._navigation_exact_frame_required = False
+        self._navigation_full_damage_required = False
+        self._navigation_raster_tile_keys.clear()
+        self._sampled_frame_continuity.retire(self.renderer.get_current_render_plan())
         self._scene_compiler.invalidate()
         self.renderer.invalidate_current_render_plan()
         self.invalidate_frame_plan()
@@ -721,6 +1020,12 @@ class RenderingPresenter:
     def invalidate_frame_plan(self) -> None:
         """Drop viewport source plans after derived render products change."""
         self._invalidate_frame_items()
+
+    def _handle_tile_grid_changed(self) -> None:
+        """Retire every frame product associated with the previous tile grid."""
+        self.invalidate_content_cache()
+        self.renderer.markDirty()
+        self._qpane.update()
 
     def has_renderable_content(self) -> bool:
         """Return True when the presenter can resolve content for rendering."""
@@ -779,9 +1084,12 @@ class RenderingPresenter:
 
     def _qpane_physical_size(self) -> QSize:
         """Return the qpane's current size expressed in device pixels."""
-        context = CoordinateContext(self._qpane)
-        logical_size = QSizeF(self._qpane.size())
-        return context.logical_to_physical(logical_size).toSize()
+        device_pixel_ratio = max(0.01, float(self._qpane.devicePixelRatioF()))
+        logical_size = self._qpane.size()
+        return QSizeF(
+            logical_size.width() * device_pixel_ratio,
+            logical_size.height() * device_pixel_ratio,
+        ).toSize()
 
     def _refresh_backing_buffers(self) -> None:
         """Rebuild renderer buffers based on the current widget DPR and size."""
@@ -792,8 +1100,7 @@ class RenderingPresenter:
 
     def _ensure_buffer_matches_widget(self) -> None:
         """Reallocate renderer buffers when the widget size has changed."""
-        base_buffer = self.renderer.get_base_buffer()
-        if base_buffer is None:
+        if not self.renderer.has_base_buffer():
             self.allocate_buffers()
             return
         expected_size = self._qpane_physical_size()
@@ -807,109 +1114,95 @@ class RenderingPresenter:
     def _scroll_reuse_signature_for_plan(
         plan: SceneRenderPlan | None,
     ) -> tuple[object, ...] | None:
-        """Return static render-plan inputs that must stay stable for scroll reuse."""
+        """Return authoritative scene inputs that must stay stable for scroll reuse."""
         if not isinstance(plan, SceneRenderPlan):
             return None
-        image_items = tuple(
-            (
-                item.descriptor.layer_id,
-                item.descriptor.kind,
-                item.descriptor.visible,
-                item.descriptor.opacity,
-                item.descriptor.blend_mode,
-                item.descriptor.placement,
-                item.descriptor.clip,
-                item.descriptor.effects,
-                item.descriptor.source,
-                item.descriptor.source_revision,
-                item.asset_key,
-                item.pyramid_asset_key,
-                item.source_image.cacheKey(),
-                item.pyramid_scale,
-                item.strategy,
-                item.render_hint_enabled,
-                item.tile_size,
-                item.tile_overlap,
-                item.max_tile_cols,
-                item.max_tile_rows,
-                item.visible_tile_range,
-                tuple(
-                    (tile.draw_pos, tile.image.cacheKey())
-                    for tile in item.tiles_to_draw
-                ),
-                item.debug_draw_tile_grid,
-                item.effect_clip_path,
-            )
-            for item in plan.render_items
-            if isinstance(item, RasterLayerRenderItem)
-        )
-        vector_items = tuple(
-            (
-                item.descriptor.layer_id,
-                item.descriptor.visible,
-                item.descriptor.opacity,
-                item.descriptor.placement,
-                item.descriptor.clip,
-                item.descriptor.effects,
-                item.descriptor.source,
-                item.descriptor.source_revision,
-                item.source_size,
-                item.effect_clip_path,
-                tuple(
-                    (
-                        tile.image.cacheKey(),
-                        tile.source_rect,
-                        tile.image_source_rect,
-                    )
-                    for tile in item.refined_tiles
-                ),
-            )
-            for item in plan.render_items
-            if isinstance(item, VectorLayerRenderItem)
-        )
-        sampled_items = tuple(
-            (
-                item.descriptor.layer_id,
-                item.descriptor.visible,
-                item.descriptor.opacity,
-                item.descriptor.placement,
-                item.descriptor.clip,
-                item.descriptor.effects,
-                item.descriptor.source,
-                item.descriptor.source_revision,
-                item.source_size,
-                item.effect_clip_path,
-                sampled_tile_batch_identity(item.tiles),
-            )
-            for item in plan.render_items
-            if isinstance(item, SampledLayerRenderItem)
-        )
         return (
             plan.scene_id,
             plan.scene_bounds,
             plan.content_bounds,
             plan.presentation_effects,
-            image_items,
-            vector_items,
-            sampled_items,
+            tuple(
+                item.descriptor for item in plan.render_items if item.descriptor.visible
+            ),
             plan.zoom,
             plan.qpane_rect,
             plan.physical_viewport_rect,
         )
 
+    @staticmethod
+    def _plans_share_navigation_content(
+        previous: SceneRenderPlan,
+        candidate: SceneRenderPlan,
+    ) -> bool:
+        """Return whether two plans differ only in viewport projection products."""
+        if (
+            previous.scene_id != candidate.scene_id
+            or previous.scene_bounds != candidate.scene_bounds
+            or previous.content_bounds != candidate.content_bounds
+            or previous.transient_raster is not None
+            or candidate.transient_raster is not None
+            or previous.presentation_effects
+            or candidate.presentation_effects
+        ):
+            return False
+        previous_items = tuple(
+            (type(item), item.descriptor, item.placement, item.clip)
+            for item in previous.render_items
+            if item.descriptor.visible
+        )
+        candidate_items = tuple(
+            (type(item), item.descriptor, item.placement, item.clip)
+            for item in candidate.render_items
+            if item.descriptor.visible
+        )
+        return previous_items == candidate_items
+
     # Internal helpers
 
     def _invalidate_frame_items(self) -> None:
         """Drop sampled hybrid plans after their render inputs change."""
+        self._pending_navigation_plan = None
         self._hybrid_items_compiled = None
         self._hybrid_items_geometry = None
-        self._hybrid_items = ()
+        self._hybrid_items = SampledFramePlan(())
+
+    def _take_pending_navigation_plan(self) -> SceneRenderPlan | None:
+        """Consume a current navigation plan without rebuilding frame products."""
+        plan = self._pending_navigation_plan
+        self._pending_navigation_plan = None
+        if plan is None or self.renderer.get_current_render_plan() is not plan:
+            return None
+        if not isclose(
+            plan.zoom,
+            self.viewport.zoom,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            return None
+        current_pan = self.viewport.pan
+        if not (
+            isclose(
+                plan.current_pan.x(),
+                current_pan.x(),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+            and isclose(
+                plan.current_pan.y(),
+                current_pan.y(),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+        ):
+            return None
+        return plan
 
     def _hybrid_items_for_frame(
         self,
         compiled: CompiledRenderScene,
         frame: RenderFrameGeometry,
-    ) -> tuple[SampledLayerRenderItem, ...]:
+    ) -> SampledFramePlan:
         """Reuse exact-frame hybrid tile planning across one presentation cycle."""
         if (
             self._hybrid_items_compiled is compiled
@@ -962,6 +1255,7 @@ class RenderingPresenter:
             native_zoom=self.viewport.nativeZoom(),
             current_pan=current_pan,
             qpane_rect=self._qpane.rect(),
+            sampling_panel_rect=self._navigation_sampling_panel_rect(),
             physical_viewport_rect=physical_viewport_rect,
             visible_scene_rect=visible_scene_rect(
                 scene=compiled.scene,
@@ -972,6 +1266,19 @@ class RenderingPresenter:
             debug_draw_tile_grid=self._qpane.settings.draw_tile_grid,
             tile_size=self.tile_manager.tile_size,
             tile_overlap=self.tile_manager.tile_overlap,
+        )
+
+    def _navigation_sampling_panel_rect(self) -> QRectF:
+        """Return panel coverage required by the retained navigation surface."""
+        device_pixel_ratio = max(0.01, self._qpane.devicePixelRatioF())
+        logical_overscan = (
+            self.renderer.buffer_overscan_physical_px / device_pixel_ratio
+        )
+        return QRectF(self._qpane.rect()).adjusted(
+            -logical_overscan,
+            -logical_overscan,
+            logical_overscan,
+            logical_overscan,
         )
 
     def _active_scene_geometry(

@@ -90,12 +90,17 @@ class WorkspaceTutorialController:
         )
         if not file_path:
             return
+        self.open_composition(Path(file_path))
+
+    def open_composition(self, path: Path) -> bool:
+        """Restore one complete editable CuteCanvas archive from a known path."""
         try:
-            composition = self._canvas.editor.persistence.load(file_path)
+            composition = self._canvas.editor.persistence.load(path)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             self._set_status(f"Could not open composition: {exc}")
-            return
+            return False
         self._set_status(f"Opened {composition.state.title}.")
+        return True
 
     def save_composition_dialog(self) -> None:
         """Persist the active editable composition as one atomic archive."""

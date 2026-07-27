@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Protocol
@@ -220,10 +221,13 @@ class RasterRenderProductStore:
 
     @staticmethod
     def _preview_width(full_width: int, target_width: float) -> int:
-        """Return a power-of-two display width bounded by the source width."""
-        desired = max(1, min(full_width, round(max(1.0, target_width))))
-        bucket = 1 << (desired - 1).bit_length()
-        return min(full_width, bucket)
+        """Return a source-relative power-of-two density bucket."""
+        source_width = max(1, int(full_width))
+        exact_scale = max(1.0 / source_width, float(target_width) / source_width)
+        if exact_scale >= 1.0:
+            return source_width
+        scale_bucket = 2.0 ** math.ceil(math.log2(exact_scale))
+        return min(source_width, max(1, round(source_width * scale_bucket)))
 
     def _notify_usage(self) -> None:
         """Publish preview-cache usage when shared coordination is installed."""

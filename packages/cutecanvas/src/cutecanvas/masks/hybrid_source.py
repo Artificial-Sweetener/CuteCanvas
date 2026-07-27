@@ -21,9 +21,8 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 
-import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QImage
 from qpane import (
     HybridCombineMode,
     HybridDocument,
@@ -36,7 +35,13 @@ from qpane import (
 
 from cutecanvas.coverage import CoverageDocumentEvaluator
 from cutecanvas.coverage.document import CoverageItem, VectorCoverageItem
+from cutecanvas.coverage.raster_sampling import (
+    CoverageSurfaceSampler,
+    coverage_image,
+    project_coverage_image,
+)
 from cutecanvas.coverage.surface import CoverageSurface
+from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 
 from .mask import MaskLayer
 
@@ -62,17 +67,53 @@ class MaskHybridSourceFactory:
         presentation_revision: int,
     ) -> HybridSource | None:
         """Return one immutable QPane source without evaluating visible pixels."""
+        return self._source(
+            layer,
+            style,
+            presentation_revision,
+            CoverageSurfaceSampler(layer.coverage.raster),
+        )
+
+    def source_with_transition(
+        self,
+        layer: MaskLayer,
+        style: HybridPresentationStyle,
+        presentation_revision: int,
+        transition: RasterPixelTransition,
+    ) -> HybridSource | None:
+        """Return a virtual hybrid source with one uncommitted raster transition."""
+        return self._source(
+            layer,
+            style,
+            presentation_revision,
+            _TransitionSurfaceSampler(layer.coverage.raster, transition),
+        )
+
+    def _source(
+        self,
+        layer: MaskLayer,
+        style: HybridPresentationStyle,
+        presentation_revision: int,
+        raster_sampler: CoverageSurfaceSampler | _TransitionSurfaceSampler,
+    ) -> HybridSource | None:
+        """Build one hybrid snapshot around the supplied raster sampler."""
         bounds = layer.coverage.source_bounds()
         if bounds is None:
             return None
         primitives: list[_HybridPrimitive] = []
         raster_bounds = layer.coverage.raster.content_bounds()
+        if isinstance(raster_sampler, _TransitionSurfaceSampler):
+            raster_bounds = (
+                raster_sampler.transition.patch_bounds
+                if raster_bounds is None
+                else raster_bounds.united(raster_sampler.transition.patch_bounds)
+            )
         if raster_bounds is not None:
             primitives.append(
                 HybridRasterPrimitive(
                     uuid.uuid5(layer.mask_id, "authoritative-raster"),
                     raster_bounds,
-                    _SurfaceSampler(layer.coverage.raster),
+                    raster_sampler,
                 )
             )
         for item in layer.coverage.retained.items:
@@ -126,16 +167,35 @@ class MaskHybridSourceFactory:
 
 
 @dataclass(frozen=True, slots=True)
-class _SurfaceSampler:
-    """Sample a thread-safe sparse coverage surface in document coordinates."""
+class _TransitionSurfaceSampler:
+    """Sample a virtual raster transition without mutating canonical storage."""
 
     surface: CoverageSurface
+    transition: RasterPixelTransition
 
     def sample(self, source_rect: QRectF, pixel_size: QSize) -> QImage:
-        """Return one filtered grayscale sample without dense-gap allocation."""
+        """Return exact transitioned coverage on the requested sampling grid."""
         bounds = RasterBounds.from_qrect(source_rect.toAlignedRect())
-        image = _coverage_image(self.surface.capture_region(bounds))
-        return _project_sample(image, bounds, source_rect, pixel_size)
+        pixels = self.surface.capture_region(bounds)
+        overlap = bounds.intersection(self.transition.patch_bounds)
+        if overlap is not None:
+            source_x = overlap.x - self.transition.patch_bounds.x
+            source_y = overlap.y - self.transition.patch_bounds.y
+            target_x = overlap.x - bounds.x
+            target_y = overlap.y - bounds.y
+            pixels[
+                target_y : target_y + overlap.height,
+                target_x : target_x + overlap.width,
+            ] = self.transition.after_pixels[
+                source_y : source_y + overlap.height,
+                source_x : source_x + overlap.width,
+            ]
+        return project_coverage_image(
+            coverage_image(pixels),
+            bounds,
+            source_rect,
+            pixel_size,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,51 +208,8 @@ class _RetainedItemSampler:
         """Evaluate only the requested source region, then sample its density."""
         bounds = RasterBounds.from_qrect(source_rect.toAlignedRect())
         pixels = CoverageDocumentEvaluator().evaluate_item(self.item, bounds)
-        image = _coverage_image(pixels)
-        return _project_sample(image, bounds, source_rect, pixel_size)
-
-
-def _project_sample(
-    image: QImage,
-    image_bounds: RasterBounds,
-    source_rect: QRectF,
-    pixel_size: QSize,
-) -> QImage:
-    """Project an integer-bounded grayscale capture to an exact sample rectangle."""
-    exact_rect = QRectF(
-        float(image_bounds.x),
-        float(image_bounds.y),
-        float(image_bounds.width),
-        float(image_bounds.height),
-    )
-    if source_rect == exact_rect and pixel_size == image.size():
-        return image
-    target = QImage(pixel_size, QImage.Format_Grayscale8)
-    target.fill(0)
-    painter = QPainter(target)
-    try:
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        scale_x = pixel_size.width() / source_rect.width()
-        scale_y = pixel_size.height() / source_rect.height()
-        painter.scale(scale_x, scale_y)
-        painter.translate(-source_rect.x(), -source_rect.y())
-        painter.drawImage(QPointF(image_bounds.x, image_bounds.y), image)
-    finally:
-        painter.end()
-    return target
-
-
-def _coverage_image(pixels: np.ndarray) -> QImage:
-    """Detach one contiguous coverage array into a grayscale Qt image."""
-    contiguous = memoryview(pixels)
-    height, width = contiguous.shape
-    return QImage(
-        contiguous,
-        width,
-        height,
-        width,
-        QImage.Format.Format_Grayscale8,
-    ).copy()
+        image = coverage_image(pixels)
+        return project_coverage_image(image, bounds, source_rect, pixel_size)
 
 
 def _pair_revisions(first: int, second: int) -> int:

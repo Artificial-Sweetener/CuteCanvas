@@ -148,6 +148,35 @@ class _RejectingBackend(_InlineBackend):
         )
 
 
+class _BoundedQueuedBackend(_QueuedBackend):
+    """Retain one accepted job and reject work until it settles."""
+
+    def __init__(self) -> None:
+        """Create one-slot backend admission."""
+
+        super().__init__()
+        self._accepted = 0
+
+    def submit(self, job: ExecutionJob) -> BackendSubmission:
+        """Accept one task or report temporary saturation."""
+
+        with self._lock:
+            if self._accepted:
+                raise ExecutionRejected(
+                    ExecutionRejectionReason.SATURATED,
+                    "test backend is saturated",
+                )
+            self._accepted += 1
+        job.add_settled_callback(self._release_accepted)
+        return super().submit(job)
+
+    def _release_accepted(self) -> None:
+        """Release the single accepted slot after task settlement."""
+
+        with self._lock:
+            self._accepted -= 1
+
+
 class _ManualDispatcher(CompletionDispatcher):
     """Retain owner callbacks for deterministic delivery races."""
 
@@ -281,6 +310,83 @@ def test_scope_close_cancels_only_its_own_work() -> None:
 
     assert first_handle.state == ExecutionState.CANCELLED
     assert second_handle.state == ExecutionState.SUCCEEDED
+
+
+def test_finalization_scope_outlives_originating_owner() -> None:
+    """Allow accepted finalization after the originating owner closes."""
+
+    backend = _QueuedBackend()
+    runtime = ExecutionRuntime(backend)
+    owner = runtime.open_scope(owner_id="owner")
+    finalization = owner.open_finalization_scope(owner_id="owner:finalization")
+
+    owner.close(reason="owner_closed")
+    handle = finalization.submit(
+        ExecutionRequest(operation="finalize", work=lambda _context: 7)
+    )
+    backend.run_next()
+
+    assert handle.state == ExecutionState.SUCCEEDED
+    assert handle.outcome is not None
+    assert handle.outcome.result == 7
+    finalization.close(reason="finalization_complete")
+
+
+def test_runtime_shutdown_closes_finalization_scope() -> None:
+    """Keep detached finalization bounded by the shared runtime lifetime."""
+
+    runtime = ExecutionRuntime(_QueuedBackend())
+    owner = runtime.open_scope(owner_id="owner")
+    finalization = owner.open_finalization_scope(owner_id="owner:finalization")
+
+    runtime.shutdown()
+
+    assert owner.is_closed
+    assert finalization.is_closed
+
+
+def test_finalization_scope_defers_temporary_backend_saturation() -> None:
+    """Retain cleanup until an accepted task releases backend capacity."""
+
+    backend = _BoundedQueuedBackend()
+    runtime = ExecutionRuntime(backend)
+    owner = runtime.open_scope(owner_id="owner")
+    finalization = owner.open_finalization_scope(owner_id="owner:finalization")
+    blocker = owner.submit(
+        ExecutionRequest(operation="blocker", work=lambda _context: 1)
+    )
+    cleanup = finalization.submit(
+        ExecutionRequest(operation="cleanup", work=lambda _context: 2)
+    )
+
+    assert cleanup.state == ExecutionState.PENDING
+    assert [job.operation for job in backend.jobs] == ["blocker"]
+
+    backend.run_next()
+
+    assert blocker.state == ExecutionState.SUCCEEDED
+    assert [job.operation for job in backend.jobs] == ["cleanup"]
+    backend.run_next()
+    assert cleanup.state == ExecutionState.SUCCEEDED
+
+
+def test_closing_finalization_scope_cancels_deferred_work() -> None:
+    """Terminalize cleanup retained only by the runtime admission queue."""
+
+    backend = _BoundedQueuedBackend()
+    runtime = ExecutionRuntime(backend)
+    owner = runtime.open_scope(owner_id="owner")
+    finalization = owner.open_finalization_scope(owner_id="owner:finalization")
+    owner.submit(ExecutionRequest(operation="blocker", work=lambda _context: 1))
+    cleanup = finalization.submit(
+        ExecutionRequest(operation="cleanup", work=lambda _context: 2)
+    )
+
+    finalization.close(reason="owner_abandoned_finalization")
+
+    assert cleanup.state == ExecutionState.CANCELLED
+    assert cleanup.outcome is not None
+    assert cleanup.outcome.cancellation_reason == "owner_abandoned_finalization"
 
 
 def test_worker_and_adopter_failures_report_their_phase() -> None:
