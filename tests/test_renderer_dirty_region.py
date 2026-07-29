@@ -21,6 +21,7 @@ import types
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QRegion, Qt, QTransform
 from qpane.rendering import Renderer
+from qpane.rendering.navigation_plan import translated_navigation_plan
 from qpane.scene.render_plan import RenderStrategy
 
 from tests.helpers.render_plan import make_render_plan
@@ -61,14 +62,10 @@ class _DummyRendererHost:
     def calculateRenderPlan(self, *, use_pan: QPointF | None = None):
         """Return the base plan with an overridden pan value when requested."""
         pan = use_pan if use_pan is not None else self.viewport.pan
-        return make_render_plan(
-            self._qpane_rect,
-            source_image=self._base_plan.base_raster_item.source_image,
-            image_id=self._base_plan.base_raster_item.asset_key.source_id,
-            transform=QTransform(self._base_plan.base_raster_item.transform),
-            strategy=self._base_plan.base_raster_item.strategy,
-            current_pan=QPointF(pan),
-            physical_viewport_rect=QRectF(self._qpane_rect),
+        return translated_navigation_plan(
+            self._base_plan,
+            QPointF(pan),
+            device_pixel_ratio=1.0,
         )
 
 
@@ -191,14 +188,12 @@ def test_redraw_base_image_buffer_keeps_buffer_pan_when_partial_dirty():
     qpane_rect = QRect(0, 0, 32, 32)
     renderer = Renderer(_DummyRendererHost(qpane_rect))
     renderer.allocate_buffers(qpane_rect.size(), 1.0)
-    original_buffer_pan = QPointF(-12.0, 7.0)
-    renderer._buffer_pan = QPointF(original_buffer_pan)
-    renderer._subpixel_pan_offset = QPointF(0.6, 0.4)
     plan = _make_render_plan(qpane_rect)
+    renderer.paint(plan)
     partial_region = QRegion(QRect(0, 0, qpane_rect.width(), qpane_rect.height() // 2))
     renderer._redraw_base_image_buffer(partial_region, plan)
-    assert renderer._buffer_pan == original_buffer_pan
-    assert renderer._subpixel_pan_offset == QPointF(0.6, 0.4)
+    assert renderer._buffer_pan == plan.current_pan
+    assert renderer._subpixel_pan_offset == QPointF()
 
 
 def test_paint_skips_redraw_when_clean():

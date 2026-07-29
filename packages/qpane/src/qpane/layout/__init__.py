@@ -17,17 +17,23 @@
 
 from .comparison import TargetComparisonLayout, TargetComparisonSnapshot
 from .grid import (
+    IncompleteRowAlignment,
     ResponsiveGridLayout,
+    ResponsiveGridPacking,
     ResponsiveGridPolicy,
     ResponsiveGridSnapshot,
+    ResponsiveGridTopology,
     ViewTargetFrame,
     ViewTargetSpec,
 )
 
 __all__ = [
+    "IncompleteRowAlignment",
     "ResponsiveGridLayout",
+    "ResponsiveGridPacking",
     "ResponsiveGridPolicy",
     "ResponsiveGridSnapshot",
+    "ResponsiveGridTopology",
     "TargetComparisonLayout",
     "TargetComparisonSnapshot",
     "ViewTargetFrame",

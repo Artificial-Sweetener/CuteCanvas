@@ -147,8 +147,12 @@ class PanZoomTool(ViewerTool):
             self._WHEEL_ZOOM_IN_FACTOR if angle > 0 else self._WHEEL_ZOOM_OUT_FACTOR
         )
         old_zoom = self._port.get_zoom()
-        new_zoom, snap_mode = self._snap_zoom(old_zoom, old_zoom * step_factor**steps)
         anchor = event.position()
+        new_zoom, snap_mode = self._snap_zoom(
+            old_zoom,
+            old_zoom * step_factor**steps,
+            anchor,
+        )
         if snap_mode is None:
             self.signals.zoom_requested.emit(new_zoom, anchor)
         else:
@@ -189,10 +193,11 @@ class PanZoomTool(ViewerTool):
         self,
         old_zoom: float,
         requested_zoom: float,
+        anchor: QPointF,
     ) -> tuple[float, ViewportZoomMode | None]:
         """Snap a wheel transition when it crosses Fit or native scale."""
         try:
-            native_zoom = float(self._port.get_native_zoom())
+            native_zoom = float(self._port.get_native_zoom(anchor))
             fit_zoom = float(self._port.get_fit_zoom())
         except (TypeError, ValueError):
             return requested_zoom, None

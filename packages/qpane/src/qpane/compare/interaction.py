@@ -68,6 +68,7 @@ class CompareDividerInteraction:
         self._interactive = True
         self._hovered = False
         self._dragging = False
+        self._mouse_drag_button: Qt.MouseButton | None = None
 
     def interactive(self) -> bool:
         """Return whether divider mouse interaction is enabled."""
@@ -85,6 +86,7 @@ class CompareDividerInteraction:
         """Clear active hover and drag state."""
         self._dragging = False
         self._hovered = False
+        self._mouse_drag_button = None
 
     def cursor(self) -> QCursor | None:
         """Return the divider cursor when hover or drag state owns the pointer."""
@@ -142,15 +144,21 @@ class CompareDividerInteraction:
         return geometry is not None and geometry.contains(point)
 
     def handle_mouse_press(self, event: QMouseEvent) -> bool:
-        """Start divider dragging when a left press lands on the boundary."""
-        if (
-            event.button() != Qt.MouseButton.LeftButton
-            or not self._interaction_active()
-            or not self.hit_test(event.position())
-        ):
+        """Start a boundary drag or summon it under a middle-button press."""
+        if not self._interaction_active():
+            return False
+        button = event.button()
+        if button is Qt.MouseButton.LeftButton:
+            if not self.hit_test(event.position()):
+                return False
+        elif button is Qt.MouseButton.MiddleButton:
+            if self.geometry() is None:
+                return False
+        else:
             return False
         self._dragging = True
         self._hovered = True
+        self._mouse_drag_button = button
         self._set_split_from_point(event.position())
         event.accept()
         self._qpane.update()
@@ -176,10 +184,15 @@ class CompareDividerInteraction:
         return False
 
     def handle_mouse_release(self, event: QMouseEvent) -> bool:
-        """End divider dragging on left-button release."""
-        if not self._dragging or event.button() != Qt.MouseButton.LeftButton:
+        """End divider dragging when the button that claimed it is released."""
+        if (
+            not self._dragging
+            or self._mouse_drag_button is None
+            or event.button() is not self._mouse_drag_button
+        ):
             return False
         self._dragging = False
+        self._mouse_drag_button = None
         self._hovered = self.hit_test(event.position())
         event.accept()
         self._qpane.update()
@@ -196,6 +209,7 @@ class CompareDividerInteraction:
             return False
         self._dragging = True
         self._hovered = False
+        self._mouse_drag_button = None
         self._set_split_from_point(point)
         self._qpane.update()
         return True
@@ -215,6 +229,7 @@ class CompareDividerInteraction:
         self._set_split_from_point(point)
         self._dragging = False
         self._hovered = False
+        self._mouse_drag_button = None
         self._qpane.update()
         return True
 

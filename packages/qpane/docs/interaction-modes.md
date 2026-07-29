@@ -56,7 +56,9 @@ extension, but this is convenient for a compact inspection utility.
 The tool delegates geometry to `NavigationInteractionPort`; it does not keep a
 parallel zoom or pan model. Programmatic calls such as `setZoomFit()`,
 `setZoom1To1()`, `applyZoom()`, and `setPan()` therefore agree exactly with
-mouse and touch navigation.
+mouse and touch navigation. A custom port's `get_native_zoom` callback receives
+the current panel-space pointer anchor, allowing a layered scene to resolve
+native scale from the visible clipped source under the gesture.
 
 `setPanZoomLocked(True)` disables all of those paths together. Use it for a
 modal host state or fixed review surface rather than replacing handlers one by
@@ -160,7 +162,9 @@ scan.
 
 The comparison boundary remains draggable in both built-in modes. It is viewer
 chrome, independent of the active tool, and uses the same authoritative
-viewport geometry as rendering.
+transformed scene geometry as rendering. A middle-button press calls the
+boundary to the pointer's scene position and owns subsequent movement until
+that button is released.
 
 Use `setComparisonDividerInteractive(False)` when host policy disables direct
 dragging. `comparisonDividerInteractive()` reports the setting, and

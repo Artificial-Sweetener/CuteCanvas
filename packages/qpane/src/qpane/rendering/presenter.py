@@ -32,6 +32,7 @@ from ..scene.identity import (
     SceneLayerTileKey,
 )
 from ..scene.model import (
+    LayerClip,
     LayerDescriptor,
     SceneDescriptor,
 )
@@ -55,6 +56,7 @@ from .coordinates import CoordinateContext, PanelHitTest
 from .frame_geometry import RenderFrameGeometry, visible_scene_rect
 from .frame_projector import SceneFrameProjector
 from .hybrid_planner import HybridRenderPlanner, SampledFramePlan
+from .layer_clip_presentation import LayerClipPresentationRegistry
 from .layer_effects import LayerEffectFrameCompiler
 from .navigation_plan import (
     translated_navigation_plan,
@@ -198,6 +200,7 @@ class RenderingPresenter:
             refinement=self._render_refinement,
         )
         self._layer_effects = LayerEffectFrameCompiler(layer_effects)
+        self._layer_clip_presentations = LayerClipPresentationRegistry()
         self._presentation_effects = LayerPresentationEffectRegistry()
         self._scene_hit_tester = SceneRenderHitTester()
         self._last_view_size = QSize()
@@ -279,8 +282,13 @@ class RenderingPresenter:
         compiled = self._scene_compiler.compiled_scene()
         if compiled is None:
             self._presentation_effects.reconcile(None)
+            self._layer_clip_presentations.reconcile(None)
             return None
         self._presentation_effects.reconcile(
+            compiled.scene.scene_id,
+            (layer.layer_id for layer in compiled.scene.layers),
+        )
+        self._layer_clip_presentations.reconcile(
             compiled.scene.scene_id,
             (layer.layer_id for layer in compiled.scene.layers),
         )
@@ -340,6 +348,10 @@ class RenderingPresenter:
             for layer in compiled.scene.layers
             for item in items_by_layer_id.get(layer.layer_id, ())
         )
+        render_items = self._layer_clip_presentations.apply(
+            compiled.scene.scene_id,
+            render_items,
+        )
         plan = SceneRenderPlan(
             scene_id=compiled.scene.scene_id,
             scene_bounds=compiled.scene.bounds,
@@ -363,6 +375,30 @@ class RenderingPresenter:
             self._schedule_transient_refinement_release()
         return plan
 
+    def set_layer_presentation_clip(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        clip: LayerClip,
+    ) -> bool:
+        """Set one active layer's transient clip and schedule a new frame."""
+        self._require_active_layer_target(scene_id, layer_id)
+        if not self._layer_clip_presentations.set(scene_id, layer_id, clip):
+            return False
+        self.invalidate_frame_plan()
+        self.renderer.invalidate_current_render_plan()
+        self.renderer.markDirty()
+        self._qpane.update()
+        return True
+
+    def reconcile_layer_presentation_clips(
+        self,
+        scene_id: uuid.UUID | None,
+        layer_ids: tuple[uuid.UUID, ...] = (),
+    ) -> None:
+        """Retire clip overrides outside the accepted durable scene."""
+        self._layer_clip_presentations.reconcile(scene_id, layer_ids)
+
     def add_layer_presentation_effect(
         self,
         scene_id: uuid.UUID,
@@ -372,7 +408,7 @@ class RenderingPresenter:
         effect_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Register one transient effect against an active rendered layer."""
-        self._require_active_effect_target(scene_id, layer_id)
+        self._require_active_layer_target(scene_id, layer_id)
         effect = self._presentation_effects.add(
             scene_id,
             layer_id,
@@ -1038,12 +1074,12 @@ class RenderingPresenter:
             return QRect()
         return QRect(QPoint(0, 0), snapshot.base_image_size)
 
-    def _require_active_effect_target(
+    def _require_active_layer_target(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
     ) -> None:
-        """Reject effect targets outside the current resolved scene."""
+        """Reject presentation targets outside the current resolved scene."""
         if not isinstance(scene_id, uuid.UUID):
             raise TypeError("scene_id must be a UUID")
         if not isinstance(layer_id, uuid.UUID):

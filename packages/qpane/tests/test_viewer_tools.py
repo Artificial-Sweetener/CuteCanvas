@@ -69,7 +69,7 @@ def test_navigation_wheel_preserves_historical_factor_and_native_snap() -> None:
             is_navigation_locked=lambda: False,
             is_content_empty=lambda: False,
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: 1.0,
+            get_native_zoom=lambda _point: 1.0,
             get_fit_zoom=lambda: 0.25,
         )
     )

@@ -68,10 +68,16 @@ class ViewerSceneController(QObject):
 
     def compare_with_next(self) -> bool:
         """Compare the active image with its next catalog neighbor."""
-        changed = self._pane.compareWithNextImage()
-        if changed:
-            self.presentationChanged.emit("comparison")
-        return changed
+        entries = self._catalog.entries
+        index = self._catalog.current_index
+        if len(entries) < 2 or index < 0:
+            return False
+        self._pane.setComparisonPair(
+            entries[index].entry_id,
+            entries[(index + 1) % len(entries)].entry_id,
+        )
+        self.presentationChanged.emit("comparison")
+        return True
 
     def flip_comparison(self) -> bool:
         """Switch the comparison between vertical and horizontal reveals."""

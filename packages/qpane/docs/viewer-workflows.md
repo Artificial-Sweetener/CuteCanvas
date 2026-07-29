@@ -121,15 +121,18 @@ entry:
 ```python
 from qpane import ComparisonOrientation
 
-viewer.selectCatalogImage(first.entry_id)
-viewer.setComparisonImage(second.entry_id)
+viewer.setComparisonPair(first.entry_id, second.entry_id)
 viewer.setComparisonSplit(0.5, ComparisonOrientation.VERTICAL)
 ```
 
-The image boundary is draggable. QPane owns its hit area and cursor behavior,
-while the host chooses whether to draw a visible divider. For a quick command
-that compares the current image with its next catalog neighbor, call
-`compareWithNextImage()`.
+The image boundary is draggable and remains projected onto the transformed
+scene seam through pan and zoom. A middle-button press anywhere in the
+comparison calls the boundary to that scene position and keeps dragging it
+until release. Divider changes update transient presentation without replacing
+the scene or invalidating reusable source products. QPane owns its hit area and
+cursor behavior, while the host chooses whether to draw a visible divider. For
+a quick command that compares the current image with its next catalog neighbor,
+call `compareWithNextImage()`.
 
 Use `comparisonState()` to update buttons and sliders:
 

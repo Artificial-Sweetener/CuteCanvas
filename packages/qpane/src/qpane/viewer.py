@@ -62,11 +62,13 @@ from .execution import (
     QtOwnerDispatcher,
     create_default_execution_runtime,
 )
+from .inspection import InspectionStateStore
 from .interaction import (
     ViewerInteractionController,
     ViewerInteractionHost,
     ViewerTool,
 )
+from .interaction.scene_navigation import SceneNativeZoomResolver
 from .rendering import ViewerRenderingRuntime
 from .rendering.coordinates import PanelHitTest
 from .rendering.scene_coordinates import SceneCoordinateSystem
@@ -120,6 +122,7 @@ class QPane(QWidget):
         config: Config | None = None,
         execution_runtime: ExecutionRuntime | None = None,
         execution_policy: DefaultExecutionPolicy | None = None,
+        inspection: InspectionStateStore | None = None,
     ) -> None:
         """Build an independently usable rendering widget.
 
@@ -128,6 +131,7 @@ class QPane(QWidget):
             execution_runtime: Optional host-owned runtime shared across widgets.
             execution_policy: Standalone runtime policy used only when QPane
                 creates its own runtime.
+            inspection: Optional host-owned inspection state for catalog views.
         """
         super().__init__()
         if execution_runtime is not None and execution_policy is not None:
@@ -168,12 +172,14 @@ class QPane(QWidget):
         self._comparison = ViewerComparison(
             self._catalog,
             lambda scene, fit: self._apply_scene(scene, fit=fit),
+            self._rendering.set_layer_presentation_clip,
             self,
         )
         self._catalog_navigation = ViewerNavigation(
             self._catalog,
             self.viewport,
             self,
+            inspection=inspection,
         )
         self._catalog_prefetch = ViewerPrefetch(
             self._catalog,
@@ -201,6 +207,12 @@ class QPane(QWidget):
             qpane=self,
             service=self._comparison,
         )
+        self._scene_navigation = SceneNativeZoomResolver(
+            lambda: self.calculateRenderPlan(),
+            lambda: self.scene(),
+            self.viewport.nativeZoom,
+        )
+        self.viewport.configure_maximum_zoom(self._scene_navigation.maximum_zoom)
         self._interaction = ViewerInteractionController(
             ViewerInteractionHost(
                 widget=self,
@@ -208,6 +220,7 @@ class QPane(QWidget):
                 settings=lambda: self.settings,
                 is_content_empty=lambda: self._rendering.is_blank,
                 physical_viewport_rect=self.physicalViewportRect,
+                native_zoom_at=self._scene_navigation.native_zoom_at,
                 is_drag_out_allowed=self._is_drag_out_allowed,
                 repaint=self.update,
                 emit_mode_changed=self.controlModeChanged.emit,
@@ -465,6 +478,14 @@ class QPane(QWidget):
         self._catalog_navigation.set_all_linked(bool(enabled))
         self.linkGroupsChanged.emit()
 
+    def captureCatalogInspection(self) -> bool:
+        """Persist the active catalog viewport before a host replaces this pane."""
+        return self._catalog_navigation.capture_current()
+
+    def restoreCatalogInspection(self) -> bool:
+        """Restore active catalog inspection after the host has final geometry."""
+        return self._catalog_navigation.restore_current()
+
     def catalogPrefetchState(self) -> ViewerPrefetchSnapshot:
         """Return immutable neighboring-pyramid prefetch counters."""
         return self._catalog_prefetch.snapshot()
@@ -489,6 +510,14 @@ class QPane(QWidget):
     def setComparisonImage(self, entry_id: uuid.UUID) -> None:
         """Reveal one catalog source over the selected image."""
         self._comparison.set_source(entry_id)
+
+    def setComparisonPair(
+        self,
+        primary_id: uuid.UUID,
+        secondary_id: uuid.UUID,
+    ) -> None:
+        """Atomically compare two distinct catalog sources."""
+        self._comparison.set_pair(primary_id, secondary_id)
 
     def clearComparison(self) -> None:
         """Disable the current image comparison."""
@@ -730,7 +759,8 @@ class QPane(QWidget):
         self._interaction.handle_key_release(event)
 
     def _handle_rendering_scene_changed(self, scene: RenderScene | None) -> None:
-        """Publish accepted scenes and reconcile active-tool cursor policy."""
+        """Publish accepted scenes after reconciling viewport navigation policy."""
+        self.viewport.reconcile_maximum_zoom()
         self._interaction.refresh_cursor()
         self.sceneChanged.emit(scene)
 

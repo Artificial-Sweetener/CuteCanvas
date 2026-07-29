@@ -51,6 +51,12 @@ def _one() -> float:
     return 1.0
 
 
+def _one_at(_point: QPointF) -> float:
+    """Return neutral native zoom for one unconfigured panel point."""
+
+    return 1.0
+
+
 ToolDependencies: TypeAlias = Mapping[str, object]
 
 
@@ -72,7 +78,7 @@ class NavigationInteractionPort:
     can_pan: Callable[[], bool] = _false
     get_pan: Callable[[], QPointF] = _point_zero
     get_zoom: Callable[[], float] = _one
-    get_native_zoom: Callable[[], float] = _one
+    get_native_zoom: Callable[[QPointF], float] = _one_at
     get_fit_zoom: Callable[[], float] = _one
     get_zoom_mode: Callable[[], ViewportZoomMode] | None = None
     set_zoom_fit: Callable[[], None] = _none

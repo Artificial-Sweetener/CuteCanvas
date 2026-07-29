@@ -333,7 +333,7 @@ def test_panzoom_wheel_emits_zoom(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
         )
     )
     grow_event = _WheelEventStub(QPointF(5, 5), 120)
@@ -362,7 +362,7 @@ def test_panzoom_wheel_uses_delta_magnitude(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: 1.0,
+            get_native_zoom=lambda _point: 1.0,
         )
     )
     grow_event = _WheelEventStub(QPointF(5, 5), 240)
@@ -393,7 +393,7 @@ def test_panzoom_wheel_snaps_to_native_zoom_on_crossing(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
         )
     )
     tool.wheelEvent(_WheelEventStub(QPointF(5, 5), 120))
@@ -418,7 +418,7 @@ def test_panzoom_wheel_snaps_to_native_zoom_on_reverse_crossing(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
         )
     )
     tool.wheelEvent(_WheelEventStub(QPointF(5, 5), -120))
@@ -443,7 +443,7 @@ def test_panzoom_wheel_snaps_to_hidpi_native_zoom(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
         )
     )
     tool.wheelEvent(_WheelEventStub(QPointF(5, 5), 120))

@@ -13,30 +13,22 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Supported responsive layout API for independent render targets."""
 
-from ..layout import (
-    IncompleteRowAlignment,
-    ResponsiveGridLayout,
-    ResponsiveGridPacking,
-    ResponsiveGridPolicy,
-    ResponsiveGridSnapshot,
-    ResponsiveGridTopology,
-    TargetComparisonLayout,
-    TargetComparisonSnapshot,
-    ViewTargetFrame,
-    ViewTargetSpec,
-)
+"""Protect navigation-buffer reuse from transient invalid viewport geometry."""
 
-__all__ = [
-    "IncompleteRowAlignment",
-    "ResponsiveGridLayout",
-    "ResponsiveGridPacking",
-    "ResponsiveGridPolicy",
-    "ResponsiveGridSnapshot",
-    "ResponsiveGridTopology",
-    "TargetComparisonLayout",
-    "TargetComparisonSnapshot",
-    "ViewTargetFrame",
-    "ViewTargetSpec",
-]
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from qpane.rendering.render import Renderer
+
+
+def test_navigation_reuse_declines_nonpositive_zoom_without_raising() -> None:
+    """A transient detached viewport must fall through to a normal redraw."""
+    renderer = Renderer.__new__(Renderer)
+    renderer._navigation_refiner = SimpleNamespace(cancel=lambda: None)
+    renderer._current_render_plan = SimpleNamespace(zoom=1.0)
+
+    reused = renderer.tryTransformBuffers(SimpleNamespace(zoom=0.0))
+
+    assert not reused

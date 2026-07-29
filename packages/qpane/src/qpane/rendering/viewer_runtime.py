@@ -28,6 +28,7 @@ from ..core import Config, OverlayDrawFn, SceneOverlayDrawFn
 from ..execution import ExecutionScope
 from ..scene.effects import LayerEffectRenderRegistry
 from ..scene.identity import SceneLayerTileKey, SourceRenderAssetKey
+from ..scene.model import LayerClip
 from ..scene.presentation_effects import (
     LayerPresentationEffect,
     LayerPresentationStyle,
@@ -161,11 +162,28 @@ class ViewerRenderingRuntime(QObject):
         """Return every registered transient effect in deterministic order."""
         return self._presenter.layer_presentation_effects()
 
+    def set_layer_presentation_clip(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        clip: LayerClip,
+    ) -> bool:
+        """Set one transient layer clip without replacing durable scene content."""
+        return self._presenter.set_layer_presentation_clip(
+            scene_id,
+            layer_id,
+            clip,
+        )
+
     def set_scene(self, scene: RenderScene | None, *, fit: bool) -> bool:
         """Replace the scene, synchronize viewport geometry, and repaint."""
         changed = self._scenes.set_scene(scene)
         if not changed:
             return False
+        self._presenter.reconcile_layer_presentation_clips(
+            None if scene is None else scene.scene_id,
+            () if scene is None else tuple(layer.layer_id for layer in scene.layers),
+        )
         self._blank = scene is None
         self._presenter.invalidate_content_cache()
         self._presenter.mark_dirty()

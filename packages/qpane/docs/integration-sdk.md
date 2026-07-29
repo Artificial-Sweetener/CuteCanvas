@@ -292,7 +292,10 @@ each registered `InspectionObserver` without recursively republishing it.
 
 `qpane.sdk.layout` supplies source-neutral target geometry.
 A `ViewTargetSpec` combines a stable target identity with its native size.
-`ResponsiveGridLayout` applies `ResponsiveGridPolicy`, partitions physical
+`ResponsiveGridLayout` applies `ResponsiveGridPolicy`.
+`ResponsiveGridTopology.MAXIMUM_REFERENCE_AREA` chooses the most useful
+fixed-aspect arrangement, `IncompleteRowAlignment.CENTER` centers a partial
+final row, and policy hysteresis prevents breakpoint flicker. It partitions physical
 pixels without cumulative rounding drift, and returns a
 `ResponsiveGridSnapshot` containing logical `ViewTargetFrame` values for
 layout, hit testing, damage, visibility, and prefetch order.

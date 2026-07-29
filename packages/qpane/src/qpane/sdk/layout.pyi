@@ -14,9 +14,12 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from ..layout import IncompleteRowAlignment as IncompleteRowAlignment
 from ..layout import ResponsiveGridLayout as ResponsiveGridLayout
+from ..layout import ResponsiveGridPacking as ResponsiveGridPacking
 from ..layout import ResponsiveGridPolicy as ResponsiveGridPolicy
 from ..layout import ResponsiveGridSnapshot as ResponsiveGridSnapshot
+from ..layout import ResponsiveGridTopology as ResponsiveGridTopology
 from ..layout import TargetComparisonLayout as TargetComparisonLayout
 from ..layout import TargetComparisonSnapshot as TargetComparisonSnapshot
 from ..layout import ViewTargetFrame as ViewTargetFrame

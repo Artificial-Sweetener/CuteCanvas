@@ -13,24 +13,24 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Catalog comparison state and immutable scene projection for viewers."""
+"""Catalog comparison intent and presentation lifecycle for viewers."""
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from functools import lru_cache
 
-from PySide6.QtCore import QObject, QSize, Signal
+from PySide6.QtCore import QObject, Signal
 
 from ..catalog.viewer_catalog import ViewerCatalog, ViewerCatalogEntry
-from ..rendering.sdk import RenderLayer, RenderScene
+from ..rendering.sdk import RenderScene
 from ..scene.model import ClipCoordinateSpace, LayerClip
 from ..types import ComparisonOrientation, ComparisonState
-
-_SCENE_NAMESPACE = uuid.UUID("79e794cd-6f4f-4c03-a838-21af22d87c46")
-_PRIMARY_LAYER_NAMESPACE = uuid.UUID("d50f5466-3298-4417-82ea-df055c7124bf")
-_COMPARE_LAYER_NAMESPACE = uuid.UUID("74c79f75-4082-4c18-a0f9-eefcab7b0a48")
+from .scene_projection import (
+    ComparisonSceneProjector,
+    comparison_layer_id,
+    scene_id,
+)
 
 
 class ViewerComparison(QObject):
@@ -43,15 +43,21 @@ class ViewerComparison(QObject):
         self,
         catalog: ViewerCatalog,
         set_scene: Callable[[RenderScene | None, bool], bool],
+        set_layer_clip: Callable[[uuid.UUID, uuid.UUID, LayerClip], bool],
         parent: QObject | None = None,
     ) -> None:
         """Bind comparison state to one viewer catalog and scene sink."""
         super().__init__(parent)
         self._catalog = catalog
         self._set_scene = set_scene
+        self._set_layer_clip = set_layer_clip
+        self._projector = ComparisonSceneProjector()
         self._source_id: uuid.UUID | None = None
         self._split_position = 0.5
         self._orientation = ComparisonOrientation.VERTICAL
+        self._presented_entries: (
+            tuple[ViewerCatalogEntry | None, ViewerCatalogEntry | None] | None
+        ) = None
         catalog.selectionChanged.connect(self._handle_selection_changed)
         catalog.changed.connect(self._reconcile_catalog)
 
@@ -80,7 +86,12 @@ class ViewerComparison(QObject):
     def show_selection(self, *, fit: bool = True) -> bool:
         """Project the active catalog selection, including comparison state."""
         primary = self._catalog.current
-        return self._set_scene(self._scene(primary), fit)
+        entries = self._catalog_entries(primary)
+        changed = self._set_scene(self._projector.project(*entries), fit)
+        self._presented_entries = entries
+        if self.active:
+            self._present_clip()
+        return changed
 
     def compare_with_next(self) -> bool:
         """Reveal the next catalog source over the active source."""
@@ -103,6 +114,30 @@ class ViewerComparison(QObject):
         self.show_selection(fit=False)
         self.changed.emit(self.state())
 
+    def set_pair(
+        self,
+        primary_id: uuid.UUID,
+        secondary_id: uuid.UUID,
+    ) -> None:
+        """Atomically select and compare two distinct catalog sources."""
+        if primary_id == secondary_id:
+            raise ValueError("comparison sources must be distinct")
+        if self._catalog.entry(primary_id) is None:
+            raise KeyError(f"unknown primary source: {primary_id}")
+        if self._catalog.entry(secondary_id) is None:
+            raise KeyError(f"unknown comparison source: {secondary_id}")
+        pair_changed = (
+            self._catalog.current is None
+            or self._catalog.current.entry_id != primary_id
+            or self._source_id != secondary_id
+        )
+        if not pair_changed:
+            return
+        self._source_id = secondary_id
+        if not self._catalog.select_entry(primary_id):
+            self.show_selection(fit=False)
+        self.changed.emit(self.state())
+
     def set_split(
         self,
         position: float,
@@ -123,7 +158,7 @@ class ViewerComparison(QObject):
         self._split_position = normalized
         self._orientation = next_orientation
         if self.active:
-            self.show_selection(fit=False)
+            self._present_clip()
         self.changed.emit(self.state())
 
     def clear(self) -> None:
@@ -143,50 +178,45 @@ class ViewerComparison(QObject):
 
     def _handle_selection_changed(self, _entry: object) -> None:
         """Present newly selected content without duplicating catalog state."""
-        self.show_selection(fit=False)
+        self._present_selection_if_stale()
 
     def _reconcile_catalog(self) -> None:
-        """Clear a removed comparison source without leaving a stale scene."""
+        """Reproject replacements or clear a removed comparison source."""
         if self._source_id is not None and self._catalog.entry(self._source_id) is None:
             self._source_id = None
+            self.show_selection(fit=False)
             self.changed.emit(self.state())
+            return
+        if self.active:
+            self._present_selection_if_stale()
 
-    def _scene(self, primary: ViewerCatalogEntry | None) -> RenderScene | None:
-        """Build one cache-stable scene from current catalog presentation state."""
-        if primary is None:
-            return None
+    def _catalog_entries(
+        self,
+        primary: ViewerCatalogEntry | None,
+    ) -> tuple[ViewerCatalogEntry | None, ViewerCatalogEntry | None]:
+        """Return the catalog entries defining the current durable scene."""
+
         secondary = (
             None if self._source_id is None else self._catalog.entry(self._source_id)
         )
-        width = primary.size.width()
-        height = primary.size.height()
-        if secondary is not None:
-            width = max(width, secondary.size.width())
-            height = max(height, secondary.size.height())
-        layers = [
-            RenderLayer(
-                primary.source,
-                layer_id=_primary_layer_id(primary.entry_id),
-                label=primary.label,
-            )
-        ]
-        if secondary is not None:
-            layers.append(
-                RenderLayer(
-                    secondary.source,
-                    layer_id=_compare_layer_id(
-                        primary.entry_id,
-                        secondary.entry_id,
-                    ),
-                    clip=self._clip(),
-                    label=secondary.label,
-                    role="comparison-image",
-                )
-            )
-        return RenderScene.from_size(
-            QSize(width, height),
-            tuple(layers),
-            scene_id=_scene_id(primary.entry_id),
+        return primary, secondary
+
+    def _present_selection_if_stale(self) -> None:
+        """Project a catalog transition once across its overlapping signals."""
+
+        entries = self._catalog_entries(self._catalog.current)
+        if entries != self._presented_entries:
+            self.show_selection(fit=False)
+
+    def _present_clip(self) -> None:
+        """Apply the live divider clip without replacing durable content."""
+        primary = self._catalog.current
+        if primary is None or self._source_id is None:
+            return
+        self._set_layer_clip(
+            scene_id(primary.entry_id),
+            comparison_layer_id(primary.entry_id, self._source_id),
+            self._clip(),
         )
 
     def _clip(self) -> LayerClip:
@@ -207,24 +237,3 @@ class ViewerComparison(QObject):
             1.0,
             1.0 - split,
         )
-
-
-@lru_cache(maxsize=4096)
-def _scene_id(source_id: uuid.UUID) -> uuid.UUID:
-    """Return one cache-stable viewer scene identity."""
-    return uuid.uuid5(_SCENE_NAMESPACE, str(source_id))
-
-
-@lru_cache(maxsize=4096)
-def _primary_layer_id(source_id: uuid.UUID) -> uuid.UUID:
-    """Return one cache-stable primary layer identity."""
-    return uuid.uuid5(_PRIMARY_LAYER_NAMESPACE, str(source_id))
-
-
-@lru_cache(maxsize=4096)
-def _compare_layer_id(primary_id: uuid.UUID, secondary_id: uuid.UUID) -> uuid.UUID:
-    """Return one cache-stable comparison pair identity."""
-    return uuid.uuid5(
-        _COMPARE_LAYER_NAMESPACE,
-        f"{primary_id}:{secondary_id}",
-    )

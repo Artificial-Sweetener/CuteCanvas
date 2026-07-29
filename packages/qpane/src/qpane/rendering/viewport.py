@@ -17,8 +17,10 @@
 """Viewport state management for QPane's rendering surface."""
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from math import isfinite
 
 from PySide6.QtCore import (
     QElapsedTimer,
@@ -68,7 +70,7 @@ class Viewport(QObject):
     _SMOOTH_ZOOM_SLOW_THRESHOLD_MS = 160.0
     _PAN_EPSILON_PX = 1e-6
     _PAN_PRECISION_DECIMALS = 9
-    _MAX_ZOOM = 10.0
+    _DEFAULT_MAXIMUM_ZOOM = 10.0
 
     def __init__(self, qpane: QWidget, config: Config):
         """Initialise viewport state tied to the hosting qpane.
@@ -80,6 +82,7 @@ class Viewport(QObject):
         super().__init__(qpane)
         self.qpane = qpane
         self._config = config
+        self._maximum_zoom_provider: Callable[[], float] | None = None
         self.content_size = QSize()  # Dimensions of the content (e.g., the image)
         self.zoom = 1.0
         self.fit_zoom = 1.0
@@ -149,13 +152,62 @@ class Viewport(QObject):
             return
         self._commit_zoom_change(zoom, pan)
 
+    def configure_maximum_zoom(
+        self,
+        provider: Callable[[], float] | None,
+    ) -> None:
+        """Bind the scene-aware provider used to cap custom navigation zoom."""
+
+        self._maximum_zoom_provider = provider
+
+    def reconcile_maximum_zoom(self) -> bool:
+        """Clamp a preserved custom view after its active scene changes."""
+
+        if (
+            self.content_size.isNull()
+            or self.zoom_mode is ViewportZoomMode.FIT
+            or self.zoom <= self._DEFAULT_MAXIMUM_ZOOM
+        ):
+            return False
+        maximum = self.maximum_zoom()
+        if self.zoom <= maximum:
+            return False
+        self._stop_zoom_animation()
+        center = QPointF(self.qpane.width() / 2.0, self.qpane.height() / 2.0)
+        pan = self._compute_anchor_pan(
+            self.zoom,
+            self.pan,
+            maximum,
+            center,
+        )
+        return self._commit_zoom_change(maximum, pan)
+
+    def maximum_zoom(self) -> float:
+        """Return one finite positive scene-aware custom zoom ceiling."""
+
+        provider = self._maximum_zoom_provider
+        if provider is None:
+            return self._DEFAULT_MAXIMUM_ZOOM
+        try:
+            maximum = float(provider())
+        except (TypeError, ValueError):
+            return self._DEFAULT_MAXIMUM_ZOOM
+        if not isfinite(maximum) or maximum <= 0.0:
+            return self._DEFAULT_MAXIMUM_ZOOM
+        return max(self._DEFAULT_MAXIMUM_ZOOM, maximum)
+
     def clamp_zoom(self, requested_zoom: float) -> float:
         """Clamp a requested zoom to the authoritative viewport limits."""
         safe_minimum = max(
             self.min_zoom(),
             float(getattr(self._config, "safe_min_zoom", 1e-3)),
         )
-        return min(self._MAX_ZOOM, max(float(requested_zoom), safe_minimum))
+        return self.clamp_maximum_zoom(max(float(requested_zoom), safe_minimum))
+
+    def clamp_maximum_zoom(self, requested_zoom: float) -> float:
+        """Clamp only the upper zoom bound for wheel and API navigation."""
+
+        return min(self.maximum_zoom(), float(requested_zoom))
 
     def apply_direct_manipulation(self, requested_zoom: float, pan: QPointF) -> None:
         """Apply a live gesture transform without interpolation or split updates."""
@@ -222,12 +274,20 @@ class Viewport(QObject):
         extra_x = (panel_w * (expansion - 1.0)) / 2
         extra_y = (panel_h * (expansion - 1.0)) / 2
         if self._axis_fits(img_w, panel_w):
-            x = 0
+            x = (
+                min(max(pan.x(), -(panel_w - img_w) / 2), (panel_w - img_w) / 2)
+                if self.zoom_mode is ViewportZoomMode.ONE_TO_ONE
+                else 0
+            )
         else:
             x_max = (img_w - panel_w) / 2 + extra_x
             x = min(max(pan.x(), -x_max), x_max)
         if self._axis_fits(img_h, panel_h):
-            y = 0
+            y = (
+                min(max(pan.y(), -(panel_h - img_h) / 2), (panel_h - img_h) / 2)
+                if self.zoom_mode is ViewportZoomMode.ONE_TO_ONE
+                else 0
+            )
         else:
             y_max = (img_h - panel_h) / 2 + extra_y
             y = min(max(pan.y(), -y_max), y_max)
@@ -268,8 +328,18 @@ class Viewport(QObject):
         img_h = float(image_size.height() * zoom)
         panel_w = float(panel_size.width())
         panel_h = float(panel_size.height())
-        return not self._axis_fits(img_w, panel_w) or not self._axis_fits(
-            img_h, panel_h
+        return (
+            (
+                self.zoom_mode is ViewportZoomMode.ONE_TO_ONE
+                and (
+                    not self._axis_fits(img_w, panel_w)
+                    or not self._axis_fits(img_h, panel_h)
+                    or not self._axis_fits(panel_w, img_w)
+                    or not self._axis_fits(panel_h, img_h)
+                )
+            )
+            or not self._axis_fits(img_w, panel_w)
+            or not self._axis_fits(img_h, panel_h)
         )
 
     def setZoom1To1(self, anchor: QPoint | QPointF | None = None):
@@ -278,36 +348,41 @@ class Viewport(QObject):
         Args:
             anchor: Optional panel coordinate to keep stationary while zooming.
         """
-        self._motion.stop()
-        if self.content_size.isNull():
-            return
-        if self._pan_zoom_locked:
-            return
-        self._stop_zoom_animation()
-        self.zoom_mode = ViewportZoomMode.ONE_TO_ONE
-        old_zoom = self.zoom
-        new_zoom = self.nativeZoom()
-        if anchor is not None:
-            context = CoordinateContext(self.qpane)
-            physical_anchor = context.logical_to_physical(QPointF(anchor))
-            panel_center_physical = context.logical_to_physical(
-                QPointF(self.qpane.width() / 2, self.qpane.height() / 2)
-            )
-            rel = physical_anchor - panel_center_physical - self.pan
-            image_point = rel / old_zoom if old_zoom != 0 else QPointF(0, 0)
-            new_pan = physical_anchor - panel_center_physical - image_point * new_zoom
-        else:
-            new_pan = QPointF(0, 0)
-        self._commit_zoom_change(new_zoom, new_pan)
+        self.set_source_native_zoom(self.nativeZoom(), anchor, interpolated=False)
 
-    def setZoom1To1Interpolated(self, anchor: QPoint | QPointF | None = None) -> None:
+    def setZoom1To1Interpolated(
+        self,
+        anchor: QPoint | QPointF | None = None,
+    ) -> None:
         """Snap zoom to native pixel ratio using an interpolated transition."""
+        self.set_source_native_zoom(self.nativeZoom(), anchor, interpolated=True)
+
+    def set_source_native_zoom(
+        self,
+        native_zoom: float,
+        anchor: QPoint | QPointF | None,
+        *,
+        interpolated: bool,
+    ) -> None:
+        """Apply source-resolved 1:1 scale while preserving semantic mode."""
+
         self._motion.stop()
         if self.content_size.isNull():
             return
         if self._pan_zoom_locked:
             return
-        target_zoom = self.nativeZoom()
+        target_zoom = float(native_zoom)
+        if not interpolated:
+            self._stop_zoom_animation()
+            self.zoom_mode = ViewportZoomMode.ONE_TO_ONE
+            new_pan = self._compute_anchor_pan(
+                self.zoom,
+                self.pan,
+                target_zoom,
+                anchor,
+            )
+            self._commit_zoom_change(target_zoom, new_pan)
+            return
         target_pan = None if anchor is not None else QPointF(0, 0)
         self._apply_zoom_interpolated(
             requested_zoom=target_zoom,
@@ -369,7 +444,7 @@ class Viewport(QObject):
             return
         self._stop_zoom_animation()
         self.zoom_mode = ViewportZoomMode.CUSTOM
-        self._apply_zoom_immediate(requested_zoom, anchor)
+        self._apply_zoom_immediate(self.clamp_maximum_zoom(requested_zoom), anchor)
 
     def applyZoomInterpolated(
         self, requested_zoom: float, anchor: QPoint | QPointF | None = None
@@ -423,7 +498,11 @@ class Viewport(QObject):
     ) -> None:
         """Apply a zoom request with interpolation and update the zoom mode."""
         old_zoom = self.zoom
-        new_zoom = requested_zoom
+        new_zoom = (
+            requested_zoom
+            if target_mode is not ViewportZoomMode.CUSTOM
+            else self.clamp_maximum_zoom(requested_zoom)
+        )
         self.zoom_mode = target_mode
         if target_mode == ViewportZoomMode.FIT and fit_zoom is not None:
             self.fit_zoom = fit_zoom
@@ -739,8 +818,10 @@ class Viewport(QObject):
         panel_size = self._physical_viewport_size()
         img_w = self.content_size.width() * zoom
         img_h = self.content_size.height() * zoom
-        if self._axis_fits(img_w, panel_size.width()) and self._axis_fits(
-            img_h, panel_size.height()
+        if (
+            self.zoom_mode is not ViewportZoomMode.ONE_TO_ONE
+            and self._axis_fits(img_w, panel_size.width())
+            and self._axis_fits(img_h, panel_size.height())
         ):
             return QPointF(0, 0)
         return pan

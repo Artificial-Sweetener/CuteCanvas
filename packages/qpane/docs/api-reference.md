@@ -1,5 +1,11 @@
 # QPane public API
 
+`QPane.captureCatalogInspection()` captures normalized inspection for the
+current catalog target, while `QPane.restoreCatalogInspection()` restores that
+state after a host changes selection or presentation. `ResponsiveGridPacking`
+selects uniform-cell or native-tile placement for the source-neutral
+responsive layout contract.
+
 ## Viewer
 
 - `QPane` is the focused PySide6 viewer facade.
@@ -72,10 +78,13 @@
 - `ComparisonDividerState` carries projected, detached divider geometry.
 - `QPane.compareWithNextImage` reveals the next catalog source over the selection.
 - `QPane.setComparisonImage` chooses an explicit catalog comparison source.
+- `QPane.setComparisonPair` atomically selects a primary source and reveals a
+  distinct secondary source over the same normalized frame.
 - `QPane.clearComparison` disables the active reveal without changing selection.
 - `QPane.setComparisonSplit` applies a normalized position and optional orientation.
 - `QPane.comparisonState` returns the immutable comparison setup.
-- `QPane.setComparisonDividerInteractive` enables or disables built-in divider dragging.
+- `QPane.setComparisonDividerInteractive` enables or disables built-in divider
+  dragging, including middle-button summon-and-drag.
 - `QPane.comparisonDividerInteractive` reports the current divider input policy.
 - `QPane.comparisonDividerState` returns detached projected divider geometry.
 
@@ -133,7 +142,9 @@
 - `PanZoomTool` implements QPane's built-in navigation behavior.
 - `CursorTool` implements pointer selection and drag-out behavior.
 - `NavigationInteractionPort` and `CursorInteractionPort` are their focused
-  activation boundaries.
+  activation boundaries. `NavigationInteractionPort.get_native_zoom` receives
+  the panel-space gesture anchor so layered scenes can resolve the visible
+  source's native scale.
 - `QPane.registerTool` adds one viewer-tool factory under a stable mode ID.
 - `QPane.unregisterTool` removes an inactive custom tool registration.
 - `QPane.setControlMode` activates one registered viewer tool.
@@ -364,8 +375,9 @@ root facade and declarative SDK above.
   inspection and target viewport transforms.
 - `ViewTargetSpec` identifies one independently rendered target and its native dimensions.
 - `ViewTargetFrame` contains a responsive-grid cell and its aspect-preserving content rectangle.
-- `ResponsiveGridPolicy` sets minimum cell width, spacing, and an optional column limit.
-- `ResponsiveGridSnapshot` provides stable frames, hit testing, visible-target queries, prefetch order, and bounded layout damage.
+- `ResponsiveGridPolicy` selects minimum-width or maximum-reference-area topology, spacing, hysteresis, partial-row alignment, and an optional column limit.
+- `ResponsiveGridTopology` and `IncompleteRowAlignment` configure reusable target-layout behavior without application semantics.
+- `ResponsiveGridSnapshot` provides stable frames, resolved topology state, hit testing, visible-target queries, prefetch order, and bounded layout damage.
 - `ResponsiveGridLayout` returns DPR-stable target cells, content frames, hit
   testing, visibility, damage, and prefetch order.
 - `TargetComparisonSnapshot` contains exact clips and a physical-pixel-aligned divider for two targets.

@@ -399,10 +399,12 @@ class RasterRenderPlanner:
             strategy=strategy,
         )
         device_pixel_ratio = frame.device_pixel_ratio
+        relative_base_raster_scale = max(frame.zoom, 0.0) / max(
+            frame.native_zoom,
+            1e-9,
+        )
         render_hint_enabled = (
-            smooth_raster_sampling_for_physical_scale(
-                frame.zoom / max(frame.native_zoom, 1e-9)
-            )
+            smooth_raster_sampling_for_physical_scale(relative_base_raster_scale)
             if layer.is_base_raster
             else smooth_raster_sampling_enabled(transform, device_pixel_ratio)
         )

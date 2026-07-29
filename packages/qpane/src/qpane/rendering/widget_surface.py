@@ -102,6 +102,19 @@ class WidgetRenderSurface:
         self._image_current = False
         return exposed
 
+    def scroll_linear(self, dx: int, dy: int) -> QRegion:
+        """Scroll materialized storage while preserving one global clip phase."""
+        if not self.is_allocated:
+            raise RuntimeError("render surface must be allocated before scrolling")
+        self.normalize_storage()
+        surface_rect = self._pixmap.rect()
+        if abs(dx) >= surface_rect.width() or abs(dy) >= surface_rect.height():
+            return QRegion(surface_rect)
+        exposed = QRegion()
+        self._pixmap.scroll(dx, dy, surface_rect, exposed)
+        self._image_current = False
+        return exposed
+
     def snapshot(self) -> QImage:
         """Return a linear image snapshot in logical buffer order."""
         if self._storage_origin.isNull():

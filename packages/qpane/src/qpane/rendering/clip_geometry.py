@@ -39,6 +39,7 @@ class ProjectedClipBoundary:
     visible_segment: QLineF | None
     scene_position: float
     hit_width: float
+    viewport_rect: QRectF | None = None
 
     def contains(self, point: QPointF) -> bool:
         """Return whether ``point`` is within hit tolerance of the visible segment."""
@@ -49,6 +50,18 @@ class ProjectedClipBoundary:
 
     def split_for_widget_point(self, point: QPointF) -> float | None:
         """Return the normalized split represented by a widget point."""
+        if self.viewport_rect is not None:
+            if self.orientation == ComparisonOrientation.HORIZONTAL:
+                origin = self.viewport_rect.top()
+                denominator = self.viewport_rect.height()
+                value = point.y()
+            else:
+                origin = self.viewport_rect.left()
+                denominator = self.viewport_rect.width()
+                value = point.x()
+            if denominator <= 0.0:
+                return None
+            return min(1.0, max(0.0, (value - origin) / denominator))
         inverse, invertible = self.item.transform.inverted()
         if not invertible:
             return None
@@ -92,6 +105,15 @@ def projected_comparison_boundary(
     item = _comparison_item(plan, source_id=source_id)
     if item is None or item.clip is None:
         return None
+    viewport_boundary = _viewport_comparison_boundary(
+        plan,
+        item,
+        orientation=orientation,
+        hit_width=hit_width,
+        split_position=split_position,
+    )
+    if viewport_boundary is not None:
+        return viewport_boundary
     scene_clip = (
         _normalized_comparison_clip(
             plan,
@@ -128,6 +150,60 @@ def projected_comparison_boundary(
         visible_segment=visible_segment,
         scene_position=scene_position,
         hit_width=hit_width,
+    )
+
+
+def _viewport_comparison_boundary(
+    plan: SceneRenderPlan,
+    item: SceneRenderItem,
+    *,
+    orientation: ComparisonOrientation,
+    hit_width: float,
+    split_position: float | None,
+) -> ProjectedClipBoundary | None:
+    """Return one divider fixed to viewport coordinates when declared there."""
+
+    clip = item.clip
+    if clip is None or clip.coordinate_space not in {
+        ClipCoordinateSpace.NORMALIZED_VIEWPORT,
+        ClipCoordinateSpace.VIEWPORT,
+    }:
+        return None
+    viewport = QRectF(plan.qpane_rect)
+    if viewport.isEmpty():
+        return None
+    if split_position is not None:
+        normalized = min(1.0, max(0.0, float(split_position)))
+    elif clip.coordinate_space is ClipCoordinateSpace.NORMALIZED_VIEWPORT:
+        normalized = (
+            clip.y if orientation is ComparisonOrientation.HORIZONTAL else clip.x
+        )
+    elif orientation is ComparisonOrientation.HORIZONTAL:
+        normalized = (clip.y - viewport.top()) / viewport.height()
+    else:
+        normalized = (clip.x - viewport.left()) / viewport.width()
+    normalized = min(1.0, max(0.0, normalized))
+    if orientation is ComparisonOrientation.HORIZONTAL:
+        position = viewport.top() + normalized * viewport.height()
+        segment = QLineF(
+            QPointF(viewport.left(), position),
+            QPointF(viewport.right(), position),
+        )
+    else:
+        position = viewport.left() + normalized * viewport.width()
+        segment = QLineF(
+            QPointF(position, viewport.top()),
+            QPointF(position, viewport.bottom()),
+        )
+    return ProjectedClipBoundary(
+        orientation=orientation,
+        item=item,
+        scene_bounds=plan.scene_bounds,
+        full_segment=segment,
+        visible_segment=QLineF(segment),
+        scene_position=normalized,
+        hit_width=hit_width,
+        viewport_rect=viewport,
     )
 
 

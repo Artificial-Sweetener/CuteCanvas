@@ -19,12 +19,15 @@ from __future__ import annotations
 
 from math import isclose
 from pathlib import Path
+from uuid import uuid4
 
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from qpane import (
     ComparisonOrientation,
+    InspectionStateStore,
+    LinkedGroup,
     QPane,
     RenderLayer,
     RenderScene,
@@ -53,6 +56,41 @@ def _mounted_catalog(qapp) -> tuple[QPane, tuple[ViewerCatalogEntry, ...]]:
     )
     qapp.processEvents()
     return pane, entries
+
+
+def test_catalog_navigation_can_use_host_owned_linked_inspection(qapp) -> None:
+    """A host can retain one native comparison viewport independently of a widget."""
+
+    inspection = InspectionStateStore()
+    primary_id = uuid4()
+    secondary_id = uuid4()
+    pane = QPane(inspection=inspection)
+    pane.resize(800, 600)
+    pane.show()
+    try:
+        pane.addImage(
+            _image(1200, 800, QColor("red")),
+            label="Primary",
+            source_id=primary_id,
+        )
+        pane.addImage(
+            _image(1200, 800, QColor("blue")),
+            label="Secondary",
+            source_id=secondary_id,
+            select=False,
+        )
+        pane.setLinkedImageGroups((LinkedGroup(uuid4(), (primary_id, secondary_id)),))
+        pane.setComparisonImage(secondary_id)
+        qapp.processEvents()
+
+        pane.applyZoom(pane.currentZoom() * 1.5)
+        assert pane.selectCatalogImage(secondary_id)
+
+        assert inspection.groups() == pane.linkedImageGroups()
+        assert inspection.state_for(secondary_id) is not None
+    finally:
+        pane.close()
+        pane.deleteLater()
 
 
 def test_catalog_navigation_reuses_sources_and_repairs_removal(qapp) -> None:
@@ -289,6 +327,97 @@ def test_comparison_divider_drag_is_qpane_owned_and_preserves_view(qapp) -> None
     assert pane.currentZoom() == before_zoom
     assert pane.currentPan() == before_pan
     assert pane.comparisonDividerState().dragging is False
+    pane.close()
+    pane.deleteLater()
+
+
+def test_middle_mouse_summons_and_drags_comparison_divider(qapp) -> None:
+    """Call either divider orientation to the middle-button pointer and drag it."""
+
+    pane, _entries = _mounted_catalog(qapp)
+    assert pane.compareWithNextImage()
+    qapp.processEvents()
+    before_zoom = pane.currentZoom()
+    before_pan = pane.currentPan()
+    cases = (
+        (
+            ComparisonOrientation.VERTICAL,
+            QPoint(173, 211),
+            QPoint(641, 389),
+        ),
+        (
+            ComparisonOrientation.HORIZONTAL,
+            QPoint(229, 137),
+            QPoint(577, 481),
+        ),
+    )
+    for orientation, called_position, dragged_position in cases:
+        pane.setComparisonSplit(0.5, orientation)
+
+        QTest.mousePress(
+            pane,
+            Qt.MouseButton.MiddleButton,
+            pos=called_position,
+        )
+        qapp.processEvents()
+        called = pane.comparisonDividerState()
+        assert called.dragging is True
+        assert called.visible_segment is not None
+        called_coordinate = (
+            called.visible_segment.y1()
+            if orientation is ComparisonOrientation.HORIZONTAL
+            else called.visible_segment.x1()
+        )
+        expected_called_coordinate = (
+            called_position.y()
+            if orientation is ComparisonOrientation.HORIZONTAL
+            else called_position.x()
+        )
+        assert isclose(called_coordinate, expected_called_coordinate, abs_tol=1.0)
+
+        QTest.mouseMove(pane, dragged_position, delay=0)
+        qapp.processEvents()
+        dragged = pane.comparisonDividerState()
+        assert dragged.dragging is True
+        assert dragged.visible_segment is not None
+        dragged_coordinate = (
+            dragged.visible_segment.y1()
+            if orientation is ComparisonOrientation.HORIZONTAL
+            else dragged.visible_segment.x1()
+        )
+        expected_dragged_coordinate = (
+            dragged_position.y()
+            if orientation is ComparisonOrientation.HORIZONTAL
+            else dragged_position.x()
+        )
+        assert isclose(dragged_coordinate, expected_dragged_coordinate, abs_tol=1.0)
+
+        QTest.mouseRelease(
+            pane,
+            Qt.MouseButton.MiddleButton,
+            pos=dragged_position,
+        )
+        qapp.processEvents()
+        assert pane.comparisonDividerState().dragging is False
+
+    pane.setComparisonDividerInteractive(False)
+    disabled_state = pane.comparisonState()
+    QTest.mousePress(
+        pane,
+        Qt.MouseButton.MiddleButton,
+        pos=QPoint(101, 101),
+    )
+    QTest.mouseMove(pane, QPoint(701, 501), delay=0)
+    QTest.mouseRelease(
+        pane,
+        Qt.MouseButton.MiddleButton,
+        pos=QPoint(701, 501),
+    )
+    qapp.processEvents()
+    assert pane.comparisonState() == disabled_state
+    assert pane.comparisonDividerState().dragging is False
+    assert pane.currentZoom() == before_zoom
+    assert pane.currentPan() == before_pan
     pane.close()
     pane.deleteLater()
 

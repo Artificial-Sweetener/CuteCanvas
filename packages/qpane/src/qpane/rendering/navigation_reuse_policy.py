@@ -13,30 +13,19 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Supported responsive layout API for independent render targets."""
 
-from ..layout import (
-    IncompleteRowAlignment,
-    ResponsiveGridLayout,
-    ResponsiveGridPacking,
-    ResponsiveGridPolicy,
-    ResponsiveGridSnapshot,
-    ResponsiveGridTopology,
-    TargetComparisonLayout,
-    TargetComparisonSnapshot,
-    ViewTargetFrame,
-    ViewTargetSpec,
-)
+"""Select safe retained-storage behavior for viewport navigation."""
 
-__all__ = [
-    "IncompleteRowAlignment",
-    "ResponsiveGridLayout",
-    "ResponsiveGridPacking",
-    "ResponsiveGridPolicy",
-    "ResponsiveGridSnapshot",
-    "ResponsiveGridTopology",
-    "TargetComparisonLayout",
-    "TargetComparisonSnapshot",
-    "ViewTargetFrame",
-    "ViewTargetSpec",
-]
+from __future__ import annotations
+
+from ..scene.render_plan import SceneRenderPlan
+
+
+def requires_linear_scroll_storage(plan: SceneRenderPlan) -> bool:
+    """Keep clipped scene geometry in one global phase during strip repair."""
+    return any(
+        item.descriptor.visible and item.clip is not None for item in plan.render_items
+    )
+
+
+__all__ = ["requires_linear_scroll_storage"]

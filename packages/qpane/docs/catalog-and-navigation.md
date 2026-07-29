@@ -177,14 +177,14 @@ catalog selection does not change.
 ```python
 from qpane import ComparisonOrientation
 
-viewer.selectCatalogImage(first.entry_id)
-viewer.setComparisonImage(second.entry_id)
+viewer.setComparisonPair(first.entry_id, second.entry_id)
 viewer.setComparisonSplit(0.5, ComparisonOrientation.VERTICAL)
 ```
 
 For the common adjacent-image workflow, `compareWithNextImage()` selects the
 next catalog resource automatically. `clearComparison()` returns to normal
-single-image presentation.
+single-image presentation. Pair replacement is atomic: changing both sources
+submits only the requested pair, without presenting an intermediate mix.
 
 `comparisonState()` returns an immutable `ComparisonState` containing enabled
 state, source identity and path, split position, and orientation. Connect
@@ -199,9 +199,11 @@ def refresh_compare_controls(state):
 viewer.comparisonChanged.connect(refresh_compare_controls)
 ```
 
-Comparison works best for aligned or similarly shaped images. When dimensions
-differ, QPane uses the combined presentation to establish safe Fit, 1:1, and
-pan limits.
+Both sources occupy the primary image's normalized frame. Differently sized or
+shaped sources are transformed into that frame, so the divider always reveals
+corresponding normalized regions and each layer retains an accurate physical
+source scale. The reveal seam belongs to that transformed frame and moves with
+it during pan and zoom.
 
 ### Host-Owned Divider Chrome
 
@@ -221,6 +223,11 @@ viewer.registerOverlay("compare-divider", draw_compare_divider)
 The snapshot includes visible and full projected segments, orientation, hit
 width, hover, drag, and interaction state. That keeps artwork host-owned while
 QPane remains the authority for geometry and input.
+
+Left-drag the current boundary normally. Press the middle mouse button anywhere
+in the comparison to call the boundary to that scene position, then move while
+holding the button to continue dragging it. Both paths update the same
+authoritative seam.
 
 `setComparisonDividerInteractive(False)` disables built-in dragging without
 changing comparison itself. This is useful when a host provides a different

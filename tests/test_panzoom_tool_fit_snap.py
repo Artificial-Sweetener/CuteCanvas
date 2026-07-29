@@ -54,7 +54,7 @@ def test_panzoom_wheel_snaps_to_fit_zoom(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
             get_fit_zoom=lambda: fit_zoom,
         )
     )
@@ -84,7 +84,7 @@ def test_panzoom_wheel_snaps_to_fit_zoom_crossing(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
             get_fit_zoom=lambda: fit_zoom,
         )
     )
@@ -113,7 +113,7 @@ def test_panzoom_wheel_snaps_to_fit_zoom_reverse(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
             get_fit_zoom=lambda: fit_zoom,
         )
     )
@@ -142,7 +142,7 @@ def test_panzoom_prioritizes_native_over_fit_if_both_crossed(qapp):
             is_content_empty=lambda: False,
             get_pan=lambda: QPointF(0, 0),
             get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda: native_zoom,
+            get_native_zoom=lambda _point: native_zoom,
             get_fit_zoom=lambda: fit_zoom,
         )
     )

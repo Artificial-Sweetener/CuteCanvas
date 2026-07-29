@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QCursor,
     QEnterEvent,
@@ -74,6 +74,7 @@ class ViewerInteractionHost:
     settings: Callable[[], Config]
     is_content_empty: Callable[[], bool]
     physical_viewport_rect: Callable[[], QRectF]
+    native_zoom_at: Callable[[QPointF], float]
     is_drag_out_allowed: Callable[[], bool]
     repaint: Callable[[], None]
     emit_mode_changed: Callable[[str], None]
@@ -276,13 +277,23 @@ class ViewerInteractionController:
             can_pan=viewport.can_pan,
             get_pan=lambda: QPointF(viewport.pan),
             get_zoom=lambda: float(viewport.zoom),
-            get_native_zoom=viewport.nativeZoom,
+            get_native_zoom=self._host.native_zoom_at,
             get_fit_zoom=viewport.computeFitZoom,
             get_zoom_mode=viewport.get_zoom_mode,
             set_zoom_fit=viewport.setZoomFit,
             set_zoom_fit_interpolated=viewport.setZoomFitInterpolated,
-            set_zoom_one_to_one=viewport.setZoom1To1,
-            set_zoom_one_to_one_interpolated=viewport.setZoom1To1Interpolated,
+            set_zoom_one_to_one=lambda anchor=None: viewport.set_source_native_zoom(
+                self._native_zoom_at(anchor),
+                anchor,
+                interpolated=False,
+            ),
+            set_zoom_one_to_one_interpolated=(
+                lambda anchor=None: viewport.set_source_native_zoom(
+                    self._native_zoom_at(anchor),
+                    anchor,
+                    interpolated=True,
+                )
+            ),
             get_dpr=self._host.widget.devicePixelRatioF,
         )
 
@@ -312,9 +323,15 @@ class ViewerInteractionController:
         if mode is ViewportZoomMode.FIT:
             viewport.setZoomFitInterpolated()
         elif mode is ViewportZoomMode.ONE_TO_ONE:
-            viewport.setZoom1To1Interpolated(anchor)
+            viewport.set_source_native_zoom(zoom, anchor, interpolated=True)
         else:
             self._apply_tool_zoom(zoom, anchor)
+
+    def _native_zoom_at(self, anchor: QPoint | QPointF | None) -> float:
+        """Resolve native zoom for an optional normalized pointer anchor."""
+
+        point = QPointF(anchor) if anchor is not None else QPointF()
+        return float(self._host.native_zoom_at(point))
 
     def _pointer_port(self) -> PointerInputPort:
         """Build the normalized direct-input boundary."""

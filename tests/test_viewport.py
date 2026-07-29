@@ -82,6 +82,27 @@ def test_apply_zoom_recenters_when_image_fits_physical_view():
     assert viewport.pan.y() == pytest.approx(0.0)
 
 
+def test_custom_zoom_uses_the_configured_authoritative_ceiling() -> None:
+    """Clamp custom zoom through the viewport's scene-aware bound provider."""
+
+    viewport, _ = _make_viewport()
+    viewport.configure_maximum_zoom(lambda: 20.0)
+
+    viewport.applyZoom(1000.0)
+
+    assert viewport.zoom == pytest.approx(20.0)
+
+
+def test_custom_zoom_below_minimum_canvas_size_remains_available() -> None:
+    """Apply API zoom-out without touch manipulation's minimum-size clamp."""
+
+    viewport, _ = _make_viewport(content_size=(64, 64), zoom=10.0)
+
+    viewport.applyZoom(0.5)
+
+    assert viewport.zoom == pytest.approx(0.5)
+
+
 def test_pan_and_zoom_mutators_respect_lock_state():
     viewport, _ = _make_viewport(dpr=1.5, pan=QPointF(10, 12), zoom=0.5)
     viewport.set_locked(True)

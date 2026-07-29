@@ -43,12 +43,21 @@ class ViewerNavigation:
         catalog: ViewerCatalog,
         viewport: Viewport,
         widget: QWidget,
+        *,
+        inspection: InspectionStateStore | None = None,
     ) -> None:
-        """Bind catalog selection transitions to one viewport."""
+        """Bind catalog selection transitions to one viewport.
+
+        Args:
+            catalog: Ordered resources whose inspection state is retained.
+            viewport: Viewport receiving restored transforms.
+            widget: Native viewport geometry owner.
+            inspection: Optional host-owned state store for a durable view role.
+        """
         self._catalog = catalog
         self._viewport = viewport
         self._widget = widget
-        self._inspection = InspectionStateStore()
+        self._inspection = inspection or InspectionStateStore()
         self._known_ids: set[uuid.UUID] = set()
         catalog.selectionChanging.connect(self._capture_outgoing)
         catalog.selectionChanged.connect(self._restore_incoming)
@@ -92,6 +101,25 @@ class ViewerNavigation:
     def clear(self) -> None:
         """Clear all stored individual and linked viewport state."""
         self._inspection.clear()
+
+    def capture_current(self) -> bool:
+        """Persist the current viewport before its native host is replaced."""
+        current = self._catalog.current
+        if current is None:
+            return False
+        state = self._capture(current)
+        if state is None:
+            return False
+        self._inspection.update(current.entry_id, state)
+        return True
+
+    def restore_current(self) -> bool:
+        """Restore the active resource after its host has final viewport geometry."""
+        current = self._catalog.current
+        if current is None:
+            return False
+        self._restore_incoming(current)
+        return True
 
     def _reconcile_catalog(self) -> None:
         """Discard viewport state for resources removed from the catalog."""

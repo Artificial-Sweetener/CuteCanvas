@@ -1135,7 +1135,7 @@ def test_repeated_high_dpi_pan_repairs_match_independent_clean_frames(qapp) -> N
 
 
 def test_clipped_public_scene_pan_reuses_exact_layered_pixels(qapp) -> None:
-    """Scene clips should remain exact during guarded pan presentation."""
+    """Scene clips should retain exact pixels in one linear storage phase."""
     qpane = QPane()
     try:
         qpane.resize(96, 96)
@@ -1181,6 +1181,7 @@ def test_clipped_public_scene_pan_reuses_exact_layered_pixels(qapp) -> None:
         )
         after = renderer.snapshot_metrics()
         assert after.scroll_hits == before.scroll_hits + 1
+        assert renderer._surface.storage_origin.isNull()
         reused_buffer = renderer.get_base_buffer()
         assert reused_buffer is not None
         reused = rendered_overscanned_widget_frame(

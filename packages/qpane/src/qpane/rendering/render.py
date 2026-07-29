@@ -42,6 +42,7 @@ from .navigation_plan import (
     navigation_products_match,
     retained_raster_navigation_delta,
 )
+from .navigation_reuse_policy import requires_linear_scroll_storage
 from .transient_raster import TransientRasterHandoff
 from .transient_raster_damage import transient_raster_transition_damage
 from .widget_surface import WidgetRenderSurface
@@ -390,7 +391,10 @@ class Renderer:
         if not navigation_products_match(buffer_plan, settled_plan):
             self._scroll_misses += 1
             return False
-        self._surface.scroll(dx, dy)
+        if requires_linear_scroll_storage(settled_plan):
+            self._surface.scroll_linear(dx, dy)
+        else:
+            self._surface.scroll(dx, dy)
         self._mark_diagnostics_dirty()
         self._buffer_pan = target_buffer_pan
         surface_region = QRegion(surface.rect())
@@ -432,6 +436,10 @@ class Renderer:
         """Reuse the composited frame for an immediate zoom presentation."""
         self._navigation_refiner.cancel()
         previous_plan = self._current_render_plan
+        if previous_plan is not None and (
+            previous_plan.zoom <= 0.0 or plan.zoom <= 0.0
+        ):
+            return False
         base_image = self._surface.pixmap if self._surface.is_allocated else None
         buffer_plan = self._buffer_render_plan
         if (
@@ -856,12 +864,14 @@ class Renderer:
         self.qpane.update()
 
     def _redraw_base_image_buffer(self, dirty_region: QRegion, plan: SceneRenderPlan):
-        """Repaint damage through canonical physical compositing patches."""
+        """Repaint damage without mixing exact and retained navigation geometry."""
         if not self._surface.is_allocated:
             return
         qpane_rect = plan.qpane_rect
         qpane_region = QRegion(qpane_rect)
-        full_viewport_dirty = dirty_region.intersected(qpane_region) == qpane_region
+        full_viewport_dirty = dirty_region.intersected(
+            qpane_region
+        ) == qpane_region or self._partial_damage_requires_full_repaint(plan)
         if full_viewport_dirty:
             self._full_redraws += 1
         else:
@@ -909,6 +919,33 @@ class Renderer:
             self._buffer_valid_region = QRegion(self._surface.pixmap.rect())
             self._buffer_render_plan = plan
             self._presentation_transform.reset()
+
+    def _partial_damage_requires_full_repaint(self, plan: SceneRenderPlan) -> bool:
+        """Reject patch painting while the backing buffer uses another viewport."""
+
+        buffer_plan = self._buffer_render_plan
+        if (
+            buffer_plan is None
+            or not self._presentation_transform.isIdentity()
+            or not self._subpixel_pan_offset.isNull()
+        ):
+            return True
+        return not (
+            isclose(buffer_plan.zoom, plan.zoom, rel_tol=1e-9, abs_tol=1e-9)
+            and isclose(
+                buffer_plan.current_pan.x(),
+                plan.current_pan.x(),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+            and isclose(
+                buffer_plan.current_pan.y(),
+                plan.current_pan.y(),
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+            and buffer_plan.qpane_rect == plan.qpane_rect
+        )
 
     def _physical_buffer_rects_for_damage(
         self,

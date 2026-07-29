@@ -4,6 +4,14 @@ This guide connects QPane's smaller tutorials into the flow of a complete host
 application. It follows the work from mounting a viewer through catalogs,
 comparison, diagnostics, extensions, and custom render content.
 
+When a host temporarily replaces a catalog presentation, call
+`QPane.captureCatalogInspection()` before the transition and
+`QPane.restoreCatalogInspection()` after the destination target is ready. This
+keeps normalized pan and zoom attached to catalog identity instead of widget
+lifetime. For multi-target surfaces, choose `ResponsiveGridPacking` through
+the grid policy so uniform cells and native-aspect tiles use the same stable
+physical-pixel layout owner.
+
 ## Mount and Configure the Viewer
 
 Create `QPane` after `QApplication`. The current `QPane.settings` value is a
@@ -60,7 +68,9 @@ changes.
 ## Compare Images
 
 `QPane.compareWithNextImage()` starts a comparison from catalog order, while
-`QPane.setComparisonImage()` chooses a specific entry and
+`QPane.setComparisonPair()` atomically chooses both entries and
+`QPane.setComparisonImage()` changes the secondary entry for the current
+selection.
 `QPane.clearComparison()` finishes the comparison. `QPane.setComparisonSplit()`
 changes the reveal position and orientation.
 
@@ -69,7 +79,8 @@ changes the reveal position and orientation.
 `QPane.setComparisonDividerInteractive()` controls built-in divider dragging,
 and `QPane.comparisonDividerInteractive()` reports whether it is enabled.
 `QPane.comparisonDividerState()` supplies projected line and hover geometry to
-a host that draws its own divider.
+a host that draws its own divider. The line follows the transformed scene seam;
+middle-button press-and-drag summons and moves it from any comparison position.
 
 ## Present the Empty Viewer
 
