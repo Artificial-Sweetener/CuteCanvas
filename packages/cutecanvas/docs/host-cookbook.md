@@ -1,5 +1,38 @@
 # Host Cookbook
 
+## Schedule canvas work through host policy
+
+A host backend implements `BackendSubmission` and advertises
+`ExecutionBackendCapabilities` before accepting an `ExecutionJob`.
+`ExecutionRequirements` combines `ExecutionResource`, `ExecutionUrgency`, and
+`ExecutionLeaseRelease`; rejected work reports `ExecutionRejected` with an
+`ExecutionRejectionReason`. Hosts retain the returned `ExecutionHandle`, form
+new work with `ExecutionRequest`, and can use `InlineDispatcher` only when
+owner-thread delivery is already guaranteed.
+
+## Add renderer-neutral view chrome
+
+Use `CanvasOverlayDrawFn` for a `CanvasDisplayScale`-aware detail overlay and
+`CanvasComparisonOverlayDrawFn` when chrome needs both
+`CanvasComparisonScale` values. `CanvasComparisonDivider` anchors artwork to
+the reveal boundary, and `CanvasComparisonZoomGesture` identifies only
+pointer-originated zoom. `OverlayDrawFn` remains the lower-level callback form
+for integrations that intentionally consume `OverlayState`.
+
+After registering detail chrome, call `CuteCanvas.unregisterCanvasOverlay()`
+when its host owner closes. `CuteCanvas.contentSubject()` captures the current
+stable content identity for host transfer actions, while
+`CuteCanvas.setPanZoomLocked()` lets grid-like surfaces suspend direct
+navigation without blocking programmatic reflow.
+
+## Tune responsive presentations
+
+`ResponsiveGridTopology` selects the column-choice rule,
+`ResponsiveGridPacking` selects uniform or native-aspect tiles, and
+`IncompleteRowAlignment` controls the final row. Inspect the resulting
+`ResponsiveGridSnapshot` when hit testing or damage tracking must use the same
+physical-pixel geometry as the mounted workspace.
+
 ## Let a Project Own the Document
 
 Keep `CanvasDocument` beside the host project or workflow state, then mount it
@@ -11,11 +44,12 @@ from cutecanvas import (
     CanvasDocumentRuntime,
     CanvasWorkspace,
     CuteCanvas,
+    ExecutionRuntime,
 )
 from qpane.sdk.execution import create_default_execution_runtime
 
 document = CanvasDocument()
-runtime = create_default_execution_runtime()
+runtime: ExecutionRuntime = create_default_execution_runtime()
 document_runtime = CanvasDocumentRuntime(document, execution_runtime=runtime)
 editor = CuteCanvas(
     document_runtime=document_runtime,
@@ -29,7 +63,8 @@ inspection = CanvasWorkspace(
 The editor and inspection workspace share resources, history, document-wide
 mutation freshness, and execution. Their active composition, viewport, and
 tools remain independent. Use
-`setTabbedPresentation(..., linked=True)` for native-size review,
+`setInspectionGroups(...)` before `setTabbedPresentation(...)` for linked
+native-size review,
 `setGridPresentation()` for a responsive overview, and
 `setComparisonPresentation()` for a draggable independent-target reveal.
 
@@ -224,6 +259,22 @@ window. `CuteCanvas.rasterBoundsRequestCompleted` reports its terminal result.
 `CuteCanvas.setMaskProperties()` changes label, tint, and opacity.
 
 `CuteCanvas.getActiveMaskImage()` evaluates the current coverage for export.
+`CuteCanvas.exportMaskImage(mask_id, composition_id=...)` exports an addressed
+mask without changing the active composition or active mask. Use the optional
+composition ID when a mask resource is shared by multiple non-active documents.
+`CuteCanvas.replaceMaskFromFile()` and `CuteCanvas.replaceMaskImage()` replace
+an addressed mask's pixels while preserving its UUID and layer associations.
+
+`CanvasWorkspace.setGridPresentation()` accepts a QPane `ResponsiveGridPolicy`.
+`CanvasWorkspace.gridSnapshot()` exposes the immutable physical-pixel layout,
+and `targetActivated` reports the selected composition without requiring a host
+to inspect child widgets. Host-owned linked inspection belongs to
+`setInspectionGroups()` and survives tab, grid, single, and comparison
+presentations. `CuteCanvas.outboundDragFailed` supplies the captured
+CuteCanvas `DragSubject` and materialization message for host feedback.
+`CuteCanvas.contentContextRequested` supplies the addressed CuteCanvas `DragSubject` and
+global menu position without changing the active composition, so host copy
+commands operate on the clicked tile.
 `CuteCanvas.rasterizeMaskCoverage()` converts retained shapes into raster
 coverage when requested. `CuteCanvas.maskSaved` reports completed file saves
 with a `MaskSavedPayload`.

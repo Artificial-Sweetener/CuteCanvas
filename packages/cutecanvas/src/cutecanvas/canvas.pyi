@@ -13,25 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Document presentation widgets and host extension contracts."""
 
-from .comparison_overlays import (
-    CanvasComparisonDivider,
-    CanvasComparisonOverlayDrawFn,
-    CanvasComparisonOverlayState,
-    CanvasComparisonScale,
-    CanvasComparisonZoomGesture,
-)
-from .contracts import CanvasPresentationContext, CanvasPresentationProvider
-from .workspace import CanvasWorkspace
+"""Expose the canonical CuteCanvas widget contract to static type checkers."""
 
-__all__ = [
-    "CanvasComparisonDivider",
-    "CanvasComparisonOverlayDrawFn",
-    "CanvasComparisonOverlayState",
-    "CanvasComparisonScale",
-    "CanvasComparisonZoomGesture",
-    "CanvasPresentationContext",
-    "CanvasPresentationProvider",
-    "CanvasWorkspace",
-]
+from .cutecanvas import CuteCanvas as CuteCanvas

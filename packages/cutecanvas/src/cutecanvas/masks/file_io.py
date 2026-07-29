@@ -30,9 +30,19 @@ class MaskImageLoader:
         pixmap = QPixmap(path)
         if pixmap.isNull():
             return None
-        if pixmap.size() != target_size:
-            pixmap = pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio)
-        image = pixmap.toImage()
-        if image.format() != QImage.Format_Grayscale8:
-            image = image.convertToFormat(QImage.Format_Grayscale8)
-        return image
+        return MaskImageLoader.normalize(pixmap.toImage(), target_size)
+
+    @staticmethod
+    def normalize(image: QImage, target_size: QSize) -> QImage | None:
+        """Detach, aspect-fit, and grayscale host-provided mask pixels."""
+        if image.isNull() or not target_size.isValid() or target_size.isNull():
+            return None
+        normalized = image.copy()
+        if normalized.size() != target_size:
+            normalized = normalized.scaled(
+                target_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+            )
+        if normalized.format() != QImage.Format_Grayscale8:
+            normalized = normalized.convertToFormat(QImage.Format_Grayscale8)
+        return normalized

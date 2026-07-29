@@ -55,6 +55,29 @@ _RENDER_TYPE_EXPORTS = (
     "SceneSnapshotOverlayState",
 )
 
+_LAYOUT_TYPE_EXPORTS = (
+    "IncompleteRowAlignment",
+    "ResponsiveGridPacking",
+    "ResponsiveGridPolicy",
+    "ResponsiveGridSnapshot",
+    "ResponsiveGridTopology",
+)
+
+_EXECUTION_TYPE_EXPORTS = (
+    "BackendSubmission",
+    "ExecutionBackendCapabilities",
+    "ExecutionHandle",
+    "ExecutionJob",
+    "ExecutionLeaseRelease",
+    "ExecutionRejected",
+    "ExecutionRejectionReason",
+    "ExecutionRequirements",
+    "ExecutionResource",
+    "ExecutionRequest",
+    "ExecutionUrgency",
+    "InlineDispatcher",
+)
+
 _AUTHOR_VECTOR_EXPORTS = (
     "VectorDocumentSnapshot",
     "VectorMaskSnapshot",
@@ -66,6 +89,8 @@ _AUTHOR_VECTOR_EXPORTS = (
 
 __all__ = [
     *_RENDER_TYPE_EXPORTS,
+    *_LAYOUT_TYPE_EXPORTS,
+    *_EXECUTION_TYPE_EXPORTS,
     *_editor_types.__all__,
     *_VECTOR_TYPE_EXPORTS,
     *_AUTHOR_VECTOR_EXPORTS,
@@ -79,11 +104,22 @@ __all__ = [
     "CloneStampState",
     "CloneStampTransform",
     "CanvasComparison",
+    "CanvasComparisonDivider",
+    "CanvasComparisonOverlayDrawFn",
+    "CanvasComparisonOverlayState",
+    "CanvasComparisonScale",
+    "CanvasComparisonZoomGesture",
+    "CanvasDisplayScale",
+    "CanvasOverlayDrawFn",
+    "CanvasOverlayState",
     "CanvasContentKind",
     "CanvasContentReference",
     "CanvasInteractionMode",
     "CanvasDocument",
     "CanvasDocumentRuntime",
+    "DragSubject",
+    "ExecutionRuntime",
+    "CanvasInspectionGroup",
     "CanvasPresentation",
     "CanvasPresentationContext",
     "CanvasPresentationKind",
@@ -113,6 +149,10 @@ __all__ = [
     "LayerGeometryMode",
     "LayerGeometryPolicy",
     "MaskInfo",
+    "OutboundDragPayload",
+    "OutboundMimeItem",
+    "OutboundMimeProvider",
+    "OverlayDrawFn",
     "PlacedAssetMode",
     "PlacedAssetStatus",
     "ResolvedCanvasContent",
@@ -126,6 +166,7 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "__version__": ("cutecanvas._version", "version"),
     "CuteCanvas": ("cutecanvas.canvas", "CuteCanvas"),
     "CanvasComparison": ("cutecanvas.document", "CanvasComparison"),
+    "OverlayDrawFn": ("cutecanvas.core", "OverlayDrawFn"),
     "CanvasContentKind": ("cutecanvas.document", "CanvasContentKind"),
     "CanvasContentReference": (
         "cutecanvas.document",
@@ -136,7 +177,10 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
         "CanvasInteractionMode",
     ),
     "CanvasDocument": ("cutecanvas.document", "CanvasDocument"),
+    "CanvasInspectionGroup": ("cutecanvas.document", "CanvasInspectionGroup"),
     "CanvasDocumentRuntime": ("cutecanvas.runtime", "CanvasDocumentRuntime"),
+    "DragSubject": ("qpane.sdk.ui", "DragSubject"),
+    "ExecutionRuntime": ("qpane.sdk.execution", "ExecutionRuntime"),
     "CanvasPresentation": ("cutecanvas.document", "CanvasPresentation"),
     "CanvasPresentationKind": (
         "cutecanvas.document",
@@ -148,6 +192,29 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
         "cutecanvas.presentation",
         "CanvasPresentationContext",
     ),
+    "CanvasComparisonDivider": (
+        "cutecanvas.presentation",
+        "CanvasComparisonDivider",
+    ),
+    "CanvasComparisonOverlayDrawFn": (
+        "cutecanvas.presentation",
+        "CanvasComparisonOverlayDrawFn",
+    ),
+    "CanvasComparisonOverlayState": (
+        "cutecanvas.presentation",
+        "CanvasComparisonOverlayState",
+    ),
+    "CanvasComparisonScale": (
+        "cutecanvas.presentation",
+        "CanvasComparisonScale",
+    ),
+    "CanvasComparisonZoomGesture": (
+        "cutecanvas.presentation",
+        "CanvasComparisonZoomGesture",
+    ),
+    "CanvasOverlayDrawFn": ("cutecanvas.overlay_contracts", "CanvasOverlayDrawFn"),
+    "CanvasOverlayState": ("cutecanvas.overlay_contracts", "CanvasOverlayState"),
+    "CanvasDisplayScale": ("cutecanvas.overlay_contracts", "CanvasDisplayScale"),
     "CanvasPresentationProvider": (
         "cutecanvas.presentation",
         "CanvasPresentationProvider",
@@ -214,6 +281,9 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
         "CloneStampTransform",
     ),
     "MaskInfo": ("cutecanvas.masks.workflow", "MaskInfo"),
+    "OutboundDragPayload": ("qpane.sdk.ui", "OutboundDragPayload"),
+    "OutboundMimeItem": ("qpane.sdk.ui", "OutboundMimeItem"),
+    "OutboundMimeProvider": ("qpane.sdk.ui", "OutboundMimeProvider"),
     "PlacedAssetMode": ("cutecanvas.placed.model", "PlacedAssetMode"),
     "PlacedAssetStatus": ("cutecanvas.placed.model", "PlacedAssetStatus"),
 }
@@ -228,6 +298,10 @@ def __getattr__(name: str) -> Any:
         value = getattr(_editor_types, name)
     elif name in _RENDER_TYPE_EXPORTS:
         value = getattr(_public_types, name)
+    elif name in _LAYOUT_TYPE_EXPORTS:
+        value = getattr(import_module("qpane.sdk.layout"), name)
+    elif name in _EXECUTION_TYPE_EXPORTS:
+        value = getattr(import_module("qpane.sdk.execution"), name)
     elif name in _VECTOR_TYPE_EXPORTS:
         value = getattr(_vector_types, name)
     elif name in _AUTHOR_VECTOR_EXPORTS:

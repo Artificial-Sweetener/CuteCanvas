@@ -23,12 +23,14 @@ from typing import cast
 
 from PySide6.QtCore import (
     QEvent,
+    QPoint,
     QRectF,
     QSize,
     Signal,
 )
 from PySide6.QtGui import (
     QColor,
+    QContextMenuEvent,
     QHideEvent,
     QPainter,
     QScreen,
@@ -141,6 +143,7 @@ from .document import CanvasDocument, CanvasViewSession
 from .document.inspection import SessionInspectionBinding
 from .facade.composition_api import CompositionApiMixin
 from .facade.configuration_api import ConfigurationApiMixin
+from .facade.context_api import ContentContextApiMixin
 from .facade.coverage_api import CoverageApiMixin
 from .facade.diagnostics_api import DiagnosticsApiMixin
 from .facade.drag_api import CanvasDragSubjectResolver, OutboundDragApiMixin
@@ -169,6 +172,7 @@ class CuteCanvas(
     ConfigurationApiMixin,
     DiagnosticsApiMixin,
     OutboundDragApiMixin,
+    ContentContextApiMixin,
     EditorPolicyApiMixin,
     CompositionApiMixin,
     MaskApiMixin,
@@ -272,6 +276,10 @@ class CuteCanvas(
     """Emit request, scene, layer, success, and message after rasterization."""
     projectionCompleted: Signal = Signal(object)
     """Emit one terminal :class:`CanvasProjectionResult`."""
+    outboundDragFailed: Signal = Signal(object, str)
+    """Emit the gesture subject and provider message after MIME materialization fails."""
+    contentContextRequested: Signal = Signal(object, QPoint)
+    """Emit the stable content subject and global position for a context gesture."""
     samCheckpointStatusChanged: Signal = Signal(str, object)
     """Emit checkpoint status and path updates for SAM readiness tracking.
     The payload is ``(status, path)``, where ``path`` is a ``Path`` and status
@@ -433,7 +441,9 @@ class CuteCanvas(
         self._inspection_binding: SessionInspectionBinding | None = None
         self._outbound_mime_provider: OutboundMimeProvider | None = None
         self._drag_subject_resolver: CanvasDragSubjectResolver | None = None
+        self._outbound_drag_subject = None
         self._outbound_drag = OutboundDragController(self)
+        self._outbound_drag.failed.connect(self._handle_outbound_drag_failed)
         self._initial_view_signals_scheduled = False
         self._init_core_components()
         self._masks = Masks(
@@ -476,6 +486,10 @@ class CuteCanvas(
         )
         self._schedule_initial_view_signals()
 
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        """Route Qt context-menu delivery through the focused host-content facade."""
+        ContentContextApiMixin.contextMenuEvent(self, event)
+
     @property
     def editor(self) -> EditorFacade:
         """Return focused document, tool, selection, and history APIs."""
@@ -487,10 +501,8 @@ class CuteCanvas(
 
     def resizeEvent(self, event):
         """Handle qpane resizing by realigning the view and refreshing the cursor."""
-        self.view().ensure_view_alignment(force=True)
-        self.update()
-        self.refreshCursor()
-        self._emit_viewport_rect_if_changed(force=True)
+        del event
+        self._handle_canvas_resize()
 
     def minimumSizeHint(self) -> QSize:
         """Prevent resizing below the configured minimum view size."""

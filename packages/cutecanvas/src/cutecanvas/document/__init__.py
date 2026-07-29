@@ -24,6 +24,7 @@ from .references import (
 )
 from .session import (
     CanvasComparison,
+    CanvasInspectionGroup,
     CanvasPresentation,
     CanvasPresentationKind,
     CanvasSessionSnapshot,
@@ -35,6 +36,7 @@ __all__ = [
     "CanvasContentKind",
     "CanvasContentReference",
     "CanvasDocument",
+    "CanvasInspectionGroup",
     "CanvasPresentation",
     "CanvasPresentationKind",
     "CanvasSessionSnapshot",

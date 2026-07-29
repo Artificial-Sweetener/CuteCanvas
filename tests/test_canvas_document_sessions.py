@@ -22,12 +22,36 @@ import uuid
 import numpy as np
 from cutecanvas import CuteCanvas, LayerPolicy
 from cutecanvas.document import CanvasDocument, CanvasViewSession
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from cutecanvas.document.inspection import SessionInspectionBinding
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from qpane.sdk.inspection import InspectionStateStore
 from qpane.sdk.rendering import ViewportZoomMode
 from qpane.sdk.types import LinkedGroup
+
+
+class _InspectionViewport:
+    """Provide the minimum viewport state needed by an inspection binding."""
+
+    def __init__(self, zoom: float) -> None:
+        """Initialize a deliberately transient viewport zoom."""
+        self.zoom = zoom
+        self.pan = QPointF()
+        self.zoom_mode = ViewportZoomMode.CUSTOM
+
+    def get_zoom_mode(self) -> ViewportZoomMode:
+        """Return the current zoom mode."""
+        return self.zoom_mode
+
+    def setZoomFit(self) -> None:
+        """Apply fit mode for protocol completeness."""
+        self.zoom_mode = ViewportZoomMode.FIT
+
+    def setZoomAndPan(self, zoom: float, pan: QPointF) -> None:
+        """Apply the projected transform for protocol completeness."""
+        self.zoom = zoom
+        self.pan = QPointF(pan)
 
 
 def test_document_content_exists_before_any_widget_mount() -> None:
@@ -102,6 +126,29 @@ def test_inspection_shares_only_when_sessions_receive_the_same_store() -> None:
 
     assert isolated_a.inspection is not isolated_b.inspection
     assert linked_a.inspection is linked_b.inspection
+
+
+def test_inspection_ignores_transient_nonpositive_viewport_zoom() -> None:
+    """A detaching view cannot publish invalid normalized inspection state."""
+    composition_id = uuid.uuid4()
+    session = CanvasViewSession()
+    viewport = _InspectionViewport(-0.25)
+    binding = SessionInspectionBinding(
+        session=session,
+        viewport=viewport,
+        target_bounds=lambda target_id: (
+            QRectF(0.0, 0.0, 640.0, 480.0) if target_id == composition_id else None
+        ),
+        viewport_size=lambda: QSizeF(640.0, 480.0),
+    )
+    try:
+        assert session.activate(composition_id, available_ids=(composition_id,))
+
+        binding.publish()
+
+        assert session.inspection.state_for(composition_id) is None
+    finally:
+        binding.close()
 
 
 def test_linked_sessions_project_native_zoom_between_different_sizes(qapp) -> None:

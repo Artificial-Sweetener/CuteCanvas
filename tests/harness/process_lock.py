@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Cross-process isolation for strict performance probes."""
+"""Cross-process shared/exclusive isolation for strict performance probes."""
 
 from __future__ import annotations
 
@@ -26,25 +26,58 @@ from typing import BinaryIO
 from typing_extensions import Self
 
 
-class InterprocessPerformanceLock:
-    """Serialize hardware-sensitive probes across pytest workers."""
+class InterprocessPerformanceIsolation:
+    """Let ordinary workers run together while performance probes run alone."""
 
-    def __init__(self, path: Path) -> None:
-        """Create a lock backed by one shared temporary file."""
-        self._path = Path(path)
-        self._stream: BinaryIO | None = None
+    def __init__(
+        self,
+        root: Path,
+        *,
+        worker_slot: int,
+        worker_count: int,
+        exclusive: bool,
+    ) -> None:
+        """Bind one worker to the shared benchmark admission protocol."""
+        if worker_count <= 0:
+            raise ValueError("worker_count must be positive")
+        if not 0 <= worker_slot < worker_count:
+            raise ValueError("worker_slot must identify one worker")
+        root = Path(root)
+        self._admission_path = root / "interactive-performance-admission.lock"
+        self._activity_path = root / "interactive-performance-activity.lock"
+        self._worker_slot = worker_slot
+        self._worker_count = worker_count
+        self._exclusive = exclusive
+        self._admission: _InterprocessByteLock | None = None
+        self._activity: list[_InterprocessByteLock] = []
 
     def __enter__(self) -> Self:
-        """Acquire the process-wide benchmark slot."""
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        stream = self._path.open("a+b")
-        stream.seek(0, os.SEEK_END)
-        if stream.tell() == 0:
-            stream.write(b"\0")
-            stream.flush()
-        stream.seek(0)
-        self._stream = stream
-        self._acquire(stream.fileno())
+        """Admit one parallel test or drain all workers for a strict probe."""
+        admission = _InterprocessByteLock(self._admission_path, byte_offset=0)
+        admission.__enter__()
+        if self._exclusive:
+            self._admission = admission
+            try:
+                for slot in range(self._worker_count):
+                    activity = _InterprocessByteLock(
+                        self._activity_path,
+                        byte_offset=slot,
+                    )
+                    activity.__enter__()
+                    self._activity.append(activity)
+            except BaseException:
+                self.__exit__(None, None, None)
+                raise
+            return self
+        activity = _InterprocessByteLock(
+            self._activity_path,
+            byte_offset=self._worker_slot,
+        )
+        try:
+            activity.__enter__()
+            self._activity.append(activity)
+        finally:
+            admission.__exit__(None, None, None)
         return self
 
     def __exit__(
@@ -53,25 +86,67 @@ class InterprocessPerformanceLock:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Release the benchmark slot even when a probe fails."""
+        """Release worker activity and reopen performance admission."""
+        del exc_type, exc_value, traceback
+        while self._activity:
+            self._activity.pop().__exit__(None, None, None)
+        admission = self._admission
+        self._admission = None
+        if admission is not None:
+            admission.__exit__(None, None, None)
+
+
+class _InterprocessByteLock:
+    """Own one byte-range lock in a shared coordination file."""
+
+    def __init__(self, path: Path, *, byte_offset: int) -> None:
+        """Configure one nonnegative byte as the lock identity."""
+        if byte_offset < 0:
+            raise ValueError("byte_offset must be nonnegative")
+        self._path = Path(path)
+        self._byte_offset = byte_offset
+        self._stream: BinaryIO | None = None
+
+    def __enter__(self) -> Self:
+        """Acquire the configured byte across processes."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        stream = self._path.open("a+b")
+        stream.seek(0, os.SEEK_END)
+        missing = self._byte_offset + 1 - stream.tell()
+        if missing > 0:
+            stream.write(b"\0" * missing)
+            stream.flush()
+        stream.seek(self._byte_offset)
+        self._stream = stream
+        self._acquire(stream.fileno(), self._byte_offset)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Release the byte even when the protected operation fails."""
         del exc_type, exc_value, traceback
         stream = self._stream
         self._stream = None
         if stream is None:
             return
         try:
-            self._release(stream.fileno())
+            self._release(stream.fileno(), self._byte_offset)
         finally:
             stream.close()
 
     @staticmethod
-    def _acquire(file_descriptor: int) -> None:
-        """Block until the platform file lock becomes available."""
+    def _acquire(file_descriptor: int, byte_offset: int) -> None:
+        """Block until the selected cross-platform byte becomes available."""
         if os.name == "nt":
             import msvcrt
 
             while True:
                 try:
+                    os.lseek(file_descriptor, byte_offset, os.SEEK_SET)
                     msvcrt.locking(file_descriptor, msvcrt.LK_NBLCK, 1)
                     return
                 except OSError:
@@ -79,16 +154,17 @@ class InterprocessPerformanceLock:
         else:
             import fcntl
 
-            fcntl.flock(file_descriptor, fcntl.LOCK_EX)
+            fcntl.lockf(file_descriptor, fcntl.LOCK_EX, 1, byte_offset)
 
     @staticmethod
-    def _release(file_descriptor: int) -> None:
-        """Release the platform file lock."""
+    def _release(file_descriptor: int, byte_offset: int) -> None:
+        """Release the selected cross-platform byte."""
         if os.name == "nt":
             import msvcrt
 
+            os.lseek(file_descriptor, byte_offset, os.SEEK_SET)
             msvcrt.locking(file_descriptor, msvcrt.LK_UNLCK, 1)
         else:
             import fcntl
 
-            fcntl.flock(file_descriptor, fcntl.LOCK_UN)
+            fcntl.lockf(file_descriptor, fcntl.LOCK_UN, 1, byte_offset)

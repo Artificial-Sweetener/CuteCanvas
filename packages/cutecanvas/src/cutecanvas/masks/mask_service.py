@@ -780,6 +780,10 @@ class MaskService:
         """Replace mask pixels for mask_id with data from path."""
         return self._layer_workflow.update_from_path(mask_id, path)
 
+    def updateMaskFromImage(self, mask_id: uuid.UUID, image: QImage) -> bool:
+        """Replace mask pixels for mask_id with host-provided image data."""
+        return self._layer_workflow.update_from_image(mask_id, image)
+
     def createBlankMask(self, size: QSize) -> uuid.UUID | None:
         """Create a blank mask layer for the current document."""
         return self._layer_workflow.create_blank(size)

@@ -45,6 +45,11 @@ class ViewApiMixin:
         rect = self._last_viewport_rect
         return QRectF(rect) if rect is not None else self.physicalViewportRect()
 
+    def setPanZoomLocked(self, locked: bool) -> None:
+        """Replace direct pan and zoom interaction permission."""
+
+        self.view().viewport.set_locked(bool(locked))
+
     def setZoomFit(self) -> None:
         """Fit the active document to the viewport and recenter pan."""
         self.view().viewport.setZoomFit()

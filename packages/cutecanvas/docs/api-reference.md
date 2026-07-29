@@ -8,23 +8,34 @@
 
 Headless owner of reusable resources, compositions, selections, and
 chronological history. Use `create_composition()`,
-`create_composition_from_image()`, `composition_ids()`, `snapshot()`,
+`create_composition_from_image()`, `replace_composition_image()`,
+`composition_ids()`, `snapshot()`,
 `content_reference()`, `resource_reference()`, `resolve_content()`, and
 `close()`.
 
+`replace_composition_image(composition_id, image)` updates the embedded content
+and intrinsic bounds of an imported image composition while retaining its
+composition, layer, resource, masks, history, and mounted view state. It is a
+headless document mutation and does not activate the composition in any view.
+
 ### `CanvasViewSession`
 
-Detachable owner of active composition, presentation, linked inspection, and
-view-local revision. `CanvasPresentation` selects `SINGLE`, `TABBED`, `GRID`,
+Detachable owner of active composition, presentation, host-owned linked
+inspection groups, and view-local revision. `CanvasPresentation` selects `SINGLE`, `TABBED`, `GRID`,
 `COMPARISON`, or `CUSTOM` arrangement without entering document history.
 `CanvasSessionSnapshot` is the immutable revisioned observation published to
 session subscribers. `CanvasComparison` records the two target identities,
 split position, and orientation used by a comparison presentation.
 `CanvasPresentationKind` names every built-in and host-provided arrangement.
+`CanvasInspectionGroup` gives a host one stable group identity and ordered
+composition membership for linked inspection that survives presentation changes.
 
 ### `CanvasWorkspace`
 
 QWidget for one document across independent target views.
+`retained_target_capacity` bounds the least-recently-used hidden target
+renderers retained between presentation switches; visible targets do not
+consume this budget.
 `setSinglePresentation()`, `setTabbedPresentation()`,
 `setGridPresentation()`, and `setComparisonPresentation()` install built-in
 arrangements. `registerPresentationProvider()` and `setCustomPresentation()`
@@ -32,6 +43,15 @@ host an application-defined arrangement through
 `CanvasPresentationProvider`.
 `CanvasPresentationContext` gives a provider validated target identities and
 the supported function for creating each target view.
+
+`registerComparisonOverlay()` and `unregisterComparisonOverlay()` own
+host-specific comparison chrome without exposing the native renderer.
+`CanvasComparisonOverlayState` contains the current `CanvasComparison`, a
+physical `CanvasComparisonDivider`, the native viewport, and a physical scale
+for each source for one paint. `comparisonZoomGesture` reports only
+pointer-originated comparison zoom as a `CanvasComparisonZoomGesture`;
+`comparisonPointerMoved` reports the current comparison pointer. Hosts call
+`refreshComparisonOverlays()` after changing transient overlay state.
 
 `document_runtime` supplies one shared `CanvasDocumentRuntime` for every
 target. `execution_runtime` supplies a host-owned physical runtime when the
@@ -49,6 +69,42 @@ view-local state.
 `CuteCanvas.setOutboundMimeProvider` applies a host MIME provider to one view.
 `CuteCanvas.clearOutboundMimeProvider` cancels pending materialization and
 disables drag-out for that view.
+
+`ExecutionRuntime` is the host-owned execution boundary accepted by
+`CanvasDocumentRuntime`, `CuteCanvas`, and `CanvasWorkspace`.
+`ExecutionRequirements`, `ExecutionResource`, `ExecutionUrgency`, and
+`ExecutionLeaseRelease` let a host backend honor the full CuteCanvas
+scheduling contract without importing QPane. `DragSubject`,
+`OutboundMimeProvider`, `OutboundDragPayload`, and `OutboundMimeItem` are the
+CuteCanvas drag-out boundary: a provider receives the captured subject and
+returns the selected URLs, MIME bytes, and preview without importing renderer
+UI modules. `ResponsiveGridPolicy`, `ResponsiveGridTopology`,
+`ResponsiveGridPacking`, and `IncompleteRowAlignment` are the public
+CuteCanvas layout contract used by `setGridPresentation()`; `gridSnapshot()`
+returns the matching `ResponsiveGridSnapshot`.
+
+`BackendSubmission`, `ExecutionBackendCapabilities`, `ExecutionHandle`,
+`ExecutionJob`, `ExecutionRejected`, `ExecutionRejectionReason`,
+`ExecutionRequest`, and `InlineDispatcher` form the typed host-backend
+lifecycle used by `ExecutionRuntime`. They let an application advertise
+supported resources, accept or reject bounded work, cancel pending
+submissions, and deliver adoption on the owner-selected dispatcher.
+
+`OverlayDrawFn` and `CanvasOverlayDrawFn` describe renderer and CuteCanvas
+detail-overlay callbacks. `CanvasComparisonOverlayDrawFn` receives a
+`CanvasComparisonScale` for each reveal source, while
+`CanvasComparisonDivider` and `CanvasComparisonZoomGesture` carry divider and
+pointer-zoom state without exposing the native renderer.
+
+`OverlayState.zoom`, `OverlayState.qpane_rect`, `OverlayState.source_image`,
+`OverlayState.transform`, `OverlayState.current_pan`, and
+`OverlayState.physical_viewport_rect` are the detached native render values
+available to low-level overlay integrations.
+
+`CuteCanvas.contentSubject()` captures the stable drag/content subject for the
+active composition. `CuteCanvas.setPanZoomLocked()` enables or disables direct
+viewport navigation while preserving programmatic fit and presentation
+reflow.
 
 ### Content references
 
@@ -263,13 +319,15 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- CompositionSnapshot.current_composition_id — Active composition UUID, or None.
 - cutecanvas.MaskInfo — Mask metadata returned by mask helpers, including stable `scene_id`, `layer_id`, and `interaction` policy for generic scene-layer operations.
 - cutecanvas.DiagnosticRecord — Label/value diagnostic entry used in overlays.
-- cutecanvas.OverlayState — Stable public-overlay snapshot passed to `draw_fn`.
-	- OverlayState.zoom — Current zoom factor.
-	- OverlayState.qpane_rect — Widget-space bounds of the viewer.
-	- OverlayState.physical_viewport_rect — Device-pixel viewport bounds.
-	- OverlayState.transform — Image-to-widget transform for coordinate anchoring.
-	- OverlayState.current_pan — Current pan offset in widget space.
-	- OverlayState.source_image — Available source raster for image-oriented overlay helpers.
+- cutecanvas.CanvasOverlayState — Renderer-neutral detail-overlay snapshot passed to `registerCanvasOverlay` callbacks.
+	- CanvasOverlayState.display_scale — Actual horizontal and vertical physical display pixels occupied by one source pixel.
+	- CanvasOverlayState.zoom — Current zoom factor.
+	- CanvasOverlayState.viewport — Widget-space bounds of the canvas.
+	- CanvasOverlayState.physical_viewport — Device-pixel viewport bounds.
+	- CanvasOverlayState.transform — Image-to-widget transform for coordinate anchoring.
+	- CanvasOverlayState.pan — Current pan offset in widget space.
+	- CanvasOverlayState.source_image — Available source raster for image-oriented overlay helpers.
+- cutecanvas.CanvasDisplayScale — Horizontal and vertical physical source-pixel scale for detail-overlay indicators.
 - cutecanvas.LayerPolicy — Host policy for direct and structural layer interaction.
 	- LayerPolicy.selectable — Allow direct tools to select the layer through covered source pixels.
 	- LayerPolicy.movable — Allow generic placement mutation and Move-tool dragging for the layer.
@@ -497,9 +555,17 @@ places another composition as a live nested layer in the open destination.
 ## Presentations and Projection
 
 - CanvasWorkspace.setSinglePresentation — Mount one composition target.
-- CanvasWorkspace.setTabbedPresentation — Mount switchable targets with optional linked inspection.
-- CanvasWorkspace.setGridPresentation — Arrange targets in a responsive physical-pixel grid.
+- CanvasWorkspace.setTabbedPresentation — Mount switchable targets while the host retains inspection groups.
+- CanvasWorkspace.setGridPresentation — Arrange targets with a host-selected CuteCanvas responsive-grid policy.
+- CanvasWorkspace.gridSnapshot — Return the current immutable CuteCanvas grid snapshot.
+- CanvasWorkspace.targetActivated — Emit the composition selected through a presentation target.
+- CanvasWorkspace.setInspectionGroups — Preserve host-owned linked inspection groups across presentation changes.
+- CuteCanvas.outboundDragFailed — Emit a stable drag subject and host materialization error from one target.
+- CuteCanvas.contentContextRequested — Emit a stable content subject and global position without activating its target.
 - CanvasWorkspace.setComparisonPresentation — Reveal two independent targets across a draggable divider.
+- CanvasWorkspace.registerComparisonOverlay — Draw host comparison chrome without native renderer access.
+- CanvasWorkspace.comparisonZoomGesture — Report a pointer-originated comparison zoom without native renderer access.
+- CanvasWorkspace.refreshComparisonOverlays — Request a comparison overlay repaint without native renderer access.
 - CanvasWorkspace.setCustomPresentation — Build a registered host arrangement over validated targets.
 - CanvasWorkspace.setInteractionMode — Apply read-only, mask-authoring, or full-editor policy to current and future views.
 - CanvasWorkspace.setOutboundMimeProvider — Apply host MIME materialization to every presentation target.
@@ -532,6 +598,9 @@ See also: [Diagnostics](diagnostics.md).
 - CuteCanvas.removeMaskFromComposition — Remove a mask instance from a document.
 - CuteCanvas.setActiveMaskID — Select a mask for editing (or clear with None).
 - CuteCanvas.getActiveMaskImage — Snapshot the active mask as a grayscale image.
+- CuteCanvas.exportMaskImage — Snapshot an addressed mask without changing active editor state.
+- CuteCanvas.replaceMaskFromFile — Replace an addressed mask's pixels from a file while retaining its UUID.
+- CuteCanvas.replaceMaskImage — Replace an addressed mask's pixels from a `QImage` while retaining its UUID.
 - CuteCanvas.getMaskUndoState — Return a `cutecanvas.MaskUndoState` snapshot with undo/redo depth for a mask ID.
 - CuteCanvas.setMaskProperties — Update mask color and/or opacity for an existing mask.
 - CuteCanvas.prefetchMaskOverlays — Queue background presentation work for one document's masks.
@@ -557,6 +626,8 @@ See also: [Masks and SAM](masks-and-sam.md) and [Interaction Modes](interaction-
 ## Extensibility
 
 ### Overlays
+- CuteCanvas.registerCanvasOverlay — Add renderer-neutral detail chrome; callbacks receive `CanvasOverlayState`.
+- CuteCanvas.unregisterCanvasOverlay — Remove one renderer-neutral detail overlay; no-op if absent.
 - CuteCanvas.registerOverlay — Add a named overlay; order follows registration.
 - CuteCanvas.unregisterOverlay — Remove an overlay; no-op if it is absent.
 - CuteCanvas.contentOverlays — Return a read-only snapshot of registered content overlays; use register/unregister helpers to change it.

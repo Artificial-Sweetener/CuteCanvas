@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import nullcontext
 
 from PySide6.QtCore import (
     QRect,
@@ -61,6 +62,8 @@ from cutecanvas.vector.conversion import (
     VectorConversionKind,
 )
 
+from .viewport_activation import resolve_viewport_activation
+
 
 class DocumentEventsMixin:
     """Group documentevents facade behavior."""
@@ -84,18 +87,35 @@ class DocumentEventsMixin:
         force_context_refresh: bool = False,
     ) -> None:
         """Activate a composition, refreshing only a reconciled successor."""
-        activation_changed = self.viewSession().activate(
-            record.composition_id,
-            available_ids=self.compositionService().composition_ids(),
+        session = self.viewSession()
+        inspection_available = (
+            session.inspection.state_for(record.composition_id) is not None
         )
-        if not activation_changed and not force_context_refresh:
-            return
-        self._cancel_floating_pixels_for_context_change()
-        self._is_blank = False
-        self.view().invalidate_content_cache()
-        self._emit_composition_selection_changed(record.composition_id)
-        if record.policy.removable:
-            self._sync_view_to_scene_bounds(fit_view=fit_view)
+        activation = resolve_viewport_activation(
+            fit_requested=fit_view,
+            inspection_available=inspection_available,
+        )
+        binding = self._inspection_binding
+        publication_guard = (
+            nullcontext() if binding is None else binding.suspend_publication()
+        )
+        with publication_guard:
+            activation_changed = session.activate(
+                record.composition_id,
+                available_ids=self.compositionService().composition_ids(),
+            )
+            if not activation_changed and not force_context_refresh:
+                return
+            self._cancel_floating_pixels_for_context_change()
+            self._is_blank = False
+            self.view().invalidate_content_cache()
+            self._emit_composition_selection_changed(record.composition_id)
+            self._sync_view_to_scene_bounds(
+                fit_view=activation.fit_view,
+                restore_inspection=activation.restore_inspection,
+            )
+        if binding is not None and not activation.restore_inspection:
+            binding.publish()
         self._masks_controller.sync_mask_activation_for_composition(
             record.composition_id
         )
@@ -521,25 +541,37 @@ class DocumentEventsMixin:
             ),
         )
 
-    def _sync_view_to_scene_bounds(self, *, fit_view: bool) -> None:
+    def _sync_view_to_scene_bounds(
+        self,
+        *,
+        fit_view: bool,
+        restore_inspection: bool | None = None,
+    ) -> None:
         """Refresh viewport geometry after private scene layout changes."""
         view = self.view()
         snapshot = view.current_content_snapshot()
         if snapshot is None:
             return
-        viewport = view.viewport
-        content_size_changed = viewport.content_size != snapshot.base_image_size
-        viewport.setContentSize(snapshot.base_image_size)
-        if fit_view:
-            viewport.setZoomFit()
-        self.setMinimumSize(self.minimumSizeHint())
-        view.mark_dirty()
-        if content_size_changed:
-            view.allocate_buffers()
-            view.ensure_view_alignment(force=True)
         binding = self._inspection_binding
-        if binding is not None:
-            binding.refresh_target(restore=not fit_view)
+        restore = not fit_view if restore_inspection is None else restore_inspection
+        publication_guard = (
+            nullcontext() if binding is None else binding.suspend_publication()
+        )
+        with publication_guard:
+            viewport = view.viewport
+            content_size_changed = viewport.content_size != snapshot.base_image_size
+            viewport.setContentSize(snapshot.base_image_size)
+            if fit_view:
+                viewport.setZoomFit()
+            self.setMinimumSize(self.minimumSizeHint())
+            view.mark_dirty()
+            if content_size_changed:
+                view.allocate_buffers()
+                view.ensure_view_alignment(force=True)
+            if binding is not None:
+                binding.refresh_target(restore=restore)
+        if binding is not None and not restore:
+            binding.publish()
         self.update()
 
     def _sync_viewport_content_geometry(self) -> None:
@@ -548,16 +580,20 @@ class DocumentEventsMixin:
         snapshot = view.current_content_snapshot()
         if snapshot is None:
             return
-        viewport = view.viewport
-        viewport.setContentSize(snapshot.base_image_size)
-        if viewport.get_zoom_mode() == ViewportZoomMode.FIT:
-            viewport.setZoomFit()
-        else:
-            viewport.setPan(viewport.pan)
-        self.setMinimumSize(self.minimumSizeHint())
         binding = self._inspection_binding
-        if binding is not None:
-            binding.refresh_target()
+        publication_guard = (
+            nullcontext() if binding is None else binding.suspend_publication()
+        )
+        with publication_guard:
+            viewport = view.viewport
+            viewport.setContentSize(snapshot.base_image_size)
+            if viewport.get_zoom_mode() == ViewportZoomMode.FIT:
+                viewport.setZoomFit()
+            else:
+                viewport.setPan(viewport.pan)
+            self.setMinimumSize(self.minimumSizeHint())
+            if binding is not None:
+                binding.refresh_target()
 
     def _handle_diagnostics_overlay_toggled(self, enabled: bool) -> None:
         """Emit overlay toggle changes while avoiding duplicate signals."""

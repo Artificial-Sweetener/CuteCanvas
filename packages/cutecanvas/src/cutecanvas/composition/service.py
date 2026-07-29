@@ -237,6 +237,26 @@ class CompositionService:
         self._touch()
         return True
 
+    def set_canvas_bounds(
+        self,
+        composition_id: uuid.UUID,
+        bounds: QRectF,
+    ) -> bool:
+        """Replace intrinsic composition bounds without changing its identity."""
+        if not isinstance(bounds, QRectF):
+            raise TypeError("bounds must be a QRectF")
+        if bounds.width() <= 0.0 or bounds.height() <= 0.0:
+            raise ValueError("composition bounds must be positive")
+        record = self.record(composition_id)
+        replacement = replace(record, canvas_bounds=QRectF(bounds))
+        if replacement == record:
+            return False
+        self._records[composition_id] = replacement
+        self._touch()
+        if self._layers_changed is not None:
+            self._layers_changed(composition_id)
+        return True
+
     def remove_layer(self, composition_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
         """Remove one host-policy-enabled layer as one history command."""
         return self._layer_edits.remove(composition_id, layer_id)

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import uuid
+from math import ceil
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
@@ -33,6 +34,7 @@ from ..masks.mask import MaskAssetStore
 from ..masks.mask_undo import MaskHistoryChange
 from ..raster.floating_layers import EditableRasterFloatingLayerOwner
 from ..resources.document_core import DocumentResourceCore
+from ..resources.model import ProjectResourceReference
 from ..resources.pixel_history import (
     ResourcePixelHistoryOwner,
     ResourcePixelTransitionOwner,
@@ -204,6 +206,51 @@ class CanvasDocument:
         )
         self._events.layers_changed(result.document_id)
         return result.document_id
+
+    def replace_composition_image(
+        self,
+        composition_id: uuid.UUID,
+        image: QImage,
+    ) -> bool:
+        """Replace one imported composition's pixels without changing view state."""
+        result = self._resources.image_documents.replace(composition_id, image)
+        self._events.resource_changed(result.resource_id)
+        return True
+
+    def embedded_image_for_composition(self, composition_id: uuid.UUID) -> QImage:
+        """Return detached pixels for a single-image composition.
+
+        Native catalog presentations consume the imported Output image directly;
+        they must not reconstruct a second document renderer or silently flatten
+        a layered editable composition.  Callers therefore receive a clear
+        error when the requested composition is not the direct imported-image
+        form created by :meth:`create_composition_from_image`.
+        """
+        self._resources.compositions.record(composition_id)
+        layers = self._resources.compositions.layers.layers_for_composition(
+            composition_id
+        )
+        if not layers:
+            bounds = self._resources.compositions.record(composition_id).canvas_bounds
+            image = QImage(
+                max(1, ceil(bounds.width())),
+                max(1, ceil(bounds.height())),
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            image.fill(0)
+            return image
+        content_layers = tuple(layer for layer in layers if layer.role == "content")
+        if len(content_layers) != 1:
+            raise ValueError(
+                "composition does not have one embedded content image layer"
+            )
+        source = content_layers[0].source
+        if not isinstance(source, ProjectResourceReference):
+            raise TypeError("composition layer does not reference a project resource")
+        snapshot = self._resources.placed_assets.get(source.resource_id)
+        if snapshot is None or snapshot.image is None or snapshot.image.isNull():
+            raise ValueError("composition does not retain embedded image pixels")
+        return QImage(snapshot.image)
 
     def remove_composition(self, composition_id: uuid.UUID) -> bool:
         """Remove one policy-enabled composition and publish its disappearance."""

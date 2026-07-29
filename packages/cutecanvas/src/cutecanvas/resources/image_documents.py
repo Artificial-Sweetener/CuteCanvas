@@ -27,7 +27,9 @@ from qpane.sdk.scene import LayerInteractionPolicy
 
 from ..composition.model import CompositionDocumentPolicy
 from ..composition.service import CompositionService
+from ..placed.model import PlacedAssetMode
 from ..placed.store import PlacedAssetStore
+from .model import ProjectResourceReference
 from .raster_instances import imported_raster_instance
 
 
@@ -91,6 +93,43 @@ class ImageDocumentWorkflow:
             raise
         return ImportedImageDocument(
             document_id=record.composition_id,
+            layer_id=layer.layer_id,
+            resource_id=resource_id,
+        )
+
+    def replace(
+        self,
+        document_id: uuid.UUID,
+        image: QImage,
+    ) -> ImportedImageDocument:
+        """Replace one imported image document's pixels under stable identities."""
+        if not isinstance(image, QImage):
+            raise TypeError("image must be a QImage")
+        if image.isNull():
+            raise ValueError("image must not be null")
+        self._compositions.record(document_id)
+        candidates = tuple(
+            layer
+            for layer in self._compositions.layers.layers_for_composition(document_id)
+            if layer.role == "content"
+            and isinstance(layer.source, ProjectResourceReference)
+            and (snapshot := self._imported_rasters.get(layer.source.resource_id))
+            is not None
+            and snapshot.mode is PlacedAssetMode.EMBEDDED
+        )
+        if len(candidates) != 1:
+            raise ValueError(
+                "composition must contain exactly one embedded content image"
+            )
+        layer = candidates[0]
+        resource_id = layer.source.resource_id
+        self._imported_rasters.replace_embedded(resource_id, image)
+        self._compositions.set_canvas_bounds(
+            document_id,
+            QRectF(0.0, 0.0, float(image.width()), float(image.height())),
+        )
+        return ImportedImageDocument(
+            document_id=document_id,
             layer_id=layer.layer_id,
             resource_id=resource_id,
         )

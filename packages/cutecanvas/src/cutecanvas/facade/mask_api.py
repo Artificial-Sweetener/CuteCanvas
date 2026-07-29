@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
 
+from cutecanvas.masks.export import MaskImageExportService
 from cutecanvas.masks.workflow import MaskInfo
 
 if TYPE_CHECKING:
@@ -55,6 +56,34 @@ class MaskApiMixin:
     def getActiveMaskImage(self) -> QImage | None:
         """Return the active mask clipped to the document canvas."""
         return self._masks_controller.get_active_mask_image()
+
+    def exportMaskImage(
+        self,
+        mask_id: uuid.UUID,
+        *,
+        composition_id: uuid.UUID | None = None,
+    ) -> QImage | None:
+        """Export one mask without changing the active document or active mask.
+
+        Args:
+            mask_id: Stable identity of the mask resource to export.
+            composition_id: Optional composition containing that mask. Supply it
+                when the mask is shared by multiple non-active compositions.
+
+        Returns:
+            A detached grayscale image clipped to the selected composition, or
+            ``None`` when the addressed mask instance cannot be resolved.
+        """
+        service = self._masks_controller.mask_service()
+        adapter = self._composition_scene_adapter
+        if service is None or adapter is None:
+            return None
+        return MaskImageExportService(
+            assets=service.assets,
+            composition_ids_for_mask=service.composition_ids_for_mask,
+            current_composition_id=self.currentCompositionID,
+            scene_for_composition=adapter.scene_for,
+        ).export(mask_id, composition_id=composition_id)
 
     def getMaskUndoState(self, mask_id: uuid.UUID) -> MaskUndoState | None:
         """Return undo and redo depth for one mask resource."""
@@ -111,6 +140,16 @@ class MaskApiMixin:
             self._emit_composition_changed()
             self._emit_scene_changed()
         return mask_id
+
+    def replaceMaskFromFile(self, mask_id: uuid.UUID, path: str) -> bool:
+        """Replace one mask's pixels from a file while retaining its identity."""
+        service = self._masks_controller.mask_service()
+        return False if service is None else service.updateMaskFromPath(mask_id, path)
+
+    def replaceMaskImage(self, mask_id: uuid.UUID, image: QImage) -> bool:
+        """Replace one mask's pixels from an image while retaining its identity."""
+        service = self._masks_controller.mask_service()
+        return False if service is None else service.updateMaskFromImage(mask_id, image)
 
     def removeMaskFromComposition(
         self,

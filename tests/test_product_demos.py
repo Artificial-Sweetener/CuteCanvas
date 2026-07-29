@@ -71,7 +71,10 @@ def test_qpane_demo_restores_catalog_viewer_and_sdk_scene(qapp) -> None:
         compare.trigger()
         qapp.processEvents()
         assert len(pane.scene().layers) == 2
-        clip = pane.scene().layers[1].clip
+        assert pane.scene().layers[1].clip is None
+        plan = pane.calculateRenderPlan()
+        assert plan is not None
+        clip = plan.render_items[1].clip
         assert clip is not None
         assert clip.coordinate_space is ClipCoordinateSpace.NORMALIZED_SCENE
         assert clip.x == 0.5

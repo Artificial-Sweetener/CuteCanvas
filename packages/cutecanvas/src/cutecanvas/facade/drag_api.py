@@ -52,6 +52,7 @@ class OutboundDragApiMixin:
     def clearOutboundMimeProvider(self) -> None:
         """Cancel pending work and disable document drag-out."""
         self._outbound_drag.cancel()
+        self._outbound_drag_subject = None
         self._outbound_mime_provider = None
         self._drag_subject_resolver = None
 
@@ -60,16 +61,27 @@ class OutboundDragApiMixin:
         provider = self._outbound_mime_provider
         if provider is None:
             return False
-        resolver = self._drag_subject_resolver
-        subject = (
-            self._default_drag_subject() if resolver is None else resolver(self, event)
-        )
+        subject = self.contentSubject(event)
         if subject is None:
             return False
+        self._outbound_drag_subject = subject
         self._outbound_drag.start(subject, provider)
         if event is not None:
             event.accept()
         return True
+
+    def contentSubject(self, event: QMouseEvent | None = None) -> DragSubject | None:
+        """Return the stable content subject addressed by a drag or context gesture."""
+        resolver = self._drag_subject_resolver
+        return (
+            self._default_drag_subject() if resolver is None else resolver(self, event)
+        )
+
+    def _handle_outbound_drag_failed(self, message: str) -> None:
+        """Forward materialization failure with the subject captured at gesture start."""
+        subject = self._outbound_drag_subject
+        if subject is not None:
+            self.outboundDragFailed.emit(subject, message)
 
     def _default_drag_subject(self) -> DragSubject | None:
         """Address the active composition as the default inspection subject."""

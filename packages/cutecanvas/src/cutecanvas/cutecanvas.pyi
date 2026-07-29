@@ -37,6 +37,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 from qpane import (
+    ComparisonOrientation as ComparisonOrientation,
+)
+from qpane import (
     DiagnosticRecord as DiagnosticRecord,
 )
 from qpane import (
@@ -51,10 +54,38 @@ from qpane import (
 from qpane import (
     PanelHitTest,
 )
-from qpane.sdk.execution import DefaultExecutionPolicy, ExecutionRuntime
+from qpane.sdk.execution import BackendSubmission as BackendSubmission
+from qpane.sdk.execution import DefaultExecutionPolicy
+from qpane.sdk.execution import (
+    ExecutionBackendCapabilities as ExecutionBackendCapabilities,
+)
+from qpane.sdk.execution import ExecutionHandle as ExecutionHandle
+from qpane.sdk.execution import ExecutionJob as ExecutionJob
+from qpane.sdk.execution import ExecutionLeaseRelease as ExecutionLeaseRelease
+from qpane.sdk.execution import ExecutionRejected as ExecutionRejected
+from qpane.sdk.execution import ExecutionRejectionReason as ExecutionRejectionReason
+from qpane.sdk.execution import ExecutionRequest as ExecutionRequest
+from qpane.sdk.execution import ExecutionRequirements as ExecutionRequirements
+from qpane.sdk.execution import ExecutionResource as ExecutionResource
+from qpane.sdk.execution import ExecutionRuntime as ExecutionRuntime
+from qpane.sdk.execution import ExecutionUrgency as ExecutionUrgency
+from qpane.sdk.execution import InlineDispatcher as InlineDispatcher
+from qpane.sdk.layout import IncompleteRowAlignment as IncompleteRowAlignment
+from qpane.sdk.layout import ResponsiveGridPacking as ResponsiveGridPacking
+from qpane.sdk.layout import ResponsiveGridPolicy as ResponsiveGridPolicy
+from qpane.sdk.layout import ResponsiveGridSnapshot as ResponsiveGridSnapshot
+from qpane.sdk.layout import ResponsiveGridTopology as ResponsiveGridTopology
 from qpane.sdk.ui import (
-    DragSubject,
-    OutboundMimeProvider,
+    DragSubject as DragSubject,
+)
+from qpane.sdk.ui import (
+    OutboundDragPayload as OutboundDragPayload,
+)
+from qpane.sdk.ui import (
+    OutboundMimeItem as OutboundMimeItem,
+)
+from qpane.sdk.ui import (
+    OutboundMimeProvider as OutboundMimeProvider,
 )
 from typing_extensions import Self
 
@@ -62,16 +93,17 @@ from .composition.geometry_policy import LayerGeometryMode as LayerGeometryMode
 from .composition.geometry_policy import LayerGeometryPolicy as LayerGeometryPolicy
 from .core import (
     CursorProvider,
-    OverlayDrawFn,
     SceneOverlayDrawFn,
     ToolFactory,
     ToolSignalBinder,
 )
+from .core import OverlayDrawFn as OverlayDrawFn
 from .coverage import CoverageShapeOptions as CoverageShapeOptions
 from .document import CanvasComparison as CanvasComparison
 from .document import CanvasContentKind as CanvasContentKind
 from .document import CanvasContentReference as CanvasContentReference
 from .document import CanvasDocument as CanvasDocument
+from .document import CanvasInspectionGroup as CanvasInspectionGroup
 from .document import CanvasPresentation as CanvasPresentation
 from .document import CanvasPresentationKind as CanvasPresentationKind
 from .document import CanvasSessionSnapshot as CanvasSessionSnapshot
@@ -112,6 +144,14 @@ from .facade.persistence import (
 )
 from .masks.mask_undo import MaskUndoState
 from .masks.workflow import MaskInfo as MaskInfo
+from .overlay_contracts import CanvasDisplayScale as CanvasDisplayScale
+from .overlay_contracts import CanvasOverlayDrawFn as CanvasOverlayDrawFn
+from .overlay_contracts import CanvasOverlayState as CanvasOverlayState
+from .presentation import CanvasComparisonDivider as CanvasComparisonDivider
+from .presentation import CanvasComparisonOverlayDrawFn as CanvasComparisonOverlayDrawFn
+from .presentation import CanvasComparisonOverlayState as CanvasComparisonOverlayState
+from .presentation import CanvasComparisonScale as CanvasComparisonScale
+from .presentation import CanvasComparisonZoomGesture as CanvasComparisonZoomGesture
 from .presentation import CanvasPresentationContext as CanvasPresentationContext
 from .presentation import CanvasPresentationProvider as CanvasPresentationProvider
 from .presentation import CanvasWorkspace as CanvasWorkspace
@@ -121,6 +161,8 @@ from .projection import CanvasProjectionResult as CanvasProjectionResult
 from .projection import CanvasProjectionStatus as CanvasProjectionStatus
 from .runtime import CanvasDocumentRuntime as CanvasDocumentRuntime
 from .snapping import SnapPolicy as SnapPolicy
+from .types import CompositionPolicy as CompositionPolicy
+from .types import LayerPolicy as LayerPolicy
 from .types import MaskSavedPayload as MaskSavedPayload
 
 class CacheMode(str, Enum):
@@ -142,10 +184,6 @@ class ControlMode(str, Enum):
     VECTOR_PATH = "vector-path"
     VECTOR_NODE = "vector-node"
     VECTOR_TEXT = "vector-text"
-
-class ComparisonOrientation(str, Enum):
-    VERTICAL = "vertical"
-    HORIZONTAL = "horizontal"
 
 class RasterExtentPolicy(str, Enum):
     FIXED = "fixed"
@@ -430,20 +468,6 @@ class CompositionLayerClip:
     coordinate_space: str
     rect: QRectF
 
-class CompositionPolicy:
-    removable: bool
-    def __init__(
-        self,
-        removable: bool = True,
-    ) -> None: ...
-
-class LayerPolicy:
-    selectable: bool
-    movable: bool
-    pixel_editable: bool
-    reorderable: bool
-    removable: bool
-
 class EditorPolicy:
     capabilities: frozenset[EditorCapability]
     noneditable_paint: NonEditablePaintPolicy
@@ -641,6 +665,8 @@ class CuteCanvas(QWidget):
     placedAssetRequestCompleted: Signal
     layerRasterizationCompleted: Signal
     projectionCompleted: Signal
+    outboundDragFailed: Signal
+    contentContextRequested: Signal
     samCheckpointStatusChanged: Signal
     samCheckpointProgress: Signal
 
@@ -687,6 +713,12 @@ class CuteCanvas(QWidget):
         self, composition_id: uuid.UUID | None = ...
     ) -> tuple[MaskInfo, ...]: ...
     def getActiveMaskImage(self) -> QImage | None: ...
+    def exportMaskImage(
+        self,
+        mask_id: uuid.UUID,
+        *,
+        composition_id: uuid.UUID | None = ...,
+    ) -> QImage | None: ...
     def getMaskUndoState(self, mask_id: uuid.UUID) -> MaskUndoState | None: ...
     def diagnosticsOverlayEnabled(self) -> bool: ...
     def diagnosticsDomains(self) -> tuple[str, ...]: ...
@@ -715,6 +747,7 @@ class CuteCanvas(QWidget):
     def setEditorPolicy(self, policy: EditorPolicy) -> bool: ...
     def interactionMode(self) -> CanvasInteractionMode: ...
     def setInteractionMode(self, mode: CanvasInteractionMode) -> bool: ...
+    def setPanZoomLocked(self, locked: bool) -> None: ...
     def setOutboundMimeProvider(
         self,
         provider: OutboundMimeProvider,
@@ -728,6 +761,7 @@ class CuteCanvas(QWidget):
         ) = ...,
     ) -> None: ...
     def clearOutboundMimeProvider(self) -> None: ...
+    def contentSubject(self, event: QMouseEvent | None = ...) -> DragSubject | None: ...
     def document(self) -> CanvasDocument: ...
     def documentRuntime(self) -> CanvasDocumentRuntime: ...
     def viewSession(self) -> CanvasViewSession: ...
@@ -745,7 +779,13 @@ class CuteCanvas(QWidget):
         name: str,
         draw_fn: OverlayDrawFn,
     ) -> None: ...
+    def registerCanvasOverlay(
+        self,
+        name: str,
+        draw_fn: CanvasOverlayDrawFn,
+    ) -> None: ...
     def unregisterOverlay(self, name: str) -> None: ...
+    def unregisterCanvasOverlay(self, name: str) -> None: ...
     def contentOverlays(self) -> Mapping[str, OverlayDrawFn]: ...
     def createComposition(
         self,
@@ -1220,6 +1260,8 @@ class CuteCanvas(QWidget):
     def removeComposition(self, composition_id: uuid.UUID) -> None: ...
     def createBlankMask(self, size: QSize) -> uuid.UUID | None: ...
     def loadMaskFromFile(self, path: str) -> uuid.UUID | None: ...
+    def replaceMaskFromFile(self, mask_id: uuid.UUID, path: str) -> bool: ...
+    def replaceMaskImage(self, mask_id: uuid.UUID, image: QImage) -> bool: ...
     def removeMaskFromComposition(
         self, composition_id: uuid.UUID, mask_id: uuid.UUID
     ) -> bool: ...

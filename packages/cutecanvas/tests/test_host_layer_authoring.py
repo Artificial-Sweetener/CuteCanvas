@@ -156,6 +156,71 @@ def test_normalized_mask_coordinates_do_not_shrink_to_existing_content(qapp) -> 
         qapp.processEvents()
 
 
+def test_export_addressed_mask_preserves_inactive_editor_state(qapp) -> None:
+    """Addressed mask export must not activate another document or mask."""
+    canvas = CuteCanvas(features=("mask",))
+    try:
+        first = canvas.editor.compositions.create(QRectF(0.0, 0.0, 64.0, 32.0))
+        first_mask_id = canvas.createBlankMask(QSize(64, 32))
+        assert first_mask_id is not None
+        assert canvas.setActiveMaskID(first_mask_id)
+        assert canvas.editor.coverage.rectangle(
+            QRectF(0.0, 0.0, 0.5, 1.0),
+            PixelSelectionMode.ADD,
+            coordinate_space=CoverageCoordinateSpace.NORMALIZED_TARGET,
+        )
+
+        second = canvas.editor.compositions.create(QRectF(0.0, 0.0, 64.0, 32.0))
+        second_mask_id = canvas.createBlankMask(QSize(64, 32))
+        assert second_mask_id is not None
+        assert canvas.setActiveMaskID(second_mask_id)
+        assert canvas.currentCompositionID() == second.id
+        assert canvas.activeMaskID() == second_mask_id
+        scene_changes = QSignalSpy(canvas.sceneChanged)
+
+        exported = canvas.exportMaskImage(
+            first_mask_id,
+            composition_id=first.id,
+        )
+
+        assert exported is not None
+        assert exported.pixelColor(31, 12).value() == 255
+        assert exported.pixelColor(32, 12).value() == 0
+        assert canvas.currentCompositionID() == second.id
+        assert canvas.activeMaskID() == second_mask_id
+        assert scene_changes.count() == 0
+    finally:
+        canvas.deleteLater()
+        qapp.processEvents()
+
+
+def test_replacing_addressed_mask_pixels_retains_identity_and_activation(qapp) -> None:
+    """Host replacement keeps the resource identity and current edit destination."""
+    canvas = CuteCanvas(features=("mask",))
+    try:
+        composition = canvas.editor.compositions.create(QRectF(0.0, 0.0, 32.0, 24.0))
+        target_mask_id = canvas.createBlankMask(QSize(32, 24))
+        other_mask_id = canvas.createBlankMask(QSize(32, 24))
+        assert target_mask_id is not None and other_mask_id is not None
+        assert canvas.setActiveMaskID(other_mask_id)
+        replacement = QImage(32, 24, QImage.Format.Format_Grayscale8)
+        replacement.fill(91)
+
+        assert canvas.replaceMaskImage(target_mask_id, replacement)
+
+        assert canvas.activeMaskID() == other_mask_id
+        assert target_mask_id in canvas.maskIDsForComposition(composition.id)
+        exported = canvas.exportMaskImage(
+            target_mask_id,
+            composition_id=composition.id,
+        )
+        assert exported is not None
+        assert exported.pixelColor(8, 11).value() == 91
+    finally:
+        canvas.deleteLater()
+        qapp.processEvents()
+
+
 def test_arbitrary_soft_coverage_commits_without_mutating_pixel_selection(qapp) -> None:
     """A host can add bounded grayscale coverage directly to an active mask."""
     canvas = CuteCanvas(features=("mask",))

@@ -151,10 +151,15 @@ them into one artificial coordinate space. Its target canvases share one
 document runtime, including mutation freshness and bounded execution:
 
 ```python
-from cutecanvas import CanvasWorkspace
+import uuid
+
+from cutecanvas import CanvasInspectionGroup, CanvasWorkspace
 
 workspace = CanvasWorkspace(document_runtime=canvas.documentRuntime())
-workspace.setTabbedPresentation(document.composition_ids(), linked=True)
+workspace.setInspectionGroups(
+    (CanvasInspectionGroup(uuid.uuid4(), document.composition_ids()),)
+)
+workspace.setTabbedPresentation(document.composition_ids())
 window.setCentralWidget(workspace)
 ```
 

@@ -26,10 +26,9 @@ import uuid
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas import CuteCanvas, ExecutionRuntime, LayerPolicy
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QFileDialog, QWidget
-from qpane import ExecutionRuntime
 
 from examples.demonstration.workers import ImageLoadCoordinator
 
@@ -53,6 +52,7 @@ class WorkspaceTutorialController:
         self._set_status = set_status
         self._load_batch_auto_select = False
         self._image_loads = ImageLoadCoordinator(execution_runtime, parent)
+        self._image_compositions_by_path: dict[Path, uuid.UUID] = {}
 
     def close(self) -> None:
         """Cancel host-owned decoder work before the demo runtime shuts down."""
@@ -196,7 +196,8 @@ class WorkspaceTutorialController:
         """Export the active mask clipped to the composition canvas."""
         if not self._require_masks():
             return
-        mask_image = self._canvas.getActiveMaskImage()
+        mask_id = self._canvas.activeMaskID()
+        mask_image = None if mask_id is None else self._canvas.exportMaskImage(mask_id)
         if mask_image is None or mask_image.isNull():
             self._set_status("No active mask to save.")
             return
@@ -297,12 +298,20 @@ class WorkspaceTutorialController:
     def accept_decoded_image(self, path: Path, image: QImage) -> None:
         """Create one independent project composition from decoded pixels."""
         self._load_batch_auto_select = False
-        self._canvas.createCompositionFromImage(
+        normalized_path = path.resolve()
+        existing_id = self._image_compositions_by_path.get(normalized_path)
+        if existing_id is not None:
+            self._canvas.document.replace_composition_image(existing_id, image)
+            self._canvas.openComposition(existing_id)
+            self._set_status(f"Refreshed {path.name}...")
+            return
+        composition_id = self._canvas.createCompositionFromImage(
             image,
             title=path.name,
             label=path.stem,
             interaction=self._ordinary_image_policy(),
         )
+        self._image_compositions_by_path[normalized_path] = composition_id
         self._set_status(f"Loaded {path.name}...")
 
     def finish_image_batch(self, count: int) -> None:

@@ -124,10 +124,33 @@ class MaskLayerWorkflow:
         )
         if prepared is None or not self._commit_image(mask_id, prepared):
             return False
+        self._notify_replaced(mask_id, f"Mask {mask_id} updated from {path}")
+        return True
+
+    def update_from_image(self, mask_id: uuid.UUID, image: QImage) -> bool:
+        """Replace mask pixels for mask_id with detached host image data."""
+        layer = self._assets.get_layer(mask_id)
+        if layer is None:
+            self._publish_status(
+                f"Update failed: no mask layer found for {mask_id}",
+                label="Mask Error",
+            )
+            return False
+        prepared = MaskImageLoader.normalize(image, layer.mask_image.size())
+        if prepared is None or not self._commit_image(mask_id, prepared):
+            self._publish_status(
+                f"Update failed: could not prepare mask image for {mask_id}",
+                label="Mask Error",
+            )
+            return False
+        self._notify_replaced(mask_id, f"Mask {mask_id} updated from image")
+        return True
+
+    def _notify_replaced(self, mask_id: uuid.UUID, message: str) -> None:
+        """Publish redraw and status after one committed mask replacement."""
         self._qpane.markDirty()
         self._qpane.repaint()
-        self._publish_status(f"Mask {mask_id} updated from {path}", label="Mask")
-        return True
+        self._publish_status(message, label="Mask")
 
     def create_blank(self, size: QSize) -> uuid.UUID | None:
         """Create a blank mask layer in the active composition."""

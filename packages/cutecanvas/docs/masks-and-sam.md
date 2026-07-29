@@ -286,6 +286,21 @@ if mask_image is not None:
     mask_image.save("mask.png")
 ```
 
+`exportMaskImage(mask_id, composition_id=...)` provides the same detached,
+canvas-clipped coverage for an addressed mask without changing the active
+composition or active mask. When a mask is shared across multiple documents,
+supply the composition ID to choose the intended canvas and transform.
+
+```python
+mask_image = canvas.exportMaskImage(mask_id, composition_id=document_id)
+if mask_image is not None:
+    mask_image.save("mask.png")
+```
+
+Use `replaceMaskFromFile(mask_id, path)` or
+`replaceMaskImage(mask_id, image)` to replace pixels in an existing mask. Both
+preserve the mask UUID, layer associations, and history ownership.
+
 Mask export and autosave use the document's raster window. Editable document
 persistence keeps the complete mask, including retained shapes and off-canvas
 coverage, so reopening a `.cutecanvas` file does not discard work that was

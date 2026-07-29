@@ -99,11 +99,11 @@ layer owns placement, visibility, opacity, policy, and stack order. A duplicated
 layer therefore shares content until the host or user explicitly forks its
 resource.
 
-`CanvasPresentation.kind` selects a single view, linked tabs, responsive grid,
+`CanvasPresentation.kind` selects a single view, tabs, responsive grid,
 independent-target comparison, or registered host layout.
 `CanvasPresentation.target_ids` identifies the arranged compositions and
-`CanvasPresentation.linked_inspection` says whether their normalized inspected
-region is shared. Comparison adds `CanvasComparison`, whose
+the host-owned `CanvasViewSession.inspection` identifies normalized inspected
+regions shared by explicit linked groups. Comparison adds `CanvasComparison`, whose
 `split_position` and `orientation` describe its transient divider.
 
 `CanvasSessionSnapshot.active_composition_id` identifies the focused target.

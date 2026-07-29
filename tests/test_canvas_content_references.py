@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from cutecanvas import CuteCanvas
 from cutecanvas.document import CanvasContentKind, CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QContextMenuEvent, QImage, QMouseEvent
+from PySide6.QtTest import QSignalSpy
 
 
 @dataclass
@@ -50,6 +52,15 @@ class _Provider:
         cancellation = _Cancellation()
         self.cancellations.append(cancellation)
         return cancellation
+
+
+class _FailingProvider:
+    """Complete one outbound MIME request with a host materialization failure."""
+
+    def materialize(self, _subject, complete):
+        """Report a deterministic failure without starting a native drag."""
+        complete(None, RuntimeError("artifact unavailable"))
+        return _Cancellation()
 
 
 def _image() -> QImage:
@@ -124,6 +135,130 @@ def test_workspace_mime_policy_reaches_future_grid_targets(qapp) -> None:
         canvas.interaction.handle_drag_start_request(None)
 
         assert provider.subjects[0].target_id == identifiers[2]
+    finally:
+        workspace.close()
+        document.close()
+
+
+def test_workspace_grid_pointer_gesture_starts_drag_out(qapp) -> None:
+    """A grid drag exports its target without activating it as a click."""
+    document = CanvasDocument()
+    identifiers = tuple(
+        document.create_composition_from_image(_image(), title=f"Output {index}")
+        for index in range(2)
+    )
+    workspace = CanvasWorkspace(document=document, features=())
+    provider = _Provider()
+    try:
+        workspace.resize(900, 600)
+        workspace.show()
+        workspace.setOutboundMimeProvider(provider)
+        workspace.setGridPresentation(identifiers)
+        qapp.processEvents()
+        canvas = workspace.canvasFor(identifiers[1])
+        assert canvas is not None
+        activations = QSignalSpy(workspace.targetActivated)
+        active_before = workspace.session.active_composition_id
+        origin = QPointF(canvas.rect().center())
+        destination = origin + QPointF(20.0, 0.0)
+
+        qapp.sendEvent(
+            canvas,
+            QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                origin,
+                origin,
+                origin,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+        qapp.sendEvent(
+            canvas,
+            QMouseEvent(
+                QEvent.Type.MouseMove,
+                destination,
+                destination,
+                destination,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+        qapp.sendEvent(
+            canvas,
+            QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                destination,
+                destination,
+                destination,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
+        assert provider.subjects[0].target_id == identifiers[1]
+        assert activations.count() == 0
+        assert workspace.session.active_composition_id == active_before
+    finally:
+        workspace.close()
+        document.close()
+
+
+def test_workspace_forwards_drag_failure_with_captured_content_subject(qapp) -> None:
+    """A host receives failure context without inspecting target canvas topology."""
+    document = CanvasDocument()
+    composition_id = document.create_composition_from_image(_image(), title="Output")
+    workspace = CanvasWorkspace(document=document, features=())
+    try:
+        workspace.setOutboundMimeProvider(_FailingProvider())
+        workspace.setGridPresentation((composition_id,))
+        canvas = workspace.canvasFor(composition_id)
+        assert canvas is not None
+        failures = QSignalSpy(workspace.outboundDragFailed)
+
+        canvas.interaction.handle_drag_start_request(None)
+        qapp.processEvents()
+
+        assert failures.count() == 1
+        subject, message = failures.at(0)
+        assert subject.target_id == composition_id
+        assert subject.subject_id == document.content_reference(composition_id)
+        assert message == "artifact unavailable"
+    finally:
+        workspace.close()
+        document.close()
+
+
+def test_workspace_forwards_context_subject_without_changing_activation(qapp) -> None:
+    """A context request identifies the clicked grid target without activation."""
+    document = CanvasDocument()
+    identifiers = tuple(
+        document.create_composition_from_image(_image(), title=f"Output {index}")
+        for index in range(2)
+    )
+    workspace = CanvasWorkspace(document=document, features=())
+    try:
+        workspace.setGridPresentation(identifiers)
+        target = workspace.canvasFor(identifiers[1])
+        assert target is not None
+        requests = QSignalSpy(workspace.contentContextRequested)
+        before = workspace.session.active_composition_id
+
+        event = QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse,
+            QPoint(4, 4),
+            QPoint(24, 28),
+        )
+        qapp.sendEvent(target, event)
+
+        assert requests.count() == 1
+        subject, global_position = requests.at(0)
+        assert subject.target_id == identifiers[1]
+        assert global_position == QPoint(24, 28)
+        assert workspace.session.active_composition_id == before
     finally:
         workspace.close()
         document.close()

@@ -19,12 +19,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from PySide6.QtGui import QPainter
 from qpane.sdk.overlays import OverlayDrawFn, SceneOverlayDrawFn
+from qpane.sdk.types import OverlayState
 
 from cutecanvas.core import (
     CursorProvider,
     ToolFactory,
     ToolSignalBinder,
+)
+from cutecanvas.overlay_contracts import (
+    CanvasOverlayDrawFn,
+    CanvasOverlayState,
 )
 from cutecanvas.tools import Tools
 
@@ -44,8 +50,27 @@ class InteractionApiMixin:
         """Register a viewport-space overlay."""
         self.interaction.registerOverlay(name, draw_fn)
 
+    def registerCanvasOverlay(
+        self,
+        name: str,
+        draw_fn: CanvasOverlayDrawFn,
+    ) -> None:
+        """Register a renderer-neutral viewport overlay for a CuteCanvas host."""
+
+        def draw_native(painter: QPainter, state: OverlayState) -> None:
+            """Adapt private QPane overlay data at the single facade boundary."""
+
+            draw_fn(painter, CanvasOverlayState.from_native(state))
+
+        self.interaction.registerOverlay(name, draw_native)
+
     def unregisterOverlay(self, name: str) -> None:
         """Remove a viewport-space overlay when present."""
+        self.interaction.unregisterOverlay(name)
+
+    def unregisterCanvasOverlay(self, name: str) -> None:
+        """Remove a renderer-neutral viewport overlay when present."""
+
         self.interaction.unregisterOverlay(name)
 
     def contentOverlays(self) -> Mapping[str, OverlayDrawFn]:

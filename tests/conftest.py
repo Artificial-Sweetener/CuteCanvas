@@ -25,17 +25,27 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 from qpane import QPane
 
-from tests.harness.process_lock import InterprocessPerformanceLock
+from tests.harness.process_lock import InterprocessPerformanceIsolation
 
 
 @pytest.fixture(autouse=True)
 def _isolate_interactive_performance(request: pytest.FixtureRequest) -> Iterator[None]:
     """Give strict latency probes exclusive access to shared hardware."""
-    if request.node.get_closest_marker("interactive_performance") is None:
-        yield
-        return
-    lock_path = Path.cwd() / ".pytest-tmp" / "interactive-performance.lock"
-    with InterprocessPerformanceLock(lock_path):
+    worker_input = getattr(request.config, "workerinput", None)
+    if worker_input is None:
+        worker_slot = 0
+        worker_count = 1
+    else:
+        worker_id = str(worker_input["workerid"])
+        worker_slot = int(worker_id.removeprefix("gw"))
+        worker_count = int(worker_input["workercount"])
+    exclusive = request.node.get_closest_marker("interactive_performance") is not None
+    with InterprocessPerformanceIsolation(
+        Path.cwd() / ".pytest-tmp",
+        worker_slot=worker_slot,
+        worker_count=worker_count,
+        exclusive=exclusive,
+    ):
         yield
 
 

@@ -19,21 +19,24 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from typing import cast
 
-from PySide6.QtCore import QRectF, Signal
+from PySide6.QtCore import QPoint, QRectF, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QStackedLayout, QWidget
 from qpane.sdk.execution import (
     DefaultExecutionPolicy,
     ExecutionRuntime,
 )
-from qpane.sdk.types import ComparisonOrientation, LinkedGroup
+from qpane.sdk.layout import ResponsiveGridPolicy, ResponsiveGridSnapshot
+from qpane.sdk.types import ComparisonOrientation
 from qpane.sdk.ui import OutboundMimeProvider
 
 from ..canvas import CuteCanvas
 from ..document import (
     CanvasComparison,
     CanvasDocument,
+    CanvasInspectionGroup,
     CanvasPresentation,
     CanvasPresentationKind,
     CanvasSessionSnapshot,
@@ -42,13 +45,13 @@ from ..document import (
 from ..editor.interaction_policy import CanvasInteractionMode
 from ..facade.drag_api import CanvasDragSubjectResolver
 from ..runtime.document_runtime import CanvasDocumentRuntime
+from .comparison_overlays import CanvasComparisonOverlayDrawFn
 from .contracts import CanvasPresentationContext, CanvasPresentationProvider
-from .surfaces import (
-    CanvasTargetMount,
-    IndependentCanvasComparison,
-    ResponsiveCanvasGrid,
-    TabbedCanvasSurface,
-)
+from .grid_surface import ResponsiveCanvasGrid
+from .native_comparison import NativeCanvasComparison
+from .surfaces import TabbedCanvasSurface
+from .target_mount import CanvasTargetMount
+from .target_pool import CanvasTargetPool, CanvasViewKey
 
 
 class CanvasWorkspace(QWidget):
@@ -56,6 +59,21 @@ class CanvasWorkspace(QWidget):
 
     presentationChanged = Signal(object)
     """Emit the immutable presentation after the visible surface changes."""
+
+    targetActivated = Signal(object)
+    """Emit the composition UUID selected through an interactive presentation."""
+
+    outboundDragFailed = Signal(object, str)
+    """Emit a target canvas's stable drag subject and materialization message."""
+
+    contentContextRequested = Signal(object, object)
+    """Emit a target canvas's stable content subject and global context position."""
+
+    comparisonZoomGesture = Signal(object)
+    """Emit a pointer-originated comparison zoom through a renderer-free value."""
+
+    comparisonPointerMoved = Signal(object)
+    """Emit a native comparison pointer position in workspace-local coordinates."""
 
     def __init__(
         self,
@@ -66,9 +84,15 @@ class CanvasWorkspace(QWidget):
         document_runtime: CanvasDocumentRuntime | None = None,
         execution_runtime: ExecutionRuntime | None = None,
         execution_policy: DefaultExecutionPolicy | None = None,
+        retained_target_capacity: int = 16,
         parent: QWidget | None = None,
     ) -> None:
-        """Create a workspace over one runtime shared by every target canvas."""
+        """Create a workspace over one runtime shared by every target canvas.
+
+        Args:
+            retained_target_capacity: Maximum hidden role-target renderers kept
+                for fast presentation switching. Visible targets are additional.
+        """
         super().__init__(parent)
         if document_runtime is not None and (
             execution_runtime is not None or execution_policy is not None
@@ -98,8 +122,17 @@ class CanvasWorkspace(QWidget):
         self._session = session or CanvasViewSession()
         self._features = None if features is None else tuple(features)
         self._providers: dict[str, CanvasPresentationProvider] = {}
-        self._canvases: dict[uuid.UUID, CuteCanvas] = {}
-        self._mounts: dict[uuid.UUID, CanvasTargetMount] = {}
+        self._targets = CanvasTargetPool(
+            self,
+            create_canvas=self._create_target_canvas,
+            inactive_capacity=retained_target_capacity,
+        )
+        self._role_sessions: dict[CanvasPresentationKind, CanvasViewSession] = {}
+        self._comparison_inspection_groups: tuple[CanvasInspectionGroup, ...] = ()
+        self._comparison_overlays: dict[str, CanvasComparisonOverlayDrawFn] = {}
+        self._comparison_surface_captured_for_group_change: (
+            NativeCanvasComparison | None
+        ) = None
         self._outbound_mime_provider: OutboundMimeProvider | None = None
         self._drag_subject_resolver: CanvasDragSubjectResolver | None = None
         self._interaction_mode = CanvasInteractionMode.READ_ONLY
@@ -153,16 +186,13 @@ class CanvasWorkspace(QWidget):
     def setTabbedPresentation(
         self,
         composition_ids: Iterable[uuid.UUID],
-        *,
-        linked: bool = True,
     ) -> None:
-        """Show switchable composition views with optional linked inspection."""
+        """Show switchable composition views with host-owned inspection state."""
         target_ids = tuple(composition_ids)
         self._set_presentation(
             CanvasPresentation(
                 CanvasPresentationKind.TABBED,
                 target_ids,
-                linked_inspection=linked,
             )
         )
 
@@ -170,17 +200,51 @@ class CanvasWorkspace(QWidget):
         self,
         composition_ids: Iterable[uuid.UUID],
         *,
-        linked: bool = False,
+        policy: ResponsiveGridPolicy | None = None,
     ) -> None:
-        """Show a responsive grid of independent composition targets."""
+        """Show a responsive grid of independent composition targets.
+
+        Args:
+            composition_ids: Ordered document compositions to present.
+            policy: Source-neutral responsive layout policy for this grid.
+        """
         target_ids = tuple(composition_ids)
         self._set_presentation(
             CanvasPresentation(
                 CanvasPresentationKind.GRID,
                 target_ids,
-                linked_inspection=linked,
+                grid_policy=policy,
             )
         )
+
+    def gridSnapshot(self) -> ResponsiveGridSnapshot | None:
+        """Return the current grid's immutable QPane layout snapshot, if any."""
+        surface = self._surface
+        return surface.snapshot if isinstance(surface, ResponsiveCanvasGrid) else None
+
+    def setInspectionGroups(self, groups: Iterable[CanvasInspectionGroup]) -> None:
+        """Replace host-owned linked inspection groups for detail presentations."""
+
+        resolved_groups = tuple(groups)
+        self._session.setInspectionGroups(resolved_groups)
+
+    def setComparisonInspectionGroups(
+        self,
+        groups: Iterable[CanvasInspectionGroup],
+    ) -> None:
+        """Replace linked inspection groups used exclusively by comparison views."""
+
+        resolved_groups = tuple(groups)
+        if resolved_groups == self._comparison_inspection_groups:
+            return
+        surface = self._surface
+        if isinstance(surface, NativeCanvasComparison):
+            surface.release()
+            self._comparison_surface_captured_for_group_change = surface
+        self._comparison_inspection_groups = resolved_groups
+        comparison_session = self._role_sessions.get(CanvasPresentationKind.COMPARISON)
+        if comparison_session is not None:
+            comparison_session.setInspectionGroups(resolved_groups)
 
     def setComparisonPresentation(
         self,
@@ -189,7 +253,6 @@ class CanvasWorkspace(QWidget):
         *,
         split_position: float = 0.5,
         orientation: ComparisonOrientation = ComparisonOrientation.VERTICAL,
-        linked: bool = True,
     ) -> None:
         """Reveal two independent composition views across one divider."""
         comparison = CanvasComparison(
@@ -203,7 +266,6 @@ class CanvasWorkspace(QWidget):
                 CanvasPresentationKind.COMPARISON,
                 (primary_id, secondary_id),
                 comparison,
-                linked,
             )
         )
 
@@ -211,8 +273,6 @@ class CanvasWorkspace(QWidget):
         self,
         provider_id: str,
         composition_ids: Iterable[uuid.UUID],
-        *,
-        linked: bool = False,
     ) -> None:
         """Build one registered host surface over validated document targets."""
         if provider_id not in self._providers:
@@ -221,19 +281,60 @@ class CanvasWorkspace(QWidget):
             CanvasPresentation(
                 CanvasPresentationKind.CUSTOM,
                 tuple(composition_ids),
-                linked_inspection=linked,
                 provider_id=provider_id,
             )
         )
 
-    def currentCanvas(self) -> CuteCanvas | None:
-        """Return the canvas receiving focused interaction, if mounted."""
+    def currentCanvas(self) -> QWidget | None:
+        """Return the native widget receiving focused interaction, if mounted."""
+
+        surface = self._surface
+        if isinstance(surface, NativeCanvasComparison):
+            return cast(QWidget, surface.pane)
         target_id = self._session.active_composition_id
-        return None if target_id is None else self._canvases.get(target_id)
+        return None if target_id is None else self.canvasFor(target_id)
+
+    def registerComparisonOverlay(
+        self,
+        name: str,
+        draw_fn: CanvasComparisonOverlayDrawFn,
+    ) -> None:
+        """Paint host artwork over every current and future native comparison."""
+
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ValueError("comparison overlay name must not be blank")
+        if normalized_name in self._comparison_overlays:
+            raise ValueError(f"comparison overlay already exists: {normalized_name}")
+        self._comparison_overlays[normalized_name] = draw_fn
+        surface = self._surface
+        if isinstance(surface, NativeCanvasComparison):
+            surface.registerOverlay(normalized_name, draw_fn)
+
+    def unregisterComparisonOverlay(self, name: str) -> None:
+        """Remove one host comparison overlay from current and future surfaces."""
+
+        if self._comparison_overlays.pop(name, None) is None:
+            return
+        surface = self._surface
+        if isinstance(surface, NativeCanvasComparison):
+            surface.unregisterOverlay(name)
+
+    def refreshComparisonOverlays(self) -> None:
+        """Request a comparison overlay repaint without exposing the renderer."""
+
+        surface = self._surface
+        if isinstance(surface, NativeCanvasComparison):
+            surface.refreshOverlays()
 
     def canvasFor(self, composition_id: uuid.UUID) -> CuteCanvas | None:
-        """Return a mounted target canvas without creating parallel state."""
-        return self._canvases.get(composition_id)
+        """Return a current canvas first, or a retained role-specific canvas."""
+
+        active_role = self._presentation_view_role(self._session.presentation)
+        return self._targets.canvas_for(
+            composition_id,
+            preferred_role=active_role,
+        )
 
     def setOutboundMimeProvider(
         self,
@@ -244,7 +345,7 @@ class CanvasWorkspace(QWidget):
         """Apply host MIME policy to current and future presentation targets."""
         self._outbound_mime_provider = provider
         self._drag_subject_resolver = subject_resolver
-        for canvas in self._canvases.values():
+        for canvas in self._targets.values():
             canvas.setOutboundMimeProvider(
                 provider,
                 subject_resolver=subject_resolver,
@@ -254,7 +355,7 @@ class CanvasWorkspace(QWidget):
         """Disable and cancel outbound dragging on every mounted target."""
         self._outbound_mime_provider = None
         self._drag_subject_resolver = None
-        for canvas in self._canvases.values():
+        for canvas in self._targets.values():
             canvas.clearOutboundMimeProvider()
 
     def setInteractionMode(self, mode: CanvasInteractionMode) -> None:
@@ -263,7 +364,7 @@ class CanvasWorkspace(QWidget):
         if resolved is CanvasInteractionMode.CUSTOM:
             raise ValueError("custom workspace policy must be applied per canvas")
         self._interaction_mode = resolved
-        for canvas in self._canvases.values():
+        for canvas in self._targets.values():
             canvas.setInteractionMode(resolved)
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -294,7 +395,7 @@ class CanvasWorkspace(QWidget):
         self,
         presentation: CanvasPresentation,
     ) -> bool:
-        """Update a divider in place when its target arrangement is unchanged."""
+        """Apply any comparison pair through the persistent native renderer."""
         previous = self._applied_presentation
         surface = self._surface
         comparison = presentation.comparison
@@ -304,38 +405,75 @@ class CanvasWorkspace(QWidget):
             or comparison is None
             or presentation.kind is not CanvasPresentationKind.COMPARISON
             or previous.kind is not CanvasPresentationKind.COMPARISON
-            or previous.target_ids != presentation.target_ids
-            or previous.linked_inspection != presentation.linked_inspection
             or previous.comparison is None
-            or previous.comparison.orientation is not comparison.orientation
-            or not isinstance(surface, IndependentCanvasComparison)
+            or not isinstance(surface, NativeCanvasComparison)
         ):
             return False
-        surface.set_split(comparison.split_position)
+        captured_for_group_change = (
+            surface is self._comparison_surface_captured_for_group_change
+        )
+        surface.setComparison(
+            comparison,
+            capture_current=not captured_for_group_change,
+        )
+        if captured_for_group_change:
+            self._comparison_surface_captured_for_group_change = None
         return True
 
     def _rebuild(self, presentation: CanvasPresentation) -> None:
         """Replace only presentation widgets while retaining target renderers."""
-        self._configure_linking(presentation)
         previous = self._surface
+        if (
+            isinstance(previous, NativeCanvasComparison)
+            and previous is not self._comparison_surface_captured_for_group_change
+        ):
+            previous.release()
+        if previous is self._comparison_surface_captured_for_group_change:
+            self._comparison_surface_captured_for_group_change = None
         surface = self._build_surface(presentation)
+        self._configure_target_interaction(presentation)
         self._surface = surface
         self._applied_presentation = presentation
         self._layout.addWidget(surface)
         self._layout.setCurrentWidget(surface)
-        if previous is not None:
+        if isinstance(surface, ResponsiveCanvasGrid):
+            surface.applyResponsiveGeometry()
+        self._targets.activate(self._required_target_keys(presentation))
+        if previous is not None and previous is not surface:
+            if isinstance(previous, ResponsiveCanvasGrid):
+                previous.release()
             self._layout.removeWidget(previous)
-            previous.setParent(None)
-            previous.deleteLater()
+            if not self._targets.contains_mount(previous) and not surface.isAncestorOf(
+                previous
+            ):
+                previous.setParent(None)
+                previous.deleteLater()
         self.presentationChanged.emit(presentation)
 
     def _build_surface(self, presentation: CanvasPresentation) -> QWidget:
         """Create one small surface around reusable composition canvases."""
+        if presentation.kind is CanvasPresentationKind.COMPARISON:
+            comparison = presentation.comparison
+            if comparison is None:
+                raise RuntimeError("comparison presentation has no state")
+            return NativeCanvasComparison(
+                document=self._document,
+                document_runtime=self._document_runtime,
+                session=self._session_for_view_role(CanvasPresentationKind.COMPARISON),
+                comparison=comparison,
+                changed=self._set_comparison_split,
+                context_requested=self._request_native_comparison_context,
+                zoom_gesture=self.comparisonZoomGesture.emit,
+                pointer_moved=self.comparisonPointerMoved.emit,
+                overlays=self._comparison_overlays,
+                parent=self,
+            )
+        view_role = self._presentation_view_role(presentation)
         entries = tuple(
             (
                 target_id,
                 self._title(target_id),
-                self._mount(target_id, self),
+                self._mount(target_id, self, view_role=view_role),
             )
             for target_id in presentation.target_ids
         )
@@ -362,18 +500,11 @@ class CanvasWorkspace(QWidget):
                 )
                 for target_id, _title, canvas in entries
             )
-            return ResponsiveCanvasGrid(grid_entries, self)
-        if presentation.kind is CanvasPresentationKind.COMPARISON:
-            comparison = presentation.comparison
-            if comparison is None:
-                raise RuntimeError("comparison presentation has no state")
-            return IndependentCanvasComparison(
-                entries[0][2],
-                entries[1][2],
-                split_position=comparison.split_position,
-                orientation=comparison.orientation,
-                split_changed=self._set_comparison_split,
-                parent=self,
+            return ResponsiveCanvasGrid(
+                grid_entries,
+                self,
+                policy=presentation.grid_policy,
+                activated=self._activate,
             )
         provider_id = presentation.provider_id
         provider = None if provider_id is None else self._providers.get(provider_id)
@@ -384,72 +515,154 @@ class CanvasWorkspace(QWidget):
                 self._document,
                 self._session,
                 presentation.target_ids,
-                self._canvas,
+                lambda target_id, parent: self._canvas(
+                    target_id,
+                    parent,
+                    view_role=view_role,
+                ),
             ),
             self,
         )
 
-    def _ensure_canvas(self, target_id: uuid.UUID) -> CuteCanvas:
-        """Return one retained renderer without changing its QWidget parent."""
-        canvas = self._canvases.get(target_id)
-        if canvas is None:
-            child_session = CanvasViewSession(
-                inspection=self._session.inspection,
-            )
-            canvas = CuteCanvas(
-                document=self._document,
-                session=child_session,
-                features=self._features,
-                document_runtime=self._document_runtime,
-            )
-            self._canvases[target_id] = canvas
-            self._mounts[target_id] = CanvasTargetMount(canvas, self)
-            child_session.activate(
+    def _configure_target_interaction(
+        self,
+        presentation: CanvasPresentation,
+    ) -> None:
+        """Give grid targets drag/click ownership instead of viewport navigation."""
+
+        grid_target = presentation.kind is CanvasPresentationKind.GRID
+        if presentation.kind is CanvasPresentationKind.COMPARISON:
+            return
+        control_mode = (
+            CuteCanvas.CONTROL_MODE_CURSOR
+            if grid_target
+            else CuteCanvas.CONTROL_MODE_PANZOOM
+        )
+        for target_id in presentation.target_ids:
+            canvas = self._targets.canvas_for(
                 target_id,
-                available_ids=self._available_ids(),
+                preferred_role=self._presentation_view_role(presentation),
             )
-            canvas.openComposition(target_id)
-            canvas.setInteractionMode(self._interaction_mode)
-            canvas.setControlMode(canvas.CONTROL_MODE_PANZOOM)
-            if self._outbound_mime_provider is not None:
-                canvas.setOutboundMimeProvider(
-                    self._outbound_mime_provider,
-                    subject_resolver=self._drag_subject_resolver,
-                )
+            if canvas is None:
+                continue
+            canvas.setPanZoomLocked(False)
+            canvas.setControlMode(control_mode)
+
+    @classmethod
+    def _required_target_keys(
+        cls,
+        presentation: CanvasPresentation,
+    ) -> tuple[CanvasViewKey, ...]:
+        """Return the only heavyweight target views needed by a presentation."""
+
+        if presentation.kind is CanvasPresentationKind.COMPARISON:
+            return ()
+        role = cls._presentation_view_role(presentation)
+        return tuple((role, target_id) for target_id in presentation.target_ids)
+
+    @staticmethod
+    def _presentation_view_role(
+        presentation: CanvasPresentation,
+    ) -> CanvasPresentationKind:
+        """Return the independent viewport role required by one presentation."""
+
+        if presentation.kind is CanvasPresentationKind.GRID:
+            return CanvasPresentationKind.GRID
+        if presentation.kind is CanvasPresentationKind.COMPARISON:
+            return CanvasPresentationKind.COMPARISON
+        return CanvasPresentationKind.SINGLE
+
+    def _create_target_canvas(
+        self,
+        target_id: uuid.UUID,
+        view_role: CanvasPresentationKind,
+    ) -> CuteCanvas:
+        """Create and configure one renderer requested by the target pool."""
+
+        child_session = CanvasViewSession(
+            inspection=self._session_for_view_role(view_role).inspection,
+        )
+        canvas = CuteCanvas(
+            document=self._document,
+            session=child_session,
+            features=self._features,
+            document_runtime=self._document_runtime,
+        )
+        canvas.outboundDragFailed.connect(self.outboundDragFailed.emit)
+        canvas.contentContextRequested.connect(self.contentContextRequested.emit)
+        canvas.openComposition(target_id)
+        canvas.setInteractionMode(self._interaction_mode)
+        if self._outbound_mime_provider is not None:
+            canvas.setOutboundMimeProvider(
+                self._outbound_mime_provider,
+                subject_resolver=self._drag_subject_resolver,
+            )
         return canvas
+
+    def _session_for_view_role(
+        self,
+        view_role: CanvasPresentationKind,
+    ) -> CanvasViewSession:
+        """Return the inspection owner shared only by one presentation role."""
+
+        if view_role is CanvasPresentationKind.SINGLE:
+            return self._session
+        session = self._role_sessions.get(view_role)
+        if session is None:
+            session = CanvasViewSession()
+            if view_role is CanvasPresentationKind.COMPARISON:
+                session.setInspectionGroups(self._comparison_inspection_groups)
+            self._role_sessions[view_role] = session
+        return session
 
     def _mount(
         self,
         target_id: uuid.UUID,
         parent: QWidget,
+        *,
+        view_role: CanvasPresentationKind,
     ) -> CanvasTargetMount:
         """Move only a lightweight host between built-in presentation surfaces."""
-        canvas = self._ensure_canvas(target_id)
-        mount = self._mounts[target_id]
-        if canvas.parent() is not mount:
-            canvas.setParent(mount)
-            canvas.setGeometry(mount.rect())
-            canvas.show()
-        mount.setParent(parent)
-        mount.show()
-        return mount
+        return self._targets.mount(target_id, parent, view_role=view_role)
 
-    def _canvas(self, target_id: uuid.UUID, parent: QWidget) -> CuteCanvas:
+    def _canvas(
+        self,
+        target_id: uuid.UUID,
+        parent: QWidget,
+        *,
+        view_role: CanvasPresentationKind,
+    ) -> CuteCanvas:
         """Give a custom provider a retained canvas under its chosen parent."""
-        canvas = self._ensure_canvas(target_id)
-        canvas.setParent(parent)
-        canvas.show()
-        return canvas
+        return self._targets.direct_canvas(target_id, parent, view_role=view_role)
 
     def _activate(self, target_id: uuid.UUID) -> None:
-        """Activate one visible target in workspace session state."""
+        """Publish every deliberate selection of a visible workspace target."""
+
+        if target_id not in self._available_ids():
+            return
         self._session.activate(
             target_id,
             available_ids=self._available_ids(),
         )
+        self.targetActivated.emit(target_id)
 
-    def _set_comparison_split(self, position: float) -> None:
-        """Replace only transient comparison state during divider movement."""
+    def _request_native_comparison_context(
+        self,
+        composition_id: uuid.UUID,
+        position: QPoint,
+    ) -> None:
+        """Expose a native comparison target through the workspace context signal."""
+        self.contentContextRequested.emit(
+            self._document.content_reference(composition_id),
+            position,
+        )
+
+    def _set_comparison_split(
+        self,
+        position: float,
+        orientation: ComparisonOrientation | None = None,
+    ) -> None:
+        """Replace only native divider state without rebuilding its render scene."""
         presentation = self._session.presentation
         comparison = presentation.comparison
         if comparison is None:
@@ -462,26 +675,25 @@ class CanvasWorkspace(QWidget):
                     comparison.primary_id,
                     comparison.secondary_id,
                     position,
-                    comparison.orientation,
+                    comparison.orientation if orientation is None else orientation,
                 ),
-                presentation.linked_inspection,
             )
         )
 
-    def _configure_linking(self, presentation: CanvasPresentation) -> None:
-        """Apply one workspace-owned link group without document mutations."""
-        if presentation.linked_inspection and len(presentation.target_ids) >= 2:
-            existing = self._session.inspection.groups()
-            group_id = existing[0].group_id if len(existing) == 1 else uuid.uuid4()
-            self._session.inspection.replace_groups(
-                (LinkedGroup(group_id, presentation.target_ids),)
-            )
-            return
-        self._session.inspection.replace_groups(())
-
     def _reconcile_document(self) -> None:
         """Remove unavailable presentation targets after document mutations."""
-        self._session.reconcile(self._available_ids())
+        available_ids = self._available_ids()
+        available = set(available_ids)
+        for group in self._session.inspection.groups():
+            for target_id in group.members:
+                if target_id not in available:
+                    self._session.inspection.discard(target_id)
+        self._session.reconcile(available_ids)
+        self._retire_unavailable_targets(available)
+
+    def _retire_unavailable_targets(self, available: set[uuid.UUID]) -> None:
+        """Close and release renderer mounts for compositions removed from the document."""
+        self._targets.retire_unavailable(available)
 
     def _available_ids(self) -> tuple[uuid.UUID, ...]:
         """Return current composition targets in document order."""
@@ -498,14 +710,16 @@ class CanvasWorkspace(QWidget):
         self._closed = True
         self._session_unsubscribe()
         self._document_unsubscribe()
-        for canvas in tuple(self._canvases.values()):
+        self._targets.close()
+        surface = self._surface
+        self._surface = None
+        if surface is not None:
             try:
-                canvas.close()
-                canvas.deleteLater()
+                surface.close()
+                surface.setParent(None)
+                surface.deleteLater()
             except RuntimeError:
                 pass
-        self._canvases.clear()
-        self._mounts.clear()
         if self._owns_document_runtime:
             self._document_runtime.close()
         if self._owns_document:

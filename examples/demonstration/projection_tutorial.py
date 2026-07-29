@@ -75,7 +75,7 @@ class ProjectionTutorialController:
         if destination is None:
             return
         if result.succeeded and result.image is not None:
-            if result.image.save(str(destination), "PNG"):
+            if result.image.save(str(destination)):
                 self._show_status(f"Exported {destination.name}.")
             else:
                 self._show_status(f"Could not write {destination.name}.")

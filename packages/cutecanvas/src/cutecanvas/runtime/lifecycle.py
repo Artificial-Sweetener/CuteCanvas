@@ -557,18 +557,6 @@ class CanvasLifecycleMixin:
         """Internal helper for workflow/hooks to track SAM managers."""
         self._sam_manager = manager
 
-    def updateMaskFromFile(self, mask_id: uuid.UUID, file_path: str) -> bool:
-        """Replace a mask layer's pixels from ``file_path`` while preserving metadata.
-
-        Args:
-            mask_id: Identifier of the mask layer to update.
-            file_path: Filesystem path to the replacement mask image.
-
-        Returns:
-            True when the layer was updated successfully.
-        """
-        return self._masks_controller.update_mask_from_file(mask_id, file_path)
-
     def invalidateActiveMaskCache(self):
         """Invalidate the colorized pixmap cache for the currently active mask.
 
@@ -639,10 +627,6 @@ class CanvasLifecycleMixin:
     def updateModifierKeyCursor(self) -> None:
         """Update modifier-sensitive cursors via the interaction delegate."""
         self.interaction.update_modifier_key_cursor()
-
-    def setPanZoomLocked(self, locked: bool):
-        """Delegate pan/zoom lock state to the viewport."""
-        self.view().viewport.set_locked(bool(locked))
 
     def blank(self):
         """Blank the qpane without clearing caches."""

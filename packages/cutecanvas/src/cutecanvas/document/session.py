@@ -18,12 +18,28 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 
 from qpane.sdk.inspection import InspectionStateStore
-from qpane.sdk.types import ComparisonOrientation
+from qpane.sdk.layout import ResponsiveGridPolicy
+from qpane.sdk.types import ComparisonOrientation, LinkedGroup
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasInspectionGroup:
+    """Describe host-owned linked inspection members without exposing QPane."""
+
+    group_id: uuid.UUID
+    members: tuple[uuid.UUID, ...]
+
+    def __post_init__(self) -> None:
+        """Reject empty or duplicate membership before mutating inspection state."""
+        if not self.members:
+            raise ValueError("inspection group must contain at least one member")
+        if len(set(self.members)) != len(self.members):
+            raise ValueError("inspection group members must be unique")
 
 
 class CanvasPresentationKind(str, Enum):
@@ -60,8 +76,8 @@ class CanvasPresentation:
     kind: CanvasPresentationKind = CanvasPresentationKind.SINGLE
     target_ids: tuple[uuid.UUID, ...] = ()
     comparison: CanvasComparison | None = None
-    linked_inspection: bool = False
     provider_id: str | None = None
+    grid_policy: ResponsiveGridPolicy | None = None
 
     def __post_init__(self) -> None:
         """Reject duplicate targets and inconsistent comparison payloads."""
@@ -83,6 +99,11 @@ class CanvasPresentation:
                 raise ValueError("custom presentation requires a provider_id")
         elif self.provider_id is not None:
             raise ValueError("provider_id requires a custom presentation")
+        if (
+            self.grid_policy is not None
+            and self.kind is not CanvasPresentationKind.GRID
+        ):
+            raise ValueError("grid_policy requires a grid presentation")
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +150,12 @@ class CanvasViewSession:
     def inspection(self) -> InspectionStateStore:
         """Return this session's explicit normalized-inspection owner."""
         return self._inspection
+
+    def setInspectionGroups(self, groups: Iterable[CanvasInspectionGroup]) -> None:
+        """Replace host-owned linked inspection groups without changing presentation."""
+        self._inspection.replace_groups(
+            LinkedGroup(group.group_id, group.members) for group in groups
+        )
 
     @property
     def revision(self) -> int:
@@ -218,8 +245,8 @@ class CanvasViewSession:
             presentation = CanvasPresentation(
                 self._presentation.kind,
                 targets,
-                linked_inspection=self._presentation.linked_inspection,
                 provider_id=self._presentation.provider_id,
+                grid_policy=self._presentation.grid_policy,
             )
         if active == self._active_composition_id and presentation == self._presentation:
             return False

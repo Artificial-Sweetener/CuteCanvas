@@ -83,6 +83,34 @@ class PlacedAssetStore:
         self._revision += 1
         return resolved_id
 
+    def replace_embedded(self, asset_id: uuid.UUID, image: QImage) -> bool:
+        """Replace embedded pixels while preserving resource identity and provenance."""
+        if not isinstance(image, QImage):
+            raise TypeError("image must be a QImage")
+        if image.isNull():
+            raise ValueError("placed asset image must not be null")
+        current = self._assets.get(asset_id)
+        if current is None:
+            raise KeyError(f"unknown placed asset: {asset_id}")
+        if current.mode is not PlacedAssetMode.EMBEDDED:
+            raise ValueError("placed asset must be embedded")
+        self._assets[asset_id] = PlacedAssetSnapshot(
+            image=QImage(image),
+            source_size=image.size(),
+            mode=PlacedAssetMode.EMBEDDED,
+            source_path=None,
+            status=PlacedAssetStatus.READY,
+            error=None,
+            keep_fallback=True,
+            fingerprint=None,
+            content_revision=current.content_revision + 1,
+            generation=current.generation,
+        )
+        self._content_bounds[asset_id] = _image_content_bounds(image)
+        self._resources.touch(asset_id)
+        self._revision += 1
+        return True
+
     def create_linked(
         self,
         image: QImage,

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from math import isclose
 
 from PySide6.QtCore import (
@@ -36,6 +37,20 @@ logger = logging.getLogger(__name__)
 
 class CanvasViewStateMixin:
     """Group canvasviewstate facade behavior."""
+
+    def _handle_canvas_resize(self) -> None:
+        """Realign resized content without publishing intermediate geometry."""
+        binding = self._inspection_binding
+        publication_guard = (
+            nullcontext() if binding is None else binding.suspend_publication()
+        )
+        with publication_guard:
+            self.view().ensure_view_alignment(force=True)
+            if binding is not None:
+                binding.refresh_target()
+        self.update()
+        self.refreshCursor()
+        self._emit_viewport_rect_if_changed(force=True)
 
     def onViewChanged(self):
         """Slot connected to the viewport's viewChanged signal."""

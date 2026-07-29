@@ -408,7 +408,7 @@ def test_load_and_update_mask_workflow(monkeypatch, qpane_with_mask, tmp_path):
     updated.fill(64)
     update_path = tmp_path / "mask_updated.png"
     assert updated.save(str(update_path))
-    result = qpane.updateMaskFromFile(mask_id, str(update_path))
+    result = qpane.replaceMaskFromFile(mask_id, str(update_path))
     assert result is True
     assert len(invalidations) == 2
     stored_layer = mask_manager.get_layer(mask_id)

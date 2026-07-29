@@ -25,6 +25,18 @@ Each composition keeps its own coordinate space and native dimensions. A
 smaller first pass is not enlarged merely because a later pass has more
 pixels.
 
+Replace a host image that has been regenerated without removing and recreating
+its document:
+
+```python
+document.replace_composition_image(first_id, QImage("first-regenerated.png"))
+```
+
+The composition, content layer, resource, masks, and inspection state retain
+their identities. The image's new native dimensions become the composition
+bounds. This mutation is headless: each mounted view keeps its current target
+and viewport until the host explicitly changes its session.
+
 Close a host-owned document when its project closes:
 
 ```python
@@ -64,10 +76,19 @@ it as editable document content.
 `CanvasWorkspace` supplies the common multi-view arrangements:
 
 ```python
-from cutecanvas import CanvasWorkspace
+import uuid
+
+from cutecanvas import (
+    CanvasInspectionGroup,
+    CanvasWorkspace,
+    ResponsiveGridPolicy,
+)
 
 workspace = CanvasWorkspace(document=document)
-workspace.setTabbedPresentation((first_id, second_id), linked=True)
+workspace.setInspectionGroups(
+    (CanvasInspectionGroup(uuid.uuid4(), (first_id, second_id)),)
+)
+workspace.setTabbedPresentation((first_id, second_id))
 ```
 
 Every target in one workspace shares its `CanvasDocumentRuntime`. That binding
@@ -76,6 +97,13 @@ operations, while each target keeps a receiver-safe view scope. Pass an
 existing `document_runtime` when other editor views mount the same document.
 Otherwise the workspace creates and closes the document binding and its
 bounded standalone execution runtime.
+
+The workspace retains currently visible target renderers and a bounded
+least-recently-used set of hidden role-specific renderers. Set
+`retained_target_capacity` to tune presentation-switch latency against
+inactive-view memory. The default retains 16 hidden targets; large grids may
+contain more active renderers, but leaving the grid releases all except that
+fixed budget.
 
 `CuteCanvas.documentRuntime` returns the binding already used by an editor.
 Pass it to another `CuteCanvas` or `CanvasWorkspace` when those views should
@@ -88,10 +116,12 @@ coordinates. Switching from a 1,000-pixel composition at 200% to a
 request remains local; it is not mislabeled as 100% on a different native
 resolution.
 
-Use an unlinked presentation when each view should remember its own region:
+Each `CanvasInspectionGroup` is host-owned and survives single, tabbed, grid,
+and comparison presentations. Omit a target from every host group when it
+should remember its own region:
 
 ```python
-workspace.setTabbedPresentation((first_id, second_id), linked=False)
+workspace.setSinglePresentation(third_id)
 ```
 
 ## Responsive Grids
@@ -99,7 +129,10 @@ workspace.setTabbedPresentation((first_id, second_id), linked=False)
 Grids arrange independent targets without synthesizing a larger document:
 
 ```python
-workspace.setGridPresentation(document.composition_ids())
+workspace.setGridPresentation(
+    document.composition_ids(),
+    policy=ResponsiveGridPolicy(),
+)
 ```
 
 QPane calculates the frames in physical pixels, then converts them to Qt
@@ -128,6 +161,46 @@ normalized inspection by default, even when their native dimensions differ.
 Dragging the divider changes presentation state, not document history.
 `ComparisonOrientation.VERTICAL` creates a left-to-right reveal, while
 `ComparisonOrientation.HORIZONTAL` creates a top-to-bottom reveal.
+
+## Add Comparison Chrome
+
+Register presentation-only comparison artwork through the workspace rather
+than reaching into the native renderer:
+
+```python
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPen
+
+
+def draw_divider_accent(painter, state) -> None:
+    divider = state.divider
+    if divider.enabled and divider.visible_segment is not None:
+        painter.setPen(QPen(Qt.GlobalColor.cyan, 2))
+        painter.drawLine(divider.visible_segment)
+
+
+workspace.registerComparisonOverlay("host-divider-accent", draw_divider_accent)
+```
+
+`CanvasComparisonOverlayState` provides the immutable comparison, divider,
+viewport, and physical display scale for each source for that paint. The
+callback runs in widget coordinates, must remain fast, and changes neither
+document history nor reveal input behavior. `comparisonZoomGesture` reports a
+pointer-originated comparison zoom and `comparisonPointerMoved` tracks its
+cursor position; after host animation state changes, call
+`refreshComparisonOverlays()` to repaint without accessing a native renderer.
+Remove the registration with `unregisterComparisonOverlay()` when its host
+owner closes.
+
+## Add Detail Chrome
+
+Use `CuteCanvas.registerCanvasOverlay()` for ordinary detail chrome. Its
+`CanvasOverlayState` exposes the logical viewport, physical viewport, current
+pan, zoom, transform, source image, and truthful `display_scale` without
+exposing the renderer's native state. `display_scale` incorporates the actual
+layer transform and device-pixel ratio, so host chrome can label physical
+source scale without treating logical zoom as equivalent. Remove it through
+`unregisterCanvasOverlay()` when the host owner closes.
 
 ## Choose How Much Editing to Expose
 
@@ -160,7 +233,7 @@ application.
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from qpane.sdk.ui import OutboundDragPayload
+from cutecanvas import OutboundDragPayload
 
 
 class CompanionFileProvider:

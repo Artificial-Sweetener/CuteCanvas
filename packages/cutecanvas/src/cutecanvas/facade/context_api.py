@@ -13,25 +13,22 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Document presentation widgets and host extension contracts."""
 
-from .comparison_overlays import (
-    CanvasComparisonDivider,
-    CanvasComparisonOverlayDrawFn,
-    CanvasComparisonOverlayState,
-    CanvasComparisonScale,
-    CanvasComparisonZoomGesture,
-)
-from .contracts import CanvasPresentationContext, CanvasPresentationProvider
-from .workspace import CanvasWorkspace
+"""Host-facing content context-menu requests."""
 
-__all__ = [
-    "CanvasComparisonDivider",
-    "CanvasComparisonOverlayDrawFn",
-    "CanvasComparisonOverlayState",
-    "CanvasComparisonScale",
-    "CanvasComparisonZoomGesture",
-    "CanvasPresentationContext",
-    "CanvasPresentationProvider",
-    "CanvasWorkspace",
-]
+from __future__ import annotations
+
+from PySide6.QtGui import QContextMenuEvent
+
+
+class ContentContextApiMixin:
+    """Resolve and publish a stable content subject for a context gesture."""
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        """Emit the addressed document subject without changing activation."""
+        subject = self.contentSubject()
+        if subject is None:
+            event.ignore()
+            return
+        self.contentContextRequested.emit(subject, event.globalPos())
+        event.accept()

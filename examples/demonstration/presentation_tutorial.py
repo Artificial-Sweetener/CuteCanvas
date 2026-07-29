@@ -18,9 +18,20 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Callable
+from typing import cast
 
-from cutecanvas import CanvasWorkspace, CuteCanvas
+from cutecanvas import (
+    CanvasContentReference,
+    CanvasInspectionGroup,
+    CanvasWorkspace,
+    CuteCanvas,
+    DragSubject,
+    OutboundDragPayload,
+    OutboundMimeItem,
+    ResponsiveGridPolicy,
+)
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -31,7 +42,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qpane import OutboundDragPayload, OutboundMimeItem
 
 from examples.demonstration.projection_tutorial import (
     ProjectionTutorialController,
@@ -41,9 +51,13 @@ from examples.demonstration.projection_tutorial import (
 class _ReferenceMimeProvider:
     """Demonstrate immediate custom MIME without assuming host file storage."""
 
-    def materialize(self, subject, complete):
+    def materialize(
+        self,
+        subject: DragSubject,
+        complete: Callable[[OutboundDragPayload | None, BaseException | None], None],
+    ) -> None:
         """Publish a portable text value and a typed document reference."""
-        reference = subject.subject_id
+        reference = cast(CanvasContentReference, subject.subject_id)
         encoded = json.dumps(
             {
                 "document_id": str(reference.document_id),
@@ -113,7 +127,8 @@ class PresentationTutorialController:
             return
         identifiers = tuple(self._canvas.compositionIDs())
         if not identifiers:
-            self._dialog.close()
+            if self._dialog is not None:
+                self._dialog.close()
             return
         self._apply_mode(self._mode.currentIndex())
 
@@ -154,12 +169,21 @@ class PresentationTutorialController:
         )
         workspace.setOutboundMimeProvider(_ReferenceMimeProvider())
         export_button.clicked.connect(
-            lambda: self._projection.export_active(workspace.currentCanvas())
+            lambda: self._projection.export_active(
+                self._active_workspace_canvas(workspace)
+            )
         )
         layout.addWidget(workspace, 1)
         self._dialog = dialog
         self._workspace = workspace
         self._mode = mode
+
+    @staticmethod
+    def _active_workspace_canvas(workspace: CanvasWorkspace) -> CuteCanvas | None:
+        """Return the active document target without exposing a native renderer."""
+
+        active_id = workspace.session.active_composition_id
+        return None if active_id is None else workspace.canvasFor(active_id)
 
     def _apply_mode(self, index: int) -> None:
         """Apply one public workspace presentation from current document IDs."""
@@ -176,10 +200,16 @@ class PresentationTutorialController:
             workspace.setSinglePresentation(primary)
             label = "single composition"
         elif index == 1:
-            workspace.setTabbedPresentation(ordered, linked=True)
+            workspace.setInspectionGroups(
+                (CanvasInspectionGroup(uuid.uuid4(), ordered),)
+            )
+            workspace.setTabbedPresentation(ordered)
             label = "linked native-size tabs"
         elif index == 2:
-            workspace.setGridPresentation(ordered)
+            workspace.setGridPresentation(
+                ordered,
+                policy=ResponsiveGridPolicy(),
+            )
             label = "responsive composition grid"
         elif len(ordered) >= 2:
             workspace.setComparisonPresentation(ordered[0], ordered[1])

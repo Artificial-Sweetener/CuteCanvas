@@ -13,25 +13,31 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Document presentation widgets and host extension contracts."""
 
-from .comparison_overlays import (
-    CanvasComparisonDivider,
-    CanvasComparisonOverlayDrawFn,
-    CanvasComparisonOverlayState,
-    CanvasComparisonScale,
-    CanvasComparisonZoomGesture,
-)
-from .contracts import CanvasPresentationContext, CanvasPresentationProvider
-from .workspace import CanvasWorkspace
+"""Resolve initial viewport behavior independently from document permissions."""
 
-__all__ = [
-    "CanvasComparisonDivider",
-    "CanvasComparisonOverlayDrawFn",
-    "CanvasComparisonOverlayState",
-    "CanvasComparisonScale",
-    "CanvasComparisonZoomGesture",
-    "CanvasPresentationContext",
-    "CanvasPresentationProvider",
-    "CanvasWorkspace",
-]
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class ViewportActivation:
+    """Describe how final content geometry initializes one activated viewport."""
+
+    fit_view: bool
+    restore_inspection: bool
+
+
+def resolve_viewport_activation(
+    *,
+    fit_requested: bool,
+    inspection_available: bool,
+) -> ViewportActivation:
+    """Give persisted inspection precedence over a default fit request."""
+    if inspection_available:
+        return ViewportActivation(fit_view=False, restore_inspection=True)
+    return ViewportActivation(
+        fit_view=bool(fit_requested),
+        restore_inspection=not fit_requested,
+    )

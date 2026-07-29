@@ -18,13 +18,15 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Protocol
 
 from PySide6.QtCore import QPointF, QRectF, QSizeF
 from qpane.sdk.inspection import (
     InspectionTarget,
     InspectionUpdate,
+    InspectionViewState,
     InspectionZoomMode,
     capture_inspection,
     project_inspection,
@@ -73,6 +75,7 @@ class SessionInspectionBinding:
         self._target_id: uuid.UUID | None = None
         self._inspection_token: uuid.UUID | None = None
         self._applying = False
+        self._publication_suspensions = 0
         self._session_unsubscribe = session.subscribe(self._session_changed)
         self.refresh_target()
 
@@ -100,10 +103,14 @@ class SessionInspectionBinding:
     def publish(self) -> None:
         """Capture viewport state and publish it to explicitly linked targets."""
         target = self._target()
-        if self._applying or target is None:
+        if self._applying or self._publication_suspensions or target is None:
             return
         viewport_size = self._viewport_size()
-        if viewport_size.width() <= 0.0 or viewport_size.height() <= 0.0:
+        if (
+            viewport_size.width() <= 0.0
+            or viewport_size.height() <= 0.0
+            or float(self._viewport.zoom) <= 0.0
+        ):
             return
         state = capture_inspection(
             target,
@@ -118,6 +125,15 @@ class SessionInspectionBinding:
             source_subscription=self._inspection_token,
         )
 
+    @contextmanager
+    def suspend_publication(self) -> Iterator[None]:
+        """Suppress intermediate geometry signals during atomic view setup."""
+        self._publication_suspensions += 1
+        try:
+            yield
+        finally:
+            self._publication_suspensions -= 1
+
     def close(self) -> None:
         """Release session and inspection subscriptions idempotently."""
         self._session_unsubscribe()
@@ -127,8 +143,8 @@ class SessionInspectionBinding:
         self._target_id = None
 
     def _session_changed(self, _snapshot: CanvasSessionSnapshot) -> None:
-        """Track target activation while leaving content reconciliation elsewhere."""
-        self.refresh_target(restore=False)
+        """Restore linked inspection when an existing or first-time target activates."""
+        self.refresh_target(restore=True)
 
     def _apply_update(self, update: InspectionUpdate) -> None:
         """Project one accepted linked update into this target's viewport."""
@@ -136,7 +152,11 @@ class SessionInspectionBinding:
             return
         self._apply_state(update.target_id, update.state)
 
-    def _apply_state(self, target_id, state) -> None:
+    def _apply_state(
+        self,
+        target_id: uuid.UUID,
+        state: InspectionViewState,
+    ) -> None:
         """Apply a normalized state without recursively publishing it."""
         bounds = self._target_bounds(target_id)
         viewport_size = self._viewport_size()
