@@ -56,7 +56,11 @@ from qpane.rendering.sdk_adapter import RenderSceneController
 from qpane.scene.source_capabilities import LayerSourceCapabilities
 from qpane.sdk.raster import present_hybrid_sample
 
-from tests.harness.timing import interaction_clock, stable_latency_samples
+from tests.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    interaction_clock,
+    stable_latency_samples,
+)
 from tests.helpers.execution_backend import TestExecution
 
 
@@ -272,6 +276,7 @@ def test_hybrid_tile_batch_evaluates_each_raster_sampler_once() -> None:
     assert all(product.image_source_rect.x() >= 0.0 for product in products)
 
 
+@INTERACTIVE_PERFORMANCE
 def test_mounted_high_zoom_pan_never_exposes_unready_hybrid_vector_tiles(
     qapp: QApplication,
 ) -> None:

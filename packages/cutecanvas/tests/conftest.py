@@ -22,8 +22,19 @@ import os
 from collections.abc import Iterator
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
+
+from tests.harness.process_lock import interactive_performance_isolation
+from tests.harness.qt_lifetime import flush_deferred_qt_lifetime
+
+
+@pytest.fixture(autouse=True)
+def _isolate_interactive_performance(
+    request: pytest.FixtureRequest,
+) -> Iterator[None]:
+    """Participate in suite-wide strict performance isolation."""
+    with interactive_performance_isolation(request):
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -38,5 +49,4 @@ def qapp() -> Iterator[QApplication]:
 def _flush_deferred_qt_deletions(qapp: QApplication) -> Iterator[None]:
     """Deliver deferred Qt deletions after each package test."""
     yield
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    qapp.processEvents()
+    flush_deferred_qt_lifetime(qapp)

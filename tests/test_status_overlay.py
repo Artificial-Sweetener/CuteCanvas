@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from PySide6.QtCore import QObject, QSize, Signal
 from PySide6.QtWidgets import QWidget
 from qpane.core import DiagnosticsSnapshot
+from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.types import DiagnosticRecord
 from qpane.ui.status_overlay import (
     FALLBACK_MESSAGE,
@@ -172,20 +174,15 @@ def test_overlay_allocates_stroke_and_shadow_slack() -> None:
             == expected_display_size
         )
         rendered_image = overlay._cached_pixmap.toImage()
-        visible_pixels = (
-            (x, y)
-            for y in range(rendered_image.height())
-            for x in range(rendered_image.width())
-            if rendered_image.pixelColor(x, y).alpha() > 0
+        visible_y, visible_x = np.nonzero(
+            qimage_to_numpy_argb32(rendered_image)[:, :, 3]
         )
-        visible_coordinates = tuple(visible_pixels)
-        assert visible_coordinates
-        visible_x = [coordinate[0] for coordinate in visible_coordinates]
-        visible_y = [coordinate[1] for coordinate in visible_coordinates]
-        assert min(visible_x) > 0
-        assert max(visible_x) < rendered_image.width() - 1
-        assert min(visible_y) > 0
-        assert max(visible_y) < rendered_image.height() - 1
+        assert visible_x.size > 0
+        assert visible_y.size > 0
+        assert visible_x.min() > 0
+        assert visible_x.max() < rendered_image.width() - 1
+        assert visible_y.min() > 0
+        assert visible_y.max() < rendered_image.height() - 1
     finally:
         overlay.deleteLater()
         qpane.deleteLater()

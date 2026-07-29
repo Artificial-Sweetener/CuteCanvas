@@ -21,31 +21,17 @@ from pathlib import Path
 import pytest
 from cutecanvas import CuteCanvas
 from cutecanvas.core import config
-from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 from qpane import QPane
 
-from tests.harness.process_lock import InterprocessPerformanceIsolation
+from tests.harness.process_lock import interactive_performance_isolation
+from tests.harness.qt_lifetime import flush_deferred_qt_lifetime
 
 
 @pytest.fixture(autouse=True)
 def _isolate_interactive_performance(request: pytest.FixtureRequest) -> Iterator[None]:
     """Give strict latency probes exclusive access to shared hardware."""
-    worker_input = getattr(request.config, "workerinput", None)
-    if worker_input is None:
-        worker_slot = 0
-        worker_count = 1
-    else:
-        worker_id = str(worker_input["workerid"])
-        worker_slot = int(worker_id.removeprefix("gw"))
-        worker_count = int(worker_input["workercount"])
-    exclusive = request.node.get_closest_marker("interactive_performance") is not None
-    with InterprocessPerformanceIsolation(
-        Path.cwd() / ".pytest-tmp",
-        worker_slot=worker_slot,
-        worker_count=worker_count,
-        exclusive=exclusive,
-    ):
+    with interactive_performance_isolation(request):
         yield
 
 
@@ -62,8 +48,7 @@ def qapp():
 def _flush_deferred_qt_deletions(qapp: QApplication) -> Iterator[None]:
     """Deliver deferred QObject deletions on the GUI thread after every test."""
     yield
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    qapp.processEvents()
+    flush_deferred_qt_lifetime(qapp)
 
 
 @pytest.fixture()

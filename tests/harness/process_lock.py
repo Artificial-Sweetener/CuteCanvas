@@ -21,9 +21,45 @@ import os
 import time
 from pathlib import Path
 from types import TracebackType
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
 from typing_extensions import Self
+
+if TYPE_CHECKING:
+    import pytest
+
+
+def interactive_performance_isolation(
+    request: pytest.FixtureRequest,
+) -> InterprocessPerformanceIsolation:
+    """Build the shared admission policy for one collected test."""
+    worker_slot, slot_count = performance_worker_slots(request)
+    exclusive = request.node.get_closest_marker("interactive_performance") is not None
+    return InterprocessPerformanceIsolation(
+        Path.cwd() / ".pytest-tmp",
+        worker_slot=worker_slot,
+        worker_count=slot_count,
+        exclusive=exclusive,
+    )
+
+
+def performance_worker_slots(
+    request: pytest.FixtureRequest,
+) -> tuple[int, int]:
+    """Return this worker slot and capacity including allowed replacements."""
+    worker_input = getattr(request.config, "workerinput", None)
+    if worker_input is None:
+        return 0, 1
+    worker_id = str(worker_input["workerid"])
+    worker_slot = int(worker_id.removeprefix("gw"))
+    worker_count = int(worker_input["workercount"])
+    configured_restarts = getattr(request.config.option, "maxworkerrestart", None)
+    restart_capacity = (
+        worker_count * 4
+        if configured_restarts is None
+        else max(0, int(configured_restarts))
+    )
+    return worker_slot, worker_count + restart_capacity
 
 
 class InterprocessPerformanceIsolation:

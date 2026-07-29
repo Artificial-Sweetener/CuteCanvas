@@ -678,6 +678,7 @@ def test_soft_mask_preview_is_pixel_identical_to_transformed_commit(
         viewer.markDirty()
         viewer.update()
         harness.drain_events()
+        assert harness.wait_for_render_refinement_idle()
         floating = renderer.get_base_buffer()
         assert floating is not None
         floating_pixels = qimage_to_numpy_argb32(floating.copy())
