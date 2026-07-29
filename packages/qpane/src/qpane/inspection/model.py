@@ -52,7 +52,7 @@ class InspectionTarget:
 
 @dataclass(frozen=True, slots=True)
 class InspectionRegion:
-    """Describe a source-independent visible region in normalized coordinates."""
+    """Describe normalized center and target span per physical display pixel."""
 
     center_x: float
     center_y: float
@@ -70,7 +70,7 @@ class InspectionRegion:
 
 @dataclass(frozen=True, slots=True)
 class InspectionViewState:
-    """Pair a normalized region with its target-local zoom interpretation."""
+    """Pair normalized inspection geometry with target-local zoom interpretation."""
 
     region: InspectionRegion
     zoom_mode: InspectionZoomMode = InspectionZoomMode.CUSTOM

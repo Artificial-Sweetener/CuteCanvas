@@ -18,7 +18,8 @@ Whether you are building a simple photo viewer or a mission-critical imaging sys
 *   **Fluid Pan & Zoom Navigation:** Silky smooth zooming, panning, and tiling out of the box.
 *   **Declarative Render Scenes:** Arrange shared raster and vector sources into review grids, contact sheets, overlays, and layered views without flattening pixels.
 *   **Public Rendering SDK:** Build custom sources, scene layers, effects, hit tests, and viewer tools while QPane owns tiling, damage, caching, and scheduling.
-*   **Inspection and Layout SDK:** Link native-size views by normalized region,
+*   **Inspection and Layout SDK:** Link native-size views by normalized center
+    and display scale, preserve manual inspection through viewport resizing,
     arrange stable responsive target grids, and compare independent targets
     without merging their coordinate spaces.
 *   **Host MIME Dragging:** Materialize files, companion variants, text, or

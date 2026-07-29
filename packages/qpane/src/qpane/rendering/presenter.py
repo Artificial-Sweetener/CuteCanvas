@@ -81,7 +81,8 @@ from .scene_coordinates import (
 from .scene_hit_testing import SceneRenderHitTester
 from .tiles import TileManager
 from .vector_planner import VectorRenderPlanner
-from .viewport import Viewport, ViewportZoomMode
+from .viewport import Viewport
+from .viewport_resize import ViewportResizeAlignment
 
 if TYPE_CHECKING:
     from ..cache.registry import CacheRegistry
@@ -203,8 +204,10 @@ class RenderingPresenter:
         self._layer_clip_presentations = LayerClipPresentationRegistry()
         self._presentation_effects = LayerPresentationEffectRegistry()
         self._scene_hit_tester = SceneRenderHitTester()
-        self._last_view_size = QSize()
-        self._last_device_pixel_ratio = float(qpane.devicePixelRatioF())
+        self._viewport_resize = ViewportResizeAlignment(
+            self.viewport,
+            float(qpane.devicePixelRatioF()),
+        )
         self._last_scroll_reuse_signature: tuple[object, ...] | None = None
         self._pending_navigation_plan: SceneRenderPlan | None = None
         self._navigation_refinement_timer = QTimer(qpane)
@@ -890,20 +893,14 @@ class RenderingPresenter:
         """Reapply FIT/custom zoom and buffers when the qpane geometry changes."""
         current_size = self._qpane.size()
         current_dpr = float(self._qpane.devicePixelRatioF())
-        dpr_changed = not isclose(
-            current_dpr, self._last_device_pixel_ratio, rel_tol=1e-9, abs_tol=1e-9
-        )
-        if not force and current_size == self._last_view_size and not dpr_changed:
+        if not self._viewport_resize.align(
+            current_size,
+            current_dpr,
+            force=force,
+        ):
             return
         self._tile_grid_runtime.observe_viewport(self._qpane_physical_size())
-        zoom_mode = self.viewport.get_zoom_mode()
-        if zoom_mode == ViewportZoomMode.FIT:
-            self.viewport.setZoomFit()
-        else:
-            self.viewport.setPan(self.viewport.pan)
         self.allocate_buffers()
-        self._last_view_size = QSize(current_size)
-        self._last_device_pixel_ratio = current_dpr
 
     def physical_viewport_rect(self) -> QRectF:
         """Return the viewport rectangle expressed in device pixels."""
@@ -999,14 +996,6 @@ class RenderingPresenter:
     def image_to_panel_point(self, image_point: QPoint) -> QPointF | None:
         """Project an image-space coordinate into the widget."""
         return self.viewport.content_to_panel_point(image_point)
-
-    def handle_resize(self) -> None:
-        """Respond to QWidget resize events."""
-        if self.viewport.get_zoom_mode() == ViewportZoomMode.FIT:
-            self._handle_resize_fit_mode()
-        else:
-            self._handle_resize_custom_mode()
-        self.allocate_buffers()
 
     def minimum_size_hint(self) -> QSize:
         """Return the safe minimum widget size for the current image."""
@@ -1267,14 +1256,6 @@ class RenderingPresenter:
             compiled=compiled,
             frame=self._frame_geometry_for(compiled, use_pan=None),
         )
-
-    def _handle_resize_fit_mode(self) -> None:
-        """Keep the viewport zoom aligned with the available widget size in FIT mode."""
-        self.viewport.setZoomFit()
-
-    def _handle_resize_custom_mode(self) -> None:
-        """Reapply the current pan so it is clamped after a custom-mode resize."""
-        self.viewport.setPan(self.viewport.pan)
 
     def _frame_geometry_for(
         self,

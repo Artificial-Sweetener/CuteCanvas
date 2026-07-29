@@ -276,19 +276,21 @@ extensions.
 
 ## Independent inspection and target layout
 
-`qpane.sdk.inspection` stores the visible region independently of source
-resolution. `InspectionTarget` identifies native bounds,
-`capture_inspection()` converts a viewport transform into an
+`qpane.sdk.inspection` stores inspection center and display scale independently
+of source resolution and viewport size. `InspectionTarget` identifies native
+bounds, `capture_inspection()` converts a viewport transform into an
 `InspectionViewState`, and `project_inspection()` derives target-local zoom and
 pan for another view. `InspectionStateStore` owns explicit link groups,
 generation-guards callbacks, and keeps 1:1 interpretation local to the target
 that requested it.
 
-An `InspectionRegion` records normalized center and span values rather than
-source pixels. `InspectionZoomMode` retains fit, native-scale, or custom
-interpretation for the target that authored the state. Projection produces a
-`ProjectedViewport`, while linked publication sends an `InspectionUpdate` to
-each registered `InspectionObserver` without recursively republishing it.
+An `InspectionRegion` records a normalized center and normalized target span
+per physical display pixel. A larger viewport therefore reveals more content
+around the same center without changing custom zoom. `InspectionZoomMode`
+retains fit, native-scale, or custom interpretation for the target that
+authored the state. Projection produces a `ProjectedViewport`, while linked
+publication sends an `InspectionUpdate` to each registered
+`InspectionObserver` without recursively republishing it.
 
 `qpane.sdk.layout` supplies source-neutral target geometry.
 A `ViewTargetSpec` combines a stable target identity with its native size.

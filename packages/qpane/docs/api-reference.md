@@ -362,17 +362,18 @@ root facade and declarative SDK above.
 ### Inspection and target layout
 
 - `InspectionTarget` identifies one native coordinate space.
-- `InspectionRegion` stores a source-neutral visible rectangle as normalized center and span values.
-- `InspectionViewState` retains a normalized visible region and target-local
-  zoom interpretation.
+- `InspectionRegion` stores a source-neutral center plus normalized target span
+  per physical display pixel.
+- `InspectionViewState` retains viewport-independent inspection scale and
+  target-local zoom interpretation.
 - `InspectionZoomMode` preserves whether a target view is fitted, native scale, or custom.
 - `InspectionUpdate` carries one generation-guarded linked-view observation to a subscribed target.
 - `InspectionObserver` is the callback contract used to receive immutable inspection updates.
 - `ProjectedViewport` contains the target-local zoom, pan, and zoom interpretation produced from normalized inspection.
 - `InspectionStateStore` owns independent state, explicit link groups, and
   generation-guarded observation.
-- `capture_inspection` and `project_inspection` convert between normalized
-  inspection and target viewport transforms.
+- `capture_inspection` and `project_inspection` convert between
+  viewport-independent normalized inspection and target viewport transforms.
 - `ViewTargetSpec` identifies one independently rendered target and its native dimensions.
 - `ViewTargetFrame` contains a responsive-grid cell and its aspect-preserving content rectangle.
 - `ResponsiveGridPolicy` selects minimum-width or maximum-reference-area topology, spacing, hysteresis, partial-row alignment, and an optional column limit.

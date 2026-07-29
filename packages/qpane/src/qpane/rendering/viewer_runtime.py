@@ -240,7 +240,6 @@ class ViewerRenderingRuntime(QObject):
 
     def resize(self) -> None:
         """Realign physical viewport and renderer buffers after widget resize."""
-        self._presenter.handle_resize()
         self._presenter.ensure_view_alignment(force=True)
         self._pane.update()
 

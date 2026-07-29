@@ -154,7 +154,7 @@ class ViewerNavigation:
         self,
         entry: ViewerCatalogEntry,
     ) -> InspectionViewState | None:
-        """Return source-size-independent viewport center and visible region."""
+        """Return viewport-independent normalized center and display scale."""
         zoom = float(self._viewport.zoom)
         if entry.size.width() <= 0 or entry.size.height() <= 0 or zoom <= 0.0:
             return None

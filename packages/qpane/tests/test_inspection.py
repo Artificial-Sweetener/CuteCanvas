@@ -60,6 +60,25 @@ def test_projection_preserves_native_zoom_semantics_across_resolutions() -> None
     assert high_projection.pan == QPointF(-100.0, 50.0)
 
 
+def test_projection_scale_and_center_are_independent_of_viewport_size() -> None:
+    """Viewport growth reveals more content without changing manual inspection."""
+    target = _target(1600.0, 1200.0)
+    state = capture_inspection(
+        target,
+        QSizeF(800.0, 600.0),
+        zoom=1.375,
+        pan=QPointF(143.0, -97.0),
+    )
+
+    shrink = project_inspection(target, QSizeF(503.0, 311.0), state)
+    grow = project_inspection(target, QSizeF(1201.0, 907.0), state)
+
+    assert shrink.zoom == pytest.approx(1.375)
+    assert grow.zoom == pytest.approx(1.375)
+    assert shrink.pan == QPointF(143.0, -97.0)
+    assert grow.pan == QPointF(143.0, -97.0)
+
+
 def test_projection_contains_region_when_target_aspect_changes() -> None:
     """Aspect changes show the complete normalized region without cropping."""
     wide = _target(2000.0, 1000.0)
@@ -74,8 +93,8 @@ def test_projection_contains_region_when_target_aspect_changes() -> None:
 
     projected = project_inspection(square, viewport, state)
 
-    horizontal_zoom = viewport.width() / (square.bounds.width() * state.region.span_x)
-    vertical_zoom = viewport.height() / (square.bounds.height() * state.region.span_y)
+    horizontal_zoom = 1.0 / (square.bounds.width() * state.region.span_x)
+    vertical_zoom = 1.0 / (square.bounds.height() * state.region.span_y)
     assert projected.zoom == min(horizontal_zoom, vertical_zoom)
 
 

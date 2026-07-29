@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Capture and project normalized inspection regions."""
+"""Capture and project viewport-independent normalized inspection geometry."""
 
 from __future__ import annotations
 
@@ -38,7 +38,11 @@ def capture_inspection(
     pan: QPointF,
     zoom_mode: InspectionZoomMode = InspectionZoomMode.CUSTOM,
 ) -> InspectionViewState:
-    """Capture one viewport as a normalized target-independent region.
+    """Capture one viewport as normalized target-independent inspection.
+
+    Region spans describe normalized target distance per physical display
+    pixel. They deliberately exclude viewport extent: resizing a viewport
+    reveals more or less content without changing the user's image scale.
 
     Args:
         target: Intrinsic target geometry being displayed.
@@ -48,7 +52,7 @@ def capture_inspection(
         zoom_mode: Local mode that produced the transform.
 
     Returns:
-        Detached normalized inspection state.
+        Detached normalized center and display-scale state.
 
     Raises:
         ValueError: If viewport or zoom geometry is invalid.
@@ -68,8 +72,8 @@ def capture_inspection(
     region = InspectionRegion(
         center_x=(center_scene_x - bounds.left()) / bounds.width(),
         center_y=(center_scene_y - bounds.top()) / bounds.height(),
-        span_x=size.width() / (bounds.width() * zoom),
-        span_y=size.height() / (bounds.height() * zoom),
+        span_x=1.0 / (bounds.width() * zoom),
+        span_y=1.0 / (bounds.height() * zoom),
     )
     return InspectionViewState(region, InspectionZoomMode(zoom_mode))
 
@@ -81,9 +85,9 @@ def project_inspection(
 ) -> ProjectedViewport:
     """Project normalized inspection state into one target-local viewport.
 
-    The requested region is contained when target and viewport aspect ratios
-    differ. This preserves every part of the shared semantic region rather than
-    cropping one axis or pretending the targets share a pixel coordinate space.
+    The target-relative display scale is contained when target aspect ratios
+    differ. Viewport dimensions validate the receiving surface but never alter
+    custom scale; resizing reveals more or less content around the same center.
 
     Args:
         target: Intrinsic target geometry receiving the state.
@@ -101,8 +105,8 @@ def project_inspection(
         raise ValueError("projection requires positive viewport dimensions")
     bounds = target.bounds
     region = state.region
-    zoom_x = size.width() / (bounds.width() * region.span_x)
-    zoom_y = size.height() / (bounds.height() * region.span_y)
+    zoom_x = 1.0 / (bounds.width() * region.span_x)
+    zoom_y = 1.0 / (bounds.height() * region.span_y)
     zoom = min(zoom_x, zoom_y)
     target_center = QPointF(
         bounds.left() + bounds.width() * region.center_x,
