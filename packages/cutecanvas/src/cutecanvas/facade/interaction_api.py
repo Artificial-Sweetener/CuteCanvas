@@ -158,11 +158,11 @@ class InteractionApiMixin:
     def setControlMode(
         self,
         mode: str,
-    ):
-        """Delegate control-mode changes to the interaction layer."""
+    ) -> bool:
+        """Select a persistent control mode and report whether it was accepted."""
         painting = self.paintingCoordinator()
         if mode == Tools.CONTROL_MODE_CLONE_STAMP:
             painting.set_stroke_operation(self.cloneStampOperation())
         else:
             painting.use_direct_stroke_operation()
-        self.interaction.set_control_mode(mode)
+        return self.interaction.set_control_mode(mode)

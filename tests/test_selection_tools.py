@@ -37,6 +37,7 @@ def _event(
     point: QPointF,
     button: Qt.MouseButton,
     buttons: Qt.MouseButton,
+    modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
 ) -> QMouseEvent:
     """Build a mouse event for one selection gesture."""
     return QMouseEvent(
@@ -46,7 +47,7 @@ def _event(
         point,
         button,
         buttons,
-        Qt.KeyboardModifier.NoModifier,
+        modifiers,
     )
 
 
@@ -101,7 +102,7 @@ def test_rectangle_tool_commits_scene_geometry_once() -> None:
     assert commits[0].combine_mode is CoverageCombineMode.REPLACE
 
 
-def test_selection_modifiers_choose_add_subtract_and_intersect() -> None:
+def test_selection_modifiers_make_alt_subtractive_with_precedence() -> None:
     modifier = {"shift": False, "alt": False}
     modes = []
     tool = EllipseSelectionTool()
@@ -121,7 +122,7 @@ def test_selection_modifiers_choose_add_subtract_and_intersect() -> None:
     assert modes == [
         CoverageCombineMode.ADD,
         CoverageCombineMode.SUBTRACT,
-        CoverageCombineMode.INTERSECT,
+        CoverageCombineMode.SUBTRACT,
     ]
 
 
@@ -190,7 +191,7 @@ def test_escape_cancels_active_geometry_without_committing() -> None:
 
 
 def test_shape_modifiers_constrain_geometry_and_preserve_feather() -> None:
-    """Mid-gesture Shift and Alt should constrain without changing algebra."""
+    """Shift should constrain while Alt changes algebra without changing geometry."""
     modifiers = {"shift": False, "alt": False}
     commits = []
     tool = RectangleSelectionTool()
@@ -223,6 +224,45 @@ def test_shape_modifiers_constrain_geometry_and_preserve_feather() -> None:
 
     assert len(commits) == 1
     item = commits[0]
-    assert item.geometry.local_bounds == (10.0, 10.0, 20.0, 20.0)
+    assert item.geometry.local_bounds == (20.0, 20.0, 10.0, 10.0)
     assert item.feather_radius == 7.5
     assert item.combine_mode is CoverageCombineMode.REPLACE
+
+
+def test_first_shape_gesture_uses_pointer_alt_without_centering_geometry() -> None:
+    """A missed key press must not make the first Alt gesture additive or centered."""
+
+    commits = []
+    tool = RectangleSelectionTool()
+    tool.activate(
+        PixelSelectionInteractionPort(
+            panel_to_scene_point=lambda point: point,
+            is_alt_held=lambda: False,
+            default_combine_mode=CoverageCombineMode.ADD,
+            commit_coverage_item=lambda item: commits.append(item) or True,
+        )
+    )
+
+    tool.mousePressEvent(
+        _event(
+            QEvent.Type.MouseButtonPress,
+            QPointF(20.0, 20.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.AltModifier,
+        )
+    )
+    tool.mouseReleaseEvent(
+        _event(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(30.0, 25.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.AltModifier,
+        )
+    )
+
+    assert len(commits) == 1
+    item = commits[0]
+    assert item.combine_mode is CoverageCombineMode.SUBTRACT
+    assert item.geometry.local_bounds == (20.0, 20.0, 10.0, 5.0)

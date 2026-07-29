@@ -33,7 +33,7 @@ from ..types import ControlMode
 class CloneStampHost(Protocol):
     """Describe widget commands delegated by the Clone Stamp facade."""
 
-    def setControlMode(self, mode: str) -> None:
+    def setControlMode(self, mode: str) -> bool:
         """Activate one registered tool mode."""
         ...
 
@@ -74,9 +74,9 @@ class CloneStampFacade:
         """Return current immutable source and configuration state."""
         return self._host.cloneStampState()
 
-    def activate(self) -> None:
-        """Activate the Clone Stamp tool."""
-        self._host.setControlMode(ControlMode.CLONE_STAMP.value)
+    def activate(self) -> bool:
+        """Select the Clone Stamp tool and report acceptance."""
+        return self._host.setControlMode(ControlMode.CLONE_STAMP.value)
 
     def set_source(self, scene_position: QPointF) -> bool:
         """Set a source in active-document scene coordinates."""

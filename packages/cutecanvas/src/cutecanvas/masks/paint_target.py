@@ -135,6 +135,7 @@ class MaskCoveragePaintTargetOwner:
         if mask_id is None:
             return False
         self._service.resetStrokePipeline(mask_id)
+        self._service.controller.edits.cancel_stroke(mask_id)
         self._active_mask_id = None
         self._coordinates = None
         return True

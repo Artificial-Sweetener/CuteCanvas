@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import ClassVar
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen
@@ -34,6 +35,8 @@ from qpane import (
 
 from cutecanvas.painting import BrushOperation, BrushStrokeSegment, BrushStrokeSession
 from cutecanvas.tools.base import BaseTool
+from cutecanvas.tools.cursor_feedback import ToolCursorStyle
+from cutecanvas.tools.modifier_snapshot import alt_is_active, shift_is_active
 from cutecanvas.tools.ports import PaintingInteractionPort
 
 from .brush_preview import BrushPreview, BrushPreviewRenderer
@@ -65,6 +68,8 @@ class BrushTool(BaseTool):
         tablet_requires_host_enablement=True,
         touch_preview=True,
     )
+    cursor_style: ClassVar[ToolCursorStyle] = ToolCursorStyle.BRUSH
+    supports_alt_erase_indicator: ClassVar[bool] = True
 
     def __init__(self):
         """Initialize brush state and default signal helpers."""
@@ -195,8 +200,9 @@ class BrushTool(BaseTool):
             return
         self._pending_undo_push = True
         self._stroke_has_content = False
-        erase_mode = self._is_alt_held()
-        if self._is_shift_held() and self.last_paint_anchor_point is not None:
+        erase_mode = alt_is_active(self._is_alt_held(), event.modifiers())
+        shift_held = shift_is_active(self._is_shift_held(), event.modifiers())
+        if shift_held and self.last_paint_anchor_point is not None:
             self._pending_undo_push = True
             self._emit_stroke(
                 self.last_paint_anchor_point,
@@ -226,13 +232,16 @@ class BrushTool(BaseTool):
         stroke_point = self._resolve_stroke_point(panel_point)
         if stroke_point is None:
             return
-        if self._is_shift_held() and self.last_paint_anchor_point is not None:
+        if (
+            shift_is_active(self._is_shift_held(), event.modifiers())
+            and self.last_paint_anchor_point is not None
+        ):
             self.current_preview_point = stroke_point
             self.signals.repaint_overlay_requested.emit()
             event.accept()
             return
         if self.is_drawing and self.last_draw_point is not None:
-            erase_mode = self._is_alt_held()
+            erase_mode = alt_is_active(self._is_alt_held(), event.modifiers())
             stroke_point = self._emit_stroke(
                 self.last_draw_point,
                 stroke_point,
@@ -311,7 +320,10 @@ class BrushTool(BaseTool):
             self.clear_pointer_preview()
             return self._pointer_stroke.active
         diameter = self._pointer_diameter(sample)
-        erase = sample.device is PointerDeviceKind.ERASER or self._is_alt_held()
+        erase = sample.device is PointerDeviceKind.ERASER or alt_is_active(
+            self._is_alt_held(),
+            sample.modifiers,
+        )
         self._set_pointer_preview(
             sample,
             diameter=diameter,
@@ -385,7 +397,10 @@ class BrushTool(BaseTool):
         if stroke_point is None:
             self.clear_pointer_preview()
             return False
-        erase = sample.device is PointerDeviceKind.ERASER or self._is_alt_held()
+        erase = sample.device is PointerDeviceKind.ERASER or alt_is_active(
+            self._is_alt_held(),
+            sample.modifiers,
+        )
         diameter = (
             float(self._get_brush_size())
             if sample.phase is PointerPhase.HOVER

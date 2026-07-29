@@ -167,6 +167,7 @@ class ExampleWindow(QMainWindow):
                 self.extensions.lens_tool_action,
             ),
         )
+        self.qpane.controlModeChanged.connect(self.tools.sync_mode)
         self.extensions = ExtensionTutorialController(
             self.qpane,
             self,

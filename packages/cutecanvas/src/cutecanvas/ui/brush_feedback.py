@@ -21,8 +21,6 @@ from __future__ import annotations
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
-BRUSH_OUTLINE_PADDING = 4
-
 
 def draw_brush_outline(
     painter: QPainter,

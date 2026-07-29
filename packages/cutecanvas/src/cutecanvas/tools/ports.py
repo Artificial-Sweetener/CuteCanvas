@@ -26,13 +26,15 @@ from PySide6.QtCore import QPoint, QPointF, QRect
 from PySide6.QtGui import QColor, QPen
 from qpane import CursorInteractionPort, NavigationInteractionPort
 
+from cutecanvas.coverage import CoverageCombineMode
+
 from .dependencies import ToolDependencies
 
 if TYPE_CHECKING:
     from qpane.sdk.rendering import PanelHitTest
     from qpane.sdk.scene import TransformModifiers, TransformOperation
 
-    from cutecanvas.coverage import CoverageCombineMode, CoverageItem, CoverageSnapshot
+    from cutecanvas.coverage import CoverageItem, CoverageSnapshot
     from cutecanvas.painting.tools.brush_preview import AffineBrushPreview
 
     from ..editor.transform_interaction import TransformBoxPresentation
@@ -100,6 +102,7 @@ class PixelSelectionInteractionPort:
     commit_coverage_item: Callable[[CoverageItem], bool] = lambda _item: False
     is_shift_held: Callable[[], bool] = _false
     is_alt_held: Callable[[], bool] = _false
+    default_combine_mode: CoverageCombineMode = CoverageCombineMode.REPLACE
     get_shape_feather_radius: Callable[[], float] = lambda: 0.0
 
 

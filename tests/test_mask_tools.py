@@ -59,10 +59,14 @@ class _PositionStub:
 
 class _MouseEventStub:
     def __init__(
-        self, point: QPoint, button: Qt.MouseButton = Qt.MouseButton.LeftButton
+        self,
+        point: QPoint,
+        button: Qt.MouseButton = Qt.MouseButton.LeftButton,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
     ):
         self._point = point
         self._button = button
+        self._modifiers = modifiers
         self.accepted = False
 
     def button(self) -> Qt.MouseButton:
@@ -70,6 +74,9 @@ class _MouseEventStub:
 
     def position(self):
         return _PositionStub(self._point)
+
+    def modifiers(self) -> Qt.KeyboardModifier:
+        return self._modifiers
 
     def accept(self) -> None:
         self.accepted = True
@@ -381,6 +388,30 @@ def test_brush_tool_eraser_hover_previews_erase_state(qapp) -> None:
     preview = tool.pointer_preview
     assert preview is not None
     assert preview.erase is True
+
+
+def test_brush_first_mouse_stroke_uses_pointer_alt_snapshot(qapp) -> None:
+    """A missed key press cannot make the first physically modified stroke paint."""
+
+    tool = BrushTool()
+    tool.activate(
+        PaintingInteractionPort(
+            is_alt_held=lambda: False,
+            panel_to_content_point=lambda point: point,
+        )
+    )
+    segments: list[BrushStrokeSegment] = []
+    tool.signals.stroke_applied.connect(segments.append)
+
+    event = _MouseEventStub(
+        QPoint(5, 5),
+        modifiers=Qt.KeyboardModifier.AltModifier,
+    )
+    tool.mousePressEvent(event)
+
+    assert event.accepted
+    assert segments
+    assert segments[0].erase is True
 
 
 def test_brush_tool_bounds_hover_repaints_to_old_and_new_ring_extents(qapp) -> None:

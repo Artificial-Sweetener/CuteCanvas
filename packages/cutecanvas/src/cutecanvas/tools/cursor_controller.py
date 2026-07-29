@@ -26,7 +26,7 @@ from PySide6.QtGui import QCursor
 
 from ..core import CursorProvider
 from ..editor import EditorOperation
-from .tools import Tools
+from .cursor_feedback import ToolCursorStyle
 
 if TYPE_CHECKING:
     from ..canvas import CuteCanvas
@@ -92,19 +92,23 @@ class EditorCursorController:
                 if cursor is not None:
                     self._apply_cursor(cursor)
                     return
-        if mode in (
-            Tools.CONTROL_MODE_DRAW_BRUSH,
-            Tools.CONTROL_MODE_CLONE_STAMP,
-        ):
+        style = getattr(
+            active_tool,
+            "cursor_style",
+            ToolCursorStyle.DEFAULT,
+        )
+        erase_indicator = self.alt_held and bool(
+            getattr(active_tool, "supports_alt_erase_indicator", False)
+        )
+        if style is ToolCursorStyle.BRUSH:
             self.update_brush(
-                erase_indicator=(
-                    self.alt_held and mode == Tools.CONTROL_MODE_DRAW_BRUSH
-                )
+                erase_indicator=erase_indicator,
             )
-        elif mode == Tools.CONTROL_MODE_SMART_SELECT:
+        elif style is ToolCursorStyle.PRECISE:
             self._apply_cursor(
-                canvas.cursor_builder.create_smart_select_cursor(
-                    erase_indicator=self.alt_held
+                canvas.cursor_builder.create_precision_cursor(
+                    erase_indicator=erase_indicator,
+                    device_pixel_ratio=canvas.devicePixelRatioF(),
                 )
             )
         else:
@@ -135,18 +139,14 @@ class EditorCursorController:
             max(2, round(logical_size)),
             color,
             erase_indicator=erase_indicator,
+            device_pixel_ratio=dpr,
         )
         self.custom_cursor = cursor
         self._apply_cursor(cursor)
 
     def update_for_modifiers(self) -> None:
         """Refresh cursor feedback when mode-sensitive modifiers change."""
-        if self._canvas._tools_manager.get_control_mode() in (
-            Tools.CONTROL_MODE_DRAW_BRUSH,
-            Tools.CONTROL_MODE_CLONE_STAMP,
-            Tools.CONTROL_MODE_SMART_SELECT,
-        ):
-            self.update()
+        self.update()
 
     def synchronize_window(self) -> None:
         """Apply the desired widget cursor to the active Qt window immediately."""

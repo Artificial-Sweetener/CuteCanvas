@@ -184,7 +184,6 @@ class ToolModeTutorialController:
                 self._show_status("Add or select a vector layer first.")
                 return
         self._canvas.setControlMode(mode)
-        self.sync_mode(mode)
         self._show_status(activation_note or f"Mode: {self.describe_mode(mode)}")
         self._document_refresh()
 

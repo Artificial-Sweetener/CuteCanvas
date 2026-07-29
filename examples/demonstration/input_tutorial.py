@@ -13,13 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Teach application-level shortcuts without coupling them to editor tools.
-
-CuteCanvas owns canvas input. The surrounding application still owns global
-conveniences such as hold-Space navigation, click-to-open on an empty canvas,
-and status-bar zoom editing. This QObject installs one bounded event filter and
-forwards only the gestures the shell intentionally owns.
-"""
+"""Teach application-level shortcuts without duplicating CuteCanvas input."""
 
 from __future__ import annotations
 
@@ -28,7 +22,7 @@ from collections.abc import Callable
 
 from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
-from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
+from PySide6.QtGui import QCursor, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
 
 logger = logging.getLogger(__name__)
@@ -59,8 +53,6 @@ class ApplicationInputTutorial(QObject):
         self._apply_zoom_edit = apply_zoom_edit
         self._resize_zoom_editor = resize_zoom_editor
         self._resize_zoom_toggle = resize_zoom_toggle
-        self._space_forwarded = False
-        self._space_restore_mode: str | None = None
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -72,47 +64,12 @@ class ApplicationInputTutorial(QObject):
                 return True
             if self._handle_open_image_event(watched, event):
                 return True
-            if self.handle_spacebar_event(watched, event):
-                return True
         except Exception:
             logger.exception(
                 "Global event filter failed (type=%s, watched=%s)",
                 event.type(),
                 type(watched).__name__,
             )
-        return False
-
-    def handle_spacebar_event(self, watched: QObject, event: QEvent) -> bool:
-        """Temporarily suspend the active tool for hold-Space navigation."""
-        event_type = event.type()
-        if event_type not in (
-            QEvent.Type.KeyPress,
-            QEvent.Type.KeyRelease,
-            QEvent.Type.ShortcutOverride,
-        ):
-            return False
-        if not isinstance(event, QKeyEvent) or event.key() != Qt.Key.Key_Space:
-            return False
-        if event_type in (
-            QEvent.Type.KeyPress,
-            QEvent.Type.ShortcutOverride,
-        ) and self._should_forward_space_event(watched, event):
-            if not self._space_forwarded and not event.isAutoRepeat():
-                self._space_restore_mode = self._canvas.getControlMode()
-                if self._space_restore_mode != CuteCanvas.CONTROL_MODE_PANZOOM:
-                    self._canvas.setControlMode(CuteCanvas.CONTROL_MODE_PANZOOM)
-            event.accept()
-            self._space_forwarded = True
-            return True
-        if event_type == QEvent.Type.KeyRelease and self._space_forwarded:
-            event.accept()
-            if event.isAutoRepeat():
-                return True
-            if self._space_restore_mode is not None:
-                self._canvas.setControlMode(self._space_restore_mode)
-            self._space_restore_mode = None
-            self._space_forwarded = False
-            return True
         return False
 
     def canvas_under_cursor(self, canvas: CuteCanvas) -> bool:
@@ -162,16 +119,6 @@ class ApplicationInputTutorial(QObject):
             event.accept()
             return True
         return False
-
-    def _should_forward_space_event(
-        self,
-        watched: QObject,
-        event: QKeyEvent,
-    ) -> bool:
-        """Forward global Space only while the pointer is over the canvas."""
-        if event.isAutoRepeat() or not self.canvas_under_cursor(self._canvas):
-            return False
-        return not self._is_canvas_target(watched)
 
     def _is_canvas_target(self, watched: QObject) -> bool:
         """Return whether one watched object belongs to the editor canvas."""

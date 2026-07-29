@@ -223,7 +223,7 @@ change composition archives, alter exports, or copy layer pixels.
 - CuteCanvas.installedFeatures — Report which optional features (mask, SAM) are active after initialization.
 - CuteCanvas.availableControlModes — List all registered control modes, including custom tools.
 - CuteCanvas.getControlMode — Return the currently active control mode ID.
-- CuteCanvas.setControlMode — Switch to a registered mode; unavailable mask/SAM modes are ignored while the placeholder is active, and unknown mode IDs raise `ValueError`.
+- CuteCanvas.setControlMode — Select a registered mode and return whether it was accepted. While Space is held, Pan/Zoom remains effective until release; unavailable mask/SAM modes return `False`, and unknown mode IDs raise `ValueError`.
 - CuteCanvas.CONTROL_MODE_CURSOR — Built-in inert cursor mode (no pan/zoom).
 - CuteCanvas.CONTROL_MODE_PANZOOM — Built-in pan/zoom mode for navigation.
 - CuteCanvas.CONTROL_MODE_MOVE — Built-in selection-aware mode that moves selected editable pixels first, or a selectable movable layer when no pixel selection exists.
@@ -667,6 +667,7 @@ See also: [Documents and Layers](scenes.md) and [Interaction Modes](interaction-
 ## Signals and Events
 
 ### Documents and Interaction
+- CuteCanvas.controlModeChanged — Control-mode ID emitted after every successful tool activation, including internal fallbacks and host-initiated changes.
 - CuteCanvas.compositionChanged — `CompositionSnapshot` payload emitted after composition records change.
 - CuteCanvas.compositionSelectionChanged — Composition UUID or `None` payload emitted when selection changes.
 - CuteCanvas.sceneChanged — `SceneSnapshot` or `None` payload emitted when the normalized active render scene changes.

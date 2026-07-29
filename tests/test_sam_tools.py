@@ -32,9 +32,15 @@ class _PointWrapper:
 
 
 class _StubMouseEvent:
-    def __init__(self, button: Qt.MouseButton, point: QPoint):
+    def __init__(
+        self,
+        button: Qt.MouseButton,
+        point: QPoint,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ):
         self._button = button
         self._position = _PointWrapper(point)
+        self._modifiers = modifiers
         self.accepted = False
 
     def button(self) -> Qt.MouseButton:
@@ -42,6 +48,9 @@ class _StubMouseEvent:
 
     def position(self):
         return self._position
+
+    def modifiers(self) -> Qt.KeyboardModifier:
+        return self._modifiers
 
     def accept(self) -> None:
         self.accepted = True
@@ -161,6 +170,33 @@ def test_smart_select_accepts_direct_touch_drag(smart_select_tool) -> None:
 
     assert len(emissions) == 1
     assert np.array_equal(emissions[0][0], np.array([2, 3, 20, 30]))
+
+
+def test_smart_select_first_gesture_uses_pointer_alt_snapshot(
+    smart_select_tool,
+) -> None:
+    """A focus transition cannot make the first modified selection additive."""
+
+    emissions = []
+    smart_select_tool.signals.region_selected_for_masking.connect(
+        lambda bbox, erase: emissions.append((bbox, erase))
+    )
+    press = _StubMouseEvent(
+        Qt.MouseButton.LeftButton,
+        QPoint(1, 2),
+        Qt.KeyboardModifier.AltModifier,
+    )
+    release = _StubMouseEvent(
+        Qt.MouseButton.LeftButton,
+        QPoint(20, 30),
+        Qt.KeyboardModifier.AltModifier,
+    )
+
+    smart_select_tool.mousePressEvent(press)
+    smart_select_tool.mouseReleaseEvent(release)
+
+    assert len(emissions) == 1
+    assert emissions[0][1] is True
 
 
 def test_smart_select_ignores_zero_area_selection(smart_select_tool):

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
@@ -28,6 +28,8 @@ from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QWheelEv
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from cutecanvas.tools.base import BaseTool
+from cutecanvas.tools.cursor_feedback import ToolCursorStyle
+from cutecanvas.tools.modifier_snapshot import alt_is_active
 from cutecanvas.tools.ports import SmartSelectionInteractionPort
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,8 @@ class SmartSelectTool(BaseTool):
     """
 
     input_profile = ToolInputProfile(touch=True)
+    cursor_style: ClassVar[ToolCursorStyle] = ToolCursorStyle.PRECISE
+    supports_alt_erase_indicator: ClassVar[bool] = True
 
     def __init__(self):
         """Initialize selection state and reset dependency callbacks."""
@@ -132,7 +136,10 @@ class SmartSelectTool(BaseTool):
         """Finalize the selection and emit a bounding box when valid."""
         if event.button() != Qt.MouseButton.LeftButton or not self.is_selecting_region:
             return
-        self._finish_selection(event.position().toPoint())
+        self._finish_selection(
+            event.position().toPoint(),
+            event.modifiers(),
+        )
         event.accept()
 
     def handle_pointer_sample(self, sample: PointerSample) -> bool:
@@ -145,7 +152,7 @@ class SmartSelectTool(BaseTool):
         if sample.phase is PointerPhase.END:
             if not self.is_selecting_region:
                 return False
-            self._finish_selection(point)
+            self._finish_selection(point, sample.modifiers)
             return True
         if sample.phase is PointerPhase.CANCEL:
             was_selecting = self.is_selecting_region
@@ -219,7 +226,11 @@ class SmartSelectTool(BaseTool):
         self.signals.repaint_overlay_requested.emit()
         return True
 
-    def _finish_selection(self, panel_point: QPoint) -> None:
+    def _finish_selection(
+        self,
+        panel_point: QPoint,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
         """Emit a valid selection rectangle and clear transient state."""
         self.is_selecting_region = False
         self.selection_end_point = self._panel_to_mask_point(panel_point)
@@ -241,8 +252,10 @@ class SmartSelectTool(BaseTool):
                 min_size = self._get_min_selection_size()
                 if (x2 - x1) > min_size and (y2 - y1) > min_size:
                     bbox = np.array([x1, y1, x2, y2])
-                    erase_mode = self._is_alt_held()
-                    self.signals.region_selected_for_masking.emit(bbox, erase_mode)
+                    self.signals.region_selected_for_masking.emit(
+                        bbox,
+                        alt_is_active(self._is_alt_held(), modifiers),
+                    )
         self._clear_selection()
 
     def _panel_to_mask_point(self, panel_point: QPoint) -> QPoint | None:
@@ -301,6 +314,7 @@ def disconnect_smart_select_signals(
 
 def smart_select_cursor_provider(qpane_instance: CuteCanvas) -> QCursor | None:
     """Provide the smart-select cursor with erase indicator support."""
-    return qpane_instance.cursor_builder.create_smart_select_cursor(
-        erase_indicator=qpane_instance.interaction.alt_key_held
+    return qpane_instance.cursor_builder.create_precision_cursor(
+        erase_indicator=qpane_instance.interaction.alt_key_held,
+        device_pixel_ratio=qpane_instance.devicePixelRatioF(),
     )

@@ -47,7 +47,7 @@ class EditorCommandHost(EditorHandleHost, CloneStampHost, Protocol):
         """Return the active tool mode."""
         ...
 
-    def setControlMode(self, mode: str) -> None:
+    def setControlMode(self, mode: str) -> bool:
         """Activate one registered tool mode."""
         ...
 
@@ -125,9 +125,9 @@ class ToolFacade:
         """Return the active tool mode."""
         return self._host.getControlMode()
 
-    def activate(self, mode: str) -> None:
-        """Activate one registered tool mode."""
-        self._host.setControlMode(mode)
+    def activate(self, mode: str) -> bool:
+        """Select one registered tool mode and report acceptance."""
+        return self._host.setControlMode(mode)
 
 
 class HistoryFacade:

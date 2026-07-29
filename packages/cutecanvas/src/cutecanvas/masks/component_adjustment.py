@@ -51,7 +51,7 @@ class MaskComponentAdjustmentTool:
         if layer is None:
             logger.warning("Cannot adjust mask %s: no mask data available.", mask_id)
             return None
-        snapshot = layer.coverage.raster.snapshot()
+        snapshot = layer.coverage.snapshot()
         bounds = snapshot.bounds
         if bounds is None:
             return None

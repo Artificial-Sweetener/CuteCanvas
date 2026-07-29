@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
-from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas import CuteCanvas, LayerPolicy, PixelSelectionMode
 from cutecanvas.document import CanvasDocument, CanvasViewSession
 from cutecanvas.document.inspection import SessionInspectionBinding
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt
@@ -29,6 +29,7 @@ from PySide6.QtTest import QTest
 from qpane.sdk.inspection import InspectionStateStore
 from qpane.sdk.rendering import ViewportZoomMode
 from qpane.sdk.types import LinkedGroup
+from qpane.sdk.vector import VectorShapeKind
 
 
 class _InspectionViewport:
@@ -217,6 +218,68 @@ def test_shared_mask_history_notifies_every_mounted_view(qapp) -> None:
         restored = document.masks.get_mask_image_copy(mask_id)
         assert restored is not None
         assert QColor(restored.pixel(32, 32)).red() == 0
+    finally:
+        first.close()
+        second.close()
+        document.close()
+
+
+def test_hybrid_mask_history_survives_view_projection_rebinding(qapp) -> None:
+    """Rebinding a view cannot fork hybrid mask state or its chronology."""
+    document = CanvasDocument()
+    first = CuteCanvas(document=document, features=("mask",))
+    second = CuteCanvas(document=document, features=("mask",))
+    first_changes: list[uuid.UUID] = []
+    second_changes: list[uuid.UUID] = []
+    first.maskUndoStackChanged.connect(first_changes.append)
+    second.maskUndoStackChanged.connect(second_changes.append)
+    try:
+        composition_id = first.createComposition(
+            QRectF(0.0, 0.0, 64.0, 64.0),
+            title="Hybrid mask",
+        )
+        other_id = first.createComposition(
+            QRectF(0.0, 0.0, 32.0, 32.0),
+            title="Temporary projection",
+        )
+        first.openComposition(composition_id)
+        second.openComposition(composition_id)
+        mask_id = first.createBlankMask(QSize(64, 64))
+        assert mask_id is not None
+        assert first.setActiveMaskID(mask_id)
+        assert second.setActiveMaskID(mask_id)
+        assert (
+            first.addCoverageShape(
+                VectorShapeKind.RECTANGLE,
+                QRectF(8.0, 8.0, 48.0, 48.0),
+                PixelSelectionMode.ADD,
+            )
+            is not None
+        )
+        generated = np.zeros((64, 64), dtype=np.uint8)
+        generated[24:40, 24:40] = 255
+        first.mask_service.handleGeneratedMask(
+            generated,
+            np.array((24, 24, 39, 39), dtype=np.int32),
+            erase_mode=True,
+        )
+        erased = document.masks.get_mask_image_copy(mask_id)
+        assert erased is not None
+        assert erased.pixelColor(32, 32).red() == 0
+
+        second.openComposition(other_id)
+        second.openComposition(composition_id)
+        assert second.setActiveMaskID(mask_id)
+        assert second.undoSceneEdit()
+        qapp.processEvents()
+
+        restored = document.masks.get_mask_image_copy(mask_id)
+        assert restored is not None
+        assert restored.pixelColor(32, 32).red() == 255
+        layer = document.masks.get_layer(mask_id)
+        assert layer is not None and layer.coverage.has_retained_items
+        assert mask_id in first_changes
+        assert mask_id in second_changes
     finally:
         first.close()
         second.close()

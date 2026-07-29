@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import ClassVar
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
@@ -25,11 +26,17 @@ from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
 from cutecanvas.coverage import CoverageCombineMode
 
 from .base import BaseTool
+from .coverage_operation import resolve_coverage_operation
+from .cursor_feedback import ToolCursorStyle
+from .modifier_snapshot import alt_is_active, shift_is_active
 from .ports import PaintBucketInteractionPort
 
 
 class PaintBucketTool(BaseTool):
     """Submit one stale-safe target fill per primary-button click."""
+
+    cursor_style: ClassVar[ToolCursorStyle] = ToolCursorStyle.PRECISE
+    supports_alt_erase_indicator: ClassVar[bool] = True
 
     def __init__(self) -> None:
         """Initialize inert dependencies for safe activation changes."""
@@ -56,7 +63,10 @@ class PaintBucketTool(BaseTool):
             event.ignore()
             return
         point = self._panel_to_target(QPointF(event.position()))
-        if point is None or not self._request_fill(point, self._combine_mode()):
+        if point is None or not self._request_fill(
+            point,
+            self._combine_mode(event.modifiers()),
+        ):
             event.ignore()
             return
         event.accept()
@@ -69,22 +79,21 @@ class PaintBucketTool(BaseTool):
         event.accept()
 
     def getCursor(self) -> QCursor | None:
-        """Show precise or forbidden feedback for the active target."""
-        return QCursor(
-            Qt.CursorShape.CrossCursor
-            if self._can_fill()
-            else Qt.CursorShape.ForbiddenCursor
-        )
+        """Defer precise feedback while retaining unavailable-state ownership."""
+        if self._can_fill():
+            return None
+        return QCursor(Qt.CursorShape.ForbiddenCursor)
 
-    def _combine_mode(self) -> CoverageCombineMode:
+    def _combine_mode(
+        self,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ) -> CoverageCombineMode:
         """Map familiar coverage modifiers to the shared algebra."""
-        shift = self._is_shift_held()
-        alt = self._is_alt_held()
-        if shift and alt:
-            return CoverageCombineMode.INTERSECT
-        if alt:
-            return CoverageCombineMode.SUBTRACT
-        return CoverageCombineMode.ADD
+        return resolve_coverage_operation(
+            default=CoverageCombineMode.ADD,
+            alt_held=alt_is_active(self._is_alt_held(), modifiers),
+            shift_held=shift_is_active(self._is_shift_held(), modifiers),
+        )
 
     def _reset_dependencies(self) -> None:
         """Install inert collaborators after construction or deactivation."""

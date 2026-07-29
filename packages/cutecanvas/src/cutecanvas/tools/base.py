@@ -17,9 +17,13 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 from PySide6.QtCore import QPoint, Signal
 from qpane import CursorTool, PanZoomTool, ViewerTool, ViewerToolSignals
+
+from .cursor_feedback import ToolCursorStyle
 
 
 class ToolSignals(ViewerToolSignals):
@@ -36,6 +40,9 @@ class ToolSignals(ViewerToolSignals):
 
 class BaseTool(ViewerTool):
     """Base for CuteCanvas tools that add editor-domain requests."""
+
+    cursor_style: ClassVar[ToolCursorStyle] = ToolCursorStyle.DEFAULT
+    supports_alt_erase_indicator: ClassVar[bool] = False
 
     def __init__(self) -> None:
         """Create the editor signal hub expected by built-in editor tools."""

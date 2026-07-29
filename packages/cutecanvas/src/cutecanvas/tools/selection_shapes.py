@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from typing import ClassVar
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent, QPainter, QPen, QPolygonF
@@ -32,6 +33,9 @@ from cutecanvas.coverage import (
 )
 
 from .base import BaseTool
+from .coverage_operation import resolve_coverage_operation
+from .cursor_feedback import ToolCursorStyle
+from .modifier_snapshot import alt_is_active, shift_is_active
 from .ports import PixelSelectionInteractionPort
 
 
@@ -39,6 +43,8 @@ class SelectionShapeTool(BaseTool):
     """Own the common gesture, modifier, and commit lifecycle for selections."""
 
     input_profile = ToolInputProfile(touch=True, tablet=True)
+    cursor_style: ClassVar[ToolCursorStyle] = ToolCursorStyle.PRECISE
+    supports_alt_erase_indicator: ClassVar[bool] = True
 
     def __init__(self) -> None:
         """Initialize an idle retained-geometry gesture."""
@@ -50,6 +56,7 @@ class SelectionShapeTool(BaseTool):
         self._scene_points: list[QPointF] = []
         self._panel_points: list[QPointF] = []
         self._gesture_combine_mode = CoverageCombineMode.REPLACE
+        self._pointer_modifiers = Qt.KeyboardModifier.NoModifier
 
     def activate(self, dependencies: PixelSelectionInteractionPort) -> None:
         """Capture coordinate and selection collaborators."""
@@ -58,6 +65,7 @@ class SelectionShapeTool(BaseTool):
         self._commit = dependencies.commit_coverage_item
         self._is_shift_held = dependencies.is_shift_held
         self._is_alt_held = dependencies.is_alt_held
+        self._default_combine_mode = dependencies.default_combine_mode
         self._get_feather_radius = dependencies.get_shape_feather_radius
 
     def deactivate(self) -> None:
@@ -70,7 +78,7 @@ class SelectionShapeTool(BaseTool):
         if event.button() != Qt.MouseButton.LeftButton:
             event.ignore()
             return
-        if self._begin(QPointF(event.position())):
+        if self._begin(QPointF(event.position()), event.modifiers()):
             event.accept()
         else:
             event.ignore()
@@ -82,7 +90,7 @@ class SelectionShapeTool(BaseTool):
         ):
             event.ignore()
             return
-        self._update(QPointF(event.position()))
+        self._update(QPointF(event.position()), event.modifiers())
         event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -90,7 +98,7 @@ class SelectionShapeTool(BaseTool):
         if event.button() != Qt.MouseButton.LeftButton or self._begin_panel is None:
             event.ignore()
             return
-        self._finish(QPointF(event.position()))
+        self._finish(QPointF(event.position()), event.modifiers())
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -105,12 +113,12 @@ class SelectionShapeTool(BaseTool):
     def handle_pointer_sample(self, sample: PointerSample) -> bool:
         """Route touch and tablet samples through the same gesture lifecycle."""
         if sample.phase is PointerPhase.BEGIN:
-            return self._begin(sample.position)
+            return self._begin(sample.position, sample.modifiers)
         if sample.phase is PointerPhase.UPDATE and self._begin_panel is not None:
-            self._update(sample.position)
+            self._update(sample.position, sample.modifiers)
             return True
         if sample.phase is PointerPhase.END and self._begin_panel is not None:
-            self._finish(sample.position)
+            self._finish(sample.position, sample.modifiers)
             return True
         if sample.phase is PointerPhase.CANCEL and self._begin_panel is not None:
             self._clear_gesture()
@@ -119,12 +127,10 @@ class SelectionShapeTool(BaseTool):
         return False
 
     def getCursor(self) -> QCursor | None:
-        """Return the standard precise-selection crosshair."""
-        return QCursor(
-            Qt.CursorShape.CrossCursor
-            if self._can_select()
-            else Qt.CursorShape.ForbiddenCursor
-        )
+        """Defer precise feedback while retaining unavailable-state ownership."""
+        if self._can_select():
+            return None
+        return QCursor(Qt.CursorShape.ForbiddenCursor)
 
     def draw_overlay(self, painter: QPainter) -> None:
         """Draw transient vector geometry without rasterizing selection coverage."""
@@ -138,7 +144,11 @@ class SelectionShapeTool(BaseTool):
         self._draw_geometry(painter)
         painter.restore()
 
-    def _begin(self, panel_point: QPointF) -> bool:
+    def _begin(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> bool:
         """Start a gesture when panel coordinates map into the active scene."""
         if not self._can_select():
             return False
@@ -149,23 +159,33 @@ class SelectionShapeTool(BaseTool):
         self._current_panel = QPointF(panel_point)
         self._scene_points = [QPointF(scene_point)]
         self._panel_points = [QPointF(panel_point)]
+        self._pointer_modifiers = modifiers
         self._gesture_combine_mode = self._modifier_combine_mode()
         self.signals.repaint_overlay_requested.emit()
         return True
 
-    def _update(self, panel_point: QPointF) -> None:
+    def _update(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
         """Append or replace current gesture geometry."""
         scene_point = self._panel_to_scene(panel_point)
         if scene_point is None:
             return
+        self._pointer_modifiers = modifiers
         self._current_panel = QPointF(panel_point)
         self._update_panel_points(panel_point)
         self._update_scene_points(scene_point)
         self.signals.repaint_overlay_requested.emit()
 
-    def _finish(self, panel_point: QPointF) -> None:
+    def _finish(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
         """Rasterize valid geometry once and commit it to selection state."""
-        self._update(panel_point)
+        self._update(panel_point, modifiers)
         item = self._coverage_item()
         if item is not None:
             self._commit(item)
@@ -178,15 +198,17 @@ class SelectionShapeTool(BaseTool):
 
     def _modifier_combine_mode(self) -> CoverageCombineMode:
         """Translate familiar pre-gesture modifiers into coverage algebra."""
-        shift = self._is_shift_held()
-        alt = self._is_alt_held()
-        if shift and alt:
-            return CoverageCombineMode.INTERSECT
-        if shift:
-            return CoverageCombineMode.ADD
-        if alt:
-            return CoverageCombineMode.SUBTRACT
-        return CoverageCombineMode.REPLACE
+        return resolve_coverage_operation(
+            default=self._default_combine_mode,
+            alt_held=alt_is_active(
+                self._is_alt_held(),
+                self._pointer_modifiers,
+            ),
+            shift_held=shift_is_active(
+                self._is_shift_held(),
+                self._pointer_modifiers,
+            ),
+        )
 
     def _clear_gesture(self) -> None:
         """Discard transient vector state."""
@@ -194,6 +216,7 @@ class SelectionShapeTool(BaseTool):
         self._current_panel = None
         self._scene_points.clear()
         self._panel_points.clear()
+        self._pointer_modifiers = Qt.KeyboardModifier.NoModifier
 
     def _reset_dependencies(self) -> None:
         """Install inert collaborators for safe deactivation."""
@@ -202,14 +225,17 @@ class SelectionShapeTool(BaseTool):
         self._commit: Callable[[CoverageItem], bool] = lambda _item: False
         self._is_shift_held: Callable[[], bool] = lambda: False
         self._is_alt_held: Callable[[], bool] = lambda: False
+        self._default_combine_mode = CoverageCombineMode.REPLACE
         self._get_feather_radius: Callable[[], float] = lambda: 0.0
 
     def _shape_rectangle(self, points: list[QPointF]) -> QRectF | None:
         """Return current constrained rectangle in the points' coordinate space."""
         return _gesture_rectangle(
             points,
-            constrain=self._is_shift_held(),
-            from_center=self._is_alt_held(),
+            constrain=shift_is_active(
+                self._is_shift_held(),
+                self._pointer_modifiers,
+            ),
         )
 
     def _update_scene_points(self, scene_point: QPointF) -> None:
@@ -316,9 +342,8 @@ def _gesture_rectangle(
     points: list[QPointF],
     *,
     constrain: bool,
-    from_center: bool,
 ) -> QRectF | None:
-    """Return a positive shape rectangle with constraint and center modifiers."""
+    """Return a positive corner-anchored rectangle with optional constraint."""
     if len(points) < 2:
         return None
     origin = points[0]
@@ -330,11 +355,5 @@ def _gesture_rectangle(
             origin.x() + (-extent if delta.x() < 0.0 else extent),
             origin.y() + (-extent if delta.y() < 0.0 else extent),
         )
-    if from_center:
-        opposite = QPointF(
-            2.0 * origin.x() - endpoint.x(), 2.0 * origin.y() - endpoint.y()
-        )
-        rectangle = QRectF(opposite, endpoint).normalized()
-    else:
-        rectangle = QRectF(origin, endpoint).normalized()
+    rectangle = QRectF(origin, endpoint).normalized()
     return None if rectangle.isEmpty() else rectangle

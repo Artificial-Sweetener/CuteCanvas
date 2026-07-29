@@ -661,6 +661,7 @@ class CuteCanvas(QWidget):
     floatingPixelEditChanged: Signal
     selectedLayerChanged: Signal
     editorPolicyChanged: Signal
+    controlModeChanged: Signal
     rasterBoundsRequestCompleted: Signal
     placedAssetRequestCompleted: Signal
     layerRasterizationCompleted: Signal
@@ -1282,4 +1283,4 @@ class CuteCanvas(QWidget):
     def setControlMode(
         self,
         mode: str,
-    ) -> None: ...
+    ) -> bool: ...

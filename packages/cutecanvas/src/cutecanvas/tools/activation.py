@@ -24,6 +24,7 @@ from PySide6.QtGui import QPen
 from qpane import CursorInteractionPort, NavigationInteractionPort
 from qpane.sdk.vector import VectorShapeKind
 
+from ..coverage import CoverageCombineMode
 from ..editor import EditorOperation
 from ..painting.tools.clone_feedback import CloneStampFeedbackProjector
 from .ports import (
@@ -129,6 +130,7 @@ def build_editor_tool_ports(
         commit_coverage_item=painting.commit_coverage_item,
         is_shift_held=is_shift_held,
         is_alt_held=is_alt_held,
+        default_combine_mode=CoverageCombineMode.ADD,
         get_shape_feather_radius=lambda: qpane.coverageShapeConfiguration().options.feather_radius,
     )
     painting_port = PaintingInteractionPort(

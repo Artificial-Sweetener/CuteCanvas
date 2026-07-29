@@ -37,7 +37,7 @@ from cutecanvas.coverage import (
 from ..composition.edit_controller import CompositionEditController
 from ..raster.sparse_grid import SparseRasterSnapshot
 from ..resources import ProjectResourceKind, ProjectResourceStore
-from .coverage_history import MaskCoverageState
+from .coverage_transactions import MaskCoverageTransactions
 from .history import MaskHistory
 from .mask_undo import (
     MaskHistoryChange,
@@ -89,6 +89,11 @@ class MaskAssetStore:
             self,
             undo_limit=undo_limit,
         )
+        self._coverage_edits = MaskCoverageTransactions(
+            layer=self.get_layer,
+            history=self._history,
+            changed=self._touch,
+        )
         self._history_subscribers: list[Callable[[MaskHistoryChange], None]] = []
 
     def get_layer(self, mask_id: uuid.UUID) -> MaskLayer | None:
@@ -99,6 +104,11 @@ class MaskAssetStore:
         """Return authoritative pixel storage for one asset."""
         layer = self._masks.get(mask_id)
         return None if layer is None else layer.coverage.raster
+
+    @property
+    def coverage_edits(self) -> MaskCoverageTransactions:
+        """Return the owner of atomic hybrid-coverage transactions."""
+        return self._coverage_edits
 
     def mask_ids(self) -> tuple[uuid.UUID, ...]:
         """Return all asset identifiers in creation order."""
@@ -200,6 +210,7 @@ class MaskAssetStore:
         """Delete one asset and its independent history."""
         if mask_id not in self._masks:
             return False
+        self._coverage_edits.discard(mask_id)
         if self._resources.get(mask_id) is not None:
             self._resources.remove(mask_id)
         self._history.dispose_mask(mask_id)
@@ -248,10 +259,7 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Commit retained mask authorship through composition history."""
-        changed = self._history.commit_coverage_item(mask_id, item, notify=notify)
-        if changed:
-            self._touch(mask_id)
-        return changed
+        return self._coverage_edits.commit_item(mask_id, item, notify=notify)
 
     def rasterize_coverage(
         self,
@@ -260,28 +268,7 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Flatten retained mask items as one reversible hybrid transition."""
-        layer = self._masks.get(mask_id)
-        if layer is None or not layer.coverage.has_retained_items:
-            return False
-        before = MaskCoverageState(
-            layer.coverage.raster.state_snapshot(),
-            layer.coverage.retained,
-        )
-        if not layer.coverage.rasterize():
-            return False
-        after = MaskCoverageState(
-            layer.coverage.raster.state_snapshot(),
-            layer.coverage.retained,
-        )
-        changed = self._history.record_applied_coverage(
-            mask_id,
-            before,
-            after,
-            notify=notify,
-        )
-        if changed:
-            self._touch(mask_id)
-        return changed
+        return self._coverage_edits.rasterize(mask_id, notify=notify)
 
     def record_applied_mask_patches(
         self,
@@ -347,10 +334,11 @@ class MaskAssetStore:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Commit complete mask structure and pixels through history."""
-        changed = self._history.commit_surface(mask_id, snapshot, notify=notify)
-        if changed:
-            self._touch(mask_id)
-        return changed
+        return self._coverage_edits.commit_surface(
+            mask_id,
+            snapshot,
+            notify=notify,
+        )
 
     def undo_mask(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
         """Undo one asset edit."""

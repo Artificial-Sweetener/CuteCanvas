@@ -23,8 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor, QKeySequence, QMouseEvent, QPen, QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QCursor, QMouseEvent, QPen, QWheelEvent
 from qpane import PointerInputPort
 from qpane.sdk.overlays import OverlayDrawFn, SceneOverlayDrawFn
 from qpane.sdk.ui import (
@@ -32,12 +31,14 @@ from qpane.sdk.ui import (
 )
 
 from ..core import CursorProvider
-from ..editor import EditorOperation, EditorOperationTarget
-from .activation import build_editor_tool_ports
+from .activation_controller import EditorToolActivationController
 from .cursor_controller import EditorCursorController
 from .input import PointerInputController
+from .keyboard_input import EditorKeyboardInputController
 from .overlay_controller import EditorOverlayController
+from .shortcuts import EditorHistoryShortcuts
 from .tools import Tools
+from .transient_input import TransientToolInput
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
 
@@ -52,16 +53,47 @@ class ToolInteractionDelegate:
         """Initialize the delegate with the owning CuteCanvas widget."""
         self._qpane = qpane
         self._tools_activated = False
-        self._mode_before_pan: str | None = None
         self._preview_outline_pen = QPen(Qt.black, 1, Qt.SolidLine)
         self._preview_inline_pen = QPen(Qt.white, 1, Qt.DashLine)
-        self._shift_key_held = False
         self._overlays = EditorOverlayController(qpane.update)
         self._pointer_input = PointerInputController(self._pointer_port())
         self._cursor = EditorCursorController(
             qpane,
             lambda: self._pointer_input.cursor_suppressed,
         )
+        self._activation = EditorToolActivationController(
+            qpane,
+            cancel_pointer_input=self._pointer_input.cancel_active_sequences,
+            is_alt_held=lambda: self._transient_input.alt_held,
+            is_shift_held=lambda: self._transient_input.shift_held,
+            brush_size=lambda: self.brush_size,
+            preview_pens=lambda: (
+                self._preview_outline_pen,
+                self._preview_inline_pen,
+            ),
+        )
+        self._transient_input = TransientToolInput(
+            navigation_mode=Tools.CONTROL_MODE_PANZOOM,
+            activate=self._activate_effective_mode,
+            accepts=self._activation.accepts,
+            suspend_active_tool=self._suspend_active_tool,
+            active_tool_captures_space=self._active_tool_captures_space,
+            state_changed=self._handle_transient_state_changed,
+        )
+        self._history_shortcuts = EditorHistoryShortcuts(
+            undo=qpane.undoSceneEdit,
+            redo=qpane.redoSceneEdit,
+        )
+        self._keyboard = EditorKeyboardInputController(
+            qpane,
+            transient=self._transient_input,
+            history=self._history_shortcuts,
+            forward_widget_press=lambda event: super(type(qpane), qpane).keyPressEvent(
+                event
+            ),
+        )
+        qpane.destroyed.connect(lambda _obj=None: self.shutdown())
+        self._shutdown = False
 
     def _pointer_port(self) -> PointerInputPort:
         """Build QPane's source-neutral pointer boundary for this editor host."""
@@ -124,22 +156,12 @@ class ToolInteractionDelegate:
     @property
     def alt_key_held(self) -> bool:
         """Return True when the delegate detected an Alt press."""
-        return self._cursor.alt_held
-
-    @alt_key_held.setter
-    def alt_key_held(self, value: bool) -> None:
-        """Update the cached Alt state used by cursor providers."""
-        self._cursor.alt_held = bool(value)
+        return self._transient_input.alt_held
 
     @property
     def shift_key_held(self) -> bool:
         """Return True while the Shift modifier is pressed."""
-        return self._shift_key_held
-
-    @shift_key_held.setter
-    def shift_key_held(self, value: bool) -> None:
-        """Cache Shift state so tools can adjust behaviour."""
-        self._shift_key_held = bool(value)
+        return self._transient_input.shift_held
 
     @property
     def overlays_suspended(self) -> bool:
@@ -267,66 +289,42 @@ class ToolInteractionDelegate:
         self.resume_overlays()
         qpane.update()
 
-    def set_control_mode(self, mode: str) -> None:
-        """Switch the active tool mode after validating feature availability.
-
-        Args:
-            mode: Control mode identifier exposed by Tools.
-
-        Side effects:
-            Verifies mask/SAM features before enabling their modes, builds the
-            ToolDependencies payload from the viewport and CuteCanvas state, and forwards it
-            to the tool manager.
-        """
-        qpane = self._qpane
-        tools = qpane._tools_manager
-        if mode in (
-            Tools.CONTROL_MODE_DRAW_BRUSH,
-            Tools.CONTROL_MODE_CLONE_STAMP,
-        ):
-            resolution = qpane.editorOperationResolver().resolve(EditorOperation.PAINT)
-            mask_service = getattr(qpane, "mask_service", None)
-            if (
-                mode == Tools.CONTROL_MODE_DRAW_BRUSH
-                and resolution.target is EditorOperationTarget.DEFAULT_PAINT_TARGET
-                and mask_service is not None
-            ):
-                composition_id = qpane.currentCompositionID()
-                if mask_service.ensureActiveMaskForComposition(composition_id):
-                    mask_service.prepareBrushInteraction()
-                    qpane.view().coordinate_scene_descriptor()
-                    resolution = qpane.editorOperationResolver().resolve(
-                        EditorOperation.PAINT
-                    )
-            if (
-                mode == Tools.CONTROL_MODE_DRAW_BRUSH
-                and resolution.allowed
-                and mask_service is not None
-            ):
-                mask_service.prepareBrushInteraction()
-        elif mode == Tools.CONTROL_MODE_SMART_SELECT:
-            if not qpane.samFeatureAvailable():
-                qpane.featureFallbacks().get("sam", "setControlMode", default=None)
-                return
-        ports = build_editor_tool_ports(
-            qpane,
-            is_alt_held=lambda: self.alt_key_held,
-            is_shift_held=lambda: self._shift_key_held,
-            get_brush_size=lambda: self.brush_size,
-            get_preview_pens=lambda: (
-                self._preview_outline_pen,
-                self._preview_inline_pen,
-            ),
-        )
-
-        if tools.get_control_mode() != mode:
-            self._pointer_input.cancel_active_sequences()
-        tools.set_mode(mode, ports)
-        self._tools_activated = True
+    def set_control_mode(self, mode: str) -> bool:
+        """Select one persistent mode without displacing temporary navigation."""
+        accepted = self._transient_input.select_mode(mode)
+        self._tools_activated = self._tools_activated or accepted
+        return accepted
 
     def get_control_mode(self) -> str:
         """Return the current tool control mode."""
         return self._qpane._tools_manager.get_control_mode()
+
+    def _activate_effective_mode(self, mode: str) -> bool:
+        """Activate one transiently resolved mode and retain lifecycle state."""
+        activated = self._activation.activate(mode)
+        self._tools_activated = self._tools_activated or activated
+        return activated
+
+    def _suspend_active_tool(self) -> None:
+        """Finish or cancel in-flight work before temporary navigation."""
+        active_tool = self._qpane._tools_manager.get_active_tool()
+        suspend = getattr(active_tool, "suspend_for_temporary_navigation", None)
+        if callable(suspend):
+            suspend()
+
+    def _active_tool_captures_space(self) -> bool:
+        """Return whether an active text-edit session owns literal Space."""
+        active_tool = self._qpane._tools_manager.get_active_tool()
+        captures = getattr(active_tool, "captures_space_key", None)
+        return bool(callable(captures) and captures())
+
+    def _handle_transient_state_changed(self) -> None:
+        """Project authoritative modifier state into cursor and repaint owners."""
+        if self._shutdown:
+            return
+        self._cursor.alt_held = self._transient_input.alt_held
+        self.update_modifier_key_cursor()
+        self._qpane.update()
 
     def update_cursor(self) -> None:
         """Apply the cursor selected by the focused arbitration owner."""
@@ -434,6 +432,8 @@ class ToolInteractionDelegate:
 
     def _handle_pointer_state_changed(self) -> None:
         """Reconcile CuteCanvas's cursor with direct-input lifecycle state."""
+        if self._shutdown:
+            return
         self.update_cursor()
 
     def _synchronize_effective_cursor(self) -> None:
@@ -452,95 +452,20 @@ class ToolInteractionDelegate:
         """Release application-wide pointer observation while hidden."""
         self._pointer_input.set_application_observation(False)
         self._pointer_input.cancel_active_sequences()
+        self._keyboard.reset()
 
     def shutdown(self) -> None:
         """Release application-level input hooks owned by this delegate."""
+        if self._shutdown:
+            return
+        self._shutdown = True
+        self._keyboard.shutdown()
         self._pointer_input.shutdown()
 
     def handle_key_press(self, event) -> bool:
-        """Handle copy, modifier, and temporary pan shortcuts before delegating to Qt.
-
-        Args:
-            event: QKeyEvent raised by the CuteCanvas widget.
-
-        Returns:
-            bool: True when the delegate consumed the event.
-        """
-        qpane = self._qpane
-        if qpane._is_blank:
-            return True
-        focused_widget = QApplication.focusWidget()
-        if event.matches(QKeySequence.StandardKey.Copy):
-            if qpane.isAncestorOf(focused_widget):
-                event.ignore()
-                qpane._tools_manager.keyPressEvent(event)
-            else:
-                super(type(qpane), qpane).keyPressEvent(event)
-            return event.isAccepted()
-        if event.key() == Qt.Key_Shift:
-            if not event.isAutoRepeat():
-                self._shift_key_held = True
-                qpane.update()
-            event.accept()
-            return True
-        if event.key() == Qt.Key_Alt:
-            if not event.isAutoRepeat():
-                self.alt_key_held = True
-                self.update_modifier_key_cursor()
-            event.accept()
-            return True
-        if event.key() == Qt.Key_Space:
-            active_tool = qpane._tools_manager.get_active_tool()
-            captures_space = getattr(active_tool, "captures_space_key", None)
-            if callable(captures_space) and captures_space():
-                event.ignore()
-                qpane._tools_manager.keyPressEvent(event)
-                return event.isAccepted()
-            if not event.isAutoRepeat():
-                current_mode = self.get_control_mode()
-                if current_mode != Tools.CONTROL_MODE_PANZOOM:
-                    suspend = getattr(
-                        active_tool,
-                        "suspend_for_temporary_navigation",
-                        None,
-                    )
-                    if callable(suspend):
-                        suspend()
-                    self._mode_before_pan = current_mode
-                    self.set_control_mode(Tools.CONTROL_MODE_PANZOOM)
-            event.accept()
-            return True
-        event.ignore()
-        qpane._tools_manager.keyPressEvent(event)
-        return event.isAccepted()
+        """Route key presses through the focused keyboard owner."""
+        return self._keyboard.handle_press(event)
 
     def handle_key_release(self, event) -> bool:
-        """Reset Alt/Shift/Space state and report whether the event was consumed.
-
-        Args:
-            event: QKeyEvent raised by the CuteCanvas widget.
-
-        Returns:
-            bool: True when the delegate handled the event.
-        """
-        if event.key() == Qt.Key_Space:
-            if not event.isAutoRepeat() and self._mode_before_pan is not None:
-                self.set_control_mode(self._mode_before_pan)
-                self._mode_before_pan = None
-            event.accept()
-            return True
-        if event.key() == Qt.Key_Alt:
-            if not event.isAutoRepeat():
-                self.alt_key_held = False
-                self.update_modifier_key_cursor()
-            event.accept()
-            return True
-        if event.key() == Qt.Key_Shift:
-            if not event.isAutoRepeat():
-                self._shift_key_held = False
-                self._qpane.update()
-            event.accept()
-            return True
-        event.ignore()
-        self._qpane._tools_manager.keyReleaseEvent(event)
-        return event.isAccepted()
+        """Route key releases through the focused keyboard owner."""
+        return self._keyboard.handle_release(event)

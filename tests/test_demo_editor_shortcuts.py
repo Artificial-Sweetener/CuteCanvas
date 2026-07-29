@@ -23,7 +23,7 @@ import numpy as np
 from cutecanvas import CuteCanvas
 from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent
+from PySide6.QtGui import QColor, QImage, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionToolButton, QWidget
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
@@ -527,7 +527,6 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
 
 def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
     qapp: QApplication,
-    monkeypatch,
 ) -> None:
     """The demo should expose intentional resolution controls only when needed."""
     size = 240
@@ -586,31 +585,11 @@ def test_demo_shows_contextual_resolution_controls_for_floating_pixels(
         assert window.tools.editor_controls.anchor_floating_action.isEnabled()
         assert window.tools.editor_controls.promote_floating_action.isEnabled()
         floating_before_space = window.qpane.floatingPixelEditState()
-        monkeypatch.setattr(
-            window.application_input,
-            "canvas_under_cursor",
-            lambda _pane: True,
-        )
-        space_press = QKeyEvent(
-            QEvent.KeyPress,
-            Qt.Key_Space,
-            Qt.NoModifier,
-        )
-        space_release = QKeyEvent(
-            QEvent.KeyRelease,
-            Qt.Key_Space,
-            Qt.NoModifier,
-        )
-        assert window.application_input.handle_spacebar_event(
-            window.commands.toolbar,
-            space_press,
-        )
+        window.qpane.setFocus()
+        QTest.keyPress(window.qpane, Qt.Key.Key_Space)
         assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_PANZOOM
         assert window.qpane.floatingPixelEditState() == floating_before_space
-        assert window.application_input.handle_spacebar_event(
-            window.commands.toolbar,
-            space_release,
-        )
+        QTest.keyRelease(window.qpane, Qt.Key.Key_Space)
         assert window.qpane.getControlMode() == CuteCanvas.CONTROL_MODE_MOVE
         assert window.qpane.floatingPixelEditState() == floating_before_space
         window.tools.editor_controls.cancel_floating_action.trigger()

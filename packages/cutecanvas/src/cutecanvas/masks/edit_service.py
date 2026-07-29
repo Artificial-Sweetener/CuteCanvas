@@ -40,6 +40,7 @@ from .coverage_history import MaskCoverageCommand
 from .mask import MaskAssetStore, MaskLayer
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_undo import MaskHistoryChange, MaskImageCommand, MaskPatch
+from .mixed_stroke import MixedMaskStrokeCoordinator
 from .render_cache import MaskRenderCache
 from .stroke_history import MaskStrokeHistorySession
 from .stroke_models import MaskStrokeJobResult, MaskStrokeJobSpec, MaskStrokePayload
@@ -107,6 +108,17 @@ class MaskEditService:
         self._content_changed = content_changed or self._structure_changed
         self._diagnostics = diagnostics
         self._stroke_history = MaskStrokeHistorySession()
+        self._mixed_strokes = MixedMaskStrokeCoordinator(
+            assets=assets,
+            renders=renders,
+            advance_epoch=lambda mask_id, reason: self.advance_epoch(
+                mask_id,
+                reason=reason,
+            ),
+            structure_changed=self._structure_changed,
+            mask_changed=mask_changed,
+            undo_changed=undo_changed,
+        )
 
     def _get_layer(self, mask_id: uuid.UUID | None) -> MaskLayer | None:
         """Return the canonical layer for a source id."""
@@ -528,6 +540,7 @@ class MaskEditService:
         if mask_id is None:
             return False
         self._stroke_history.begin(mask_id)
+        self._mixed_strokes.begin(mask_id)
         return True
 
     def update_stroke_image(
@@ -588,6 +601,11 @@ class MaskEditService:
             logger.warning("Cannot commit stroke %s: missing mask.", mask_id)
             return False
         payload = self._stroke_history.consume(mask_id)
+        if self._mixed_strokes.active(mask_id):
+            if not payload.patches and payload.structural_before is None:
+                self._mixed_strokes.cancel(mask_id)
+                return False
+            return self._mixed_strokes.commit(mask_id)
         if payload.structural_before is not None:
             layer = self._get_layer(mask_id)
             if layer is None:
@@ -610,6 +628,11 @@ class MaskEditService:
                 already_applied=already_applied,
             )
         return False
+
+    def cancel_stroke(self, mask_id: uuid.UUID) -> bool:
+        """Discard patch capture and restore provisional hybrid authorship."""
+        self._stroke_history.discard(mask_id)
+        return self._mixed_strokes.cancel(mask_id)
 
     def apply_mask_image(
         self,

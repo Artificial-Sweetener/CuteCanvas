@@ -28,6 +28,7 @@ from cutecanvas.ui.brush_feedback import (
     draw_brush_outline,
     draw_brush_path_outline,
 )
+from cutecanvas.ui.erase_indicator import EraseIndicatorRenderer
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +90,13 @@ class BrushPreview:
 class BrushPreviewRenderer:
     """Render direct-input feedback independently from the platform cursor."""
 
+    def __init__(
+        self,
+        erase_indicator: EraseIndicatorRenderer | None = None,
+    ) -> None:
+        """Capture the shared erase decoration collaborator."""
+        self._erase_indicator = erase_indicator or EraseIndicatorRenderer()
+
     def draw(
         self,
         painter: QPainter,
@@ -117,35 +125,12 @@ class BrushPreviewRenderer:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             draw_brush_outline(painter, ellipse, color)
             if preview.erase:
-                self._draw_erase_indicator(
+                self._erase_indicator.draw(
                     painter,
-                    center,
-                    logical_diameter,
+                    ellipse,
                 )
         finally:
             painter.restore()
-
-    @staticmethod
-    def _draw_erase_indicator(
-        painter: QPainter,
-        center: QPointF,
-        diameter: float,
-    ) -> None:
-        """Draw a compact high-contrast minus sign inside an eraser preview."""
-        half_length = max(2.0, min(8.0, diameter * 0.16))
-        y = center.y() + min(8.0, diameter * 0.2)
-        start = QPointF(center.x() - half_length, y)
-        end = QPointF(center.x() + half_length, y)
-        outline = QPen(QColor(Qt.GlobalColor.black), 3.0)
-        outline.setCosmetic(True)
-        outline.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(outline)
-        painter.drawLine(start, end)
-        foreground = QPen(QColor(Qt.GlobalColor.white), 1.0)
-        foreground.setCosmetic(True)
-        foreground.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(foreground)
-        painter.drawLine(start, end)
 
 
 @dataclass(frozen=True, slots=True)

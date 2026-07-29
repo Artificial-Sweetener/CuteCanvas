@@ -31,6 +31,26 @@ from qpane.sdk.rendering import PanelPoint, ScenePoint
 from tests.harness.timing import interaction_clock
 
 
+def test_canvas_emits_public_control_mode_changes(qapp) -> None:
+    """Hosts should observe public and internal tool transitions through CuteCanvas."""
+
+    del qapp
+    canvas = CuteCanvas(features=())
+    try:
+        observed: list[str] = []
+        canvas.controlModeChanged.connect(observed.append)
+
+        canvas.setControlMode(canvas.CONTROL_MODE_MOVE)
+        canvas.interaction.set_control_mode(canvas.CONTROL_MODE_PANZOOM)
+
+        assert observed == [
+            canvas.CONTROL_MODE_MOVE,
+            canvas.CONTROL_MODE_PANZOOM,
+        ]
+    finally:
+        canvas.deleteLater()
+
+
 def test_typed_handles_route_document_layer_tool_and_history_workflows(qapp) -> None:
     """Common editing should not require callers to pass scene/layer ID pairs."""
     canvas = CuteCanvas(features=())

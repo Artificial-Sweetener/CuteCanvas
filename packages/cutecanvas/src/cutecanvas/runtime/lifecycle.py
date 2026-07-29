@@ -255,6 +255,7 @@ class CanvasLifecycleMixin:
         self._composition_scene_adapter = components.composition_scene_adapter
         self._tools = components.tools
         tool_signals = components.tools.signals
+        tool_signals.mode_changed.connect(self.controlModeChanged.emit)
         tool_signals.stroke_applied.connect(components.painting.apply)
         tool_signals.stroke_completed.connect(components.painting.commit)
         tool_signals.stroke_cancelled.connect(components.painting.cancel)

@@ -102,6 +102,13 @@ redo, and `CompositionPersistenceFacade` saves complete composition archives.
 again. `CuteCanvas.editorOperationState()` explains whether a particular intent
 is allowed for the selected composition, layer, and pointer position.
 
+`CuteCanvas.controlModeChanged` is the authoritative source for pressed
+tool-button state because it also reports editor-owned fallback transitions:
+
+```python
+canvas.controlModeChanged.connect(tool_strip.set_active_mode)
+```
+
 Pass `execution_policy` when one widget should own a tuned standalone runtime.
 Pass `execution_runtime` when the application owns execution. When several
 editor views mount the same document, create one `CanvasDocumentRuntime` and
@@ -410,7 +417,9 @@ waiting resume. `CuteCanvas.resumeOverlays()` resumes without forcing a paint,
 `CuteCanvas.unregisterTool()` removes an inactive mode.
 `CuteCanvas.availableControlModes()` lists modes,
 `CuteCanvas.getControlMode()` returns the active one, and
-`CuteCanvas.setControlMode()` activates another.
+`CuteCanvas.setControlMode()` selects another and reports whether the selection
+was accepted. Pan/Zoom remains the active mode while Space is held and the
+latest accepted selection becomes active when Space is released.
 `CuteCanvas.registerCursorProvider()` supplies contextual cursor behavior, and
 `CuteCanvas.unregisterCursorProvider()` removes it.
 

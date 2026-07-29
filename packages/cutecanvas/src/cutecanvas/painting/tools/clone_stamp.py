@@ -18,11 +18,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import ClassVar
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QWheelEvent
 from qpane import PointerPhase, PointerSample
 
+from cutecanvas.tools.cursor_feedback import ToolCursorStyle
 from cutecanvas.tools.ports import CloneStampInteractionPort
 
 from .brush import BrushTool
@@ -31,6 +33,9 @@ from .brush_preview import AffineBrushPreview, AffineBrushPreviewRenderer
 
 class CloneStampTool(BrushTool):
     """Paint cloned pixels while adding only source-setting interaction."""
+
+    cursor_style: ClassVar[ToolCursorStyle] = ToolCursorStyle.BRUSH
+    supports_alt_erase_indicator: ClassVar[bool] = False
 
     def __init__(self) -> None:
         """Initialize shared stroke input and inert source dependencies."""

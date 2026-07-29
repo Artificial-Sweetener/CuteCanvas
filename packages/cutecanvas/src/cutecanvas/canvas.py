@@ -260,6 +260,8 @@ class CuteCanvas(
     """Emit selected scene-layer identity or ``None`` after it changes."""
     editorPolicyChanged: Signal = Signal(object)
     """Emit the immutable editor capability policy after replacement."""
+    controlModeChanged: Signal = Signal(str)
+    """Emit the public control-mode identity after tool activation changes."""
     rasterBoundsRequestCompleted: Signal = Signal(
         uuid.UUID, uuid.UUID, uuid.UUID, bool, str
     )
