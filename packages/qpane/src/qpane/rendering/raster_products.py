@@ -35,6 +35,10 @@ class RasterPyramidProducts(Protocol):
         """Return retained product state for ``asset_key`` when present."""
         ...
 
+    def can_retain_pyramid(self, image: QImage) -> bool:
+        """Return whether one derived pyramid can survive cache admission."""
+        ...
+
     def generate_pyramid_for_asset(
         self,
         asset_key: SourceRenderAssetKey,
@@ -122,6 +126,9 @@ class RasterRenderProductStore:
         """Return the best available product and lazily request missing levels."""
         self._advance_source_revision(asset_key)
         if self._pyramids.pyramid_for_asset(asset_key) is None:
+            if not self._pyramids.can_retain_pyramid(full_image):
+                self._discard_previews(asset_key)
+                return full_image
             self._pyramids.generate_pyramid_for_asset(asset_key, full_image)
         product = self._pyramids.get_best_fit_image_for_asset(asset_key, target_width)
         selected = full_image if product is None or product.isNull() else product

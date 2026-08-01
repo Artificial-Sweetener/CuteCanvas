@@ -30,10 +30,15 @@ class _PyramidProducts:
         self.images: dict[SourceRenderAssetKey, QImage] = {}
         self.generated: list[SourceRenderAssetKey] = []
         self.removed: list[SourceRenderAssetKey] = []
+        self.retainable = True
 
     def pyramid_for_asset(self, asset_key: SourceRenderAssetKey) -> object | None:
         """Return retained state when generated."""
         return self.images.get(asset_key)
+
+    def can_retain_pyramid(self, image: QImage) -> bool:
+        """Return the configured admission result for the supplied source."""
+        return self.retainable and not image.isNull()
 
     def generate_pyramid_for_asset(
         self,
@@ -140,6 +145,25 @@ def test_pending_pyramid_uses_one_bounded_preview_product() -> None:
     assert first.height() == 256
     assert second.cacheKey() == first.cacheKey()
     assert products.usage_bytes == first.sizeInBytes()
+
+
+def test_rejected_pyramid_admission_uses_authoritative_pixels_without_work() -> None:
+    """Memory pressure must select direct pixels without a derived-work loop."""
+    pyramids = _PyramidProducts()
+    pyramids.retainable = False
+    products = RasterRenderProductStore(pyramids, _TileProducts())
+    source = QImage(4096, 2048, QImage.Format_ARGB32_Premultiplied)
+    key = _key(uuid.uuid4(), "raster", 1)
+
+    selected = products.best_fit_image(
+        asset_key=key,
+        full_image=source,
+        target_width=300.0,
+    )
+
+    assert selected.cacheKey() == source.cacheKey()
+    assert pyramids.generated == []
+    assert products.usage_bytes == 0
 
 
 def test_preview_density_bucket_is_relative_to_non_power_of_two_source_width() -> None:

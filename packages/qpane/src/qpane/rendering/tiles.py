@@ -43,6 +43,7 @@ from ..execution import (
 )
 from ..execution.qt_delay import QtDelayScheduler
 from ..scene.identity import SceneLayerAssetKey, SceneLayerTileKey, SourceRenderAssetKey
+from .cache_admission import cache_admits_bytes, estimated_image_region_bytes
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
 from .owner_callback import OwnerCallback
 from .raster_tile_grid import RasterTileGrid
@@ -267,13 +268,13 @@ class TileManager(QObject, CacheMetricsMixin):
         self._cache_size_bytes = clamped
         self.usageChanged.emit(clamped)
 
-    def add_tile(self, tile: Tile) -> None:
-        """Insert `tile` into the cache while updating bookkeeping."""
+    def add_tile(self, tile: Tile) -> bool:
+        """Insert `tile` into the cache and report whether it was retained."""
         key = tile.key
         if not self._key_matches_grid(key):
-            return
+            return False
         if not self._allow_cache_insert(tile.size_bytes, key):
-            return
+            return False
         payload_key = _SourceTilePayloadKey.from_layer_key(key)
         new_size = self._cache_size_bytes
         previous = self._tile_cache.pop(payload_key, None)
@@ -290,6 +291,18 @@ class TileManager(QObject, CacheMetricsMixin):
             and self._cache_size_bytes > self.cache_limit_bytes
         ):
             self._schedule_cache_eviction()
+        return True
+
+    def can_retain_tile(self, source_image: QImage) -> bool:
+        """Return whether one maximum-sized source tile can survive admission."""
+        width = min(self.tile_size, source_image.width())
+        height = min(self.tile_size, source_image.height())
+        return cache_admits_bytes(
+            estimated_image_region_bytes(source_image, width, height),
+            configured_limit_bytes=self.cache_limit_bytes,
+            externally_managed=self._managed_mode,
+            guard=self._cache_admission_guard,
+        )
 
     def get_tile(
         self,
@@ -687,11 +700,12 @@ class TileManager(QObject, CacheMetricsMixin):
             )
             self._rejected_cache_keys.add(key)
 
-        if size > budget_limit:
-            _warn(budget_limit)
-            return False
-        guard = self._cache_admission_guard
-        if guard is not None and not guard(size):
+        if not cache_admits_bytes(
+            size,
+            configured_limit_bytes=budget_limit,
+            externally_managed=self._managed_mode,
+            guard=self._cache_admission_guard,
+        ):
             _warn(budget_limit)
             return False
         return True
@@ -748,9 +762,12 @@ class TileManager(QObject, CacheMetricsMixin):
             self._prefetch_finish(tile.key, success=False)
             logger.info("Discarded stale tile generated for retired grid: %s", tile.key)
             return
-        self.add_tile(tile)
+        retained = self.add_tile(tile)
+        self._prefetch_finish(tile.key, success=retained)
+        if not retained:
+            logger.info("Discarded generated tile rejected by cache: %s", tile.key)
+            return
         self._payload_layer_keys[payload_key] = set(waiters)
-        self._prefetch_finish(tile.key, success=True)
         logger.info("Tile generated for %s", tile.key)
         for layer_key in waiters:
             self._payload_layer_keys.setdefault(payload_key, set()).add(layer_key)

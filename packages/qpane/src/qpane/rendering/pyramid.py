@@ -43,6 +43,7 @@ from ..execution import (
 )
 from ..execution.qt_delay import QtDelayScheduler
 from ..scene.identity import SourceRenderAssetKey
+from .cache_admission import cache_admits_bytes, estimated_pyramid_bytes
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
 from .owner_callback import OwnerCallback
 
@@ -223,6 +224,15 @@ class PyramidManager(QObject, CacheMetricsMixin):
         self._assert_main_thread()
         return self._pyramids.get(asset_key)
 
+    def can_retain_pyramid(self, image: QImage) -> bool:
+        """Return whether the derived pyramid can survive current admission."""
+        return cache_admits_bytes(
+            estimated_pyramid_bytes(image, int(self._config.min_view_size_px)),
+            configured_limit_bytes=self.cache_limit_bytes,
+            externally_managed=self._managed_mode,
+            guard=self._cache_admission_guard,
+        )
+
     def iter_cached_asset_keys(self):
         """Yield cached asset keys in LRU order (oldest first)."""
         self._assert_main_thread()
@@ -397,16 +407,19 @@ class PyramidManager(QObject, CacheMetricsMixin):
         if asset_key not in self._pyramids:
             return
         self._pyramids[asset_key] = pyramid
-        if self._allow_cache_insert(pyramid.size_bytes, asset_key):
-            previous = self._cache.pop(asset_key, None)
-            previous_bytes = previous.size_bytes if previous is not None else 0
-            self._cache[asset_key] = pyramid
-            self._set_cache_usage_bytes(
-                self._cache_size_bytes - previous_bytes + pyramid.size_bytes
-            )
-            if not self._managed_mode:
-                self._enforce_cache_size()
-            logger.info("Pyramid generated for %s", asset_key)
+        if not self._allow_cache_insert(pyramid.size_bytes, asset_key):
+            self._pyramids.pop(asset_key, None)
+            logger.info("Discarded generated pyramid rejected by cache: %s", asset_key)
+            return
+        previous = self._cache.pop(asset_key, None)
+        previous_bytes = previous.size_bytes if previous is not None else 0
+        self._cache[asset_key] = pyramid
+        self._set_cache_usage_bytes(
+            self._cache_size_bytes - previous_bytes + pyramid.size_bytes
+        )
+        if not self._managed_mode:
+            self._enforce_cache_size()
+        logger.info("Pyramid generated for %s", asset_key)
         self.pyramidReady.emit(asset_key)
 
     def _on_pyramid_outcome(
@@ -573,11 +586,12 @@ class PyramidManager(QObject, CacheMetricsMixin):
             )
             self._rejected_cache_keys.add(key)
 
-        if not self._managed_mode and size > budget_limit:
-            _warn(budget_limit)
-            return False
-        guard = self._cache_admission_guard
-        if guard is not None and not guard(size):
+        if not cache_admits_bytes(
+            size,
+            configured_limit_bytes=budget_limit,
+            externally_managed=self._managed_mode,
+            guard=self._cache_admission_guard,
+        ):
             _warn(budget_limit)
             return False
         return True

@@ -70,3 +70,29 @@ def test_pyramid_eviction_batch_drops_entries():
     assert key not in manager._cache
     assert key not in manager._pyramids
     assert manager._evictions_total == 1
+
+
+@pytest.mark.usefixtures("qapp")
+def test_rejected_pyramid_adoption_drops_unaccounted_product() -> None:
+    """Rejected pyramid products must not survive outside cache accounting."""
+    execution = ControlledExecution()
+    manager = PyramidManager(config=Config(), execution_scope=execution.scope)
+    manager.cache_limit_bytes = 0
+    key = make_source_key(uuid.uuid4())
+    source = QImage(64, 64, QImage.Format_ARGB32_Premultiplied)
+    pyramid = ImagePyramid(
+        asset_key=key,
+        full_resolution_image=source,
+        size_bytes=source.sizeInBytes(),
+    )
+    manager._pyramids[key] = pyramid
+    ready: list[object] = []
+    manager.pyramidReady.connect(ready.append)
+
+    assert not manager.can_retain_pyramid(source)
+    manager._on_pyramid_generated(pyramid)
+
+    assert ready == []
+    assert key not in manager._pyramids
+    assert key not in manager._cache
+    assert manager.cache_usage_bytes == 0

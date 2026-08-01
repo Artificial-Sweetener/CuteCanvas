@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import time
 import uuid
 from dataclasses import replace
 
@@ -26,15 +25,6 @@ from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt
 from PySide6.QtTest import QTest
-from qpane import (
-    ClipCoordinateSpace,
-    LayerClip,
-    LayerTransform,
-    QPane,
-    RasterSource,
-    RenderLayer,
-    RenderScene,
-)
 from qpane.rendering.navigation_plan import retained_raster_navigation_delta
 from qpane.rendering.render import Renderer
 from qpane.scene.identity import scene_image_asset_key, source_render_asset_key
@@ -44,6 +34,16 @@ from qpane.scene.render_plan import (
     TileRenderData,
 )
 
+from qpane import (
+    ClipCoordinateSpace,
+    LayerClip,
+    LayerTransform,
+    QPane,
+    RasterSource,
+    RenderLayer,
+    RenderScene,
+)
+from tests.harness.timing import completion_clock
 from tests.helpers.render_compare import (
     assert_images_match,
     checker_image,
@@ -653,10 +653,8 @@ def test_direct_pan_release_atomically_replaces_a_repaired_ring_frame(qapp) -> N
         assert not renderer._surface.storage_origin.isNull()
 
         presenter.finish_navigation_interaction()
-        deadline = time.perf_counter() + 3.0
-        while (
-            presenter.navigation_refinement_pending and time.perf_counter() < deadline
-        ):
+        deadline = completion_clock() + 3.0
+        while presenter.navigation_refinement_pending and completion_clock() < deadline:
             qapp.processEvents()
             QTest.qWait(1)
 
@@ -685,6 +683,7 @@ def test_sampled_product_transition_stages_one_complete_guarded_frame(qapp) -> N
     qpane = _make_qpane_with_checker_image(qapp, size=1024)
     presenter = qpane.view().presenter
     try:
+        qpane.applySettings(cache={"mode": "hard", "budget_mb": 0})
         presenter.paint(
             is_blank=False,
             content_overlays={},
@@ -699,10 +698,8 @@ def test_sampled_product_transition_stages_one_complete_guarded_frame(qapp) -> N
         presenter._handle_render_refinement_ready()
         assert presenter.navigation_refinement_pending
 
-        deadline = time.perf_counter() + 3.0
-        while (
-            presenter.navigation_refinement_pending and time.perf_counter() < deadline
-        ):
+        deadline = completion_clock() + 3.0
+        while presenter.navigation_refinement_pending and completion_clock() < deadline:
             qapp.processEvents()
             QTest.qWait(1)
 
@@ -822,6 +819,7 @@ def test_settled_zoom_builds_exact_frame_in_bounded_atomic_slices(qapp) -> None:
     """Zoom refinement must never block one full-surface renderer paint."""
     qpane = _make_qpane_with_checker_image(qapp, size=1024)
     try:
+        qpane.applySettings(cache={"mode": "hard", "budget_mb": 0})
         qpane.resize(1024, 768)
         presenter = qpane.view().presenter
         presenter.paint(
@@ -836,10 +834,8 @@ def test_settled_zoom_builds_exact_frame_in_bounded_atomic_slices(qapp) -> None:
 
         qpane.applyZoom(1.5, QPointF(qpane.rect().center()))
         QTest.qWait(70)
-        deadline = time.perf_counter() + 3.0
-        while (
-            presenter.navigation_refinement_pending and time.perf_counter() < deadline
-        ):
+        deadline = completion_clock() + 3.0
+        while presenter.navigation_refinement_pending and completion_clock() < deadline:
             qapp.processEvents()
             QTest.qWait(1)
 

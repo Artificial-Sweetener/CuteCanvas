@@ -24,10 +24,10 @@ from dataclasses import replace
 
 import pytest
 from PySide6.QtGui import QImage, Qt
-from qpane.rendering import TileManager
 from qpane.rendering.raster_tile_grid import RasterTileGrid
 from qpane.rendering.tiles import Tile
 
+from qpane.rendering import TileManager
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.execution_backend import ControlledExecution
 from tests.helpers.render_plan import make_tile_key
@@ -67,6 +67,25 @@ def test_visible_tile_generation_adopts_and_caches(qapp) -> None:
     tile = manager.get_tile(key, _image())
     assert tile is not None and not tile.isNull()
     assert ready == [key]
+
+
+def test_rejected_tile_admission_never_announces_an_unavailable_product(qapp) -> None:
+    """A generated tile must not trigger redraw loops when it cannot be retained."""
+    execution = ControlledExecution()
+    manager = _manager(execution)
+    manager.cache_limit_bytes = 0
+    key = make_tile_key()
+    ready: list[object] = []
+    manager.tileReady.connect(ready.append)
+
+    assert not manager.can_retain_tile(_image())
+    assert manager.get_tile(key, _image()) is None
+    execution.run_all()
+    qapp.processEvents()
+
+    assert ready == []
+    assert manager.cache_usage_bytes == 0
+    assert not manager._tile_cache
 
 
 def test_scene_layers_share_one_source_tile_product(qapp) -> None:

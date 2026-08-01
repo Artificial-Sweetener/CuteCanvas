@@ -617,14 +617,16 @@ class RasterRenderPlanner:
             cacheable=False,
         )
 
-    @staticmethod
     def _render_strategy(
+        self,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
         source_product: _RasterSourceProduct,
     ) -> RenderStrategy:
         """Return the direct or tiled strategy for a layer in one frame."""
-        if not source_product.cacheable:
+        if not source_product.cacheable or not self._tile_manager.can_retain_tile(
+            source_product.image
+        ):
             return RenderStrategy.DIRECT
         canvas_size_physical = (
             QSizeF(

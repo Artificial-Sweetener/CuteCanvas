@@ -18,18 +18,17 @@
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 import pytest
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
-from qpane import QPane
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.ui.widget_props import apply_widget_defaults
 
+from qpane import QPane
+from tests.harness.timing import completion_clock
 from tests.helpers.render_compare import checker_image
 
 
@@ -259,7 +258,10 @@ def test_settled_pan_and_zoom_keep_staged_canvas_background_transparent(
     pane.devicePixelRatioF = lambda: device_pixel_ratio  # type: ignore[method-assign]
     pane.setParent(parent)
     pane.setGeometry(parent.rect())
-    pane.applySettings(smooth_zoom_enabled=False)
+    pane.applySettings(
+        smooth_zoom_enabled=False,
+        cache={"mode": "hard", "budget_mb": 0},
+    )
     image = QImage(800, 600, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(Qt.GlobalColor.transparent)
     image_painter = QPainter(image)
@@ -273,10 +275,8 @@ def test_settled_pan_and_zoom_keep_staged_canvas_background_transparent(
 
     def wait_for_navigation_refinement() -> None:
         """Drain the exact-frame lifecycle without accepting a latent timer."""
-        deadline = time.perf_counter() + 8.0
-        while (
-            presenter.navigation_refinement_pending and time.perf_counter() < deadline
-        ):
+        deadline = completion_clock() + 8.0
+        while presenter.navigation_refinement_pending and completion_clock() < deadline:
             qapp.processEvents()
             QTest.qWait(1)
         assert not presenter.navigation_refinement_pending
