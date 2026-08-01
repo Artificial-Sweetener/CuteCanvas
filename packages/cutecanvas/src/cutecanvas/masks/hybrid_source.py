@@ -23,15 +23,6 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage
-from qpane import (
-    HybridCombineMode,
-    HybridDocument,
-    HybridPresentationStyle,
-    HybridRasterPrimitive,
-    HybridSource,
-    HybridVectorPrimitive,
-    RasterBounds,
-)
 
 from cutecanvas.coverage import CoverageDocumentEvaluator
 from cutecanvas.coverage.document import CoverageItem, VectorCoverageItem
@@ -42,6 +33,15 @@ from cutecanvas.coverage.raster_sampling import (
 )
 from cutecanvas.coverage.surface import CoverageSurface
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
+from qpane import (
+    HybridCombineMode,
+    HybridDocument,
+    HybridPresentationStyle,
+    HybridRasterPrimitive,
+    HybridSource,
+    HybridVectorPrimitive,
+    RasterBounds,
+)
 
 from .mask import MaskLayer
 

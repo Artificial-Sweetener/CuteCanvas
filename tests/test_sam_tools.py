@@ -20,6 +20,7 @@ from cutecanvas.masks.tools.smart_select import SmartSelectTool
 from cutecanvas.tools.ports import SmartSelectionInteractionPort
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor
+
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

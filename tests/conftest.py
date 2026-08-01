@@ -22,8 +22,8 @@ import pytest
 from cutecanvas import CuteCanvas
 from cutecanvas.core import config
 from PySide6.QtWidgets import QApplication
-from qpane import QPane
 
+from qpane import QPane
 from tests.harness.process_lock import interactive_performance_isolation
 from tests.harness.qt_lifetime import flush_deferred_qt_lifetime
 

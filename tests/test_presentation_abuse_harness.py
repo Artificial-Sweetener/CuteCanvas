@@ -31,11 +31,11 @@ from PySide6.QtCore import (
     QSize,
 )
 from PySide6.QtGui import QColor, QImage, QPainter
-from qpane.scene import ClipCoordinateSpace, RenderStrategy
 from qpane.scene.render_plan import SceneRenderItem, SceneRenderPlan
 from qpane.sdk.rendering import ViewportZoomMode
 from qpane.sdk.types import ComparisonOrientation
 
+from qpane.scene import ClipCoordinateSpace, RenderStrategy
 from tests.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     average_interaction_latency_ms,

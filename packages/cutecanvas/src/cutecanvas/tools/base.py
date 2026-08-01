@@ -21,6 +21,7 @@ from typing import ClassVar
 
 import numpy as np
 from PySide6.QtCore import QPoint, Signal
+
 from qpane import CursorTool, PanZoomTool, ViewerTool, ViewerToolSignals
 
 from .cursor_feedback import ToolCursorStyle

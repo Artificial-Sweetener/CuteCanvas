@@ -21,6 +21,7 @@ from time import monotonic
 
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
+
 from qpane import QPane, RasterSource, RenderLayer, RenderScene
 
 

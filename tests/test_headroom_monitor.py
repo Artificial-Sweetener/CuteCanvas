@@ -22,9 +22,9 @@ import time
 from threading import Event
 
 from cutecanvas import CuteCanvas
-from qpane.core import headroom
 from qpane.execution import CancellationToken
 
+from qpane.core import headroom
 from tests.harness.timing import interaction_clock
 
 MB = 1024 * 1024

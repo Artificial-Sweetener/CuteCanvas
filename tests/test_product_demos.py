@@ -22,10 +22,10 @@ import math
 from cutecanvas import CuteCanvas
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QAction, QColor, QImage
-from qpane import ClipCoordinateSpace, QPane
 
 from examples.cutecanvas_demo import ExampleOptions, ExampleWindow
 from examples.qpane_demo import ViewerWindow
+from qpane import ClipCoordinateSpace, QPane
 
 
 def test_qpane_demo_restores_catalog_viewer_and_sdk_scene(qapp) -> None:

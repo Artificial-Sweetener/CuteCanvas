@@ -33,9 +33,9 @@ from cutecanvas.sam import service
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
-from qpane.features import FeatureInstallError
 from qpane.types import DiagnosticRecord
 
+from qpane.features import FeatureInstallError
 from tests.helpers.execution_backend import TestExecution
 
 

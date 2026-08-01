@@ -24,8 +24,9 @@ import pytest
 from PySide6.QtCore import QElapsedTimer, QLineF, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
-from qpane import ComparisonOrientation, QPane, RenderScene
 from qpane.scene.render_plan import SceneRenderPlan
+
+from qpane import ComparisonOrientation, QPane, RenderScene
 
 
 def test_heterogeneous_comparison_sources_share_the_primary_frame(qapp) -> None:

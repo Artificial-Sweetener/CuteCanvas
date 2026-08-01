@@ -26,6 +26,7 @@ from cutecanvas.ui.cursor_builder import CursorBuilder
 from cutecanvas.ui.erase_indicator import EraseIndicatorRenderer
 from PySide6.QtCore import QPointF, QRect, QRectF, QSizeF
 from PySide6.QtGui import QColor, QFont, QImage, QPainter
+
 from qpane import PointerDeviceKind
 
 

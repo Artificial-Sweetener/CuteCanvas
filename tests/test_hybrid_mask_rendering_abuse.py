@@ -31,16 +31,16 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QTransform, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qpane.hybrid.tile_source import HybridRenderTileSource
+from qpane.raster.image_conversion import qimage_to_numpy_argb32
+from qpane.rendering.render_tile_geometry import visible_tile_requests
+
 from qpane import (
     HybridDocument,
     HybridPresentationStyle,
     HybridVectorPrimitive,
     RasterBounds,
 )
-from qpane.hybrid.tile_source import HybridRenderTileSource
-from qpane.raster.image_conversion import qimage_to_numpy_argb32
-from qpane.rendering.render_tile_geometry import visible_tile_requests
-
 from tests.harness.mounted_qpane import MountedQPaneHarness
 from tests.harness.timing import (
     INTERACTIVE_PERFORMANCE,

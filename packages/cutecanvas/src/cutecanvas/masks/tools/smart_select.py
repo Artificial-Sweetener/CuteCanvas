@@ -25,12 +25,12 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QWheelEvent
-from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from cutecanvas.tools.base import BaseTool
 from cutecanvas.tools.cursor_feedback import ToolCursorStyle
 from cutecanvas.tools.modifier_snapshot import alt_is_active
 from cutecanvas.tools.ports import SmartSelectionInteractionPort
+from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 logger = logging.getLogger(__name__)
 

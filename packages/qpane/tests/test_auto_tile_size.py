@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtTest import QTest
-from qpane import Config, QPane
 from qpane.rendering.raster_tile_grid import RasterTileGrid
+
+from qpane import Config, QPane
 
 
 def _active_grid(pane: QPane) -> RasterTileGrid:

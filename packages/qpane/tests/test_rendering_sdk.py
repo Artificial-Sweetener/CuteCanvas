@@ -22,12 +22,6 @@ import uuid
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
-from qpane import (
-    HybridDocument,
-    HybridPresentationStyle,
-    HybridSource,
-    HybridVectorPrimitive,
-)
 from qpane.rendering.scene_compiler import SceneRenderCompiler
 from qpane.rendering.sdk import RasterSource, RenderLayer, RenderScene, VectorSource
 from qpane.rendering.sdk_adapter import RenderSceneController
@@ -50,6 +44,13 @@ from qpane.vector.public import (
     VectorObjectKind,
     VectorShapeKind,
     VectorStyle,
+)
+
+from qpane import (
+    HybridDocument,
+    HybridPresentationStyle,
+    HybridSource,
+    HybridVectorPrimitive,
 )
 
 

@@ -27,6 +27,18 @@ from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qpane.hybrid.evaluation import HybridDocumentEvaluator
+from qpane.hybrid.tile_source import HybridRenderTileSource
+from qpane.raster.image_conversion import (
+    numpy_to_qimage_grayscale8_at_size,
+    qimage_to_numpy_grayscale8,
+)
+from qpane.rendering.render_tile_geometry import visible_tile_requests
+from qpane.rendering.scene_compiler import SceneRenderCompiler
+from qpane.rendering.sdk_adapter import RenderSceneController
+from qpane.scene.source_capabilities import LayerSourceCapabilities
+from qpane.sdk.raster import present_hybrid_sample
+
 from qpane import (
     HybridCombineMode,
     HybridDocument,
@@ -44,18 +56,6 @@ from qpane import (
     VectorShapeKind,
     VectorStyle,
 )
-from qpane.hybrid.evaluation import HybridDocumentEvaluator
-from qpane.hybrid.tile_source import HybridRenderTileSource
-from qpane.raster.image_conversion import (
-    numpy_to_qimage_grayscale8_at_size,
-    qimage_to_numpy_grayscale8,
-)
-from qpane.rendering.render_tile_geometry import visible_tile_requests
-from qpane.rendering.scene_compiler import SceneRenderCompiler
-from qpane.rendering.sdk_adapter import RenderSceneController
-from qpane.scene.source_capabilities import LayerSourceCapabilities
-from qpane.sdk.raster import present_hybrid_sample
-
 from tests.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     interaction_clock,

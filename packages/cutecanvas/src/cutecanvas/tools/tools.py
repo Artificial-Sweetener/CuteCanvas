@@ -21,6 +21,7 @@ from collections.abc import Callable
 
 import numpy as np
 from PySide6.QtCore import QObject, QPoint, Signal
+
 from qpane import (
     CursorTool,
     PanZoomTool,

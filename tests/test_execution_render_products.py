@@ -21,8 +21,6 @@ from __future__ import annotations
 import uuid
 
 from PySide6.QtGui import QColor, QImage
-from qpane import Config
-from qpane.rendering import PyramidManager, PyramidStatus, TileManager
 from qpane.rendering.raster_tile_grid import RasterTileGrid
 from qpane.scene.identity import (
     SceneLayerAssetKey,
@@ -31,6 +29,8 @@ from qpane.scene.identity import (
 )
 from qpane.sdk.execution import ExecutionRuntime
 
+from qpane import Config
+from qpane.rendering import PyramidManager, PyramidStatus, TileManager
 from tests.helpers.execution_backend import ControllableExecutionBackend
 
 

@@ -22,7 +22,6 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QObject, QSize, Signal
 from PySide6.QtWidgets import QWidget
-from qpane.core import DiagnosticsSnapshot
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.types import DiagnosticRecord
 from qpane.ui.status_overlay import (
@@ -33,6 +32,8 @@ from qpane.ui.status_overlay import (
     STALE_THRESHOLD_SEC,
     QPaneStatusOverlay,
 )
+
+from qpane.core import DiagnosticsSnapshot
 
 
 class DummyDiagnostics(QObject):
