@@ -32,6 +32,8 @@ from PySide6.QtGui import (
 )
 from qpane.sdk.rendering import ViewportZoomMode
 
+from ..document import CanvasViewportInteraction
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,11 +48,26 @@ class CanvasViewStateMixin:
         )
         with publication_guard:
             self.view().ensure_view_alignment(force=True)
+            self._refit_fit_only_viewport()
             if binding is not None:
                 binding.refresh_target()
         self.update()
         self.refreshCursor()
         self._emit_viewport_rect_if_changed(force=True)
+
+    def _refit_fit_only_viewport(self) -> None:
+        """Recompute best fit for a responsive non-navigable viewport."""
+        spec = self.viewSession().viewport_spec
+        if (
+            spec is None
+            or spec.interaction is not CanvasViewportInteraction.FIT_ONLY
+            or not self.view().has_renderable_content()
+        ):
+            return
+        viewport = self.view().viewport
+        viewport.set_locked(False)
+        viewport.setZoomFit()
+        viewport.set_locked(True)
 
     def onViewChanged(self):
         """Slot connected to the viewport's viewChanged signal."""

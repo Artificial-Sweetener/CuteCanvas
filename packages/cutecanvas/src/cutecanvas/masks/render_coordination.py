@@ -386,7 +386,6 @@ class MaskRenderWorkCoordinator:
             )
             if sub_mask_image is not None and stride > 1:
                 sub_mask_image.setText("qpane_preview_stride", str(stride))
-                sub_mask_image.setText("qpane_preview_provisional", "1")
         preview_provisional = (
             sub_mask_image is not None
             and sub_mask_image.text("qpane_preview_provisional") == "1"
@@ -736,8 +735,7 @@ class MaskRenderWorkCoordinator:
             return
         self._submission_failures += len(pending.mask_revisions)
         message = (
-            f"Mask prefetch failed for {self._format_uuid(image_id)}: "
-            f"{outcome.error}"
+            f"Mask prefetch failed for {self._format_uuid(image_id)}: {outcome.error}"
         )
         self._last_message = message
         self._last_duration_ms = None

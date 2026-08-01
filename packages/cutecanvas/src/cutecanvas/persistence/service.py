@@ -26,8 +26,9 @@ from ..masks.mask import MaskAssetStore
 from ..placed.store import PlacedAssetStore
 from ..raster.assets import EditableRasterAssetStore
 from ..vector.store import VectorAssetStore
-from .capture import capture_composition
+from .capture import capture_composition, capture_document
 from .codec import CompositionArchiveCodec
+from .model import CompositionArchiveSnapshot
 from .restore import CompositionArchiveRestorer
 
 
@@ -74,3 +75,41 @@ class CompositionPersistenceService:
             vectors=self._vectors,
         ).restore(archive)
         return archive.composition_id
+
+    def save_document(self, path: Path) -> tuple[uuid.UUID, ...]:
+        """Atomically save every independent composition to one archive."""
+        archive = self.capture_document()
+        self.write_document(archive, path)
+        return archive.root_document_ids
+
+    def capture_document(self) -> CompositionArchiveSnapshot:
+        """Capture a detached snapshot of every independent composition."""
+        composition_ids = self._compositions.composition_ids()
+        return capture_document(
+            composition_ids,
+            self._compositions,
+            self._masks(),
+            self._rasters,
+            self._placed_assets,
+            self._vectors,
+        )
+
+    def write_document(
+        self,
+        archive: CompositionArchiveSnapshot,
+        path: Path,
+    ) -> None:
+        """Atomically write one previously detached document snapshot."""
+        self._codec.write(archive, path)
+
+    def load_document(self, path: Path) -> tuple[uuid.UUID, ...]:
+        """Validate and transactionally restore all roots from one archive."""
+        archive = self._codec.read(path)
+        CompositionArchiveRestorer(
+            compositions=self._compositions,
+            masks=self._masks(),
+            rasters=self._rasters,
+            placed_assets=self._placed_assets,
+            vectors=self._vectors,
+        ).restore(archive)
+        return archive.root_document_ids

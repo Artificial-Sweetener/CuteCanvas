@@ -172,14 +172,19 @@ class MaskDelegate:
             return None
         return service.getUndoState(mask_id)
 
-    def load_mask_from_file(self, path: str) -> uuid.UUID | None:
-        """Load a mask from ``path`` via the mask service when available."""
+    def load_mask_from_file(
+        self,
+        path: str,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Load a mask and optionally record its document admission."""
         if not self.mask_feature_available():
             return self._fallbacks().get("mask", "load_mask_from_file", default=None)
         service = self._mask_service
         if service is None:
             return None
-        return service.loadMaskFromPath(path)
+        return service.loadMaskFromPath(path, undoable=undoable)
 
     def update_mask_from_file(self, mask_id: uuid.UUID, file_path: str) -> bool:
         """Replace mask pixels for ``mask_id`` using the file at ``file_path``."""
@@ -203,14 +208,19 @@ class MaskDelegate:
             return False
         return service.updateMaskFromPath(mask_id, file_path)
 
-    def create_blank_mask(self, size: QSize) -> uuid.UUID | None:
-        """Create a blank mask layer sized to ``size`` when tooling exists."""
+    def create_blank_mask(
+        self,
+        size: QSize,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Create a blank mask and optionally record its document admission."""
         if not self.mask_feature_available():
             return self._fallbacks().get("mask", "create_blank_mask", default=None)
         service = self._mask_service
         if service is None:
             return None
-        return service.createBlankMask(size)
+        return service.createBlankMask(size, undoable=undoable)
 
     def set_active_mask_id(self, mask_id):
         """Select ``mask_id`` for editing without changing its layer placement."""

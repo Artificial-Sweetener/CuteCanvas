@@ -35,6 +35,7 @@ from cutecanvas.coverage import (
     CoverageSnapshot,
     CoverageStateSnapshot,
 )
+from cutecanvas.coverage.snapshot_equality import coverage_state_snapshots_equal
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.edit_history import CompositionEditCommand
@@ -201,7 +202,7 @@ class MaskHistory:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Record an already-applied hybrid transition as one edit."""
-        if before == after:
+        if before.has_same_content(after):
             return False
         return self._record(
             mask_id,
@@ -277,7 +278,7 @@ class MaskHistory:
         notify: Callable[[uuid.UUID], None] | None = None,
     ) -> bool:
         """Record an already-applied complete surface transition."""
-        if _surface_equal(before, after):
+        if coverage_state_snapshots_equal(before, after):
             return False
         return self._record(
             mask_id,
@@ -296,7 +297,7 @@ class MaskHistory:
         if layer is None:
             return False
         before = layer.coverage.raster.state_snapshot()
-        if _surface_equal(before, after):
+        if coverage_state_snapshots_equal(before, after):
             return False
         command = MaskSurfaceCommand(
             mask_id,
@@ -479,37 +480,6 @@ class MaskHistory:
             return False
         command.command.redo()
         return True
-
-
-def _surface_equal(
-    left: CoverageStateSnapshot,
-    right: CoverageStateSnapshot,
-) -> bool:
-    """Return whether complete coverage surface states match."""
-    if isinstance(left, SparseRasterSnapshot) or isinstance(
-        right, SparseRasterSnapshot
-    ):
-        if not isinstance(left, SparseRasterSnapshot) or not isinstance(
-            right, SparseRasterSnapshot
-        ):
-            return False
-        return (
-            left.bounds == right.bounds
-            and left.extent_policy is right.extent_policy
-            and left.channels == right.channels
-            and left.tile_size == right.tile_size
-            and len(left.tiles) == len(right.tiles)
-            and all(
-                left_tile.bounds == right_tile.bounds
-                and np.array_equal(left_tile.pixels, right_tile.pixels)
-                for left_tile, right_tile in zip(left.tiles, right.tiles, strict=True)
-            )
-        )
-    return (
-        left.bounds == right.bounds
-        and left.extent_policy is right.extent_policy
-        and np.array_equal(left.pixels, right.pixels)
-    )
 
 
 def _command_bytes(command: MaskUndoCommand) -> int:

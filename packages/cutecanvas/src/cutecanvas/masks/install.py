@@ -56,7 +56,6 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
         mask_config=mask_config,
         stroke_diagnostics=diagnostics_tracker,
         structure_changed=qpane._handle_raster_structure_changed,
-        content_changed=qpane._handle_scene_source_changed,
         render_scale=lambda: qpane.view().viewport.zoom,
     )
     service = MaskService(
@@ -98,14 +97,16 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
             qpane.markDirty(dirty_rect=rect)
         qpane.update()
 
-    def _handle_mask_updated(mask_id, _rect=None):
-        """Recompile durable mask state without interpreting source-space damage."""
+    def _handle_mask_updated(mask_id, rect=None):
+        """Recompile durable state while preserving render-owned local damage."""
         if isinstance(mask_id, uuid.UUID):
             live_source = controller.renders.is_live_preview(mask_id)
             live_source_modes[mask_id] = live_source
             if live_source:
                 return
         qpane.view().invalidate_content_cache()
+        if rect is not None and not rect.isNull() and not rect.isEmpty():
+            return
         qpane.markDirty()
         qpane.update()
 

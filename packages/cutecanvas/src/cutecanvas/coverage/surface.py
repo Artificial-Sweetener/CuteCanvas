@@ -232,11 +232,19 @@ class CoverageSurface:
         return cls(view)
 
     @classmethod
-    def blank(cls, size: QSize) -> CoverageSurface:
-        """Create a zero-filled surface of ``size``."""
+    def blank(
+        cls,
+        size: QSize,
+        *,
+        extent_policy: RasterExtentPolicy = RasterExtentPolicy.FIXED,
+    ) -> CoverageSurface:
+        """Create a zero-filled surface with an explicit write-extent policy."""
         if not size.isValid():
-            return cls()
-        return cls(np.zeros((size.height(), size.width()), dtype=np.uint8))
+            return cls(extent_policy=extent_policy)
+        return cls(
+            np.zeros((size.height(), size.width()), dtype=np.uint8),
+            extent_policy=extent_policy,
+        )
 
     @classmethod
     def from_sparse_snapshot(cls, snapshot: SparseRasterSnapshot) -> CoverageSurface:

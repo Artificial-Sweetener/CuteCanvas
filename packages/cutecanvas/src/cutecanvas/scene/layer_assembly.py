@@ -81,12 +81,12 @@ class CompositionLayerSceneAssembler:
 
     def assemble(self, document: SceneDescriptor) -> SceneDescriptor:
         """Resolve every document instance in its authoritative z-order."""
-        return self._assemble_instances(
+        return self.assemble_instances(
             document,
             self.layer_instances(document.scene_id),
         )
 
-    def _assemble_instances(
+    def assemble_instances(
         self,
         document: SceneDescriptor,
         instances: tuple[CompositionLayerInstance, ...],

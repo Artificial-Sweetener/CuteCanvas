@@ -38,6 +38,29 @@ def capture_composition(
     vectors: VectorAssetStore,
 ) -> CompositionArchiveSnapshot:
     """Return a detached archive for a document and every nested dependency."""
+    return capture_document(
+        (root_document_id,),
+        compositions,
+        masks,
+        rasters,
+        placed_assets,
+        vectors,
+    )
+
+
+def capture_document(
+    root_document_ids: tuple[uuid.UUID, ...],
+    compositions: CompositionService,
+    masks: MaskAssetStore | None,
+    rasters: EditableRasterAssetStore,
+    placed_assets: PlacedAssetStore,
+    vectors: VectorAssetStore,
+) -> CompositionArchiveSnapshot:
+    """Return every root and their deduplicated transitive resource closures."""
+    if not root_document_ids:
+        raise ValueError("document archive requires at least one root")
+    if len(set(root_document_ids)) != len(root_document_ids):
+        raise ValueError("document archive roots must be unique")
     resources = rasters.resources
     documents = {}
     layer_stacks = {}
@@ -46,7 +69,7 @@ def capture_composition(
     color_surfaces = {}
     imported_snapshots = {}
     vector_documents = {}
-    pending_documents = [root_document_id]
+    pending_documents = list(reversed(root_document_ids))
     pending_resources: list[uuid.UUID] = []
     visited_documents: set[uuid.UUID] = set()
     visited_resources: set[uuid.UUID] = set()
@@ -109,7 +132,7 @@ def capture_composition(
                 vector_documents[resource_id] = document
 
     return CompositionArchiveSnapshot(
-        root_document_id=root_document_id,
+        root_document_id=root_document_ids[0],
         documents=documents,
         layer_stacks=layer_stacks,
         resources=resource_records,
@@ -117,4 +140,5 @@ def capture_composition(
         rasters=color_surfaces,
         placed_assets=imported_snapshots,
         vectors=vector_documents,
+        root_document_ids=root_document_ids,
     )

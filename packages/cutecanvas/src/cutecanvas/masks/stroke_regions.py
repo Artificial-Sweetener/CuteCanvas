@@ -25,10 +25,11 @@ from dataclasses import dataclass
 from PySide6.QtCore import QPoint, QRect
 from qpane.sdk.scene import RasterBounds
 
-from cutecanvas.coverage import CoverageSnapshot, WritableCoverageRegion
+from cutecanvas.coverage import WritableCoverageRegion
 
 from ..painting import BrushStrokeSegment
 from .mask import MaskLayer
+from .stroke_constraints import MaskStrokeConstraint
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +59,7 @@ class MaskStrokeRegionPlanner:
         mask_id: uuid.UUID,
         layer: MaskLayer,
         segment: BrushStrokeSegment,
-        constraint: CoverageSnapshot | None = None,
+        constraint: MaskStrokeConstraint | None = None,
     ) -> PreparedMaskStrokeRegion | None:
         """Return storage-space geometry accepted for one semantic segment."""
         requested = self._requested_bounds(segment)

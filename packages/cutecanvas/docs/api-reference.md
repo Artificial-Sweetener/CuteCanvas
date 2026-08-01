@@ -30,6 +30,20 @@ split position, and orientation used by a comparison presentation.
 `CanvasInspectionGroup` gives a host one stable group identity and ordered
 composition membership for linked inspection that survives presentation changes.
 
+### Independent document viewports
+
+`CanvasViewportSource` selects a composition, one layer, a same-composition
+layer subset, or a mounted resource through stable content references.
+`CanvasViewportSpec` combines that source with a stable viewport identity,
+`CanvasViewportInteraction`, and `CanvasRenderVariant`.
+`CuteCanvas.setViewportSpec()` mounts selected live content without changing
+document structure, and `CuteCanvas.viewportSpec()` returns the view-local
+policy. `CanvasViewportInteraction.FIT_ONLY` refits after size changes and
+locks direct navigation; `INTERACTIVE` retains pan and zoom.
+`CanvasRenderVariant.MASK_COVERAGE` presents selected masks as neutral
+grayscale coverage, while `COMPOSITE` and `MASK_OVERLAY` retain ordinary
+presentation.
+
 ### `CanvasWorkspace`
 
 QWidget for one document across independent target views.
@@ -83,12 +97,14 @@ UI modules. `ResponsiveGridPolicy`, `ResponsiveGridTopology`,
 CuteCanvas layout contract used by `setGridPresentation()`; `gridSnapshot()`
 returns the matching `ResponsiveGridSnapshot`.
 
-`BackendSubmission`, `ExecutionBackendCapabilities`, `ExecutionHandle`,
-`ExecutionJob`, `ExecutionRejected`, `ExecutionRejectionReason`,
-`ExecutionRequest`, and `InlineDispatcher` form the typed host-backend
-lifecycle used by `ExecutionRuntime`. They let an application advertise
-supported resources, accept or reject bounded work, cancel pending
-submissions, and deliver adoption on the owner-selected dispatcher.
+`ExecutionBackend`, `BackendSubmission`, `ExecutionBackendCapabilities`,
+`ExecutionHandle`, `ExecutionJob`, `ExecutionRejected`,
+`ExecutionRejectionReason`, `ExecutionRequest`, and `InlineDispatcher` form
+the typed host-backend lifecycle used by `ExecutionRuntime`. A host can publish
+`ExecutionSnapshot` values and return `DiagnosticsSubscription` handles without
+importing QPane. These contracts let an application advertise supported
+resources, accept or reject bounded work, cancel pending submissions, observe
+capacity, and deliver adoption on the owner-selected dispatcher.
 
 `OverlayDrawFn` and `CanvasOverlayDrawFn` describe renderer and CuteCanvas
 detail-overlay callbacks. `CanvasComparisonOverlayDrawFn` receives a
@@ -115,6 +131,12 @@ records the observed instance and resource revisions.
 identity.
 `CanvasContentKind` distinguishes composition, placed layer, and reusable
 resource references.
+
+`EmbeddedImageExportSnapshot` carries detached pixels and an exact resource
+revision. `CuteCanvas.captureEmbeddedImageExport()` captures it without view
+activation. `MaskExportSnapshot` carries a detached canvas-bounded grayscale
+mask and exact resource revision; `CuteCanvas.captureMaskExport()` captures it
+without changing mask or view activation.
 
 ### Projection
 
@@ -163,6 +185,25 @@ and redo, `CloneStampFacade` configures retouching, and
 
 Handles keep stable IDs and read current state from the canvas. They do not
 cache a second mutable document model.
+
+### Detached document persistence
+
+`CompositionPersistenceFacade.capture_document()` captures every independent
+composition and its transitive resources into an immutable
+`DocumentPersistenceSnapshot`. Capture runs against live document authority
+and performs no filesystem access. A host may pass the snapshot to a worker
+and call `CompositionPersistenceFacade.write_document()` there; the write
+never consults the live canvas or document. `save_document()` performs both
+steps synchronously for hosts that do not need split scheduling.
+
+- `DocumentPersistenceSnapshot.composition_ids` records the ordered root
+  compositions represented by the capture.
+- `CompositionPersistenceFacade.capture_document()` returns a detached
+  document snapshot.
+- `CompositionPersistenceFacade.write_document()` atomically writes a
+  previously captured snapshot.
+- `CompositionPersistenceFacade.load_document()` restores every root from one
+  document archive.
 
 The sections below list the complete public surface. Use the narrative guides
 for step-by-step workflows.
@@ -593,8 +634,8 @@ See also: [Diagnostics](diagnostics.md).
 - CuteCanvas.activeMaskID — Read the active mask UUID (or None).
 - CuteCanvas.maskIDsForComposition — List mask UUIDs for the given or active document.
 - CuteCanvas.listMasksForComposition — Return document mask metadata.
-- CuteCanvas.createBlankMask — Create a transparent mask layer in the active document.
-- CuteCanvas.loadMaskFromFile — Import a mask file and return its UUID on success.
+- CuteCanvas.createBlankMask — Create a transparent mask layer, optionally outside user undo history.
+- CuteCanvas.loadMaskFromFile — Import a mask file with optional document-admission history.
 - CuteCanvas.removeMaskFromComposition — Remove a mask instance from a document.
 - CuteCanvas.setActiveMaskID — Select a mask for editing (or clear with None).
 - CuteCanvas.getActiveMaskImage — Snapshot the active mask as a grayscale image.
@@ -613,6 +654,8 @@ See also: [Diagnostics](diagnostics.md).
 CuteCanvas receives touch and tablet input automatically. Pan/zoom mode supports direct one-finger pan, centroid-anchored two-finger pan/pinch, double tap, and optional translation inertia. Brush mode supports fixed-size touch painting plus pressure-sensitive active pens and eraser tips. These behaviors are configured through `Config`; see [Touch and Pen Input](touch-and-pen.md).
 
 ### SAM
+- `warmSamDependencies` imports the optional SAM runtime eagerly through the
+  package's public API.
 - CuteCanvas.samFeatureAvailable — Check whether the SAM feature is installed.
 - CuteCanvas.samCheckpointReady — Check whether the resolved SAM checkpoint exists on disk.
 - CuteCanvas.samCheckpointPath — Return the resolved SAM checkpoint path when available.
@@ -746,6 +789,8 @@ See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and 
 - `CuteCanvas.setPixelSelectionPaintTarget` routes brush coverage to the one authoritative composition selection.
 - `CuteCanvas.clearPaintTarget` cancels unresolved brush work and clears its destination.
 - `CuteCanvas.brushPreset` and `CuteCanvas.setBrushPreset` query and replace the complete immutable brush configuration.
+- `CuteCanvas.renderBrushTipPreview` renders the active preset into a detached,
+  DPR-aware image using the production brush-tip cache.
 - `CuteCanvas.setBrushSize` changes only the size field while retaining the rest of the active preset.
 - `CuteCanvas.paintColor` and `CuteCanvas.setPaintColor` query and replace the detached color used by RGBA targets. Coverage targets retain coverage semantics.
 - `CuteCanvas.paintTargetChanged` emits `PaintTargetSnapshot` or `None` after target changes.

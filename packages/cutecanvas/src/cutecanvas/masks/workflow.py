@@ -602,10 +602,19 @@ class Masks:
 
     # Mask operations
 
-    def load_mask_from_file(self, path: str) -> uuid.UUID | None:
-        """Load a mask from ``path`` and return the created mask id."""
+    def load_mask_from_file(
+        self,
+        path: str,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Load a mask and optionally record its document admission."""
         delegate = self._ensure_mask_delegate()
-        return None if delegate is None else delegate.load_mask_from_file(path)
+        return (
+            None
+            if delegate is None
+            else delegate.load_mask_from_file(path, undoable=undoable)
+        )
 
     def update_mask_from_file(self, mask_id: uuid.UUID, path: str) -> bool:
         """Replace ``mask_id`` with mask data loaded from ``path``."""
@@ -614,10 +623,19 @@ class Masks:
             False if delegate is None else delegate.update_mask_from_file(mask_id, path)
         )
 
-    def create_blank_mask(self, size: QSize) -> uuid.UUID | None:
-        """Create and activate a blank mask of ``size``."""
+    def create_blank_mask(
+        self,
+        size: QSize,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Create a blank mask and optionally record its document admission."""
         delegate = self._ensure_mask_delegate()
-        return None if delegate is None else delegate.create_blank_mask(size)
+        return (
+            None
+            if delegate is None
+            else delegate.create_blank_mask(size, undoable=undoable)
+        )
 
     def set_mask_properties(
         self,

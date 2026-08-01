@@ -66,16 +66,17 @@ def test_public_raster_state_and_policy_preserve_bounds_and_pixels(qpane_with_ma
     state = qpane.rasterSurfaceState(info.scene_id, info.layer_id)
     assert state is not None
     assert state.bounds == QRect(0, 0, 8, 8)
-    assert state.extent_policy is RasterExtentPolicy.FIXED
+    assert state.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
 
     assert qpane.setRasterExtentPolicy(
         info.scene_id,
         info.layer_id,
-        RasterExtentPolicy.EXPAND_ON_WRITE,
+        RasterExtentPolicy.FIXED,
     )
     updated = qpane.rasterSurfaceState(info.scene_id, info.layer_id)
     assert updated is not None
     assert updated.bounds == state.bounds
+    assert updated.extent_policy is RasterExtentPolicy.FIXED
     assert updated.structure_revision == state.structure_revision + 1
     assert updated.content_revision == state.content_revision
     assert (layer.coverage.raster.snapshot_array() == before).all()
@@ -282,11 +283,11 @@ def test_transformed_mask_brush_preview_and_commit_share_scene_selection(
     assert qpane.setLayerPlacement(
         info.scene_id,
         info.layer_id,
-        QRectF(10.0, 20.0, 16.0, 16.0),
+        QRectF(-4.0, -4.0, 16.0, 16.0),
     )
-    selection = QImage(8, 16, QImage.Format_Grayscale8)
+    selection = QImage(4, 8, QImage.Format_Grayscale8)
     selection.fill(255)
-    assert qpane.setPixelSelection(selection, QRect(14, 20, 8, 16))
+    assert qpane.setPixelSelection(selection, QRect(2, 0, 4, 8))
 
     service.applyStrokeSegment(
         BrushStrokeSegment.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)

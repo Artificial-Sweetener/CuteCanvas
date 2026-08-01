@@ -30,7 +30,9 @@ from qpane.sdk.scene import (
     SceneLayerHitTestResult,
 )
 
+from ..document import CanvasViewportSpec
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
+from ..scene.viewport_selection import ViewportSceneSelection
 from ..types import LayerHit
 from .layers import CompositionLayerInstance
 from .model import CompositionRecord
@@ -48,21 +50,30 @@ class CompositionSceneAdapter:
         compositions: CompositionService,
         assembler: CompositionLayerSceneAssembler,
         current_composition_id: Callable[[], uuid.UUID | None],
+        viewport_selection: ViewportSceneSelection,
+        current_viewport_spec: Callable[[], CanvasViewportSpec | None],
     ) -> None:
         """Capture document and cross-domain assembly collaborators."""
         self._compositions = compositions
         self._assembler = assembler
         self._current_composition_id = current_composition_id
+        self._viewport_selection = viewport_selection
+        self._current_viewport_spec = current_viewport_spec
 
     def scene_contribution(self) -> SceneContribution | None:
         """Return the active composition document as a replacement contribution."""
         record = self._active_record()
         if record is None:
             return None
-        scene = self.scene_for(record.composition_id)
+        scene = self.scene_for(record.composition_id, apply_viewport=True)
         return SceneContribution(scene=scene, order=_LAYERED_COMPOSITION_ORDER)
 
-    def scene_for(self, composition_id: uuid.UUID) -> SceneDescriptor:
+    def scene_for(
+        self,
+        composition_id: uuid.UUID,
+        *,
+        apply_viewport: bool = False,
+    ) -> SceneDescriptor:
         """Assemble one addressed composition without changing view activation."""
         record = self._compositions.record(composition_id)
         document = SceneDescriptor(
@@ -71,16 +82,24 @@ class CompositionSceneAdapter:
             bounds=_placement_from_rect(record.canvas_bounds),
             layers=(),
         )
-        return self._assembler.assemble(document)
+        spec = self._current_viewport_spec() if apply_viewport else None
+        if spec is None:
+            return self._assembler.assemble(document)
+        return self._viewport_selection.assemble(spec, document)
 
     def revision(self) -> tuple[object, ...]:
         """Return revisions that can change the replacement scene contribution."""
         record = self._active_record()
         if record is None:
             return (self._compositions.revision(), None)
+        spec = self._current_viewport_spec()
         return (
             self._compositions.revision(),
-            self._assembler.revision(),
+            (
+                self._assembler.revision()
+                if spec is None
+                else self._viewport_selection.revision(spec)
+            ),
         )
 
     def hit_from_result(

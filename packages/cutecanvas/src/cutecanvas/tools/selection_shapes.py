@@ -22,8 +22,15 @@ from collections.abc import Callable
 from typing import ClassVar
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent, QPainter, QPen, QPolygonF
-from qpane import PointerPhase, PointerSample, ToolInputProfile
+from PySide6.QtGui import (
+    QCursor,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPolygonF,
+)
 
 from cutecanvas.coverage import (
     CoverageCombineMode,
@@ -31,9 +38,11 @@ from cutecanvas.coverage import (
     CoverageItem,
     VectorCoverageItem,
 )
+from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .base import BaseTool
 from .coverage_operation import resolve_coverage_operation
+from .coverage_preview import draw_clipped_marching_ants
 from .cursor_feedback import ToolCursorStyle
 from .modifier_snapshot import alt_is_active, shift_is_active
 from .ports import PixelSelectionInteractionPort
@@ -67,6 +76,8 @@ class SelectionShapeTool(BaseTool):
         self._is_alt_held = dependencies.is_alt_held
         self._default_combine_mode = dependencies.default_combine_mode
         self._get_feather_radius = dependencies.get_shape_feather_radius
+        self._constrain_item = dependencies.constrain_coverage_item
+        self._item_to_panel_path = dependencies.coverage_item_to_panel_path
 
     def deactivate(self) -> None:
         """Discard transient geometry and release collaborators."""
@@ -227,6 +238,12 @@ class SelectionShapeTool(BaseTool):
         self._is_alt_held: Callable[[], bool] = lambda: False
         self._default_combine_mode = CoverageCombineMode.REPLACE
         self._get_feather_radius: Callable[[], float] = lambda: 0.0
+        self._constrain_item: Callable[[CoverageItem], CoverageItem | None] = (
+            lambda item: item
+        )
+        self._item_to_panel_path: (
+            Callable[[CoverageItem], QPainterPath | None] | None
+        ) = None
 
     def _shape_rectangle(self, points: list[QPointF]) -> QRectF | None:
         """Return current constrained rectangle in the points' coordinate space."""
@@ -253,18 +270,34 @@ class SelectionShapeTool(BaseTool):
             self._panel_points[-1] = QPointF(panel_point)
 
     def _coverage_item(self) -> CoverageItem | None:
-        """Return retained subclass geometry when it has positive area."""
+        """Return current geometry constrained by its authoring aperture."""
+        item = self._raw_coverage_item()
+        return None if item is None else self._constrain_item(item)
+
+    def _raw_coverage_item(self) -> CoverageItem | None:
+        """Return unconstrained subclass geometry when it has positive area."""
         raise NotImplementedError
 
     def _draw_geometry(self, painter: QPainter) -> None:
         """Draw subclass-specific panel geometry."""
+        if self._item_to_panel_path is not None:
+            item = self._coverage_item()
+            if item is not None:
+                path = self._item_to_panel_path(item)
+                if path is not None:
+                    draw_clipped_marching_ants(painter, path)
+            return
+        self._draw_unconstrained_geometry(painter)
+
+    def _draw_unconstrained_geometry(self, painter: QPainter) -> None:
+        """Draw subclass-specific panel geometry without an aperture."""
         raise NotImplementedError
 
 
 class RectangleSelectionTool(SelectionShapeTool):
     """Create rectangular pixel selections."""
 
-    def _coverage_item(self) -> CoverageItem | None:
+    def _raw_coverage_item(self) -> CoverageItem | None:
         """Retain the current scene rectangle."""
         rectangle = self._shape_rectangle(self._scene_points)
         return (
@@ -278,7 +311,7 @@ class RectangleSelectionTool(SelectionShapeTool):
             )
         )
 
-    def _draw_geometry(self, painter: QPainter) -> None:
+    def _draw_unconstrained_geometry(self, painter: QPainter) -> None:
         """Draw the current panel rectangle."""
         rectangle = self._shape_rectangle(self._panel_points)
         if rectangle is not None:
@@ -288,7 +321,7 @@ class RectangleSelectionTool(SelectionShapeTool):
 class EllipseSelectionTool(SelectionShapeTool):
     """Create elliptical pixel selections."""
 
-    def _coverage_item(self) -> CoverageItem | None:
+    def _raw_coverage_item(self) -> CoverageItem | None:
         """Retain the current scene ellipse."""
         rectangle = self._shape_rectangle(self._scene_points)
         return (
@@ -302,7 +335,7 @@ class EllipseSelectionTool(SelectionShapeTool):
             )
         )
 
-    def _draw_geometry(self, painter: QPainter) -> None:
+    def _draw_unconstrained_geometry(self, painter: QPainter) -> None:
         """Draw the current panel ellipse."""
         rectangle = self._shape_rectangle(self._panel_points)
         if rectangle is not None:
@@ -322,7 +355,7 @@ class LassoSelectionTool(SelectionShapeTool):
         if not self._panel_points or panel_point != self._panel_points[-1]:
             self._panel_points.append(QPointF(panel_point))
 
-    def _coverage_item(self) -> CoverageItem | None:
+    def _raw_coverage_item(self) -> CoverageItem | None:
         """Retain a lasso with at least three distinct scene points."""
         if len(self._scene_points) < 3:
             return None
@@ -333,7 +366,7 @@ class LassoSelectionTool(SelectionShapeTool):
             feather_radius=self._get_feather_radius(),
         )
 
-    def _draw_geometry(self, painter: QPainter) -> None:
+    def _draw_unconstrained_geometry(self, painter: QPainter) -> None:
         """Draw accumulated freeform panel samples."""
         painter.drawPolyline(QPolygonF(self._panel_points))
 

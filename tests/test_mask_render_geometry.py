@@ -29,14 +29,20 @@ from cutecanvas.coverage import (
 )
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
+from cutecanvas.masks.mask_undo import (
+    MaskHistoryChange,
+    MaskImageCommand,
+    MaskUndoSnippet,
+)
 from cutecanvas.masks.source_resolver import MaskSourceCapabilities
 from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage
-from qpane import HybridPresentationStyle, HybridSource, LayerTransform
 from qpane.hybrid.evaluation import HybridDocumentEvaluator
 from qpane.raster.image_conversion import qimage_to_numpy_grayscale8
 from qpane.scene.raster import RasterBounds
+
+from qpane import HybridPresentationStyle, HybridSource, LayerTransform
 
 
 def test_preview_stride_defaults_to_visible_density_before_cache_warmup(qapp) -> None:
@@ -122,6 +128,59 @@ def test_worker_colorized_mask_patch_does_not_materialize_full_surface(
         layer,
         colorized_image=colorized,
     )
+
+
+def test_history_delta_reads_only_dirty_surface_regions(qapp, monkeypatch) -> None:
+    """Undo presentation must not copy a large authoritative mask in full."""
+
+    assets = MaskAssetStore(ProjectResourceStore())
+    image = QImage(4096, 4096, QImage.Format.Format_Grayscale8)
+    image.fill(0)
+    mask_id = assets.create_mask(image)
+    layer = assets.get_layer(mask_id)
+    assert layer is not None
+    controller = MaskController(
+        assets,
+        source_to_panel_point=lambda point: QPointF(point),
+        config=Config(),
+        mask_config=MaskConfigSlice(),
+    )
+    assert controller.renders.get(layer, scale=0.125) is not None
+    dirty = QRect(1024, 768, 48, 32)
+    layer.coverage.raster.mutate_storage_region(
+        RasterBounds.from_qrect(dirty),
+        lambda pixels, _image: pixels.fill(255),
+    )
+    original_snapshot_region = layer.coverage.raster.snapshot_storage_region
+    captured_regions: list[RasterBounds] = []
+
+    def reject_full_snapshot() -> QImage:
+        raise AssertionError("history presentation copied the full mask")
+
+    def capture_region(region: RasterBounds, *, stride: int = 1) -> np.ndarray:
+        captured_regions.append(region)
+        return original_snapshot_region(region, stride=stride)
+
+    monkeypatch.setattr(layer.coverage.raster, "snapshot_qimage", reject_full_snapshot)
+    monkeypatch.setattr(
+        layer.coverage.raster,
+        "snapshot_storage_region",
+        capture_region,
+    )
+    snippet = QImage(dirty.size(), QImage.Format.Format_Grayscale8)
+    snippet.fill(255)
+    command = MaskImageCommand(mask_id, QImage(), QImage(), lambda _id, _image: None)
+
+    assert controller.renders.apply_history_delta(
+        layer,
+        MaskHistoryChange(
+            mask_id,
+            "undo",
+            command,
+            (MaskUndoSnippet(dirty, snippet),),
+        ),
+    )
+    assert captured_regions == [RasterBounds.from_qrect(dirty)]
 
 
 def test_live_preview_uses_one_exact_sample_lattice_during_scale_transition(

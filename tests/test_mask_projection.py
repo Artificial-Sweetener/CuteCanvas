@@ -112,8 +112,8 @@ def test_projection_applies_layer_translation_before_canvas_clipping() -> None:
     assert projected.sum() == 255
 
 
-def test_generated_canvas_mask_obeys_fixed_and_expand_on_write_policy() -> None:
-    """Generated canvas pixels should map through movement into local storage."""
+def test_generated_canvas_mask_uses_infinite_default_and_obeys_fixed_policy() -> None:
+    """Mask defaults expand through movement while explicit fixed storage clips."""
     assets = MaskAssetStore(ProjectResourceStore())
     mask_id = assets.create_mask(QImage(QSize(4, 4), QImage.Format_Grayscale8))
     scene_id = uuid.uuid4()
@@ -141,15 +141,15 @@ def test_generated_canvas_mask_obeys_fixed_and_expand_on_write_policy() -> None:
     incoming = np.zeros((4, 4), dtype=np.uint8)
     incoming[1, 0] = 255
 
-    assert projection.combine_canvas_mask(mask_id, incoming, erase=False) is None
-
     surface = assets.get_surface(mask_id)
     assert surface is not None
-    surface.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
     expanded = projection.combine_canvas_mask(mask_id, incoming, erase=False)
     assert expanded is not None
     assert expanded.bounds == RasterBounds(-2, 0, 6, 4)
     assert expanded.pixels[1, 0] == 255
+
+    surface.set_extent_policy(RasterExtentPolicy.FIXED)
+    assert projection.combine_canvas_mask(mask_id, incoming, erase=False) is None
 
 
 @pytest.mark.performance

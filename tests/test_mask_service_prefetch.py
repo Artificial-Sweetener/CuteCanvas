@@ -34,6 +34,7 @@ from cutecanvas.masks.render_products import (
     PrefetchedOverlay,
 )
 from cutecanvas.resources import ProjectResourceStore
+from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
 from qpane.types import DiagnosticRecord
 
@@ -105,7 +106,14 @@ def test_resolve_prefetch_scales_filters_invalid(canvas_core):
     """Invalid or duplicate scales should be filtered out."""
     service, _, _ = _build_service(canvas_core)
     scales = service.render_work.resolve_prefetch_scales(
-        [1.0, 0.5, 0.5, 0, "bad", 0.25]
+        [
+            1.0,
+            0.5,
+            0.5,
+            0,
+            "bad",
+            0.25,
+        ]
     )
     assert scales == (0.5, 0.25)
 
@@ -401,6 +409,24 @@ def test_snippet_result_is_discarded_while_stroke_preview_is_active(
     )
 
     assert updates == []
+
+
+@pytest.mark.usefixtures("qapp")
+def test_durable_sampled_refresh_does_not_become_a_live_stroke_preview(
+    canvas_core,
+    monkeypatch,
+) -> None:
+    """Keep passive document refreshes out of provisional stroke ownership."""
+
+    service, manager, controller = _build_service(canvas_core)
+    mask_id = manager.create_mask(QImage(4096, 4096, QImage.Format.Format_Grayscale8))
+    layer = manager.get_layer(mask_id)
+    assert layer is not None
+    monkeypatch.setattr(service.render_work, "_current_zoom", lambda: 0.125)
+
+    service.render_work.update_region(QRect(512, 512, 128, 128), layer)
+
+    assert not controller.renders.is_live_preview(mask_id)
 
 
 @pytest.mark.usefixtures("qapp")

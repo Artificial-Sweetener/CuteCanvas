@@ -42,6 +42,7 @@ from ..core.config import Config
 from ..coverage import CoverageShapeConfiguration
 from ..document import CanvasDocument
 from ..fill import PaintBucketCoordinator, SelectionFillCoordinator
+from ..masks.canvas_aperture import ActiveMaskCanvasAperture
 from ..masks.coordinates import ActiveMaskLayerCoordinates
 from ..painting import (
     BrushDynamics,
@@ -101,6 +102,7 @@ from ..scene.raster_mutations import (
 from ..scene.source_capabilities import EditorSourceCapabilities
 from ..scene.transform_preview import SceneLayerTransformPreview
 from ..scene.transform_session import SceneLayerTransformController
+from ..scene.viewport_selection import ViewportSceneSelection
 from ..selection import (
     PixelSelectionPaintTargetOwner,
     PixelSelectionService,
@@ -235,6 +237,7 @@ class EditorRootComponents:
     operation_resolver: EditorOperationResolver
     paint_destination: InteractivePaintDestinationCoordinator
     active_mask_coordinates: ActiveMaskLayerCoordinates
+    active_mask_aperture: ActiveMaskCanvasAperture
     composition_scene_adapter: CompositionSceneAdapter
     tools: Tools
     cursor_builder: CursorBuilder
@@ -564,6 +567,12 @@ class EditorCompositionRoot:
             active_scene=view.coordinate_scene_descriptor,
             coordinates=view.coordinates,
         )
+        active_mask_aperture = ActiveMaskCanvasAperture(
+            active_mask_id=callbacks.active_mask_id,
+            active_scene=view.coordinate_scene_descriptor,
+            coordinates=view.coordinates,
+            pixel_selection=pixel_selection,
+        )
 
         scene_mutations.register_owner(
             EditableRasterSceneMutationOwner(
@@ -602,6 +611,12 @@ class EditorCompositionRoot:
             compositions=compositions,
             assembler=layer_assembler,
             current_composition_id=callbacks.current_composition_id,
+            viewport_selection=ViewportSceneSelection(
+                inputs.document,
+                compositions,
+                layer_assembler,
+            ),
+            current_viewport_spec=lambda: inputs.qpane.viewSession().viewport_spec,
         )
         scene_providers.register_replacement(composition_scene_adapter)
         tools = Tools(parent=inputs.qpane)
@@ -658,6 +673,7 @@ class EditorCompositionRoot:
             operation_resolver=operation_resolver,
             paint_destination=paint_destination,
             active_mask_coordinates=active_mask_coordinates,
+            active_mask_aperture=active_mask_aperture,
             composition_scene_adapter=composition_scene_adapter,
             tools=tools,
             cursor_builder=cursor_builder,

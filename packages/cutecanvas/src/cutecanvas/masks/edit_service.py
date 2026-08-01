@@ -36,27 +36,16 @@ from qpane.sdk.scene import RasterBounds
 from cutecanvas.coverage import CoverageItem, CoverageSnapshot, WritableCoverageRegion
 from cutecanvas.types import RasterExtentPolicy
 
-from .coverage_history import MaskCoverageCommand
+from .history_presentation import MaskHistoryPresenter
 from .mask import MaskAssetStore, MaskLayer
 from .mask_diagnostics import MaskStrokeDiagnostics
-from .mask_undo import MaskHistoryChange, MaskImageCommand, MaskPatch
+from .mask_undo import MaskHistoryChange, MaskPatch
 from .mixed_stroke import MixedMaskStrokeCoordinator
 from .render_cache import MaskRenderCache
 from .stroke_history import MaskStrokeHistorySession
 from .stroke_models import MaskStrokeJobResult, MaskStrokeJobSpec, MaskStrokePayload
-from .surface_history import MaskSurfaceCommand
 
 logger = logging.getLogger(__name__)
-
-
-def _command_changes_structure(change: MaskHistoryChange) -> bool:
-    """Return whether history replay can change storage bounds."""
-    command = change.command
-    if isinstance(command, MaskSurfaceCommand):
-        return command.before.bounds != command.after.bounds
-    if isinstance(command, MaskImageCommand):
-        return command.before.size() != command.after.size()
-    return isinstance(command, MaskCoverageCommand)
 
 
 class MaskEditEpochs:
@@ -94,8 +83,8 @@ class MaskEditService:
         mask_changed: Callable[[uuid.UUID | None, QRect], None],
         undo_changed: Callable[[uuid.UUID], None],
         structure_changed: Callable[[], None] | None = None,
-        content_changed: Callable[[], None] | None = None,
         diagnostics: MaskStrokeDiagnostics | None = None,
+        presentation_identity: object,
     ) -> None:
         """Initialize editing with explicit state-owner collaborators."""
         self._assets = assets
@@ -105,8 +94,15 @@ class MaskEditService:
         self._mask_changed = mask_changed
         self._undo_changed = undo_changed
         self._structure_changed = structure_changed or (lambda: None)
-        self._content_changed = content_changed or self._structure_changed
         self._diagnostics = diagnostics
+        self._presentation_identity = presentation_identity
+        self._history_presentation = MaskHistoryPresenter(
+            assets=assets,
+            renders=renders,
+            mask_changed=mask_changed,
+            undo_changed=undo_changed,
+            structure_changed=self._structure_changed,
+        )
         self._stroke_history = MaskStrokeHistorySession()
         self._mixed_strokes = MixedMaskStrokeCoordinator(
             assets=assets,
@@ -464,26 +460,41 @@ class MaskEditService:
         bounds_before = (
             None if layer_before is None else layer_before.coverage.raster.bounds
         )
-        if patches:
-            if already_applied:
-                success = self._assets.record_applied_mask_patches(
-                    mask_id,
-                    patches,
-                )
-            else:
-                success = self._assets.commit_mask_patches(mask_id, patches)
-        else:
-            if image is None:
-                logger.error(
-                    "commit_mask_update aborted for mask %s: image payload missing.",
-                    mask_id,
-                )
-                return False
-            success = self._assets.commit_mask_image(
-                mask_id,
-                image,
-                before_image=before,
+        dirty_bounds = None
+        if patches and bounds_before is not None:
+            dirty_rect = QRect(patches[0].rect)
+            for patch in patches[1:]:
+                dirty_rect = dirty_rect.united(patch.rect)
+            dirty_bounds = RasterBounds(
+                bounds_before.x + dirty_rect.x(),
+                bounds_before.y + dirty_rect.y(),
+                dirty_rect.width(),
+                dirty_rect.height(),
             )
+        with self._assets.change_origin(
+            self._presentation_identity,
+            detail=dirty_bounds,
+        ):
+            if patches:
+                if already_applied:
+                    success = self._assets.record_applied_mask_patches(
+                        mask_id,
+                        patches,
+                    )
+                else:
+                    success = self._assets.commit_mask_patches(mask_id, patches)
+            else:
+                if image is None:
+                    logger.error(
+                        "commit_mask_update aborted for mask %s: image payload missing.",
+                        mask_id,
+                    )
+                    return False
+                success = self._assets.commit_mask_image(
+                    mask_id,
+                    image,
+                    before_image=before,
+                )
         if not success:
             return False
         if not already_applied:
@@ -506,25 +517,9 @@ class MaskEditService:
         change = operator(mask_id)
         return change is not None
 
-    def present_history_change(self, change: MaskHistoryChange) -> None:
-        """Refresh cached and structural presentation after history replay."""
-        mask_id = change.mask_id
-        mask_layer = self._get_layer(mask_id)
-        applied_delta = False
-        if mask_layer is not None and change.has_snippets:
-            applied_delta = self._renders.apply_history_delta(mask_layer, change)
-        if applied_delta:
-            dirty_rect = QRect(change.snippets[0].rect)
-            for snippet in change.snippets[1:]:
-                dirty_rect = dirty_rect.united(snippet.rect)
-            self._mask_changed(mask_id, dirty_rect)
-        else:
-            if mask_layer is not None:
-                self._renders.invalidate_layer(mask_layer)
-            self._mask_changed(mask_id, QRect())
-        if _command_changes_structure(change):
-            self._structure_changed()
-        self._undo_changed(mask_id)
+    def present_history_change(self, change: MaskHistoryChange) -> bool:
+        """Present one document-owned history replay in this mounted view."""
+        return self._history_presentation.present(change)
 
     def undo(self) -> bool:
         """Undo the most recent mask change tracked for the active layer."""
@@ -588,7 +583,8 @@ class MaskEditService:
                     image.width(),
                     image.height(),
                 )
-        self._assets.set_mask_image(mask_id, image)
+        with self._assets.change_origin(self._presentation_identity):
+            self._assets.set_mask_image(mask_id, image)
         self.advance_epoch(mask_id, reason="update_stroke_image")
         if layer.coverage.raster.bounds != bounds_before:
             self._structure_changed()
@@ -603,18 +599,21 @@ class MaskEditService:
         payload = self._stroke_history.consume(mask_id)
         if self._mixed_strokes.active(mask_id):
             if not payload.patches and payload.structural_before is None:
-                self._mixed_strokes.cancel(mask_id)
+                with self._assets.change_origin(self._presentation_identity):
+                    self._mixed_strokes.cancel(mask_id)
                 return False
-            return self._mixed_strokes.commit(mask_id)
+            with self._assets.change_origin(self._presentation_identity):
+                return self._mixed_strokes.commit(mask_id)
         if payload.structural_before is not None:
             layer = self._get_layer(mask_id)
             if layer is None:
                 return False
-            changed = self._assets.record_applied_surface(
-                mask_id,
-                payload.structural_before,
-                layer.coverage.raster.state_snapshot(),
-            )
+            with self._assets.change_origin(self._presentation_identity):
+                changed = self._assets.record_applied_surface(
+                    mask_id,
+                    payload.structural_before,
+                    layer.coverage.raster.state_snapshot(),
+                )
             if changed:
                 self._undo_changed(mask_id)
             return changed
@@ -632,7 +631,8 @@ class MaskEditService:
     def cancel_stroke(self, mask_id: uuid.UUID) -> bool:
         """Discard patch capture and restore provisional hybrid authorship."""
         self._stroke_history.discard(mask_id)
-        return self._mixed_strokes.cancel(mask_id)
+        with self._assets.change_origin(self._presentation_identity):
+            return self._mixed_strokes.cancel(mask_id)
 
     def apply_mask_image(
         self,
@@ -670,24 +670,27 @@ class MaskEditService:
         bounds_before = (
             None if layer_before is None else layer_before.coverage.raster.bounds
         )
-        if not self._assets.commit_mask_surface(mask_id, snapshot):
-            return False
+        with self._assets.change_origin(self._presentation_identity):
+            if not self._assets.commit_mask_surface(mask_id, snapshot):
+                return False
         self.advance_epoch(mask_id, reason="mask_surface_applied")
         layer = self._get_layer(mask_id)
         if layer is not None:
             self._renders.invalidate_layer(layer)
         if layer is not None and layer.coverage.raster.bounds != bounds_before:
             self._structure_changed()
+        else:
+            self._mask_changed(mask_id, QRect())
         self._undo_changed(mask_id)
-        self._mask_changed(mask_id, QRect())
         return True
 
     def apply_coverage_item(self, mask_id: uuid.UUID, item: CoverageItem) -> bool:
         """Commit retained mask geometry and invalidate all derived presentation."""
         layer = self._get_layer(mask_id)
         bounds_before = None if layer is None else layer.coverage.source_bounds()
-        if not self._assets.commit_coverage_item(mask_id, item):
-            return False
+        with self._assets.change_origin(self._presentation_identity):
+            if not self._assets.commit_coverage_item(mask_id, item):
+                return False
         self.advance_epoch(mask_id, reason="mask_coverage_item_applied")
         layer = self._get_layer(mask_id)
         if layer is not None:
@@ -696,20 +699,19 @@ class MaskEditService:
         if bounds_after != bounds_before:
             self._structure_changed()
         else:
-            self._content_changed()
+            self._mask_changed(mask_id, QRect())
         self._undo_changed(mask_id)
-        self._mask_changed(mask_id, QRect())
         return True
 
     def rasterize_coverage(self, mask_id: uuid.UUID) -> bool:
         """Flatten retained coverage with complete history and cache invalidation."""
-        if not self._assets.rasterize_coverage(mask_id):
-            return False
+        with self._assets.change_origin(self._presentation_identity):
+            if not self._assets.rasterize_coverage(mask_id):
+                return False
         self.advance_epoch(mask_id, reason="mask_coverage_rasterized")
         layer = self._get_layer(mask_id)
         if layer is not None:
             self._renders.invalidate_layer(layer)
         self._structure_changed()
         self._undo_changed(mask_id)
-        self._mask_changed(mask_id, QRect())
         return True

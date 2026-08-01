@@ -30,6 +30,12 @@ from .session import (
     CanvasSessionSnapshot,
     CanvasViewSession,
 )
+from .viewport import (
+    CanvasRenderVariant,
+    CanvasViewportInteraction,
+    CanvasViewportSource,
+    CanvasViewportSpec,
+)
 
 __all__ = [
     "CanvasComparison",
@@ -39,8 +45,12 @@ __all__ = [
     "CanvasInspectionGroup",
     "CanvasPresentation",
     "CanvasPresentationKind",
+    "CanvasRenderVariant",
     "CanvasSessionSnapshot",
     "CanvasViewSession",
+    "CanvasViewportInteraction",
+    "CanvasViewportSource",
+    "CanvasViewportSpec",
     "DocumentChange",
     "DocumentChangeKind",
     "DocumentEventHub",

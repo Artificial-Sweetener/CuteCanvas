@@ -1206,7 +1206,7 @@ def test_mask_stroke_finalize_drops_stale_generation(qapp):
         _cleanup_qpane(qpane, qapp)
 
 
-def test_mask_stroke_finalize_drops_stale_token(qapp):
+def test_mask_stroke_finalize_drops_stale_token(qapp, monkeypatch):
     executor = TestExecution(auto_finish=False)
     qpane, image = _prepare_qpane_with_mask_feature(executor=executor)
     service = _mask_service(qpane)
@@ -1219,6 +1219,12 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
     layer.coverage.raster.fill(0)
     qpane.interaction.brush_size = 5
     tools = qpane._tools_manager
+    refreshes: list[QRect] = []
+    monkeypatch.setattr(
+        service._stroke_pipeline,
+        "_update_region",
+        lambda dirty_rect, _layer, **_kwargs: refreshes.append(QRect(dirty_rect)),
+    )
     try:
 
         def queue_stroke(point: QPoint) -> None:
@@ -1242,6 +1248,7 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
         second_token = preview_tokens.get(mask_id)
         assert second_token is not None and second_token != first_token
+        refreshes.clear()
         backend = qpane._test_execution_backend
         jobs = [
             job
@@ -1251,6 +1258,7 @@ def test_mask_stroke_finalize_drops_stale_token(qapp):
         assert len(jobs) == 2
         backend.run_job(jobs[0])
         qapp.processEvents()
+        assert refreshes == []
         preview_tokens = service.strokeDebugSnapshot().preview_tokens
         assert preview_tokens.get(mask_id) == second_token
         view, _ = qimage_to_numpy_view_grayscale8(layer.mask_image)
@@ -1415,7 +1423,9 @@ def test_controller_noop_stroke_preserves_revision_and_history(qpane_with_mask):
     assert service.getUndoState(mask_id) == history_before
 
 
-def test_mask_service_produces_preview_for_zoomed_out(qpane_with_mask, monkeypatch):
+def test_mask_service_produces_durable_sampled_patch_for_zoomed_out(
+    qpane_with_mask, monkeypatch
+):
     qpane, mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
     base_image = _current_source_image(qpane)
@@ -1461,7 +1471,7 @@ def test_mask_service_produces_preview_for_zoomed_out(qpane_with_mask, monkeypat
     assert isinstance(preview_image, QImage)
     stride = int(preview_image.text("qpane_preview_stride"))
     assert stride == max(1, round(1.0 / max(viewport.zoom, 1e-6)))
-    assert preview_image.text("qpane_preview_provisional") == "1"
+    assert preview_image.text("qpane_preview_provisional") == ""
     preview_view, _ = qimage_to_numpy_view_grayscale8(preview_image)
     mask_view, _ = qimage_to_numpy_view_grayscale8(layer.mask_image)
     y0, x0 = dirty_rect.top(), dirty_rect.left()

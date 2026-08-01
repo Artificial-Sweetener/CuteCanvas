@@ -294,10 +294,10 @@ def test_hidden_raster_never_reappears_during_mask_navigation_abuse(
         harness.close()
 
 
-def test_moved_default_mask_keeps_fixed_image_sized_write_bounds(
+def test_moved_default_mask_expands_only_inside_the_canvas_aperture(
     qapp: QApplication,
 ) -> None:
-    """Default masks should clip real brush input at their moved finite surface."""
+    """Default masks should retain paint on newly exposed canvas regions."""
     harness = MountedQPaneHarness(
         qapp,
         image_size=QSize(400, 400),
@@ -336,16 +336,16 @@ def test_moved_default_mask_keeps_fixed_image_sized_write_bounds(
         harness.drain_events(wait_ms=10)
         state = harness.viewer.getMaskUndoState(mask_id)
         assert state is not None
-        assert state.undo_depth == 0
+        assert state.undo_depth == 1
 
         driver.begin(inside_surface)
         driver.move(inside_surface, 1)
         driver.end(inside_surface)
-        assert harness.wait_for_mask_undo_depth(mask_id, 1)
+        assert harness.wait_for_mask_undo_depth(mask_id, 2)
         exported = harness.viewer.getActiveMaskImage()
         assert exported is not None
         assert exported.size() == QSize(400, 400)
-        assert exported.pixelColor(50, 200).red() == 0
+        assert exported.pixelColor(50, 200).red() > 0
         assert exported.pixelColor(150, 200).red() > 0
         assert exported.pixelColor(350, 200).red() == 0
     finally:
@@ -387,7 +387,7 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
             mask_info.layer_id,
             QRectF(100.0, 0.0, 400.0, 400.0),
         )
-        assert harness.viewer.setRasterExtentPolicy(
+        harness.viewer.setRasterExtentPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
             RasterExtentPolicy.EXPAND_ON_WRITE,
@@ -699,7 +699,7 @@ def test_delete_and_history_follow_expanded_negative_mask_bounds(
         )
         harness.viewer.setSelectedLayer(info.scene_id, info.layer_id)
         assert harness.viewer.selectedLayer().layer_id == info.layer_id
-        assert harness.viewer.setRasterExtentPolicy(
+        harness.viewer.setRasterExtentPolicy(
             info.scene_id,
             info.layer_id,
             RasterExtentPolicy.EXPAND_ON_WRITE,
@@ -777,7 +777,7 @@ def test_expanding_mask_grows_every_edge_through_mounted_brush_input(
         assert mask_info.layer_id is not None
         assert mask_info.interaction.movable
         assert mask_info.interaction.pixel_editable
-        assert harness.viewer.setRasterExtentPolicy(
+        harness.viewer.setRasterExtentPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
             RasterExtentPolicy.EXPAND_ON_WRITE,
@@ -867,7 +867,7 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
             mask_info.layer_id,
             QRectF(size * 0.5, 0.0, size, size),
         )
-        assert harness.viewer.setRasterExtentPolicy(
+        harness.viewer.setRasterExtentPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
             RasterExtentPolicy.EXPAND_ON_WRITE,
@@ -934,7 +934,7 @@ def test_expanding_mask_live_preview_never_flashes_painted_pixels(
             mask_info.layer_id,
             QRectF(size * 0.5, 0.0, size, size),
         )
-        assert harness.viewer.setRasterExtentPolicy(
+        harness.viewer.setRasterExtentPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
             RasterExtentPolicy.EXPAND_ON_WRITE,
@@ -1011,7 +1011,7 @@ def test_expanding_mask_structural_undo_never_flashes_retained_pixels(
             mask_info.layer_id,
             QRectF(100.0, 0.0, 400.0, 400.0),
         )
-        assert harness.viewer.setRasterExtentPolicy(
+        harness.viewer.setRasterExtentPolicy(
             mask_info.scene_id,
             mask_info.layer_id,
             RasterExtentPolicy.EXPAND_ON_WRITE,

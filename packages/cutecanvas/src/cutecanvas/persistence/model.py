@@ -44,12 +44,18 @@ class CompositionArchiveSnapshot:
     rasters: Mapping[uuid.UUID, SparseRasterSnapshot]
     placed_assets: Mapping[uuid.UUID, PlacedAssetSnapshot]
     vectors: Mapping[uuid.UUID, VectorDocument]
+    root_document_ids: tuple[uuid.UUID, ...] = ()
 
     def __post_init__(self) -> None:
         """Normalize immutable collection boundaries."""
         if not isinstance(self.root_document_id, uuid.UUID):
             raise TypeError("root_document_id must be a UUID")
         documents = dict(self.documents)
+        root_document_ids = self.root_document_ids or (self.root_document_id,)
+        if len(set(root_document_ids)) != len(root_document_ids):
+            raise ValueError("archive root documents must be unique")
+        if not set(root_document_ids).issubset(documents):
+            raise ValueError("every archive root document must be present")
         if self.root_document_id not in documents:
             raise ValueError("archive root document must be present")
         if set(documents) != set(self.layer_stacks):
@@ -87,6 +93,7 @@ class CompositionArchiveSnapshot:
             MappingProxyType(dict(self.placed_assets)),
         )
         object.__setattr__(self, "vectors", MappingProxyType(dict(self.vectors)))
+        object.__setattr__(self, "root_document_ids", tuple(root_document_ids))
 
     @property
     def composition_id(self) -> uuid.UUID:

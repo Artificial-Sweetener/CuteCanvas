@@ -23,10 +23,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect
-from PySide6.QtGui import QColor, QPen
-from qpane import CursorInteractionPort, NavigationInteractionPort
+from PySide6.QtGui import QColor, QPainterPath, QPen
 
 from cutecanvas.coverage import CoverageCombineMode
+from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from .dependencies import ToolDependencies
 
@@ -104,6 +104,12 @@ class PixelSelectionInteractionPort:
     is_alt_held: Callable[[], bool] = _false
     default_combine_mode: CoverageCombineMode = CoverageCombineMode.REPLACE
     get_shape_feather_radius: Callable[[], float] = lambda: 0.0
+    constrain_coverage_item: Callable[[CoverageItem], CoverageItem | None] = (
+        lambda item: item
+    )
+    coverage_item_to_panel_path: (
+        Callable[[CoverageItem], QPainterPath | None] | None
+    ) = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +120,7 @@ class PaintingInteractionPort:
     is_shift_held: Callable[[], bool] = _false
     can_paint: Callable[[], bool] = _true
     prepare_paint: Callable[[], bool] = _true
+    gesture_start_allowed: Callable[[QPointF], bool] = lambda _point: True
     get_brush_size: Callable[[], int] = lambda: 20
     get_preview_pens: Callable[[], tuple[QPen, QPen]] | None = None
     panel_hit_test: Callable[[QPoint], PanelHitTest | None] | None = None

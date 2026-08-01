@@ -175,6 +175,9 @@ class CompositionArchiveCodec:
             "format": _FORMAT,
             "version": _VERSION,
             "root_document_id": str(archive.root_document_id),
+            "root_document_ids": [
+                str(document_id) for document_id in archive.root_document_ids
+            ],
             "documents": [
                 {
                     "document": CompositionArchiveCodec._encode_document(
@@ -561,6 +564,12 @@ class CompositionArchiveCodec:
         )
         if version >= 11:
             root_document_id = uuid.UUID(str(manifest["root_document_id"]))
+            root_values = manifest.get("root_document_ids")
+            root_document_ids = (
+                tuple(uuid.UUID(str(value)) for value in root_values)
+                if isinstance(root_values, list)
+                else (root_document_id,)
+            )
             documents = document_records
             layer_stacks = document_layers
         else:
@@ -577,6 +586,7 @@ class CompositionArchiveCodec:
                 )
             )
             root_document_id = document.composition_id
+            root_document_ids = (root_document_id,)
             documents = {root_document_id: document}
             layer_stacks = {root_document_id: layers}
             project_resources[root_document_id] = ProjectResourceRecord(
@@ -600,6 +610,7 @@ class CompositionArchiveCodec:
             rasters=rasters,
             placed_assets=placed_assets,
             vectors=vectors,
+            root_document_ids=root_document_ids,
         )
 
     @staticmethod
@@ -956,6 +967,10 @@ class CompositionArchiveCodec:
                     raise TypeError("archive documents must be a list")
                 if not isinstance(manifest.get("root_document_id"), str):
                     raise TypeError("archive root_document_id must be a string")
+                if "root_document_ids" in manifest and not isinstance(
+                    manifest["root_document_ids"], list
+                ):
+                    raise TypeError("archive root_document_ids must be a list")
             elif not isinstance(manifest.get("instances"), list):
                 raise TypeError("archive instances must be a list")
             if 8 <= version < 11 and not isinstance(manifest.get("document"), dict):

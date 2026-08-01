@@ -30,11 +30,10 @@ from qpane.sdk.raster import (
     qimage_to_numpy_grayscale8,
 )
 
-from cutecanvas.coverage import CoverageSnapshot
-
 from ..painting import BrushCompositor, BrushDab, BrushDabEngine, BrushStrokeSegment
 from ..painting.rendering import apply_coverage_constraint, paint_coverage_segment
 from .mask_controller import MaskController
+from .stroke_constraints import MaskStrokeConstraint
 from .stroke_models import (
     MaskStrokeJobSpec,
     MaskStrokePayload,
@@ -58,7 +57,7 @@ class DecimatedStrokePreview:
     mask_id: UUID
     stride: int
     compositor: BrushCompositor = field(default_factory=BrushCompositor)
-    constraint: CoverageSnapshot | None = None
+    constraint: MaskStrokeConstraint | None = None
     constraint_region: Callable[[QRect, int], np.ndarray] | None = None
     _segments: list[BrushStrokeSegment] = field(default_factory=list)
     _segment_rects: list[QRect] = field(default_factory=list)

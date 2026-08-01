@@ -19,6 +19,7 @@
 from .autosave import AutosaveManager
 from .autosave_coordination import should_enable_mask_autosave
 from .delegate import MaskDelegate
+from .export import MaskExportSnapshot
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
@@ -31,6 +32,7 @@ __all__ = (
     "MaskAssetStore",
     "MaskController",
     "MaskDelegate",
+    "MaskExportSnapshot",
     "MaskLayer",
     "MaskPatch",
     "MaskService",

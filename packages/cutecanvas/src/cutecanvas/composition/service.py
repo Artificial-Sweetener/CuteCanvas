@@ -168,6 +168,7 @@ class CompositionService:
         origin: CompositionOrigin = CompositionOrigin.COMPOSITION,
         layers: tuple[CompositionLayerInstance, ...] = (),
         policy: CompositionDocumentPolicy | None = None,
+        composition_id: uuid.UUID | None = None,
     ) -> CompositionRecord:
         """Create one independent composition."""
         if not isinstance(bounds, QRectF):
@@ -179,28 +180,32 @@ class CompositionService:
         normalized_title = title.strip()
         if not normalized_title:
             raise ValueError("title must not be empty")
-        composition_id = uuid.uuid4()
+        resolved_composition_id = composition_id or uuid.uuid4()
+        if not isinstance(resolved_composition_id, uuid.UUID):
+            raise TypeError("composition_id must be a UUID or None")
+        if resolved_composition_id in self._records:
+            raise ValueError("composition_id already exists")
         record = CompositionRecord(
-            composition_id=composition_id,
+            composition_id=resolved_composition_id,
             origin=origin,
             title=normalized_title,
             canvas_bounds=QRectF(bounds),
             policy=policy or CompositionDocumentPolicy(),
         )
-        self._records[composition_id] = record
+        self._records[resolved_composition_id] = record
         self._layer_notification_depth += 1
         try:
-            self._layers.ensure_composition(composition_id, tuple(layers))
+            self._layers.ensure_composition(resolved_composition_id, tuple(layers))
         finally:
             self._layer_notification_depth -= 1
-        self._order.append(composition_id)
+        self._order.append(resolved_composition_id)
         if self._document_resources is not None:
             try:
-                self._document_resources.synchronize(composition_id, layers)
+                self._document_resources.synchronize(resolved_composition_id, layers)
             except Exception:
-                self._records.pop(composition_id, None)
-                self._layers.remove_composition(composition_id)
-                self._order.remove(composition_id)
+                self._records.pop(resolved_composition_id, None)
+                self._layers.remove_composition(resolved_composition_id)
+                self._order.remove(resolved_composition_id)
                 raise
         self._touch()
         return record

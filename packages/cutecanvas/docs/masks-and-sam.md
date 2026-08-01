@@ -62,6 +62,14 @@ mask_id = canvas.loadMaskFromFile("existing-mask.png")
 Color images are converted to 8-bit coverage. The returned UUID identifies the
 mask resource; its document layer has its own layer ID and transform.
 
+Creation and import are undoable editor actions by default. A host that installs
+a required mask as part of document setup can keep that structure outside user
+history:
+
+```python
+mask_id = canvas.createBlankMask(image.size(), undoable=False)
+```
+
 ## Choose the Active Mask
 
 Only one mask receives mask-specific painting at a time:

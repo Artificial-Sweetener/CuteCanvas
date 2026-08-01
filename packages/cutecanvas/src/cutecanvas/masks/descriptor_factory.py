@@ -23,10 +23,13 @@ from typing import Protocol
 
 from qpane.sdk.scene import (
     BlendMode,
+    ClipCoordinateSpace,
+    LayerClip,
     LayerContentCapabilities,
     LayerDescriptor,
     LayerHitTest,
     LayerKind,
+    LayerPlacement,
     RasterBounds,
     SceneDescriptor,
 )
@@ -94,16 +97,17 @@ class MaskLayerDescriptorFactory:
             resource.revision,
             int(self.renders.render_revision(mask_id)),
         )
+        placement = instance.transform.map_bounds(raster_bounds)
         return LayerDescriptor(
             scene_id=scene.scene_id,
             layer_id=instance.layer_id,
             kind=LayerKind.MASK,
             source=instance.source,
-            placement=instance.transform.map_bounds(raster_bounds),
+            placement=placement,
             visible=instance.visible,
             opacity=instance.opacity,
             blend_mode=BlendMode.NORMAL,
-            clip=instance.clip,
+            clip=_presentation_clip(scene, instance.clip, placement),
             effects=instance.effects,
             hit_test=LayerHitTest(enabled=instance.hit_test, role=instance.role),
             interaction=instance.interaction,
@@ -114,3 +118,28 @@ class MaskLayerDescriptorFactory:
             raster_bounds=raster_bounds,
             transform=instance.transform,
         )
+
+
+def _presentation_clip(
+    scene: SceneDescriptor,
+    requested: LayerClip | None,
+    placement: LayerPlacement,
+) -> LayerClip | None:
+    """Apply the canvas aperture only when mask geometry can escape it."""
+    if requested is not None:
+        return requested
+    bounds = scene.bounds
+    if (
+        placement.x >= bounds.x
+        and placement.y >= bounds.y
+        and placement.x + placement.width <= bounds.x + bounds.width
+        and placement.y + placement.height <= bounds.y + bounds.height
+    ):
+        return None
+    return LayerClip(
+        ClipCoordinateSpace.SCENE,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+    )

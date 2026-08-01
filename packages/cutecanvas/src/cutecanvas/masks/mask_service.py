@@ -32,7 +32,6 @@ from qpane.sdk.types import DiagnosticRecord
 
 from cutecanvas.coverage import CoverageItem, CoverageSnapshot
 
-from ..composition.edit_controller import CompositionEditController
 from ..composition.layers import CompositionLayerInstance
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
@@ -54,10 +53,10 @@ from .render_coordination import (
     SNIPPET_ASYNC_THRESHOLD_PX,
     MaskRenderWorkCoordinator,
 )
+from .stroke_constraints import MaskStrokeConstraint
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
-
     from ..canvas import CuteCanvas
     from ..scene.mutations import SceneMutationCoordinator
 logger = logging.getLogger(__name__)
@@ -107,7 +106,6 @@ class MaskService:
             publish_status=self._record_status,
         )
         self._status_messages: deque[tuple[str, str]] = deque(maxlen=8)
-        self._history_unsubscribe: Callable[[], None] | None = None
         self._history_actions_after_stroke: dict[
             uuid.UUID,
             deque[Callable[[], None]],
@@ -128,8 +126,8 @@ class MaskService:
             composition_ids_for_mask=self._layers.composition_ids_for_mask,
             current_composition_id=qpane.currentCompositionID,
             current_zoom=self._current_zoom,
-            should_defer_prefetch=lambda active_id, next_id: self._activation.should_defer(
-                active_id, next_id
+            should_defer_prefetch=lambda active_id, next_id: (
+                self._activation.should_defer(active_id, next_id)
             ),
             is_mask_busy=lambda mask_id: self._stroke_pipeline.is_mask_busy(mask_id),
             publish_status=self._record_status,
@@ -153,7 +151,9 @@ class MaskService:
             assets=mask_assets,
             controller=mask_controller,
             execution_scope=view_execution_scope,
-            mask_feature_available=lambda: qpane._masks_controller.mask_feature_available(),
+            mask_feature_available=lambda: (
+                qpane._masks_controller.mask_feature_available()
+            ),
             current_composition_id=qpane.currentCompositionID,
             ensure_active=self._activation.ensure_active,
             mask_ids_for_composition=self._layers.mask_ids_for_composition,
@@ -391,29 +391,15 @@ class MaskService:
 
     def setStrokeConstraintProvider(
         self,
-        provider: Callable[[uuid.UUID], CoverageSnapshot | None] | None,
+        provider: Callable[[uuid.UUID], MaskStrokeConstraint | None] | None,
     ) -> None:
         """Bind composition selection coverage used to constrain mask strokes."""
         self._stroke_pipeline.set_selection_constraint(provider)
 
-    def bindCompositionEdits(self, edits: CompositionEditController) -> None:
-        """Observe document-owned mask history through this view's presentation."""
-        if self._history_unsubscribe is not None:
-            self._history_unsubscribe()
-        self._history_unsubscribe = self._assets.bind_composition_edits(
-            edits,
-            self._scope_for_mask,
-            self._mask_controller.edits.present_history_change,
-        )
-
     def shutdown(self) -> None:
-        """Detach view-local history observation during widget teardown."""
+        """Stop view-local mask workers during widget teardown."""
         self._stroke_pipeline.shutdown()
         self._render_work.shutdown()
-        unsubscribe = self._history_unsubscribe
-        self._history_unsubscribe = None
-        if unsubscribe is not None:
-            unsubscribe()
 
     def _scope_for_mask(self, mask_id: uuid.UUID) -> uuid.UUID | None:
         """Resolve a mask asset to its active or first owning composition."""
@@ -772,9 +758,14 @@ class MaskService:
         """Cache a status update so diagnostics surfaces the latest mask activity."""
         self._status_messages.append((label, message))
 
-    def loadMaskFromPath(self, path: str) -> uuid.UUID | None:
-        """Import a mask from path and attach it to the current document."""
-        return self._layer_workflow.load_from_path(path)
+    def loadMaskFromPath(
+        self,
+        path: str,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Import a mask and optionally record its document admission."""
+        return self._layer_workflow.load_from_path(path, undoable=undoable)
 
     def updateMaskFromPath(self, mask_id: uuid.UUID, path: str) -> bool:
         """Replace mask pixels for mask_id with data from path."""
@@ -784,9 +775,14 @@ class MaskService:
         """Replace mask pixels for mask_id with host-provided image data."""
         return self._layer_workflow.update_from_image(mask_id, image)
 
-    def createBlankMask(self, size: QSize) -> uuid.UUID | None:
-        """Create a blank mask layer for the current document."""
-        return self._layer_workflow.create_blank(size)
+    def createBlankMask(
+        self,
+        size: QSize,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Create a blank mask and optionally record its document admission."""
+        return self._layer_workflow.create_blank(size, undoable=undoable)
 
     def removeMaskFromComposition(
         self,

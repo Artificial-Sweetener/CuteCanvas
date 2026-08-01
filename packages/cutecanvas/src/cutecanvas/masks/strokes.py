@@ -39,12 +39,11 @@ from qpane.sdk.execution import (
 )
 from qpane.sdk.scene import RasterBounds
 
-from cutecanvas.coverage import CoverageSnapshot
-
 from ..painting import BrushCompositor, BrushStrokeSegment
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
+from .stroke_constraints import MaskStrokeConstraint
 from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
@@ -52,6 +51,7 @@ from .stroke_models import (
 from .stroke_preview import DecimatedStrokePreview
 from .stroke_regions import MaskStrokeRegionPlanner
 from .stroke_rendering import render_mask_stroke
+from .stroke_requests import StrokeRequestRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +67,6 @@ class MaskStrokeDebugSnapshot:
         tuple[ExecutionHandle[MaskStrokeJobResult, object], ...],
     ] = field(default_factory=dict)
     invalidated_job_tokens: tuple[tuple[UUID, int], ...] = ()
-
-
-@dataclass(slots=True)
-class _PendingStrokeRequest:
-    """Own one queued stroke request and its adoption policy."""
-
-    mask_id: UUID
-    job_token: int
-    commit: bool
-    handle: ExecutionHandle[MaskStrokeJobResult, object] | None = None
 
 
 class MaskStrokePipeline:
@@ -95,7 +85,9 @@ class MaskStrokePipeline:
         view: Callable[[], object],
         update_region: Callable[..., None],
         diagnostics: MaskStrokeDiagnostics | None = None,
-        selection_constraint: Callable[[UUID], CoverageSnapshot | None] | None = None,
+        selection_constraint: (
+            Callable[[UUID], MaskStrokeConstraint | None] | None
+        ) = None,
         compositor: BrushCompositor | None = None,
     ) -> None:
         """Initialize stroke pipeline state, tokens, and optional diagnostics."""
@@ -115,8 +107,7 @@ class MaskStrokePipeline:
         )
         self._preview_states: dict[UUID, DecimatedStrokePreview] = {}
         self._preview_tokens: dict[UUID, int] = {}
-        self._pending_jobs: dict[UUID, set[UUID]] = {}
-        self._pending_requests: dict[UUID, _PendingStrokeRequest] = {}
+        self._requests = StrokeRequestRegistry()
         self._invalidated_job_tokens: set[tuple[UUID, int]] = set()
         self._job_token_counter = count(1)
         self._diagnostics = diagnostics
@@ -139,7 +130,7 @@ class MaskStrokePipeline:
 
     def set_selection_constraint(
         self,
-        provider: Callable[[UUID], CoverageSnapshot | None] | None,
+        provider: Callable[[UUID], MaskStrokeConstraint | None] | None,
     ) -> None:
         """Replace the composition-owned mask stroke constraint provider."""
         self._selection_constraint = provider or (lambda _mask_id: None)
@@ -150,8 +141,7 @@ class MaskStrokePipeline:
             return True
         if mask_id in self._preview_tokens:
             return True
-        pending = self._pending_jobs.get(mask_id)
-        return bool(pending)
+        return self._requests.has_pending(mask_id)
 
     def configure_diagnostics(self, *, enabled: bool) -> None:
         """Apply runtime toggles to the current diagnostics tracker."""
@@ -169,20 +159,10 @@ class MaskStrokePipeline:
 
     def debug_snapshot(self) -> MaskStrokeDebugSnapshot:
         """Expose pending state for tests without leaking internal dicts."""
-        pending = {
-            mask_id: tuple(
-                request.handle
-                for request_id in request_ids
-                if (request := self._pending_requests.get(request_id)) is not None
-                and request.handle is not None
-            )
-            for mask_id, request_ids in self._pending_jobs.items()
-            if request_ids
-        }
         return MaskStrokeDebugSnapshot(
             preview_state_ids=tuple(self._preview_states.keys()),
             preview_tokens=dict(self._preview_tokens),
-            pending_jobs=pending,
+            pending_jobs=self._requests.debug_handles(),
             invalidated_job_tokens=tuple(self._invalidated_job_tokens),
         )
 
@@ -199,8 +179,7 @@ class MaskStrokePipeline:
             self._preview_states
         )
         preview_tokens: MutableMapping[UUID, int] = self._preview_tokens
-        pending_jobs = self._pending_jobs
-        pending_requests = self._pending_requests
+        requests = self._requests
         invalidated_job_tokens = self._invalidated_job_tokens
         manager = self._assets
         diagnostics = self._diagnostics
@@ -208,17 +187,17 @@ class MaskStrokePipeline:
         if mask_id is None:
             target_ids.update(preview_states.keys())
             target_ids.update(preview_tokens.keys())
-            target_ids.update(pending_jobs.keys())
+            target_ids.update(requests.mask_ids())
         else:
             target_ids.add(mask_id)
         for target in tuple(target_ids):
             had_state = False
-            handles = pending_jobs.get(target)
+            handles = requests.request_ids(target)
             preserved_ids = {
                 request_id
                 for request_id in handles or ()
                 if preserve_committed
-                and (request := pending_requests.get(request_id)) is not None
+                and (request := requests.request(request_id)) is not None
                 and request.commit
             }
             cancelled_ids = set(handles or ()) - preserved_ids
@@ -226,7 +205,7 @@ class MaskStrokePipeline:
             if handles:
                 had_state = bool(cancelled_ids)
                 for request_id in cancelled_ids:
-                    request = pending_requests.pop(request_id, None)
+                    request = requests.remove(request_id)
                     job_token = None if request is None else request.job_token
                     handle = None if request is None else request.handle
                     cancelled = (
@@ -243,12 +222,6 @@ class MaskStrokePipeline:
                             status="cancelled",
                             detail="interaction ownership changed",
                         )
-                if preserved_ids:
-                    pending_jobs[target] = preserved_ids
-                else:
-                    pending_jobs.pop(target, None)
-            else:
-                pending_jobs.pop(target, None)
             preview_state = preview_states.pop(target, None)
             preview_dirty_rect = (
                 None if preview_state is None else preview_state.dirty_rect()
@@ -258,7 +231,7 @@ class MaskStrokePipeline:
             preserved_tokens = {
                 request.job_token
                 for request_id in preserved_ids
-                if (request := pending_requests.get(request_id)) is not None
+                if (request := requests.request(request_id)) is not None
             }
             if (
                 target in preview_tokens
@@ -284,8 +257,7 @@ class MaskStrokePipeline:
         if mask_id is None:
             preview_states.clear()
             if not preserve_committed:
-                pending_jobs.clear()
-                pending_requests.clear()
+                requests.clear()
                 preview_tokens.clear()
             if clear_counter and not invalidated_job_tokens:
                 self._job_token_counter = count(1)
@@ -324,10 +296,8 @@ class MaskStrokePipeline:
         """Queue one typed stroke product and wire owner-safe adoption."""
         request_id = uuid4()
         diagnostics = self._diagnostics
-        pending_jobs = self._pending_jobs
         if diagnostics is not None:
-            pending_handles = pending_jobs.get(spec.mask_id)
-            pending_count = len(pending_handles) if pending_handles else 0
+            pending_count = self._requests.pending_count(spec.mask_id)
             stride_value = None
             metadata_mapping = (
                 spec.metadata if isinstance(spec.metadata, Mapping) else None
@@ -354,8 +324,8 @@ class MaskStrokePipeline:
             job_token,
             source,
         )
-        pending_jobs.setdefault(spec.mask_id, set()).add(request_id)
-        self._pending_requests[request_id] = _PendingStrokeRequest(
+        self._requests.register(
+            request_id,
             mask_id=spec.mask_id,
             job_token=job_token,
             commit=commit,
@@ -383,18 +353,14 @@ class MaskStrokePipeline:
                 ),
             )
         except ExecutionRejected:
-            pending_jobs.get(spec.mask_id, set()).discard(request_id)
-            self._pending_requests.pop(request_id, None)
+            self._requests.remove(request_id)
             logger.exception(
                 "Failed to queue mask stroke work (mask=%s source=%s)",
                 spec.mask_id,
                 source,
             )
             return False
-        if request_id in pending_jobs.get(spec.mask_id, set()):
-            pending_request = self._pending_requests.get(request_id)
-            if pending_request is not None:
-                pending_request.handle = handle
+        self._requests.bind_handle(request_id, handle)
         handle.add_done_callback(
             lambda outcome: self._settle_stroke_job(
                 spec.mask_id,
@@ -422,12 +388,7 @@ class MaskStrokePipeline:
         mask_id = result.mask_id
         diagnostics = self._diagnostics
         log_fn = logger.debug
-        pending = self._pending_jobs.get(mask_id)
-        if pending is not None:
-            pending.discard(request_id)
-            if not pending:
-                self._pending_jobs.pop(mask_id, None)
-        pending_request = self._pending_requests.pop(request_id, None)
+        pending_request = self._requests.remove(request_id)
         metadata_mapping = (
             result.metadata if isinstance(result.metadata, Mapping) else {}
         )
@@ -543,7 +504,9 @@ class MaskStrokePipeline:
             )
             _clear_pending_token(stale_job.mask_id, stale_token)
             latest_layer = mask_manager.get_layer(stale_job.mask_id)
-            if latest_layer is not None:
+            if latest_layer is not None and not self._requests.has_committed_successor(
+                stale_job.mask_id
+            ):
                 self._update_region(stale_job.dirty_rect, latest_layer)
                 self._refresh_active_preview(stale_job.mask_id, latest_layer)
             if diagnostics is not None:
@@ -581,7 +544,7 @@ class MaskStrokePipeline:
                 job_result.mask_id,
                 job_result.generation,
                 controller.edits.async_epoch(job_result.mask_id),
-                bool(self._pending_jobs.get(job_result.mask_id)),
+                self._requests.has_pending(job_result.mask_id),
             )
             if commit:
                 controller.edits.commit_stroke(job_result.mask_id)
@@ -629,20 +592,16 @@ class MaskStrokePipeline:
         """Clear failed or cancelled stroke execution without leaving preview state."""
         if outcome.state == ExecutionState.SUCCEEDED:
             return
-        pending_request = self._pending_requests.get(request_id)
+        pending_request = self._requests.request(request_id)
         if (
             pending_request is not None
             and pending_request.handle is not None
             and pending_request.handle is not handle
         ):
             return
-        pending = self._pending_jobs.get(mask_id)
-        if pending is None or request_id not in pending:
+        if request_id not in self._requests.request_ids(mask_id):
             return
-        pending.discard(request_id)
-        if not pending:
-            self._pending_jobs.pop(mask_id, None)
-        pending_request = self._pending_requests.pop(request_id, None)
+        pending_request = self._requests.remove(request_id)
         job_token = None if pending_request is None else pending_request.job_token
         if job_token is not None and self._preview_tokens.get(mask_id) == job_token:
             self._preview_tokens.pop(mask_id, None)
@@ -800,41 +759,28 @@ class MaskStrokePipeline:
     @staticmethod
     def _constraint_storage_region(
         mask_layer: MaskLayer,
-        constraint: CoverageSnapshot,
+        constraint: MaskStrokeConstraint,
         storage_rect: QRect,
         stride: int,
     ) -> np.ndarray:
         """Return selection coverage aligned to current mask storage coordinates."""
         surface = mask_layer.coverage.raster
         surface_bounds = surface.bounds
-        constraint_bounds = constraint.bounds
-        full = np.zeros(
-            (storage_rect.height(), storage_rect.width()),
-            dtype=np.uint8,
-        )
-        if surface_bounds is None or constraint_bounds is None:
-            return full[:: max(1, stride), :: max(1, stride)]
+        if surface_bounds is None:
+            return np.zeros(
+                (
+                    (storage_rect.height() + max(1, stride) - 1) // max(1, stride),
+                    (storage_rect.width() + max(1, stride) - 1) // max(1, stride),
+                ),
+                dtype=np.uint8,
+            )
         local = RasterBounds(
             surface_bounds.x + storage_rect.x(),
             surface_bounds.y + storage_rect.y(),
             storage_rect.width(),
             storage_rect.height(),
         )
-        overlap = local.intersection(constraint_bounds)
-        if overlap is not None:
-            source_x = overlap.x - constraint_bounds.x
-            source_y = overlap.y - constraint_bounds.y
-            target_x = overlap.x - local.x
-            target_y = overlap.y - local.y
-            full[
-                target_y : target_y + overlap.height,
-                target_x : target_x + overlap.width,
-            ] = constraint.pixels[
-                source_y : source_y + overlap.height,
-                source_x : source_x + overlap.width,
-            ]
-        sample_stride = max(1, stride)
-        return full[::sample_stride, ::sample_stride]
+        return constraint.sample(local, stride)
 
     def commit_active_stroke(self) -> None:
         """Flush any recorded stroke segments for the active mask."""

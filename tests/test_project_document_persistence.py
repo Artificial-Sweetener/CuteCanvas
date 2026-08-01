@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from cutecanvas import CuteCanvas
@@ -142,4 +143,82 @@ def test_invalid_nested_archive_is_rejected_without_mutating_open_project(
         target.close()
         source.deleteLater()
         target.deleteLater()
+        qapp.processEvents()
+
+
+def test_complete_document_archive_round_trips_independent_roots(
+    qapp,
+    tmp_path,
+) -> None:
+    """Independent roots and mask resources survive one transactional archive."""
+    source = CuteCanvas(features=("mask",))
+    restored = CuteCanvas(features=("mask",))
+    try:
+        first_id = source.createCompositionFromImage(_image("red"), title="First")
+        mask_id = source.createBlankMask(
+            QImage(64, 48, QImage.Format_Grayscale8).size()
+        )
+        assert mask_id is not None
+        coverage = QImage(64, 48, QImage.Format.Format_Grayscale8)
+        coverage.fill(255)
+        assert source.document().masks.commit_mask_image(mask_id, coverage)
+        second_id = source.createCompositionFromImage(_image("blue"), title="Second")
+        path = tmp_path / "complete.cutecanvas"
+
+        saved = source.editor.persistence.save_document(path)
+        assert tuple(handle.id for handle in saved) == (first_id, second_id)
+        loaded = restored.editor.persistence.load_document(path, open_first=False)
+
+        assert tuple(handle.id for handle in loaded) == (first_id, second_id)
+        assert restored.currentCompositionID() is None
+        assert restored.document().masks.get_layer(mask_id) is not None
+    finally:
+        source.close()
+        restored.close()
+        source.deleteLater()
+        restored.deleteLater()
+        qapp.processEvents()
+
+
+def test_document_snapshot_is_detached_for_background_persistence(
+    qapp,
+    tmp_path,
+) -> None:
+    """Write a stable public snapshot after the live document changes again."""
+    source = CuteCanvas(features=("mask",))
+    restored = CuteCanvas(features=("mask",))
+    try:
+        composition_id = source.createCompositionFromImage(_image("red"))
+        mask_id = source.createBlankMask(
+            QImage(64, 48, QImage.Format_Grayscale8).size()
+        )
+        assert mask_id is not None
+        snapshot = source.editor.persistence.capture_document()
+
+        changed = QImage(64, 48, QImage.Format_Grayscale8)
+        changed.fill(255)
+        assert source.document().masks.commit_mask_image(mask_id, changed)
+        path = tmp_path / "detached.cutecanvas"
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(
+                source.editor.persistence.write_document,
+                snapshot,
+                path,
+            ).result(timeout=5.0)
+
+        loaded = restored.editor.persistence.load_document(path, open_first=False)
+        persisted = restored.exportMaskImage(
+            mask_id,
+            composition_id=composition_id,
+        )
+
+        assert tuple(handle.id for handle in loaded) == (composition_id,)
+        assert snapshot.composition_ids == (composition_id,)
+        assert persisted is not None
+        assert persisted.pixelColor(24, 20).value() == 0
+    finally:
+        source.close()
+        restored.close()
+        source.deleteLater()
+        restored.deleteLater()
         qapp.processEvents()

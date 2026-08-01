@@ -74,7 +74,9 @@ from .editor import (
 )
 from .editor.transform_interaction import EditorTransformInteraction
 from .fill import PaintBucketCoordinator, SelectionFillCoordinator
+from .masks.canvas_aperture import ActiveMaskCanvasAperture
 from .masks.coordinates import ActiveMaskLayerCoordinates
+from .masks.coverage_preview_source import MaskCoverageSourceCapabilities
 from .masks.descriptor_factory import MaskLayerDescriptorFactory
 from .masks.floating_layers import MaskFloatingLayerOwner
 from .masks.paint_target import MaskCoveragePaintTargetOwner
@@ -150,6 +152,7 @@ from .facade.drag_api import CanvasDragSubjectResolver, OutboundDragApiMixin
 from .facade.editor import EditorFacade
 from .facade.editor_policy_api import EditorPolicyApiMixin
 from .facade.effect_api import EffectApiMixin
+from .facade.image_export_api import EmbeddedImageExportApiMixin
 from .facade.interaction_api import InteractionApiMixin
 from .facade.layer_api import LayerApiMixin
 from .facade.mask_api import MaskApiMixin
@@ -160,6 +163,7 @@ from .facade.resource_api import ResourceApiMixin
 from .facade.snapping_api import SnappingApiMixin
 from .facade.vector_api import VectorApiMixin
 from .facade.view_api import ViewApiMixin
+from .facade.viewport_api import ViewportApiMixin
 from .runtime.accessors import CanvasAccessorsMixin
 from .runtime.document_events import DocumentEventsMixin
 from .runtime.lifecycle import CanvasLifecycleMixin
@@ -169,12 +173,14 @@ from .runtime.view_state import CanvasViewStateMixin
 class CuteCanvas(
     QWidget,
     ViewApiMixin,
+    ViewportApiMixin,
     ConfigurationApiMixin,
     DiagnosticsApiMixin,
     OutboundDragApiMixin,
     ContentContextApiMixin,
     EditorPolicyApiMixin,
     CompositionApiMixin,
+    EmbeddedImageExportApiMixin,
     MaskApiMixin,
     LayerApiMixin,
     ResourceApiMixin,
@@ -422,6 +428,7 @@ class CuteCanvas(
         self._scene_movement_interaction: SceneLayerMovementInteraction | None = None
         self._scene_transform_interaction: EditorTransformInteraction | None = None
         self._active_mask_coordinates: ActiveMaskLayerCoordinates | None = None
+        self._active_mask_aperture: ActiveMaskCanvasAperture | None = None
         self._scene_provider_registry: SceneProviderRegistry | None = None
         self._source_capabilities: LayerSourceCapabilities | None = None
         self._editor_source_capabilities: EditorSourceCapabilities | None = None
@@ -430,6 +437,9 @@ class CuteCanvas(
         self._projection_service = None
         self._mask_descriptor_factory: MaskLayerDescriptorFactory | None = None
         self._mask_source_capabilities: MaskSourceCapabilities | None = None
+        self._mask_coverage_source_capabilities: (
+            MaskCoverageSourceCapabilities | None
+        ) = None
         self._masks: Masks | None = None
         self._tools: Tools | None = None
         self._is_blank = False

@@ -1,0 +1,92 @@
+#    CuteCanvas - High-performance layered image editor
+#    Copyright (C) 2025  Artificial Sweetener and contributors
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""Render current mask coverage neutrally in dedicated document viewports."""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QSize
+from PySide6.QtGui import QColor
+from qpane.sdk.scene import LayerSourceReference
+
+from qpane import HybridPresentationStyle, HybridSource
+
+from ..resources import ProjectResourceReference
+from .source_resolver import MaskSourceCapabilities
+
+
+@dataclass(frozen=True, slots=True)
+class MaskCoverageSourceReference:
+    """Address one mask resource through its neutral coverage presentation."""
+
+    resource_id: uuid.UUID
+    kind: str = field(default="mask-coverage", init=False)
+
+    def __post_init__(self) -> None:
+        """Validate the stable resource identity."""
+        if not isinstance(self.resource_id, uuid.UUID):
+            raise TypeError("resource_id must be a UUID")
+
+
+@dataclass(frozen=True, slots=True)
+class MaskCoverageSourceCapabilities:
+    """Expose white coverage independently of the mask overlay color."""
+
+    source: MaskSourceCapabilities
+
+    def source_size(self, reference: LayerSourceReference) -> QSize | None:
+        """Return the current mask dimensions without copying pixels."""
+        return self.source.source_size(_resource(reference))
+
+    def source_path(self, reference: LayerSourceReference) -> Path | None:
+        """Return no path because mask coverage remains memory-backed."""
+        del reference
+        return None
+
+    def contains(self, reference: LayerSourceReference, point: QPointF) -> bool:
+        """Hit-test the current mask coverage."""
+        return self.source.contains(_resource(reference), point)
+
+    def hybrid_document(
+        self,
+        reference: LayerSourceReference,
+    ) -> HybridSource | None:
+        """Return current mask pixels with a neutral white presentation."""
+        resource = _resource(reference)
+        layer = self.source.assets.get_layer(resource.resource_id)
+        if layer is None:
+            return None
+        return self.source.hybrids.source(
+            layer,
+            HybridPresentationStyle(QColor("white")),
+            self.source.renders.render_revision(resource.resource_id),
+        )
+
+
+def _resource(reference: LayerSourceReference) -> ProjectResourceReference:
+    """Convert a preview reference to its authoritative resource key."""
+    if not isinstance(reference, MaskCoverageSourceReference):
+        raise TypeError("reference must be a MaskCoverageSourceReference")
+    return ProjectResourceReference(reference.resource_id)
+
+
+__all__ = [
+    "MaskCoverageSourceCapabilities",
+    "MaskCoverageSourceReference",
+]

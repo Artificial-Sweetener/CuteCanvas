@@ -10,6 +10,10 @@ A host backend implements `BackendSubmission` and advertises
 new work with `ExecutionRequest`, and can use `InlineDispatcher` only when
 owner-thread delivery is already guaranteed.
 
+Implement the public `ExecutionBackend` protocol to supply that lifecycle.
+Diagnostic-capable backends publish `ExecutionSnapshot` values and return a
+`DiagnosticsSubscription` that independently releases each observer.
+
 ## Add renderer-neutral view chrome
 
 Use `CanvasOverlayDrawFn` for a `CanvasDisplayScale`-aware detail overlay and
@@ -96,6 +100,22 @@ questions.
 `EffectsFacade` adds temporary treatments, `HistoryFacade` controls undo and
 redo, and `CompositionPersistenceFacade` saves complete composition archives.
 
+For session autosave, capture live authority as a
+`DocumentPersistenceSnapshot` on the document owner thread and schedule only
+detached archive I/O on a worker:
+
+```python
+snapshot = canvas.editor.persistence.capture_document()
+disk_executor.submit(
+    canvas.editor.persistence.write_document,
+    snapshot,
+    session_archive_path,
+)
+```
+
+The snapshot remains stable if the user edits again while the archive is being
+written. Persist the archive before any host session record that references it.
+
 `CuteCanvas.setEditorPolicy()` replaces the host's enabled capabilities,
 `CuteCanvas.editorPolicy()` returns the current policy, and
 `CuteCanvas.editorPolicyChanged` tells toolbars to resolve their enabled state
@@ -132,6 +152,19 @@ when layer identity matters.
 The normal navigation behavior remains available through
 `CuteCanvas.CONTROL_MODE_PANZOOM`, while `CuteCanvas.CONTROL_MODE_CURSOR`
 provides non-navigating pointer inspection.
+
+For live node thumbnails or layer inspectors, mount another `CuteCanvas` with
+the same `CanvasDocumentRuntime`, then call `CuteCanvas.setViewportSpec()` with
+a `CanvasViewportSpec`. Build its source with `CanvasViewportSource.content()`
+or `CanvasViewportSource.layer_subset()`. Choose
+`CanvasViewportInteraction.FIT_ONLY` for a responsive best-fit preview and
+`CanvasRenderVariant.MASK_COVERAGE` for neutral mask coverage. Query the
+view-local policy with `CuteCanvas.viewportSpec()`.
+
+Use `CuteCanvas.captureEmbeddedImageExport()` to obtain an
+`EmbeddedImageExportSnapshot` and `CuteCanvas.captureMaskExport()` to obtain a
+`MaskExportSnapshot`. Both carry detached pixels and the exact captured
+revision, so later edits cannot alter queued external work.
 
 ## Compare Sources
 
@@ -241,6 +274,9 @@ change. `CuteCanvas.setPaintColor()` changes raster color,
 `CuteCanvas.paintColor()` returns it, and `CuteCanvas.paintColorChanged` keeps a
 host color well synchronized.
 
+`CuteCanvas.renderBrushTipPreview()` renders a compact DPR-aware image from the
+same cached tip definition used by painting.
+
 `CuteCanvas.CONTROL_MODE_DRAW_BRUSH` paints or erases the active target.
 `CuteCanvas.configurePaintBucket()` sets tolerance, connectivity, and edge
 behavior; `CuteCanvas.paintBucketOptions()` reports them; and
@@ -255,7 +291,9 @@ window. `CuteCanvas.rasterBoundsRequestCompleted` reports its terminal result.
 ## Work with Masks
 
 `CuteCanvas.createBlankMask()` creates a mask layer, and
-`CuteCanvas.loadMaskFromFile()` imports grayscale coverage.
+`CuteCanvas.loadMaskFromFile()` imports grayscale coverage. Both operations
+are undoable by default. Pass `undoable=False` when the host is establishing
+required document structure that user undo must preserve.
 `CuteCanvas.listMasksForComposition()` returns the masks for one composition;
 `CuteCanvas.maskIDsForComposition()` returns only their IDs.
 `CuteCanvas.removeMaskFromComposition()` removes one permitted mask instance.
@@ -271,6 +309,9 @@ mask without changing the active composition or active mask. Use the optional
 composition ID when a mask resource is shared by multiple non-active documents.
 `CuteCanvas.replaceMaskFromFile()` and `CuteCanvas.replaceMaskImage()` replace
 an addressed mask's pixels while preserving its UUID and layer associations.
+
+Call `warmSamDependencies()` during host-controlled startup when optional SAM
+imports should be ready before the first smart-selection request.
 
 `CanvasWorkspace.setGridPresentation()` accepts a QPane `ResponsiveGridPolicy`.
 `CanvasWorkspace.gridSnapshot()` exposes the immutable physical-pixel layout,

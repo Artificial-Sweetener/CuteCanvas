@@ -39,6 +39,8 @@ from cutecanvas.composition.layers import CompositionLayerInstance
 from cutecanvas.composition.public_policy import (
     public_layer_policy,
 )
+from cutecanvas.masks.mask_undo import MaskHistoryChange
+from cutecanvas.masks.resource_changes import MaskResourceChange
 from cutecanvas.painting import PaintTargetIdentity
 from cutecanvas.placed.workflow import PlacedAssetCompletion
 from cutecanvas.resources import ProjectResourceReference
@@ -100,11 +102,19 @@ class DocumentEventsMixin:
             nullcontext() if binding is None else binding.suspend_publication()
         )
         with publication_guard:
+            viewport_changed = session.set_viewport_spec(
+                None,
+                composition_id=record.composition_id,
+            )
             activation_changed = session.activate(
                 record.composition_id,
                 available_ids=self.compositionService().composition_ids(),
             )
-            if not activation_changed and not force_context_refresh:
+            if (
+                not activation_changed
+                and not viewport_changed
+                and not force_context_refresh
+            ):
                 return
             self._cancel_floating_pixels_for_context_change()
             self._is_blank = False
@@ -191,11 +201,31 @@ class DocumentEventsMixin:
         dirty_region: object | None = None,
     ) -> None:
         """Refresh source products and public state after a resource change."""
+        if isinstance(dirty_region, MaskResourceChange):
+            service = self.mask_service
+            if (
+                service is not None
+                and dirty_region.origin is service.controller.presentation_identity
+            ):
+                return
+            dirty_region = dirty_region.detail
+        if isinstance(dirty_region, MaskHistoryChange):
+            service = self.mask_service
+            if service is not None:
+                structure_changed = service.controller.edits.present_history_change(
+                    dirty_region
+                )
+                if not structure_changed:
+                    self._emit_scene_changed()
+                return
         if isinstance(dirty_region, RasterBounds):
-            self._masks_controller.refresh_mask_resource(
+            refreshed = self._masks_controller.refresh_mask_resource(
                 resource_id,
                 dirty_region,
             )
+            if refreshed:
+                self._emit_scene_changed()
+                return
         self.view().invalidate_content_cache()
         self._handle_internal_scene_content_changed()
         self._emit_scene_changed()

@@ -51,6 +51,7 @@ from .target_contracts import (
     RetainedCoverageTargetOwner,
 )
 from .tip_cache import BrushTipCache
+from .tip_preview import BrushTipPreviewRenderer
 
 if TYPE_CHECKING:
     from .targets import PaintingCoordinator
@@ -74,6 +75,7 @@ __all__ = (
     "BrushStrokeSegment",
     "BrushStrokeSession",
     "BrushTipCache",
+    "BrushTipPreviewRenderer",
     "CloneStampAlignment",
     "CloneStampSampleMode",
     "CloneStampSource",

@@ -25,10 +25,12 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
 
-from cutecanvas.masks.export import MaskImageExportService
+from cutecanvas.masks.export import MaskExportSnapshot, MaskImageExportService
 from cutecanvas.masks.workflow import MaskInfo
 
 if TYPE_CHECKING:
+    from cutecanvas.composition.scene_adapter import CompositionSceneAdapter
+    from cutecanvas.masks.mask_service import MaskService
     from cutecanvas.masks.mask_undo import MaskUndoState
 
 
@@ -78,12 +80,45 @@ class MaskApiMixin:
         adapter = self._composition_scene_adapter
         if service is None or adapter is None:
             return None
+        return self._mask_export_service(service, adapter).export(
+            mask_id,
+            composition_id=composition_id,
+        )
+
+    def captureMaskExport(
+        self,
+        mask_id: uuid.UUID,
+        *,
+        composition_id: uuid.UUID | None = None,
+    ) -> MaskExportSnapshot | None:
+        """Capture one exact mask revision and its canvas-bounded pixels."""
+        service = self._masks_controller.mask_service()
+        adapter = self._composition_scene_adapter
+        if service is None or adapter is None:
+            return None
+        return self._mask_export_service(service, adapter).capture(
+            mask_id,
+            composition_id=composition_id,
+        )
+
+    def _mask_export_service(
+        self,
+        service: MaskService,
+        adapter: CompositionSceneAdapter,
+    ) -> MaskImageExportService:
+        """Build the stateless mask export boundary from authoritative owners."""
+        resources = self.document().resources.resources
         return MaskImageExportService(
             assets=service.assets,
             composition_ids_for_mask=service.composition_ids_for_mask,
             current_composition_id=self.currentCompositionID,
             scene_for_composition=adapter.scene_for,
-        ).export(mask_id, composition_id=composition_id)
+            resource_revision=lambda resource_id: (
+                None
+                if (record := resources.get(resource_id)) is None
+                else record.revision
+            ),
+        )
 
     def getMaskUndoState(self, mask_id: uuid.UUID) -> MaskUndoState | None:
         """Return undo and redo depth for one mask resource."""
@@ -125,17 +160,33 @@ class MaskApiMixin:
             return False, f"SAM refresh failed: {exc}."
         return True, "SAM refreshed."
 
-    def createBlankMask(self, size: QSize) -> uuid.UUID | None:
-        """Create and activate an empty mask in the active document."""
-        mask_id = self._masks_controller.create_blank_mask(size)
+    def createBlankMask(
+        self,
+        size: QSize,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Create an empty mask with optional document-admission history."""
+        mask_id = self._masks_controller.create_blank_mask(
+            size,
+            undoable=undoable,
+        )
         if mask_id is not None:
             self._emit_composition_changed()
             self._emit_scene_changed()
         return mask_id
 
-    def loadMaskFromFile(self, path: str) -> uuid.UUID | None:
-        """Load and activate a mask in the active document."""
-        mask_id = self._masks_controller.load_mask_from_file(path)
+    def loadMaskFromFile(
+        self,
+        path: str,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Load a mask with optional document-admission history."""
+        mask_id = self._masks_controller.load_mask_from_file(
+            path,
+            undoable=undoable,
+        )
         if mask_id is not None:
             self._emit_composition_changed()
             self._emit_scene_changed()

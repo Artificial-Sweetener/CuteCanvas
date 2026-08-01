@@ -30,13 +30,14 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
-from qpane import HybridPresentationStyle
 from qpane.sdk.configuration import CacheSettings
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
     numpy_to_qimage_grayscale8_at_size,
 )
 from qpane.sdk.scene import RasterBounds
+
+from qpane import HybridPresentationStyle
 
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
@@ -660,7 +661,11 @@ class MaskRenderCache:
         latest = self._latest_entries(layer.mask_id)
         if not latest:
             return False
-        mask_rect = layer.mask_image.rect()
+        surface = layer.coverage.raster
+        surface_bounds = surface.bounds
+        if surface_bounds is None:
+            return False
+        mask_rect = QRect(0, 0, surface_bounds.width, surface_bounds.height)
         dirty_rects: list[QRect] = []
         for snippet in change.snippets:
             rect = snippet.rect.normalized().intersected(mask_rect)
@@ -671,8 +676,16 @@ class MaskRenderCache:
         if not dirty_rects:
             return False
         for rect in dirty_rects:
+            pixels = surface.snapshot_storage_region(
+                RasterBounds(
+                    rect.x(),
+                    rect.y(),
+                    rect.width(),
+                    rect.height(),
+                )
+            )
             image = self.colorize_image(
-                layer.mask_image.copy(rect),
+                numpy_to_qimage_grayscale8(pixels),
                 self._color_for_mask(layer.mask_id),
                 mask_id=layer.mask_id,
                 source="history_snippet",

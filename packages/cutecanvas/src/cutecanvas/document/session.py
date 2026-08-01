@@ -26,6 +26,8 @@ from qpane.sdk.inspection import InspectionStateStore
 from qpane.sdk.layout import ResponsiveGridPolicy
 from qpane.sdk.types import ComparisonOrientation, LinkedGroup
 
+from .viewport import CanvasViewportSpec
+
 
 @dataclass(frozen=True, slots=True)
 class CanvasInspectionGroup:
@@ -113,6 +115,7 @@ class CanvasSessionSnapshot:
     active_composition_id: uuid.UUID | None
     presentation: CanvasPresentation
     revision: int
+    viewport_spec: CanvasViewportSpec | None = None
 
 
 class CanvasViewSession:
@@ -127,6 +130,7 @@ class CanvasViewSession:
         self._session_id = uuid.uuid4()
         self._active_composition_id: uuid.UUID | None = None
         self._presentation = CanvasPresentation()
+        self._viewport_spec: CanvasViewportSpec | None = None
         self._inspection = inspection or InspectionStateStore()
         self._revision = 0
         self._subscribers: list[Callable[[CanvasSessionSnapshot], None]] = []
@@ -145,6 +149,11 @@ class CanvasViewSession:
     def presentation(self) -> CanvasPresentation:
         """Return the immutable current presentation."""
         return self._presentation
+
+    @property
+    def viewport_spec(self) -> CanvasViewportSpec | None:
+        """Return the explicit source and policy for this mounted viewport."""
+        return self._viewport_spec
 
     @property
     def inspection(self) -> InspectionStateStore:
@@ -181,6 +190,27 @@ class CanvasViewSession:
                 CanvasPresentationKind.SINGLE,
                 (composition_id,),
             )
+        self._publish()
+        return True
+
+    def set_viewport_spec(
+        self,
+        spec: CanvasViewportSpec | None,
+        *,
+        composition_id: uuid.UUID | None,
+    ) -> bool:
+        """Install one independently identified viewport source and policy."""
+        if spec is not None and not isinstance(spec, CanvasViewportSpec):
+            raise TypeError("spec must be a CanvasViewportSpec or None")
+        if composition_id is not None and not isinstance(composition_id, uuid.UUID):
+            raise TypeError("composition_id must be a UUID or None")
+        if (
+            self._viewport_spec == spec
+            and self._active_composition_id == composition_id
+        ):
+            return False
+        self._viewport_spec = spec
+        self._active_composition_id = composition_id
         self._publish()
         return True
 
@@ -261,6 +291,7 @@ class CanvasViewSession:
             self._active_composition_id,
             self._presentation,
             self._revision,
+            self._viewport_spec,
         )
 
     def subscribe(

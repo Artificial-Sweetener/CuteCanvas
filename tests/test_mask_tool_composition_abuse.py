@@ -157,6 +157,48 @@ def test_generated_smart_selection_erasure_round_trips_retained_shape_history(
     assert not layer.coverage.has_retained_items
 
 
+def test_successive_generated_masks_use_semantic_history_equality(
+    harness: MountedQPaneHarness,
+) -> None:
+    """Repeated SAM results must record, skip, and replay array-backed states."""
+    viewer = harness.viewer
+    mask_id = harness.mask_ids[0]
+    first = np.zeros((400, 400), dtype=np.uint8)
+    first[40:81, 40:81] = 255
+
+    viewer.mask_service.handleGeneratedMask(
+        first,
+        np.array((40, 40, 80, 80), dtype=np.int32),
+        erase_mode=False,
+    )
+    assert viewer.getMaskUndoState(mask_id).undo_depth == 1
+    assert _mask_value(harness, 60, 60) == 255
+
+    viewer.mask_service.handleGeneratedMask(
+        first,
+        np.array((40, 40, 80, 80), dtype=np.int32),
+        erase_mode=False,
+    )
+    assert viewer.getMaskUndoState(mask_id).undo_depth == 1
+
+    second = np.zeros((400, 400), dtype=np.uint8)
+    second[180:221, 180:221] = 255
+    viewer.mask_service.handleGeneratedMask(
+        second,
+        np.array((180, 180, 220, 220), dtype=np.int32),
+        erase_mode=False,
+    )
+    assert viewer.getMaskUndoState(mask_id).undo_depth == 2
+    assert _mask_value(harness, 60, 60) == 255
+    assert _mask_value(harness, 200, 200) == 255
+
+    assert viewer.undoSceneEdit()
+    assert _mask_value(harness, 60, 60) == 255
+    assert _mask_value(harness, 200, 200) == 0
+    assert viewer.redoSceneEdit()
+    assert _mask_value(harness, 200, 200) == 255
+
+
 def test_cancelled_mixed_stroke_restores_exact_retained_state(
     harness: MountedQPaneHarness,
 ) -> None:

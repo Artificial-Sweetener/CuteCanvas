@@ -196,7 +196,7 @@ class CommandTutorialController:
         self.open_composition_action.triggered.connect(
             self._workspace.open_composition_dialog
         )
-        self.save_composition_action = QAction("Save Composition…", self._parent)
+        self.save_composition_action = QAction("Save Workspace…", self._parent)
         self.save_composition_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
         self.save_composition_action.triggered.connect(
             self._workspace.save_composition_dialog

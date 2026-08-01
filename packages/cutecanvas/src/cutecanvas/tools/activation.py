@@ -21,8 +21,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPen
-from qpane import CursorInteractionPort, NavigationInteractionPort
 from qpane.sdk.vector import VectorShapeKind
+
+from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from ..coverage import CoverageCombineMode
 from ..editor import EditorOperation
@@ -113,6 +114,7 @@ def build_editor_tool_ports(
     )
     painting = qpane.paintingCoordinator()
     paint_destination = qpane.interactivePaintDestination()
+    mask_aperture = qpane.activeMaskCanvasAperture()
     selection_port = PixelSelectionInteractionPort(
         panel_to_scene_point=qpane.view().panel_to_scene_point,
         can_select=lambda: qpane.editorOperationResolver()
@@ -132,12 +134,15 @@ def build_editor_tool_ports(
         is_alt_held=is_alt_held,
         default_combine_mode=CoverageCombineMode.ADD,
         get_shape_feather_radius=lambda: qpane.coverageShapeConfiguration().options.feather_radius,
+        constrain_coverage_item=mask_aperture.constrain_item,
+        coverage_item_to_panel_path=mask_aperture.item_panel_path,
     )
     painting_port = PaintingInteractionPort(
         is_alt_held=is_alt_held,
         is_shift_held=is_shift_held,
         can_paint=paint_destination.can_prepare,
         prepare_paint=paint_destination.prepare,
+        gesture_start_allowed=mask_aperture.contains_panel_point,
         get_brush_size=get_brush_size,
         get_preview_pens=get_preview_pens,
         panel_hit_test=qpane.panelHitTest,

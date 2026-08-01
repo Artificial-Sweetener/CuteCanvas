@@ -436,7 +436,7 @@ def test_floating_session_resolves_safely_across_structure_tool_and_teardown(
         assert viewer.setRasterExtentPolicy(
             info.scene_id,
             info.layer_id,
-            RasterExtentPolicy.EXPAND_ON_WRITE,
+            RasterExtentPolicy.FIXED,
         )
         assert viewer.floatingPixelEditState() is None
         assert source.coverage.raster.storage_value(80, 80) == 0

@@ -36,26 +36,10 @@ from PySide6.QtGui import (
     QTransform,
 )
 from PySide6.QtWidgets import QWidget
-from qpane import (
-    ComparisonOrientation as ComparisonOrientation,
-)
-from qpane import (
-    DiagnosticRecord as DiagnosticRecord,
-)
-from qpane import (
-    LayerPresentationEffect as LayerPresentationEffect,
-)
-from qpane import (
-    LayerPresentationEffectKind as LayerPresentationEffectKind,
-)
-from qpane import (
-    LayerPresentationStyle as LayerPresentationStyle,
-)
-from qpane import (
-    PanelHitTest,
-)
 from qpane.sdk.execution import BackendSubmission as BackendSubmission
 from qpane.sdk.execution import DefaultExecutionPolicy
+from qpane.sdk.execution import DiagnosticsSubscription as DiagnosticsSubscription
+from qpane.sdk.execution import ExecutionBackend as ExecutionBackend
 from qpane.sdk.execution import (
     ExecutionBackendCapabilities as ExecutionBackendCapabilities,
 )
@@ -68,6 +52,7 @@ from qpane.sdk.execution import ExecutionRequest as ExecutionRequest
 from qpane.sdk.execution import ExecutionRequirements as ExecutionRequirements
 from qpane.sdk.execution import ExecutionResource as ExecutionResource
 from qpane.sdk.execution import ExecutionRuntime as ExecutionRuntime
+from qpane.sdk.execution import ExecutionSnapshot as ExecutionSnapshot
 from qpane.sdk.execution import ExecutionUrgency as ExecutionUrgency
 from qpane.sdk.execution import InlineDispatcher as InlineDispatcher
 from qpane.sdk.layout import IncompleteRowAlignment as IncompleteRowAlignment
@@ -89,6 +74,25 @@ from qpane.sdk.ui import (
 )
 from typing_extensions import Self
 
+from qpane import (
+    ComparisonOrientation as ComparisonOrientation,
+)
+from qpane import (
+    DiagnosticRecord as DiagnosticRecord,
+)
+from qpane import (
+    LayerPresentationEffect as LayerPresentationEffect,
+)
+from qpane import (
+    LayerPresentationEffectKind as LayerPresentationEffectKind,
+)
+from qpane import (
+    LayerPresentationStyle as LayerPresentationStyle,
+)
+from qpane import (
+    PanelHitTest,
+)
+
 from .composition.geometry_policy import LayerGeometryMode as LayerGeometryMode
 from .composition.geometry_policy import LayerGeometryPolicy as LayerGeometryPolicy
 from .core import (
@@ -106,7 +110,11 @@ from .document import CanvasDocument as CanvasDocument
 from .document import CanvasInspectionGroup as CanvasInspectionGroup
 from .document import CanvasPresentation as CanvasPresentation
 from .document import CanvasPresentationKind as CanvasPresentationKind
+from .document import CanvasRenderVariant as CanvasRenderVariant
 from .document import CanvasSessionSnapshot as CanvasSessionSnapshot
+from .document import CanvasViewportInteraction as CanvasViewportInteraction
+from .document import CanvasViewportSource as CanvasViewportSource
+from .document import CanvasViewportSpec as CanvasViewportSpec
 from .document import CanvasViewSession as CanvasViewSession
 from .document import ResolvedCanvasContent as ResolvedCanvasContent
 from .editor.interaction_policy import CanvasInteractionMode as CanvasInteractionMode
@@ -142,6 +150,10 @@ from .facade.handles import (
 from .facade.persistence import (
     CompositionPersistenceFacade as CompositionPersistenceFacade,
 )
+from .facade.persistence import (
+    DocumentPersistenceSnapshot as DocumentPersistenceSnapshot,
+)
+from .masks.export import MaskExportSnapshot as MaskExportSnapshot
 from .masks.mask_undo import MaskUndoState
 from .masks.workflow import MaskInfo as MaskInfo
 from .overlay_contracts import CanvasDisplayScale as CanvasDisplayScale
@@ -159,11 +171,14 @@ from .projection import CanvasProjectionHandle as CanvasProjectionHandle
 from .projection import CanvasProjectionRequest as CanvasProjectionRequest
 from .projection import CanvasProjectionResult as CanvasProjectionResult
 from .projection import CanvasProjectionStatus as CanvasProjectionStatus
+from .resources import EmbeddedImageExportSnapshot as EmbeddedImageExportSnapshot
 from .runtime import CanvasDocumentRuntime as CanvasDocumentRuntime
 from .snapping import SnapPolicy as SnapPolicy
 from .types import CompositionPolicy as CompositionPolicy
 from .types import LayerPolicy as LayerPolicy
 from .types import MaskSavedPayload as MaskSavedPayload
+
+def warmSamDependencies() -> None: ...
 
 class CacheMode(str, Enum):
     AUTO = "auto"
@@ -720,6 +735,15 @@ class CuteCanvas(QWidget):
         *,
         composition_id: uuid.UUID | None = ...,
     ) -> QImage | None: ...
+    def captureMaskExport(
+        self,
+        mask_id: uuid.UUID,
+        *,
+        composition_id: uuid.UUID | None = ...,
+    ) -> MaskExportSnapshot | None: ...
+    def captureEmbeddedImageExport(
+        self, composition_id: uuid.UUID
+    ) -> EmbeddedImageExportSnapshot | None: ...
     def getMaskUndoState(self, mask_id: uuid.UUID) -> MaskUndoState | None: ...
     def diagnosticsOverlayEnabled(self) -> bool: ...
     def diagnosticsDomains(self) -> tuple[str, ...]: ...
@@ -734,6 +758,13 @@ class CuteCanvas(QWidget):
     def currentZoom(self) -> float: ...
     def currentViewportRect(self) -> QRectF: ...
     def setZoomFit(self) -> None: ...
+    def renderBrushTipPreview(
+        self,
+        logical_size: QSize,
+        *,
+        device_pixel_ratio: float = ...,
+        color: QColor | None = ...,
+    ) -> QImage: ...
     def setZoom1To1(self, anchor: QPoint | QPointF | None = ...) -> None: ...
     def applyZoom(
         self,
@@ -766,6 +797,8 @@ class CuteCanvas(QWidget):
     def document(self) -> CanvasDocument: ...
     def documentRuntime(self) -> CanvasDocumentRuntime: ...
     def viewSession(self) -> CanvasViewSession: ...
+    def setViewportSpec(self, spec: CanvasViewportSpec) -> None: ...
+    def viewportSpec(self) -> CanvasViewportSpec | None: ...
     def editorOperationState(
         self,
         intent: EditorIntent,
@@ -1259,8 +1292,12 @@ class CuteCanvas(QWidget):
     def unregisterTool(self, mode: str) -> None: ...
     def openComposition(self, composition_id: uuid.UUID) -> None: ...
     def removeComposition(self, composition_id: uuid.UUID) -> None: ...
-    def createBlankMask(self, size: QSize) -> uuid.UUID | None: ...
-    def loadMaskFromFile(self, path: str) -> uuid.UUID | None: ...
+    def createBlankMask(
+        self, size: QSize, *, undoable: bool = ...
+    ) -> uuid.UUID | None: ...
+    def loadMaskFromFile(
+        self, path: str, *, undoable: bool = ...
+    ) -> uuid.UUID | None: ...
     def replaceMaskFromFile(self, mask_id: uuid.UUID, path: str) -> bool: ...
     def replaceMaskImage(self, mask_id: uuid.UUID, image: QImage) -> bool: ...
     def removeMaskFromComposition(

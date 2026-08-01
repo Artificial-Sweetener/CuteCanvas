@@ -42,7 +42,7 @@ from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from cutecanvas.editor import (
     EditorOperation,
 )
-from cutecanvas.painting import BrushPreset
+from cutecanvas.painting import BrushPreset, BrushTipPreviewRenderer
 from cutecanvas.painting.clone_model import (
     CloneStampAlignment,
     CloneStampSampleMode,
@@ -194,8 +194,10 @@ class RasterApiMixin:
         source_kind = None
         if identity.layer_id is not None:
             resolved = self.sceneMutationCoordinator().find_layer(
-                lambda layer: layer.scene_id == identity.scene_id
-                and layer.layer_id == identity.layer_id
+                lambda layer: (
+                    layer.scene_id == identity.scene_id
+                    and layer.layer_id == identity.layer_id
+                )
             )
             if resolved is None:
                 return None
@@ -273,6 +275,23 @@ class RasterApiMixin:
         self.refreshCursor()
         self.brushPresetChanged.emit(preset)
         return True
+
+    def renderBrushTipPreview(
+        self,
+        logical_size: QSize,
+        *,
+        device_pixel_ratio: float = 1.0,
+        color: QColor | None = None,
+    ) -> QImage:
+        """Render the active brush definition for lightweight host controls."""
+        return BrushTipPreviewRenderer(
+            self.paintingCoordinator().compositor.tips
+        ).render(
+            self.brushPreset(),
+            logical_size,
+            device_pixel_ratio=device_pixel_ratio,
+            color=color,
+        )
 
     def paintColor(self) -> QColor:
         """Return the detached active color used by color paint targets."""
@@ -788,10 +807,7 @@ class RasterApiMixin:
 
     def _undo_scene_edit_scope(self, scene_id: uuid.UUID) -> bool:
         """Undo one exact scope after any asynchronous edit barrier clears."""
-        result = self.compositionService().edit_controller.undo(scene_id)
-        if result.changed:
-            self._publish_scene_layer_change()
-        return result.changed
+        return self.compositionService().edit_controller.undo(scene_id).changed
 
     def redoSceneEdit(self) -> bool:
         """Redo the next chronological editor change in the active scene."""
@@ -801,7 +817,4 @@ class RasterApiMixin:
         scene_id = self._active_resolved_scene_id()
         if scene_id is None:
             return False
-        result = self.compositionService().edit_controller.redo(scene_id)
-        if result.changed:
-            self._publish_scene_layer_change()
-        return result.changed
+        return self.compositionService().edit_controller.redo(scene_id).changed

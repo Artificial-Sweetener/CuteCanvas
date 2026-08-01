@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from cutecanvas import Config, CuteCanvas
+from cutecanvas import Config, CuteCanvas, ExecutionRuntime
 from PySide6.QtCore import QByteArray, QEvent, QRect, Qt
 from PySide6.QtGui import (
     QIcon,
@@ -45,7 +45,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qpane import create_default_execution_runtime
 
 from examples.demo_settings import load_demo_settings, save_demo_window_settings
 from examples.demonstration import demo_text
@@ -69,6 +68,7 @@ from examples.demonstration.status_tutorial import StatusTutorialController
 from examples.demonstration.tool_mode_tutorial import ToolModeTutorialController
 from examples.demonstration.welcome_document import seed_welcome_document
 from examples.demonstration.workspace_tutorial import WorkspaceTutorialController
+from qpane import create_default_execution_runtime
 from tools.navigation_trace import NavigationTraceRecorder
 
 MASK_KEY_LOOKUP = {
@@ -125,7 +125,7 @@ class ExampleWindow(QMainWindow):
         super().__init__()
         self.options = options
         self._example_config = config if config is not None else Config()
-        self._execution_runtime = create_default_execution_runtime()
+        self._execution_runtime: ExecutionRuntime = create_default_execution_runtime()
         self._execution_closed = False
         self._reference_dialog: QuickReferenceDialog | None = None
         self._shortcuts: list[QShortcut] = []

@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 import numpy as np
@@ -37,6 +39,7 @@ from cutecanvas.coverage import (
 from ..composition.edit_controller import CompositionEditController
 from ..raster.sparse_grid import SparseRasterSnapshot
 from ..resources import ProjectResourceKind, ProjectResourceStore
+from ..types import RasterExtentPolicy
 from .coverage_transactions import MaskCoverageTransactions
 from .history import MaskHistory
 from .mask_undo import (
@@ -44,6 +47,7 @@ from .mask_undo import (
     MaskPatch,
     MaskUndoState,
 )
+from .resource_changes import MaskResourceChange
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +85,15 @@ class MaskAssetStore:
         resources: ProjectResourceStore,
         *,
         undo_limit: int = 20,
+        changed: Callable[[uuid.UUID, object | None], None] | None = None,
     ) -> None:
-        """Initialize asset storage before composition history is bound."""
+        """Initialize storage and its document-level change publisher."""
         self._resources = resources
+        self._changed = changed or (lambda _mask_id, _payload=None: None)
+        self._change_origin: ContextVar[MaskResourceChange | None] = ContextVar(
+            f"cutecanvas-mask-origin-{id(self)}",
+            default=None,
+        )
         self._masks: dict[uuid.UUID, MaskLayer] = {}
         self._history = MaskHistory(
             self,
@@ -94,7 +104,6 @@ class MaskAssetStore:
             history=self._history,
             changed=self._touch,
         )
-        self._history_subscribers: list[Callable[[MaskHistoryChange], None]] = []
 
     def get_layer(self, mask_id: uuid.UUID) -> MaskLayer | None:
         """Return one mask asset when it exists."""
@@ -114,6 +123,20 @@ class MaskAssetStore:
         """Return all asset identifiers in creation order."""
         return tuple(self._masks)
 
+    @contextmanager
+    def change_origin(
+        self,
+        origin: object,
+        *,
+        detail: object | None = None,
+    ) -> Iterator[None]:
+        """Attribute synchronous mutations and damage to one presentation."""
+        token = self._change_origin.set(MaskResourceChange(origin, detail))
+        try:
+            yield
+        finally:
+            self._change_origin.reset(token)
+
     @property
     def undo_limit(self) -> int:
         """Return the history depth applied to mask assets."""
@@ -127,26 +150,13 @@ class MaskAssetStore:
         self,
         edits: CompositionEditController,
         scope_for_mask: Callable[[uuid.UUID], uuid.UUID | None],
-        completed: Callable[[MaskHistoryChange], None],
-    ) -> Callable[[], None]:
-        """Bind chronology and return an idempotent presentation unsubscribe."""
-
-        if completed not in self._history_subscribers:
-            self._history_subscribers.append(completed)
+    ) -> None:
+        """Bind the document's sole chronological mask history owner."""
         self._history.bind(edits, scope_for_mask, self._publish_history_change)
 
-        def unsubscribe() -> None:
-            """Detach the mounted presentation's history observer."""
-            if completed in self._history_subscribers:
-                self._history_subscribers.remove(completed)
-
-        return unsubscribe
-
     def _publish_history_change(self, change: MaskHistoryChange) -> None:
-        """Invalidate once, then notify every mounted mask presentation."""
-        self._touch(change.mask_id)
-        for callback in tuple(self._history_subscribers):
-            callback(change)
+        """Publish history replay once through the document change stream."""
+        self._touch(change.mask_id, change)
 
     def create_mask(self, image: QImage) -> uuid.UUID:
         """Create a blank asset matching ``image`` dimensions."""
@@ -158,7 +168,13 @@ class MaskAssetStore:
         )
         self._masks[mask_id] = MaskLayer(
             mask_id=mask_id,
-            coverage=CoverageAsset(mask_id, CoverageSurface.blank(image.size())),
+            coverage=CoverageAsset(
+                mask_id,
+                CoverageSurface.blank(
+                    image.size(),
+                    extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
+                ),
+            ),
         )
         self._history.initialize_mask(mask_id)
         return mask_id
@@ -382,11 +398,27 @@ class MaskAssetStore:
         for mask_id in self.mask_ids():
             self.delete_mask(mask_id)
 
-    def _touch(self, mask_id: uuid.UUID) -> None:
+    def _touch(
+        self,
+        mask_id: uuid.UUID,
+        payload: object | None = None,
+    ) -> None:
         """Advance one retained coverage resource and its dependents."""
-        self.touch(mask_id)
+        self.touch(mask_id, payload=payload)
 
-    def touch(self, mask_id: uuid.UUID) -> None:
+    def touch(self, mask_id: uuid.UUID, *, payload: object | None = None) -> None:
         """Advance one directly mutated coverage resource and its dependents."""
         if self._resources.get(mask_id) is not None:
             self._resources.touch(mask_id)
+            change = self._change_origin.get()
+            self._changed(
+                mask_id,
+                MaskResourceChange(
+                    None if change is None else change.origin,
+                    (
+                        payload
+                        if payload is not None or change is None
+                        else change.detail
+                    ),
+                ),
+            )

@@ -25,6 +25,12 @@ from typing import ClassVar
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen
+
+from cutecanvas.painting import BrushOperation, BrushStrokeSegment, BrushStrokeSession
+from cutecanvas.tools.base import BaseTool
+from cutecanvas.tools.cursor_feedback import ToolCursorStyle
+from cutecanvas.tools.modifier_snapshot import alt_is_active, shift_is_active
+from cutecanvas.tools.ports import PaintingInteractionPort
 from qpane import (
     PanelHitTest,
     PointerDeviceKind,
@@ -32,12 +38,6 @@ from qpane import (
     PointerSample,
     ToolInputProfile,
 )
-
-from cutecanvas.painting import BrushOperation, BrushStrokeSegment, BrushStrokeSession
-from cutecanvas.tools.base import BaseTool
-from cutecanvas.tools.cursor_feedback import ToolCursorStyle
-from cutecanvas.tools.modifier_snapshot import alt_is_active, shift_is_active
-from cutecanvas.tools.ports import PaintingInteractionPort
 
 from .brush_preview import BrushPreview, BrushPreviewRenderer
 
@@ -94,6 +94,7 @@ class BrushTool(BaseTool):
         self._is_shift_held: Callable[[], bool] = lambda: False
         self._can_paint: Callable[[], bool] = lambda: True
         self._prepare_paint: Callable[[], bool] = lambda: True
+        self._gesture_start_allowed: Callable[[QPointF], bool] = lambda _point: True
         self._get_brush_size: Callable[[], int] = lambda: 20
         self._get_preview_pens: Callable[[], tuple[QPen, QPen]] = (
             self._default_preview_pens
@@ -149,6 +150,7 @@ class BrushTool(BaseTool):
         self._is_shift_held = dependencies.is_shift_held
         self._can_paint = dependencies.can_paint
         self._prepare_paint = dependencies.prepare_paint
+        self._gesture_start_allowed = dependencies.gesture_start_allowed
         self._get_brush_size = dependencies.get_brush_size
         self._get_preview_pens = (
             dependencies.get_preview_pens or self._default_preview_pens
@@ -191,6 +193,8 @@ class BrushTool(BaseTool):
     def mousePressEvent(self, event: QMouseEvent):
         """Begin a brush stroke or execute a straight-line stroke when shift is held."""
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if not self._gesture_start_allowed(event.position()):
             return
         if not self._can_paint() or not self._prepare_paint():
             return
@@ -311,7 +315,9 @@ class BrushTool(BaseTool):
             preview_cleared = self.clear_pointer_preview()
             return stroke_cancelled or preview_cleared
         if sample.phase is PointerPhase.BEGIN and (
-            not self._can_paint() or not self._prepare_paint()
+            not self._gesture_start_allowed(sample.position)
+            or not self._can_paint()
+            or not self._prepare_paint()
         ):
             self.clear_pointer_preview()
             return False

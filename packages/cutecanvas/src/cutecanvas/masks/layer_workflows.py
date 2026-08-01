@@ -63,8 +63,13 @@ class MaskLayerWorkflow:
         self._commit_image = commit_image
         self._publish_status = publish_status
 
-    def load_from_path(self, path: str) -> uuid.UUID | None:
-        """Import a mask from path and attach it to the active composition."""
+    def load_from_path(
+        self,
+        path: str,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Import a mask and optionally record its admission in history."""
         scene = self._qpane.currentScene()
         composition_id = self._qpane.currentCompositionID()
         if composition_id is None or scene is None:
@@ -84,18 +89,21 @@ class MaskLayerWorkflow:
         )
         if prepared is None:
             return None
-        seed = QImage(target_size, QImage.Format_Grayscale8)
-        seed.fill(0)
-        mask_id = self._assets.create_mask(seed)
-        if not self._commit_image(mask_id, prepared):
-            return None
+        if undoable:
+            seed = QImage(target_size, QImage.Format_Grayscale8)
+            seed.fill(0)
+            mask_id = self._assets.create_mask(seed)
+            if not self._commit_image(mask_id, prepared):
+                return None
+        else:
+            mask_id = self._assets.create_mask(prepared)
         layer = self._assets.get_layer(mask_id)
         layer_index = len(self._layers.mask_ids_for_composition(composition_id))
         if layer is None or not self._layers.attach_to_composition(
             mask_id,
             composition_id,
             color=random_mask_color(layer_index),
-            undoable=True,
+            undoable=undoable,
         ):
             self._assets.delete_mask(mask_id)
             return None
@@ -152,8 +160,13 @@ class MaskLayerWorkflow:
         self._qpane.repaint()
         self._publish_status(message, label="Mask")
 
-    def create_blank(self, size: QSize) -> uuid.UUID | None:
-        """Create a blank mask layer in the active composition."""
+    def create_blank(
+        self,
+        size: QSize,
+        *,
+        undoable: bool = True,
+    ) -> uuid.UUID | None:
+        """Create a blank mask and optionally record its admission in history."""
         if size.isNull() or not size.isValid():
             self._publish_status(
                 "Cannot create blank mask with invalid size.", label="Mask Error"
@@ -175,7 +188,7 @@ class MaskLayerWorkflow:
             mask_id,
             composition_id,
             color=color,
-            undoable=True,
+            undoable=undoable,
         ):
             self._assets.delete_mask(mask_id)
             return None

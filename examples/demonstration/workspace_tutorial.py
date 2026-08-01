@@ -30,6 +30,10 @@ from cutecanvas import CuteCanvas, ExecutionRuntime, LayerPolicy
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QFileDialog, QWidget
 
+from examples.demonstration.document_saves import (
+    DocumentSaveCoordinator,
+    DocumentSaveResult,
+)
 from examples.demonstration.workers import ImageLoadCoordinator
 
 
@@ -52,11 +56,17 @@ class WorkspaceTutorialController:
         self._set_status = set_status
         self._load_batch_auto_select = False
         self._image_loads = ImageLoadCoordinator(execution_runtime, parent)
+        self._document_saves = DocumentSaveCoordinator(
+            execution_runtime,
+            canvas.editor.persistence,
+            parent,
+        )
         self._image_compositions_by_path: dict[Path, uuid.UUID] = {}
 
     def close(self) -> None:
         """Cancel host-owned decoder work before the demo runtime shuts down."""
         self._image_loads.close()
+        self._document_saves.close()
 
     @staticmethod
     def _ordinary_image_policy() -> LayerPolicy:
@@ -103,14 +113,14 @@ class WorkspaceTutorialController:
         return True
 
     def save_composition_dialog(self) -> None:
-        """Persist the active editable composition as one atomic archive."""
+        """Capture the complete workspace and persist it outside the GUI thread."""
         composition = self._canvas.editor.compositions.current
         if composition is None:
             self._set_status("Open a composition before saving.")
             return
         file_path, _ = QFileDialog.getSaveFileName(
             self._parent,
-            "Save CuteCanvas Composition",
+            "Save CuteCanvas Workspace",
             str(Path.home() / f"{composition.state.title}.cutecanvas"),
             "CuteCanvas compositions (*.cutecanvas)",
         )
@@ -120,11 +130,25 @@ class WorkspaceTutorialController:
         if not path.suffix:
             path = path.with_suffix(".cutecanvas")
         try:
-            self._canvas.editor.persistence.save(composition, path)
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            snapshot = self._canvas.editor.persistence.capture_document()
+        except (RuntimeError, TypeError, ValueError) as exc:
             self._set_status(f"Could not save composition: {exc}")
             return
-        self._set_status(f"Saved {composition.state.title}.")
+        if not self._document_saves.submit(
+            snapshot,
+            path,
+            finished=self._document_save_finished,
+        ):
+            self._set_status("That workspace destination is already being saved.")
+            return
+        self._set_status(f"Saving workspace to {path.name}…")
+
+    def _document_save_finished(self, result: DocumentSaveResult) -> None:
+        """Present one terminal background workspace save result."""
+        if result.error is not None:
+            self._set_status(f"Could not save workspace: {result.error}")
+            return
+        self._set_status(f"Saved workspace to {result.path.name}.")
 
     def place_embedded_dialog(self) -> None:
         """Decode one image off-thread before placing detached pixels."""
@@ -344,7 +368,10 @@ class WorkspaceTutorialController:
         if scene is None or scene.bounds.isEmpty():
             self._set_status("Open a composition before creating masks.")
             return None
-        mask_id = self._canvas.createBlankMask(scene.bounds.size().toSize())
+        mask_id = self._canvas.createBlankMask(
+            scene.bounds.size().toSize(),
+            undoable=True,
+        )
         if mask_id is None:
             self._set_status("Unable to create a mask layer.")
             return None
@@ -383,7 +410,7 @@ class WorkspaceTutorialController:
         if self._canvas.currentCompositionID() is None:
             self._set_status("Open a composition before importing masks.")
             return
-        mask_id = self._canvas.loadMaskFromFile(str(path))
+        mask_id = self._canvas.loadMaskFromFile(str(path), undoable=True)
         if mask_id is None:
             self._set_status(f"Failed to import mask from {path.name}.")
             return

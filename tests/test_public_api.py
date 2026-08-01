@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import cutecanvas
 import pytest
-import qpane
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage
+
+import qpane
 
 
 def test_qpane_public_api_symbols() -> None:
@@ -192,8 +193,17 @@ def test_cutecanvas_public_api_symbols() -> None:
         "CanvasOverlayDrawFn",
         "CanvasDisplayScale",
         "CanvasOverlayState",
+        "CanvasRenderVariant",
+        "CanvasViewportInteraction",
+        "CanvasViewportSource",
+        "CanvasViewportSpec",
         "DragSubject",
+        "DiagnosticsSubscription",
+        "DocumentPersistenceSnapshot",
+        "ExecutionBackend",
         "ExecutionRuntime",
+        "ExecutionSnapshot",
+        "EmbeddedImageExportSnapshot",
         "CanvasInteractionMode",
         "CanvasPresentation",
         "CanvasPresentationContext",
@@ -215,12 +225,14 @@ def test_cutecanvas_public_api_symbols() -> None:
         "PaintTargetKind",
         "FloatingPixelMode",
         "MaskInfo",
+        "MaskExportSnapshot",
         "OutboundDragPayload",
         "OutboundMimeItem",
         "OutboundMimeProvider",
         "PlacedAssetMode",
         "PlacedAssetStatus",
         "ResolvedCanvasContent",
+        "warmSamDependencies",
     }
     assert expected.issubset(set(cutecanvas.__all__))
     assert "QPane" not in cutecanvas.__all__

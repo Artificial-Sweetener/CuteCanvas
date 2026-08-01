@@ -48,6 +48,10 @@ from cutecanvas.editor.composition_root import (
     EditorRootCallbacks,
     EditorRootInputs,
 )
+from cutecanvas.masks.coverage_preview_source import (
+    MaskCoverageSourceCapabilities,
+    MaskCoverageSourceReference,
+)
 from cutecanvas.masks.descriptor_factory import MaskLayerDescriptorFactory
 from cutecanvas.masks.floating_layers import MaskFloatingLayerOwner
 from cutecanvas.masks.paint_target import MaskCoveragePaintTargetOwner
@@ -184,9 +188,7 @@ class CanvasLifecycleMixin:
             )
         )
         self.destroyed.connect(
-            lambda _obj=None, service=components.vector.conversions: (
-                service.shutdown()
-            )
+            lambda _obj=None, service=components.vector.conversions: service.shutdown()
         )
         self._pixel_selection = components.pixel_selection
         self._layer_geometry = components.layer_geometry
@@ -252,6 +254,7 @@ class CanvasLifecycleMixin:
         self._operation_resolver = components.operation_resolver
         self._paint_destination = components.paint_destination
         self._active_mask_coordinates = components.active_mask_coordinates
+        self._active_mask_aperture = components.active_mask_aperture
         self._composition_scene_adapter = components.composition_scene_adapter
         self._tools = components.tools
         tool_signals = components.tools.signals
@@ -399,10 +402,9 @@ class CanvasLifecycleMixin:
             Registers coverage rendering, editing, and resource capabilities.
         """
         self._masks_controller.attachMaskService(service)
-        service.bindCompositionEdits(self.compositionService().edit_controller)
         self.destroyed.connect(lambda _obj=None, attached=service: attached.shutdown())
         service.setStrokeConstraintProvider(
-            self.editorInteraction().mask_stroke_constraint
+            self.activeMaskCanvasAperture().stroke_constraint
         )
         factory = MaskLayerDescriptorFactory(
             assets=service.assets,
@@ -422,6 +424,23 @@ class CanvasLifecycleMixin:
             raise RuntimeError("project resource capability registry is unavailable")
         resource_capabilities.register(ProjectResourceKind.COVERAGE, capabilities)
         self._mask_source_capabilities = capabilities
+        coverage_capabilities = MaskCoverageSourceCapabilities(capabilities)
+        source_capabilities = self._source_capabilities
+        if source_capabilities is None:
+            raise RuntimeError("render source capability registry is unavailable")
+        source_capabilities.metadata.register(
+            MaskCoverageSourceReference,
+            coverage_capabilities,
+        )
+        source_capabilities.hit_tests.register(
+            MaskCoverageSourceReference,
+            coverage_capabilities,
+        )
+        source_capabilities.hybrids.register(
+            MaskCoverageSourceReference,
+            coverage_capabilities,
+        )
+        self._mask_coverage_source_capabilities = coverage_capabilities
         from cutecanvas.masks.raster_mutations import MaskRasterMutationOwner
 
         raster_owner = MaskRasterMutationOwner(
@@ -540,6 +559,22 @@ class CanvasLifecycleMixin:
                     capabilities,
                 )
             self._mask_source_capabilities = None
+        coverage_capabilities = self._mask_coverage_source_capabilities
+        source_capabilities = self._source_capabilities
+        if coverage_capabilities is not None and source_capabilities is not None:
+            source_capabilities.metadata.unregister(
+                MaskCoverageSourceReference,
+                coverage_capabilities,
+            )
+            source_capabilities.hit_tests.unregister(
+                MaskCoverageSourceReference,
+                coverage_capabilities,
+            )
+            source_capabilities.hybrids.unregister(
+                MaskCoverageSourceReference,
+                coverage_capabilities,
+            )
+        self._mask_coverage_source_capabilities = None
         self._masks_controller.detachMaskService()
 
     def attachSamManager(self, sam_manager: SamManager) -> None:

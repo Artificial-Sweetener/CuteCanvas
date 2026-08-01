@@ -114,7 +114,7 @@ def test_demo_layer_inspector_preserves_manual_bounds_until_applied(qapp) -> Non
         assert viewer.setRasterExtentPolicy(
             mask.scene_id,
             mask.layer_id,
-            RasterExtentPolicy.EXPAND_ON_WRITE,
+            RasterExtentPolicy.FIXED,
         )
 
         assert inspector._edited_bounds() == requested

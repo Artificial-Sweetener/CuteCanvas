@@ -51,7 +51,6 @@ class MaskController(QObject):
         stroke_diagnostics: MaskStrokeDiagnostics | None = None,
         color_for_mask: Callable[[uuid.UUID], QColor | None] | None = None,
         structure_changed: Callable[[], None] | None = None,
-        content_changed: Callable[[], None] | None = None,
         render_scale: Callable[[], float] | None = None,
     ):
         """Initialize mask caches, coordinate transforms, and diagnostics hooks.
@@ -65,7 +64,6 @@ class MaskController(QObject):
             stroke_diagnostics: Optional diagnostics helper for stroke timing/counters.
             color_for_mask: Composition-owned mask appearance lookup.
             structure_changed: Callback for source-bounds geometry changes.
-            content_changed: Callback for source revisions that preserve geometry.
             render_scale: Current visible scale used for activation warming.
         """
         super().__init__()
@@ -78,6 +76,7 @@ class MaskController(QObject):
         self._color_for_mask = color_for_mask or (lambda _mask_id: DEFAULT_MASK_COLOR)
         self._render_scale = render_scale or (lambda: 1.0)
         self._active_mask_id = None
+        self._presentation_identity = object()
         self._epochs = MaskEditEpochs()
         self._renders = MaskRenderCache(
             mask_manager,
@@ -98,9 +97,14 @@ class MaskController(QObject):
             mask_changed=lambda mask_id, rect: self.mask_updated.emit(mask_id, rect),
             undo_changed=self.undo_stack_changed.emit,
             structure_changed=structure_changed,
-            content_changed=content_changed,
             diagnostics=stroke_diagnostics,
+            presentation_identity=self._presentation_identity,
         )
+
+    @property
+    def presentation_identity(self) -> object:
+        """Return the opaque identity used to suppress self-originated replay."""
+        return self._presentation_identity
 
     @property
     def renders(self) -> MaskRenderCache:

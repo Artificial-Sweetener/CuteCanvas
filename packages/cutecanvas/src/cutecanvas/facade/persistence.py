@@ -17,10 +17,23 @@
 
 from __future__ import annotations
 
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..persistence import CompositionPersistenceService
+from ..persistence import (
+    CompositionArchiveSnapshot,
+    CompositionPersistenceService,
+)
 from .handles import CompositionHandle, EditorHandleHost
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentPersistenceSnapshot:
+    """Carry detached document authority prepared for background persistence."""
+
+    composition_ids: tuple[uuid.UUID, ...]
+    _archive: CompositionArchiveSnapshot = field(repr=False)
 
 
 class CompositionPersistenceFacade:
@@ -50,3 +63,42 @@ class CompositionPersistenceFacade:
         if open_composition:
             composition.open()
         return composition
+
+    def save_document(self, path: str | Path) -> tuple[CompositionHandle, ...]:
+        """Atomically save every independent composition in the document."""
+        snapshot = self.capture_document()
+        self.write_document(snapshot, path)
+        return tuple(
+            CompositionHandle(self._host, composition_id)
+            for composition_id in snapshot.composition_ids
+        )
+
+    def capture_document(self) -> DocumentPersistenceSnapshot:
+        """Capture detached document authority without filesystem access."""
+        archive = self._service.capture_document()
+        return DocumentPersistenceSnapshot(archive.root_document_ids, archive)
+
+    def write_document(
+        self,
+        snapshot: DocumentPersistenceSnapshot,
+        path: str | Path,
+    ) -> None:
+        """Atomically write a detached document snapshot to ``path``."""
+        if not isinstance(snapshot, DocumentPersistenceSnapshot):
+            raise TypeError("snapshot must be a DocumentPersistenceSnapshot")
+        self._service.write_document(snapshot._archive, Path(path))
+
+    def load_document(
+        self,
+        path: str | Path,
+        *,
+        open_first: bool = True,
+    ) -> tuple[CompositionHandle, ...]:
+        """Transactionally restore all roots from one document archive."""
+        compositions = tuple(
+            CompositionHandle(self._host, composition_id)
+            for composition_id in self._service.load_document(Path(path))
+        )
+        if open_first and compositions:
+            compositions[0].open()
+        return compositions

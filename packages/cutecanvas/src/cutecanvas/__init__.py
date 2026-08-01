@@ -65,6 +65,8 @@ _LAYOUT_TYPE_EXPORTS = (
 
 _EXECUTION_TYPE_EXPORTS = (
     "BackendSubmission",
+    "DiagnosticsSubscription",
+    "ExecutionBackend",
     "ExecutionBackendCapabilities",
     "ExecutionHandle",
     "ExecutionJob",
@@ -73,6 +75,7 @@ _EXECUTION_TYPE_EXPORTS = (
     "ExecutionRejectionReason",
     "ExecutionRequirements",
     "ExecutionResource",
+    "ExecutionSnapshot",
     "ExecutionRequest",
     "ExecutionUrgency",
     "InlineDispatcher",
@@ -118,11 +121,13 @@ __all__ = [
     "CanvasDocument",
     "CanvasDocumentRuntime",
     "DragSubject",
+    "EmbeddedImageExportSnapshot",
     "ExecutionRuntime",
     "CanvasInspectionGroup",
     "CanvasPresentation",
     "CanvasPresentationContext",
     "CanvasPresentationKind",
+    "CanvasRenderVariant",
     "CanvasPresentationProvider",
     "CanvasProjectionHandle",
     "CanvasProjectionRequest",
@@ -130,6 +135,9 @@ __all__ = [
     "CanvasProjectionStatus",
     "CanvasSessionSnapshot",
     "CanvasViewSession",
+    "CanvasViewportInteraction",
+    "CanvasViewportSource",
+    "CanvasViewportSpec",
     "CanvasWorkspace",
     "Config",
     "CoverageShapeOptions",
@@ -138,6 +146,7 @@ __all__ = [
     "CompositionCollection",
     "CompositionHandle",
     "CompositionPersistenceFacade",
+    "DocumentPersistenceSnapshot",
     "EditorFacade",
     "EffectsFacade",
     "HistoryFacade",
@@ -149,6 +158,7 @@ __all__ = [
     "LayerGeometryMode",
     "LayerGeometryPolicy",
     "MaskInfo",
+    "MaskExportSnapshot",
     "OutboundDragPayload",
     "OutboundMimeItem",
     "OutboundMimeProvider",
@@ -159,6 +169,7 @@ __all__ = [
     "SelectionFacade",
     "SnapPolicy",
     "ToolFacade",
+    "warmSamDependencies",
 ]
 __all__ = sorted(set(__all__) - {"QPane"})
 
@@ -180,14 +191,25 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "CanvasInspectionGroup": ("cutecanvas.document", "CanvasInspectionGroup"),
     "CanvasDocumentRuntime": ("cutecanvas.runtime", "CanvasDocumentRuntime"),
     "DragSubject": ("qpane.sdk.ui", "DragSubject"),
+    "EmbeddedImageExportSnapshot": (
+        "cutecanvas.resources",
+        "EmbeddedImageExportSnapshot",
+    ),
     "ExecutionRuntime": ("qpane.sdk.execution", "ExecutionRuntime"),
     "CanvasPresentation": ("cutecanvas.document", "CanvasPresentation"),
     "CanvasPresentationKind": (
         "cutecanvas.document",
         "CanvasPresentationKind",
     ),
+    "CanvasRenderVariant": ("cutecanvas.document", "CanvasRenderVariant"),
     "CanvasSessionSnapshot": ("cutecanvas.document", "CanvasSessionSnapshot"),
     "CanvasViewSession": ("cutecanvas.document", "CanvasViewSession"),
+    "CanvasViewportInteraction": (
+        "cutecanvas.document",
+        "CanvasViewportInteraction",
+    ),
+    "CanvasViewportSource": ("cutecanvas.document", "CanvasViewportSource"),
+    "CanvasViewportSpec": ("cutecanvas.document", "CanvasViewportSpec"),
     "CanvasPresentationContext": (
         "cutecanvas.presentation",
         "CanvasPresentationContext",
@@ -230,6 +252,10 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "CompositionPersistenceFacade": (
         "cutecanvas.facade.persistence",
         "CompositionPersistenceFacade",
+    ),
+    "DocumentPersistenceSnapshot": (
+        "cutecanvas.facade.persistence",
+        "DocumentPersistenceSnapshot",
     ),
     "LayerHandle": ("cutecanvas.facade.handles", "LayerHandle"),
     "LayerEffectHandle": ("cutecanvas.facade.handles", "LayerEffectHandle"),
@@ -281,11 +307,13 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
         "CloneStampTransform",
     ),
     "MaskInfo": ("cutecanvas.masks.workflow", "MaskInfo"),
+    "MaskExportSnapshot": ("cutecanvas.masks.export", "MaskExportSnapshot"),
     "OutboundDragPayload": ("qpane.sdk.ui", "OutboundDragPayload"),
     "OutboundMimeItem": ("qpane.sdk.ui", "OutboundMimeItem"),
     "OutboundMimeProvider": ("qpane.sdk.ui", "OutboundMimeProvider"),
     "PlacedAssetMode": ("cutecanvas.placed.model", "PlacedAssetMode"),
     "PlacedAssetStatus": ("cutecanvas.placed.model", "PlacedAssetStatus"),
+    "warmSamDependencies": ("cutecanvas.sam.service", "ensure_dependencies"),
 }
 
 

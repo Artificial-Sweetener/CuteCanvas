@@ -96,6 +96,7 @@ def _contracts(root: Path) -> tuple[FacadeContract, ...]:
                     "DiagnosticsApiMixin",
                     "EditorPolicyApiMixin",
                     "EffectApiMixin",
+                    "EmbeddedImageExportApiMixin",
                     "OutboundDragApiMixin",
                     "ProjectionApiMixin",
                     "MaskApiMixin",
@@ -107,6 +108,7 @@ def _contracts(root: Path) -> tuple[FacadeContract, ...]:
                     "InteractionApiMixin",
                     "LayerApiMixin",
                     "ViewApiMixin",
+                    "ViewportApiMixin",
                     "CanvasAccessorsMixin",
                 }
             ),

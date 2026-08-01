@@ -20,14 +20,38 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import numpy_to_qimage_grayscale8
 from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
+from ..coverage import CoverageAsset
 from ..resources import ProjectResourceReference
 from .mask import MaskAssetStore
 from .projection import project_mask_snapshot
+
+
+@dataclass(frozen=True, slots=True)
+class MaskExportSnapshot:
+    """Carry one exact bounded mask revision into an external operation."""
+
+    mask_id: uuid.UUID
+    composition_id: uuid.UUID
+    revision: int
+    image: QImage
+
+    def __post_init__(self) -> None:
+        """Detach mutable pixels and validate stable export identity."""
+        if not isinstance(self.mask_id, uuid.UUID):
+            raise TypeError("mask_id must be a UUID")
+        if not isinstance(self.composition_id, uuid.UUID):
+            raise TypeError("composition_id must be a UUID")
+        if not isinstance(self.revision, int) or self.revision < 0:
+            raise ValueError("revision must be a non-negative integer")
+        if not isinstance(self.image, QImage) or self.image.isNull():
+            raise ValueError("image must be a non-null QImage")
+        object.__setattr__(self, "image", self.image.copy())
 
 
 class MaskImageExportService:
@@ -40,12 +64,14 @@ class MaskImageExportService:
         composition_ids_for_mask: Callable[[uuid.UUID], tuple[uuid.UUID, ...]],
         current_composition_id: Callable[[], uuid.UUID | None],
         scene_for_composition: Callable[[uuid.UUID], SceneDescriptor],
+        resource_revision: Callable[[uuid.UUID], int | None],
     ) -> None:
         """Bind the authoritative mask, composition, and scene owners."""
         self._assets = assets
         self._composition_ids_for_mask = composition_ids_for_mask
         self._current_composition_id = current_composition_id
         self._scene_for_composition = scene_for_composition
+        self._resource_revision = resource_revision
 
     def export(
         self,
@@ -65,15 +91,26 @@ class MaskImageExportService:
             A canvas-clipped grayscale snapshot, or ``None`` when the addressed
             mask instance cannot be resolved unambiguously.
         """
+        snapshot = self.capture(mask_id, composition_id=composition_id)
+        return None if snapshot is None else snapshot.image.copy()
+
+    def capture(
+        self,
+        mask_id: uuid.UUID,
+        *,
+        composition_id: uuid.UUID | None = None,
+    ) -> MaskExportSnapshot | None:
+        """Capture one immutable mask revision before bounded evaluation."""
         resolved_composition_id = self._resolve_composition_id(
             mask_id,
             composition_id,
         )
         if resolved_composition_id is None:
             return None
-        asset = self._assets.get_layer(mask_id)
-        if asset is None:
+        captured = self._capture_asset(mask_id)
+        if captured is None:
             return None
+        revision, asset = captured
         try:
             scene = self._scene_for_composition(resolved_composition_id)
         except KeyError:
@@ -86,14 +123,31 @@ class MaskImageExportService:
         if width <= 0 or height <= 0:
             return None
         pixels = project_mask_snapshot(
-            asset.coverage.snapshot(),
+            asset.snapshot(),
             layer=layer,
             canvas_x=scene.bounds.x,
             canvas_y=scene.bounds.y,
             canvas_width=width,
             canvas_height=height,
         )
-        return numpy_to_qimage_grayscale8(pixels)
+        return MaskExportSnapshot(
+            mask_id=mask_id,
+            composition_id=resolved_composition_id,
+            revision=revision,
+            image=numpy_to_qimage_grayscale8(pixels),
+        )
+
+    def _capture_asset(self, mask_id: uuid.UUID) -> tuple[int, CoverageAsset] | None:
+        """Detach one coherent mask resource revision despite concurrent mutation."""
+        for _attempt in range(3):
+            revision = self._resource_revision(mask_id)
+            asset = self._assets.get_layer(mask_id)
+            if revision is None or asset is None:
+                return None
+            state = asset.coverage.state_snapshot()
+            if self._resource_revision(mask_id) == revision:
+                return revision, CoverageAsset.from_snapshot(mask_id, state)
+        return None
 
     def _resolve_composition_id(
         self,

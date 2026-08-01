@@ -53,6 +53,7 @@ from cutecanvas.editor import (
 )
 from cutecanvas.editor.transform_interaction import EditorTransformInteraction
 from cutecanvas.fill import PaintBucketCoordinator, SelectionFillCoordinator
+from cutecanvas.masks.canvas_aperture import ActiveMaskCanvasAperture
 from cutecanvas.masks.coordinates import ActiveMaskLayerCoordinates
 from cutecanvas.masks.workflow import Masks
 from cutecanvas.painting import PaintingCoordinator
@@ -204,6 +205,13 @@ class CanvasAccessorsMixin:
                 "Active mask coordinates accessed before initialization"
             )
         return coordinates
+
+    def activeMaskCanvasAperture(self) -> ActiveMaskCanvasAperture:
+        """Expose private active-mask canvas-aperture projection."""
+        aperture = self._active_mask_aperture
+        if aperture is None:
+            raise AttributeError("Active mask aperture accessed before initialization")
+        return aperture
 
     def _active_resolved_scene_id(self) -> uuid.UUID | None:
         """Return the active internal scene identifier used for mutation routing."""

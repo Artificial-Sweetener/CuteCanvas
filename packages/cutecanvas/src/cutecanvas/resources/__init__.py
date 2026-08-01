@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Project resource identity, revision, and dependency ownership."""
 
+from .image_export import EmbeddedImageExportService, EmbeddedImageExportSnapshot
 from .model import (
     ProjectResourceKind,
     ProjectResourceRecord,
@@ -27,6 +28,8 @@ from .rasterization import (
 from .store import ProjectResourceStore
 
 __all__ = [
+    "EmbeddedImageExportService",
+    "EmbeddedImageExportSnapshot",
     "LayerRasterizationCompletion",
     "LayerResourceRasterizationRouter",
     "ProjectResourceKind",

@@ -22,16 +22,25 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from cutecanvas.coverage import CoverageDocument, CoverageStateSnapshot
+from cutecanvas.coverage.snapshot_equality import coverage_state_snapshots_equal
 
 from .mask_undo import MaskUndoSnippet
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class MaskCoverageState:
     """Retain sparse raster state and semantic items as one mask revision."""
 
     raster: CoverageStateSnapshot
     retained: CoverageDocument
+
+    def has_same_content(self, other: MaskCoverageState) -> bool:
+        """Return whether another state carries the same live hybrid revision."""
+        return (
+            self.retained.document_id == other.retained.document_id
+            and self.retained.evaluation_token == other.retained.evaluation_token
+            and coverage_state_snapshots_equal(self.raster, other.raster)
+        )
 
 
 @dataclass(slots=True)

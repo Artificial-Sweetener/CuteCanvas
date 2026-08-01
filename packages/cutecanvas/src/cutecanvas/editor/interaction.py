@@ -25,7 +25,6 @@ from qpane.sdk.scene import RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageItem, CoverageSnapshot
 
-from ..resources import ProjectResourceReference
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_edits import LayerPixelMutationCoordinator
@@ -183,30 +182,6 @@ class EditorInteractionCoordinator:
     def delete_selected_pixels(self) -> bool:
         """Route selection-constrained deletion to the selected source owner."""
         return self._pixel_mutations.clear_selected_pixels()
-
-    def mask_stroke_constraint(
-        self,
-        mask_id: uuid.UUID,
-    ) -> CoverageSnapshot | None:
-        """Project active selection into one unbounded mask's local coordinates."""
-        scene = self._active_scene()
-        if scene is None:
-            return None
-        selection = self._pixel_selection.state(scene.scene_id).coverage
-        if selection is None:
-            return None
-        layer = next(
-            (
-                candidate
-                for candidate in scene.layers
-                if isinstance(candidate.source, ProjectResourceReference)
-                and candidate.source.resource_id == mask_id
-            ),
-            None,
-        )
-        if layer is None or layer.transform is None:
-            return None
-        return self._coverage_projector.project_to_layer(selection, layer.transform)
 
     def _active_scene_bounds(self, scene_id: uuid.UUID) -> RasterBounds | None:
         """Return integer canvas bounds when ``scene_id`` is currently active."""

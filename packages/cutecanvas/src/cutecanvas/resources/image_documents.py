@@ -63,6 +63,7 @@ class ImageDocumentWorkflow:
         label: str | None,
         interaction: LayerInteractionPolicy,
         policy: CompositionDocumentPolicy,
+        document_id: uuid.UUID | None = None,
     ) -> ImportedImageDocument:
         """Import detached pixels and create one independent document atomically."""
         if not isinstance(image, QImage):
@@ -87,6 +88,7 @@ class ImageDocumentWorkflow:
                 title=title,
                 layers=(layer,),
                 policy=policy,
+                composition_id=document_id,
             )
         except Exception:
             self._imported_rasters.remove(resource_id)

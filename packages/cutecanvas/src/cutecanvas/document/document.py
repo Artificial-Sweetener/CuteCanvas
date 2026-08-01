@@ -31,7 +31,6 @@ from ..editor.floating_history import FloatingPixelHistory
 from ..editor.floating_layers import FloatingLayerPromotionRegistry
 from ..masks.floating_layers import MaskFloatingLayerOwner
 from ..masks.mask import MaskAssetStore
-from ..masks.mask_undo import MaskHistoryChange
 from ..raster.floating_layers import EditableRasterFloatingLayerOwner
 from ..resources.document_core import DocumentResourceCore
 from ..resources.model import ProjectResourceReference
@@ -77,11 +76,13 @@ class CanvasDocument:
             lifecycle=self._resources.lifecycle,
             changed=self._events.resource_changed,
         )
-        self._masks = MaskAssetStore(self._resources.resources)
-        self._mask_history_unsubscribe = self._masks.bind_composition_edits(
+        self._masks = MaskAssetStore(
+            self._resources.resources,
+            changed=self._events.resource_changed,
+        )
+        self._masks.bind_composition_edits(
             self._resources.compositions.edit_controller,
             self._composition_scope_for_mask,
-            self._publish_mask_history_change,
         )
         pixel_history = ResourcePixelHistoryOwner(
             resources=self._resources.resources,
@@ -188,6 +189,7 @@ class CanvasDocument:
         label: str | None = None,
         interaction: LayerPolicy | None = None,
         policy: CompositionPolicy | None = None,
+        composition_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Import detached pixels and return one seeded composition identity."""
         result = self._resources.image_documents.create(
@@ -203,6 +205,7 @@ class CanvasDocument:
                 )
             ),
             policy=internal_document_policy(policy or CompositionPolicy()),
+            document_id=composition_id,
         )
         self._events.layers_changed(result.document_id)
         return result.document_id
@@ -339,7 +342,6 @@ class CanvasDocument:
             return
         self._closed = True
         self._content_revision_unsubscribe()
-        self._mask_history_unsubscribe()
         self._events.clear()
 
     def _composition_scope_for_mask(
@@ -355,10 +357,6 @@ class CanvasDocument:
             ):
                 return composition_id
         return None
-
-    def _publish_mask_history_change(self, change: MaskHistoryChange) -> None:
-        """Publish replayed mask content without binding history to a view."""
-        self._events.resource_changed(change.mask_id)
 
     def _advance_content_revision(self, change: DocumentChange) -> None:
         """Advance only compositions whose projected pixels may have changed."""
