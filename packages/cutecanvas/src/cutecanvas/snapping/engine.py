@@ -210,6 +210,7 @@ def _perpendicular_span(
 def _relationship_rank(
     moving: SnapFeatureKind,
     target: SnapFeatureKind,
+    accepts_cross_feature: bool,
 ) -> int | None:
     """Rank meaningful feature relationships and reject cross-feature snaps."""
     if target in (SnapFeatureKind.GUIDE, SnapFeatureKind.GRID):
@@ -222,5 +223,5 @@ def _relationship_rank(
     ):
         return 1
     if SnapFeatureKind.CENTER in (moving, target):
-        return 2
+        return 2 if accepts_cross_feature else None
     return None

@@ -89,8 +89,10 @@ from ..resources.source_capabilities import ProjectResourceSourceCapabilities
 from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
 from ..scene.layer_geometry import LayerGeometryPolicy, LayerGeometryResolver
+from ..scene.layer_move import SceneLayerMoveController
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.movement_interaction import SceneLayerMovementInteraction
+from ..scene.movement_mutations import LayerMovementMutationOwner
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_edits import LayerPixelMutationCoordinator
 from ..scene.pixel_owners import LayerPixelOwnerRegistry
@@ -115,6 +117,7 @@ from ..vector.install import VectorDomainComponents, VectorDomainInstaller
 from ..vector.tools import install_vector_tools
 from .floating_layers import FloatingLayerPromotionRegistry
 from .interaction import EditorInteractionCoordinator
+from .move_configuration import MoveToolConfiguration
 from .movement import EditorMovementInteraction
 from .operation_resolution import (
     EditorOperationResolver,
@@ -182,6 +185,7 @@ class EditorRootInputs:
     selection_projections: LayerSelectionProjectionCache
     floating_promotions: FloatingLayerPromotionRegistry
     editor_policy: EditorPolicyController
+    move_configuration: MoveToolConfiguration
     callbacks: EditorRootCallbacks
 
 
@@ -221,7 +225,8 @@ class EditorRootComponents:
     scene_rasterizer: SceneRegionRasterizer
     view: View
     scene_mutations: SceneMutationCoordinator
-    scene_movement: SceneLayerTransformController
+    scene_movement: SceneLayerMoveController
+    scene_transform: SceneLayerTransformController
     scene_movement_interaction: SceneLayerMovementInteraction
     scene_transform_interaction: EditorTransformInteraction
     raster_mutations: RasterLayerMutationCoordinator
@@ -367,21 +372,35 @@ class EditorCompositionRoot:
                 else LayerGeometryPolicy()
             ),
         )
-        scene_movement = SceneLayerTransformController(
+        scene_transform = SceneLayerTransformController(
             inputs.layer_selection,
             inputs.transform_preview,
             scene_mutations,
             layer_geometry,
         )
+        movement_mutations = LayerMovementMutationOwner(
+            scene_provider=view.current_scene_descriptor,
+            composition_id=callbacks.current_composition_id,
+            layers=compositions.layers,
+            edits=compositions.edit_controller,
+        )
+        scene_movement = SceneLayerMoveController(
+            selection=inputs.layer_selection,
+            preview=inputs.transform_preview,
+            mutations=movement_mutations,
+            geometry=layer_geometry,
+            scene_provider=view.current_scene_descriptor,
+        )
         scene_movement_interaction = SceneLayerMovementInteraction(
             movement=scene_movement,
+            selection=inputs.layer_selection,
             hit_test=view.scene_selection_hit_test,
             panel_to_scene=view.panel_to_scene_point,
             publish_change=callbacks.transform_changed,
             refresh_preview=callbacks.transform_preview_changed,
         )
         layer_transform_interaction = SceneLayerTransformInteraction(
-            transforms=scene_movement,
+            transforms=scene_transform,
             panel_to_scene=view.panel_to_scene_point,
             scene_to_panel=view.scene_to_panel_point,
             publish_change=callbacks.transform_changed,
@@ -541,6 +560,7 @@ class EditorCompositionRoot:
             panel_to_scene=view.panel_to_scene_point,
             refresh_preview=callbacks.pixel_move_preview_changed,
             snapping=snapping.movement,
+            configuration=inputs.move_configuration,
         )
         floating_pixels = FloatingPixelRenderCompiler(
             editor_source_capabilities.pixel_presentation
@@ -652,6 +672,7 @@ class EditorCompositionRoot:
             view=view,
             scene_mutations=scene_mutations,
             scene_movement=scene_movement,
+            scene_transform=scene_transform,
             scene_movement_interaction=scene_movement_interaction,
             scene_transform_interaction=scene_transform_interaction,
             raster_mutations=raster_mutations,

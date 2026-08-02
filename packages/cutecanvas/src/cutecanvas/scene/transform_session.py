@@ -48,6 +48,7 @@ class LayerTransformBoxState:
     bounds: TransformLocalBounds
     transform: LayerTransform
     unresolved: bool
+    excluded_layer_ids: tuple[uuid.UUID, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,14 +107,11 @@ class SceneLayerTransformController:
         bounds = self._bounds_for_layer(_scene, layer)
         if bounds is None or layer.transform is None:
             return None
-        preview = self._preview.current
-        transform = (
-            preview.transform
-            if preview is not None
-            and preview.scene_id == layer.scene_id
-            and preview.layer_id == layer.layer_id
-            else layer.transform
+        preview_transform = self._preview.transform_for(
+            layer.scene_id,
+            layer.layer_id,
         )
+        transform = preview_transform or layer.transform
         return LayerTransformBoxState(
             layer.scene_id,
             layer.layer_id,
@@ -196,8 +194,11 @@ class SceneLayerTransformController:
         session = self._session
         if session is None:
             return None
-        preview = self._preview.current
-        transform = session.initial_transform if preview is None else preview.transform
+        preview_transform = self._preview.transform_for(
+            session.scene_id,
+            session.layer_id,
+        )
+        transform = preview_transform or session.initial_transform
         self._session = None
         self._gesture = None
         self._preview.clear()
@@ -272,14 +273,15 @@ class SceneLayerTransformController:
         bounds = self._bounds_for_layer(scene, layer)
         if bounds is None:
             return False
-        preview = self._preview.current
+        preview_transform = self._preview.transform_for(
+            layer.scene_id,
+            layer.layer_id,
+        )
         continuing = bool(
             self._session is not None
             and self._session.scene_id == layer.scene_id
             and self._session.layer_id == layer.layer_id
-            and preview is not None
-            and preview.scene_id == layer.scene_id
-            and preview.layer_id == layer.layer_id
+            and preview_transform is not None
         )
         if not continuing:
             self.cancel()
@@ -290,7 +292,9 @@ class SceneLayerTransformController:
                 layer.transform,
             )
         base = (
-            preview.transform if continuing and preview is not None else layer.transform
+            preview_transform
+            if continuing and preview_transform is not None
+            else layer.transform
         )
         self._gesture = LayerTransformGesture(
             QPointF(scene_point),

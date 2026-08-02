@@ -69,6 +69,7 @@ class MovementSnapCoordinator:
         targets = self._candidates.capture(
             excluded_layer_id=box.layer_id,
             excluded_bounds=source_bounds,
+            excluded_layer_ids=box.excluded_layer_ids,
         )
         if targets is None or targets.scene_id != box.scene_id:
             self.clear()

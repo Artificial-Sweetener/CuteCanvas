@@ -72,6 +72,7 @@ from .editor import (
     LayerSelectionProjectionCache,
     SelectedPixelMovementController,
 )
+from .editor.move_configuration import MoveToolConfiguration
 from .editor.transform_interaction import EditorTransformInteraction
 from .fill import PaintBucketCoordinator, SelectionFillCoordinator
 from .masks.canvas_aperture import ActiveMaskCanvasAperture
@@ -110,6 +111,7 @@ from .runtime.document_runtime import CanvasDocumentRuntime
 from .runtime.execution_binding import CanvasExecutionBinding
 from .scene.layer_assembly import CompositionLayerSceneAssembler
 from .scene.layer_geometry import LayerGeometryResolver
+from .scene.layer_move import SceneLayerMoveController
 from .scene.layer_selection import SceneLayerSelectionController
 from .scene.movement_interaction import SceneLayerMovementInteraction
 from .scene.mutations import SceneMutationCoordinator
@@ -157,6 +159,7 @@ from .facade.image_export_api import EmbeddedImageExportApiMixin
 from .facade.interaction_api import InteractionApiMixin
 from .facade.layer_api import LayerApiMixin
 from .facade.mask_api import MaskApiMixin
+from .facade.move_api import MoveApiMixin
 from .facade.placed_api import PlacedAssetApiMixin
 from .facade.projection_api import ProjectionApiMixin
 from .facade.raster_api import RasterApiMixin
@@ -180,6 +183,7 @@ class CuteCanvas(
     OutboundDragApiMixin,
     ContentContextApiMixin,
     EditorPolicyApiMixin,
+    MoveApiMixin,
     CompositionApiMixin,
     EmbeddedImageExportApiMixin,
     MaskApiMixin,
@@ -265,6 +269,10 @@ class CuteCanvas(
     """Emit unresolved floating-pixel state or ``None`` after it changes."""
     selectedLayerChanged: Signal = Signal(object)
     """Emit selected scene-layer identity or ``None`` after it changes."""
+    selectedLayersChanged: Signal = Signal(object)
+    """Emit all selected scene-layer identities after selection changes."""
+    moveToolOptionsChanged: Signal = Signal(object)
+    """Emit immutable Move-tool options after configuration changes."""
     editorPolicyChanged: Signal = Signal(object)
     """Emit the immutable editor capability policy after replacement."""
     controlModeChanged: Signal = Signal(str)
@@ -408,6 +416,9 @@ class CuteCanvas(
         self._selection_layer_projections = LayerSelectionProjectionCache()
         self._floating_layer_promotions = FloatingLayerPromotionRegistry()
         self._editor_policy = EditorPolicyController(self.editorPolicyChanged.emit)
+        self._move_tool_configuration = MoveToolConfiguration(
+            self.moveToolOptionsChanged.emit
+        )
         self._raster_floating_layer_owner: EditableRasterFloatingLayerOwner | None = (
             None
         )
@@ -427,7 +438,8 @@ class CuteCanvas(
         self._scene_transform_preview = SceneLayerTransformPreview(
             resolve_transform_preview_clip
         )
-        self._scene_movement: SceneLayerTransformController | None = None
+        self._scene_movement: SceneLayerMoveController | None = None
+        self._scene_transform: SceneLayerTransformController | None = None
         self._scene_movement_interaction: SceneLayerMovementInteraction | None = None
         self._scene_transform_interaction: EditorTransformInteraction | None = None
         self._active_mask_coordinates: ActiveMaskLayerCoordinates | None = None

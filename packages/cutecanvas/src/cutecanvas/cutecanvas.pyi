@@ -15,7 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -515,6 +515,9 @@ class LayerSelectionSnapshot:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
 
+class MoveToolOptions:
+    auto_select_layers: bool = ...
+
 class PlacedAssetSnapshot:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
@@ -675,6 +678,8 @@ class CuteCanvas(QWidget):
     vectorRequestCompleted: Signal
     floatingPixelEditChanged: Signal
     selectedLayerChanged: Signal
+    selectedLayersChanged: Signal
+    moveToolOptionsChanged: Signal
     editorPolicyChanged: Signal
     controlModeChanged: Signal
     rasterBoundsRequestCompleted: Signal
@@ -779,6 +784,8 @@ class CuteCanvas(QWidget):
     def setEditorPolicy(self, policy: EditorPolicy) -> bool: ...
     def interactionMode(self) -> CanvasInteractionMode: ...
     def setInteractionMode(self, mode: CanvasInteractionMode) -> bool: ...
+    def moveToolOptions(self) -> MoveToolOptions: ...
+    def setMoveToolOptions(self, options: MoveToolOptions) -> bool: ...
     def setPanZoomLocked(self, locked: bool) -> None: ...
     def setOutboundMimeProvider(
         self,
@@ -894,10 +901,18 @@ class CuteCanvas(QWidget):
         vertically: bool = ...,
     ) -> bool: ...
     def selectedLayer(self) -> LayerSelectionSnapshot | None: ...
+    def selectedLayers(self) -> tuple[LayerSelectionSnapshot, ...]: ...
     def setSelectedLayer(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
+    ) -> bool: ...
+    def setSelectedLayers(
+        self,
+        scene_id: uuid.UUID,
+        layer_ids: Sequence[uuid.UUID],
+        *,
+        active_layer_id: uuid.UUID | None = ...,
     ) -> bool: ...
     def clearSelectedLayer(self) -> bool: ...
     def duplicateLayer(

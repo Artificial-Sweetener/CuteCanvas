@@ -77,7 +77,10 @@ def test_move_tool_routes_normalized_sequence_through_generic_operations(
     tool = MoveTool()
     tool.activate(
         MoveInteractionPort(
-            begin_move=lambda point, _copy: calls.append(("begin", point)) or True,
+            begin_move=lambda point, _copy, _extend, _toggle: calls.append(
+                ("begin", point)
+            )
+            or True,
             update_move=lambda point, _suppress: calls.append(("update", point))
             or True,
             finish_move=lambda point, _suppress: calls.append(("finish", point))
@@ -108,7 +111,8 @@ def test_move_tool_forwards_alt_as_copy_intent() -> None:
     tool = MoveTool()
     tool.activate(
         MoveInteractionPort(
-            begin_move=lambda _point, copy: copy_intents.append(copy) or True,
+            begin_move=lambda _point, copy, _extend, _toggle: copy_intents.append(copy)
+            or True,
         )
     )
 
@@ -130,7 +134,7 @@ def test_move_tool_suspends_pointer_sequence_without_cancelling_floating_edit() 
     tool = MoveTool()
     tool.activate(
         MoveInteractionPort(
-            begin_move=lambda _point, _copy: True,
+            begin_move=lambda _point, _copy, _extend, _toggle: True,
             cancel_move=lambda: cancelled.append(True) or True,
             suspend_move=lambda: suspended.append(True) or True,
         )
@@ -149,7 +153,8 @@ def test_move_tool_routes_mouse_drag_through_same_operations() -> None:
     tool = MoveTool()
     tool.activate(
         MoveInteractionPort(
-            begin_move=lambda _point, _copy: calls.append("begin") or True,
+            begin_move=lambda _point, _copy, _extend, _toggle: calls.append("begin")
+            or True,
             update_move=lambda _point, _suppress: calls.append("update") or True,
             finish_move=lambda _point, _suppress: calls.append("finish") or True,
         )
@@ -188,7 +193,7 @@ def test_move_tool_uses_four_direction_cursor_during_drag() -> None:
     tool = MoveTool()
     tool.activate(
         MoveInteractionPort(
-            begin_move=lambda _point, _copy: True,
+            begin_move=lambda _point, _copy, _extend, _toggle: True,
             move_target_available=lambda: True,
         )
     )
@@ -230,7 +235,7 @@ def test_move_tool_constrains_shift_drag_to_nearest_45_degree_axis() -> None:
     tool = MoveTool()
     tool.activate(
         MoveInteractionPort(
-            begin_move=lambda _point, _copy: True,
+            begin_move=lambda _point, _copy, _extend, _toggle: True,
             update_move=lambda point, _suppress: updates.append(point) or True,
         )
     )

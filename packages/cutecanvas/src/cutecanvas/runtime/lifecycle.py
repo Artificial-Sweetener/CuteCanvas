@@ -106,6 +106,7 @@ class CanvasLifecycleMixin:
                 selection_projections=self._selection_layer_projections,
                 floating_promotions=self._floating_layer_promotions,
                 editor_policy=self._editor_policy,
+                move_configuration=self._move_tool_configuration,
                 callbacks=EditorRootCallbacks(
                     composition_history_changed=(
                         self._handle_composition_edit_history_changed
@@ -237,6 +238,7 @@ class CanvasLifecycleMixin:
         self._view = components.view
         self._scene_mutations = components.scene_mutations
         self._scene_movement = components.scene_movement
+        self._scene_transform = components.scene_transform
         self._scene_movement_interaction = components.scene_movement_interaction
         self._scene_transform_interaction = components.scene_transform_interaction
         self._raster_mutations = components.raster_mutations

@@ -69,6 +69,8 @@ class MoveTool(BaseTool):
             self._begin_move(
                 point,
                 bool(event.modifiers() & Qt.KeyboardModifier.AltModifier),
+                bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier),
+                bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier),
             )
         )
         if self._active:
@@ -155,6 +157,8 @@ class MoveTool(BaseTool):
                 self._begin_move(
                     QPointF(sample.position),
                     bool(sample.modifiers & Qt.KeyboardModifier.AltModifier),
+                    bool(sample.modifiers & Qt.KeyboardModifier.ShiftModifier),
+                    bool(sample.modifiers & Qt.KeyboardModifier.ControlModifier),
                 )
             )
             if self._active:
@@ -244,7 +248,9 @@ class MoveTool(BaseTool):
         """Restore inert dependencies and clear sequence ownership."""
         self._active = False
         self._origin = QPointF()
-        self._begin_move: Callable[[QPointF, bool], bool] = lambda _point, _copy: False
+        self._begin_move: Callable[[QPointF, bool, bool, bool], bool] = (
+            lambda _point, _copy, _extend, _toggle_auto: False
+        )
         self._update_move: Callable[[QPointF, bool], bool] = (
             lambda _point, _suppress: False
         )

@@ -24,8 +24,9 @@ from dataclasses import dataclass
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import SceneLayerHitTestResult
 
-from .layer_selection import SceneLayerSelection
-from .transform_session import LayerTransformBoxState, SceneLayerTransformController
+from .layer_move import SceneLayerMoveController
+from .layer_selection import SceneLayerSelection, SceneLayerSelectionController
+from .transform_session import LayerTransformBoxState
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +47,8 @@ class SceneLayerMovementInteraction:
     def __init__(
         self,
         *,
-        movement: SceneLayerTransformController,
+        movement: SceneLayerMoveController,
+        selection: SceneLayerSelectionController,
         hit_test: Callable[[QPointF], SceneLayerHitTestResult | None],
         panel_to_scene: Callable[[QPointF], QPointF | None],
         publish_change: Callable[[], None],
@@ -54,6 +56,7 @@ class SceneLayerMovementInteraction:
     ) -> None:
         """Capture coordinate, movement, and presentation collaborators."""
         self._movement = movement
+        self._selection = selection
         self._hit_test = hit_test
         self._panel_to_scene = panel_to_scene
         self._publish_change = publish_change
@@ -64,6 +67,11 @@ class SceneLayerMovementInteraction:
     def hovered(self) -> SceneLayerSelection | None:
         """Return the move target currently under the pointer."""
         return self._hovered
+
+    @property
+    def selected(self) -> SceneLayerSelection | None:
+        """Return the active member of the layer selection."""
+        return self._selection.current
 
     def transform_box_state(self) -> LayerTransformBoxState | None:
         """Return current content-tight movement geometry for snapping."""
@@ -99,10 +107,29 @@ class SceneLayerMovementInteraction:
         self._refresh_preview()
         return True
 
-    def begin(self, candidate: LayerMoveCandidate) -> bool:
-        """Begin movement for one resolver-approved hit candidate."""
+    def begin(
+        self,
+        candidate: LayerMoveCandidate | None,
+        scene_point: QPointF,
+        *,
+        auto_select: bool,
+        extend_selection: bool,
+    ) -> bool:
+        """Resolve direct selection and begin movement for the selected set."""
         self.clear_hover()
-        return self._movement.begin_move(candidate.hit, candidate.scene_point)
+        if auto_select:
+            if candidate is None:
+                return False
+            hit = candidate.hit
+            selected = self._selection
+            if extend_selection:
+                selected.add(hit.scene_id, hit.layer_id)
+            elif not selected.contains(hit.scene_id, hit.layer_id):
+                selected.select_hit(hit)
+            else:
+                selected.activate(hit.scene_id, hit.layer_id)
+            scene_point = candidate.scene_point
+        return self._movement.begin(scene_point)
 
     def update(self, panel_point: QPointF) -> bool:
         """Update transient placement from panel coordinates."""
@@ -124,7 +151,7 @@ class SceneLayerMovementInteraction:
         scene_point = self._panel_to_scene(panel_point)
         if scene_point is None:
             return self.cancel()
-        result = self._movement.finish_move(scene_point)
+        result = self._movement.finish(scene_point)
         if result is not None and result.changed:
             self._publish_change()
             return True
@@ -133,7 +160,7 @@ class SceneLayerMovementInteraction:
 
     def finish_scene(self, scene_point: QPointF) -> bool:
         """Commit movement from an already normalized or snapped scene point."""
-        result = self._movement.finish_move(scene_point)
+        result = self._movement.finish(scene_point)
         if result is not None and result.changed:
             self._publish_change()
             return True
@@ -152,8 +179,8 @@ class SceneLayerMovementInteraction:
         return self._movement.suspend()
 
     def nudge(self, delta_x: int, delta_y: int) -> bool:
-        """Commit one keyboard movement for the selected movable layer."""
-        result = self._movement.nudge_selected(delta_x, delta_y)
+        """Commit one keyboard movement for selected movable layers."""
+        result = self._movement.nudge(delta_x, delta_y)
         if result is None or not result.changed:
             return False
         self._publish_change()

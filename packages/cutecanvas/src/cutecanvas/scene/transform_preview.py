@@ -44,21 +44,37 @@ class LayerTransformPreview:
 
 
 class SceneLayerTransformPreview:
-    """Own and apply one transient layer transform without source mutation."""
+    """Own and apply one transient transform set without source mutation."""
 
     def __init__(
         self,
         resolve_clip: TransformPreviewClipResolver | None = None,
     ) -> None:
         """Initialize with an optional source-owned presentation-clip policy."""
-        self._preview: LayerTransformPreview | None = None
+        self._previews: tuple[LayerTransformPreview, ...] = ()
         self._revision = 0
         self._resolve_clip = resolve_clip or _preserve_clip
 
     @property
-    def current(self) -> LayerTransformPreview | None:
-        """Return the active transient transform override."""
-        return self._preview
+    def previews(self) -> tuple[LayerTransformPreview, ...]:
+        """Return all active transient transform overrides."""
+        return self._previews
+
+    def transform_for(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> LayerTransform | None:
+        """Return one active transform override by identity."""
+        preview = next(
+            (
+                candidate
+                for candidate in self._previews
+                if candidate.scene_id == scene_id and candidate.layer_id == layer_id
+            ),
+            None,
+        )
+        return None if preview is None else preview.transform
 
     def revision(self) -> int:
         """Return the revision used to invalidate compiled instance geometry."""
@@ -71,38 +87,49 @@ class SceneLayerTransformPreview:
         transform: LayerTransform,
     ) -> bool:
         """Set a transient transform override and report whether it changed."""
-        preview = LayerTransformPreview(scene_id, layer_id, transform)
-        if preview == self._preview:
+        return self.set_many((LayerTransformPreview(scene_id, layer_id, transform),))
+
+    def set_many(self, previews: tuple[LayerTransformPreview, ...]) -> bool:
+        """Set one coherent transient transform set."""
+        identities = {(preview.scene_id, preview.layer_id) for preview in previews}
+        if len(identities) != len(previews):
+            raise ValueError("preview layer identities must be unique")
+        if previews == self._previews:
             return False
-        self._preview = preview
+        self._previews = previews
         self._revision += 1
         return True
 
     def clear(self) -> bool:
         """Clear the transient override and report whether it changed."""
-        if self._preview is None:
+        if not self._previews:
             return False
-        self._preview = None
+        self._previews = ()
         self._revision += 1
         return True
 
     def process_scene(self, scene: SceneDescriptor) -> SceneDescriptor:
         """Return scene with the matching transform and derived placement."""
-        preview = self._preview
-        if preview is None or preview.scene_id != scene.scene_id:
+        transforms = {
+            preview.layer_id: preview.transform
+            for preview in self._previews
+            if preview.scene_id == scene.scene_id
+        }
+        if not transforms:
             return scene
         changed = False
         layers = []
         for layer in scene.layers:
-            if layer.layer_id != preview.layer_id or layer.raster_bounds is None:
+            transform = transforms.get(layer.layer_id)
+            if transform is None or layer.raster_bounds is None:
                 layers.append(layer)
                 continue
-            placement = preview.transform.map_bounds(layer.raster_bounds)
+            placement = transform.map_bounds(layer.raster_bounds)
             layers.append(
                 replace(
                     layer,
                     placement=placement,
-                    transform=preview.transform,
+                    transform=transform,
                     clip=self._resolve_clip(scene, layer, placement),
                 )
             )

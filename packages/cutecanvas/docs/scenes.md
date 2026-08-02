@@ -144,9 +144,12 @@ if layer.select():
     print(layer.state.label)
 ```
 
-`selectedLayerChanged` tells an inspector when to refresh. `selectedLayer()`
-returns the current `LayerSelectionSnapshot`, and `clearSelectedLayer()` clears
-it.
+`selectedLayers()` returns the ordered layer selection with its active member
+last, while `selectedLayer()` returns only that active member. Hosts can replace
+the complete selection with `setSelectedLayers()` or replace it with one member
+through `setSelectedLayer()`. `selectedLayersChanged` updates multi-selection
+UI, `selectedLayerChanged` updates active-layer controls, and
+`clearSelectedLayer()` clears the complete set.
 
 Pointer selection uses visible content. Transparent pixels fall through to a
 covered layer below, which keeps layer targeting aligned with what the user can

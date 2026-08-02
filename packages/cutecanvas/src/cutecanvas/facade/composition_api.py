@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import replace
 
 from PySide6.QtCore import (
@@ -541,6 +542,17 @@ class CompositionApiMixin:
             layer_id=selection.layer_id,
         )
 
+    def selectedLayers(self) -> tuple[LayerSelectionSnapshot, ...]:
+        """Return all selected layers with the active member last."""
+        current_scene = self.currentScene()
+        if current_scene is None:
+            return ()
+        return tuple(
+            LayerSelectionSnapshot(current_scene.scene_id, selection.layer_id)
+            for selection in self.editorInteraction().selected_layers
+            if selection.scene_id == current_scene.scene_id
+        )
+
     def setSelectedLayer(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
         """Select one policy-enabled layer in the active scene."""
         if not isinstance(scene_id, uuid.UUID):
@@ -552,6 +564,29 @@ class CompositionApiMixin:
         return self.editorInteraction().select_layer(
             self._resolve_public_scene_id(scene_id),
             layer_id,
+        )
+
+    def setSelectedLayers(
+        self,
+        scene_id: uuid.UUID,
+        layer_ids: Sequence[uuid.UUID],
+        *,
+        active_layer_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Replace selection with policy-enabled layers in the active scene."""
+        if not isinstance(scene_id, uuid.UUID):
+            raise TypeError("scene_id must be a UUID")
+        normalized = tuple(layer_ids)
+        if not all(isinstance(layer_id, uuid.UUID) for layer_id in normalized):
+            raise TypeError("layer_ids must contain only UUID values")
+        if active_layer_id is not None and not isinstance(active_layer_id, uuid.UUID):
+            raise TypeError("active_layer_id must be a UUID or None")
+        if not self._anchor_floating_pixels_before_edit():
+            return False
+        return self.editorInteraction().select_layers(
+            self._resolve_public_scene_id(scene_id),
+            normalized,
+            active_layer_id=active_layer_id,
         )
 
     def clearSelectedLayer(self) -> bool:

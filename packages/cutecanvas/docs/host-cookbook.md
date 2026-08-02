@@ -215,10 +215,19 @@ open composition as a live nested resource.
 resource. `CuteCanvas.forkLayerResource()` redirects one instance to an
 independent copy before an edit that should not affect its siblings.
 
-`CuteCanvas.setSelectedLayer()` selects one layer and
-`CuteCanvas.clearSelectedLayer()` clears the selection.
-`CuteCanvas.selectedLayer()` reports the current identity, while
-`CuteCanvas.selectedLayerChanged` updates the tree and contextual controls.
+`CuteCanvas.setSelectedLayer()` replaces layer selection with one active layer.
+`CuteCanvas.setSelectedLayers()` replaces it with an ordered set and an optional
+active member. `CuteCanvas.selectedLayers()` reports the complete set,
+`CuteCanvas.selectedLayer()` reports the active member, and their corresponding
+signals update the layer tree and active-layer controls. `clearSelectedLayer()`
+clears the complete set.
+
+`CuteCanvas.selectedLayerChanged` publishes the active member and
+`CuteCanvas.selectedLayersChanged` publishes the complete ordered set.
+`CuteCanvas.clearSelectedLayer()` clears both views of selection.
+`CuteCanvas.moveToolOptions()` returns direct-selection configuration,
+`CuteCanvas.setMoveToolOptions()` replaces it, and
+`CuteCanvas.moveToolOptionsChanged` keeps host controls synchronized.
 
 `CuteCanvas.translateLayer()` moves a layer by an offset,
 `CuteCanvas.centerLayer()` aligns it with the composition, and

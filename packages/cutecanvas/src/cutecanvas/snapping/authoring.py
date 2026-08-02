@@ -294,6 +294,7 @@ class AuthoringSnapCoordinator:
 def _authoring_relationship_rank(
     _moving: SnapFeatureKind,
     _target: SnapFeatureKind,
+    _accepts_cross_feature: bool,
 ) -> int:
     """Allow an authored endpoint to align with every configured target line."""
     return 0

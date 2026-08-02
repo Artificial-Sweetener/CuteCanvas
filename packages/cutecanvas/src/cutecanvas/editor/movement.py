@@ -27,6 +27,7 @@ from cutecanvas.snapping.model import SnapGuide
 
 from ..scene.layer_selection import SceneLayerSelection
 from ..scene.movement_interaction import SceneLayerMovementInteraction
+from .move_configuration import MoveToolConfiguration
 from .operation_resolution import (
     EditorOperation,
     EditorOperationResolver,
@@ -68,6 +69,7 @@ class EditorMovementInteraction:
         panel_to_scene: Callable[[QPointF], QPointF | None],
         refresh_preview: Callable[[], None],
         snapping: MovementSnapPort,
+        configuration: MoveToolConfiguration,
     ) -> None:
         """Bind selected-pixel and layer-placement movement branches."""
         self._pixels = pixels
@@ -76,6 +78,7 @@ class EditorMovementInteraction:
         self._panel_to_scene = panel_to_scene
         self._refresh_preview = refresh_preview
         self._snapping = snapping
+        self._configuration = configuration
         self._active: Literal["pixels", "layer"] | None = None
         self._selection_hover_valid = False
 
@@ -92,7 +95,14 @@ class EditorMovementInteraction:
     @property
     def target_available(self) -> bool:
         """Return whether current hover identifies a valid movement target."""
-        return self._selection_hover_valid or self._layers.hovered is not None
+        return (
+            self._selection_hover_valid
+            or self._layers.hovered is not None
+            or (
+                not self._configuration.options.auto_select_layers
+                and self._layers.selected is not None
+            )
+        )
 
     def update_hover(self, panel_point: QPointF) -> bool:
         """Refresh target feedback without changing durable selection state."""
@@ -107,7 +117,7 @@ class EditorMovementInteraction:
             EditorOperationTarget.SELECTED_PIXELS,
         }
         candidate = None
-        if not pixel_target:
+        if not pixel_target and self._configuration.options.auto_select_layers:
             candidate = self._layers.candidate_at(panel_point)
             resolution = self._operations.resolve(
                 EditorOperation.MOVE,
@@ -137,7 +147,13 @@ class EditorMovementInteraction:
             self._refresh_preview()
         return layer_changed or selection_changed
 
-    def begin(self, panel_point: QPointF, copy: bool = False) -> bool:
+    def begin(
+        self,
+        panel_point: QPointF,
+        copy: bool = False,
+        extend_selection: bool = False,
+        toggle_auto_select: bool = False,
+    ) -> bool:
         """Begin the selection-priority movement branch for one pointer sequence."""
         if self._active is not None:
             return False
@@ -165,21 +181,34 @@ class EditorMovementInteraction:
             self._active = "pixels"
             self._snapping.begin(self._pixels.transform_box_state(), scene_point)
             return True
-        candidate = self._layers.candidate_at(panel_point)
+        auto_select = (
+            self._configuration.options.auto_select_layers != toggle_auto_select
+        )
+        candidate = self._layers.candidate_at(panel_point) if auto_select else None
+        current = self._layers.selected
         resolution = self._operations.resolve(
             EditorOperation.MOVE,
             scene_point=scene_point,
-            candidate_layer_id=(None if candidate is None else candidate.hit.layer_id),
+            candidate_layer_id=(
+                candidate.hit.layer_id
+                if candidate is not None
+                else (None if current is None else current.layer_id)
+            ),
         )
         if (
             not resolution.allowed
             or resolution.target is not EditorOperationTarget.LAYER
-            or candidate is None
-            or not self._layers.begin(candidate)
+            or scene_point is None
+            or not self._layers.begin(
+                candidate,
+                scene_point,
+                auto_select=auto_select,
+                extend_selection=extend_selection,
+            )
         ):
             return False
         self._active = "layer"
-        self._snapping.begin(self._layers.transform_box_state(), candidate.scene_point)
+        self._snapping.begin(self._layers.transform_box_state(), scene_point)
         return True
 
     def update(self, panel_point: QPointF, suppress_snap: bool = False) -> bool:

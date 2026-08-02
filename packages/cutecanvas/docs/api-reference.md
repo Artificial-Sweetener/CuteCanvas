@@ -378,6 +378,8 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 - cutecanvas.LayerSelectionSnapshot — Selected scene-layer identity, kept separate from pixel-selection coverage.
 	- LayerSelectionSnapshot.scene_id — Public identity of the scene containing the selected layer.
 	- LayerSelectionSnapshot.layer_id — Stable identity of the selected layer.
+- cutecanvas.MoveToolOptions — Immutable direct-layer movement configuration.
+	- MoveToolOptions.auto_select_layers — Select topmost visible content at gesture start instead of preserving the existing layer set.
 - cutecanvas.RasterExtentPolicy — Write-boundary policy for raster layer storage.
 	- RasterExtentPolicy.FIXED — Clip edits to the layer's current local bounds.
 	- RasterExtentPolicy.EXPAND_ON_WRITE — Preserve the original grow-on-write contract with sparse backing.
@@ -527,8 +529,12 @@ See also: [Project Resources](project-resources.md).
 - CuteCanvas.setLayerTransform — Set an invertible affine local-to-scene transform when movement policy permits it.
 - CuteCanvas.setLayerIndex — Move one active layer to a bottom-to-top render index as one undoable composition-stack edit.
 - CuteCanvas.selectedLayer — Return selected scene-layer identity independently of pixel coverage.
+- CuteCanvas.selectedLayers — Return the complete ordered layer selection with its active member last.
 - CuteCanvas.setSelectedLayer — Select a policy-enabled layer in the active scene.
+- CuteCanvas.setSelectedLayers — Replace selection with policy-enabled layers and an optional active member.
 - CuteCanvas.clearSelectedLayer — Clear layer identity without clearing pixel selection.
+- CuteCanvas.moveToolOptions — Return immutable direct-layer movement options.
+- CuteCanvas.setMoveToolOptions — Replace direct-layer movement options.
 - CuteCanvas.rasterSurfaceState — Return local bounds, extent policy, and revisions for a supported active raster layer.
 - CuteCanvas.setRasterExtentPolicy — Choose whether writes clip to current local bounds or expand storage.
 - CuteCanvas.requestRasterBounds — Asynchronously pad or crop a supported raster layer to exact integer local bounds while preserving its scene transform.
@@ -718,6 +724,8 @@ See also: [Documents and Layers](scenes.md) and [Interaction Modes](interaction-
 - CuteCanvas.pixelSelectionChanged — `PixelSelectionSnapshot` payload emitted when the active composition selection changes.
 - CuteCanvas.floatingPixelEditChanged — `FloatingPixelSnapshot` or `None` emitted when unresolved fragment state changes.
 - CuteCanvas.selectedLayerChanged — `LayerSelectionSnapshot` or `None` emitted when selected layer identity changes.
+- CuteCanvas.selectedLayersChanged — Ordered `LayerSelectionSnapshot` tuple emitted when layer selection changes.
+- CuteCanvas.moveToolOptionsChanged — `MoveToolOptions` emitted after direct-layer movement configuration changes.
 - CuteCanvas.CONTROL_MODE_SELECT_RECTANGLE — Built-in rectangular pixel-selection tool ID.
 - CuteCanvas.CONTROL_MODE_SELECT_ELLIPSE — Built-in elliptical pixel-selection tool ID.
 - CuteCanvas.CONTROL_MODE_SELECT_LASSO — Built-in freeform pixel-selection tool ID.
@@ -876,6 +884,7 @@ See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and 
 - `CuteCanvas.layerGeometryPolicy` and `CuteCanvas.setLayerGeometryPolicy` query or replace one layer's manipulation geometry. `CuteCanvas.layerLocalBounds` returns the resolved bounds actually used by move, transform, snapping, and editor overlays.
 - `CuteCanvas.setLayerVisible` changes composition-local rendering and hit testing as one undoable edit for every layer source. `LayerHandle.set_visible` provides the focused equivalent.
 - `CuteCanvas.translateLayer` adds an exact scene-coordinate displacement without changing the affine linear transform. `CuteCanvas.centerLayer` aligns either or both layer-center axes to the composition canvas. `LayerHandle.translate` and `LayerHandle.center` expose the same commands without raw identifier pairs. Movability remains host policy for translation and alignment.
+- Move auto-selects the topmost eligible visible content by default. Shift-click adds to the layer set; dragging any selected member and keyboard nudging move all movable members through one preview, one durable publication, and one history edit. `MoveToolOptions.auto_select_layers=False` preserves the existing set, and Ctrl at gesture start temporarily inverts that option.
 - `cutecanvas.SnapPolicy` selects canvas, visible-layer, selection, guide, and grid candidates plus device-pixel acquire/release thresholds. Its default eight-pixel acquire tolerance is evaluated through QPane's physical viewport zoom, independently of display scaling.
 - Movement snapping admits center-to-center, matching-edge, opposing-adjacent-edge, and edge-to-center relationships. Authored guides and grid lines accept the nearest moving feature.
 - Rectangle and ellipse mask tools, rectangle and ellipse pixel-selection tools, vector rectangle and ellipse tools, and explicit vector-path anchors snap both their anchor and active endpoint. An authored endpoint may align to any configured target edge or center. Preview and commit use the same resolved geometry.

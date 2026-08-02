@@ -28,7 +28,7 @@ from cutecanvas import (
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QImage
 from qpane.scene.raster import RasterBounds
-from qpane.scene.render_plan import RasterLayerRenderItem
+from qpane.scene.render_plan import SampledLayerRenderItem
 
 pytest_plugins = ("tests.test_mask_workflows",)
 
@@ -270,7 +270,7 @@ def test_editable_raster_participates_in_normal_render_plan(qpane_with_mask) -> 
         for candidate in plan.render_items
         if candidate.descriptor.layer_id == layer_id
     )
-    assert isinstance(item, RasterLayerRenderItem)
+    assert isinstance(item, SampledLayerRenderItem)
     assert item.descriptor.label == "Rendered paint"
 
 
@@ -337,8 +337,11 @@ def test_shared_editable_raster_instances_edit_together_but_place_independently(
         if item.descriptor.layer_id in {original_id, duplicate_id}
     ]
     assert len(shared_items) == 2
-    assert shared_items[0].asset_key != shared_items[1].asset_key
-    assert shared_items[0].pyramid_asset_key == shared_items[1].pyramid_asset_key
+    assert all(isinstance(item, SampledLayerRenderItem) for item in shared_items)
+    assert shared_items[0].descriptor.source == shared_items[1].descriptor.source
+    assert shared_items[0].descriptor.layer_id != shared_items[1].descriptor.layer_id
+    assert shared_items[0].placement != shared_items[1].placement
+    assert shared_items[0].transform != shared_items[1].transform
     assert qpane.undoSceneEdit()
     restored = qpane.currentScene()
     assert restored is not None

@@ -27,7 +27,7 @@ from cutecanvas.composition.resource_lifetime import (
     ResourceLeaseKind,
 )
 from cutecanvas.resources import ProjectResourceReference
-from cutecanvas.scene.transform_edit import LayerTransformEdit
+from cutecanvas.scene.transform_edit import LayerTransformEdit, LayerTransformTransition
 from qpane.scene.affine import LayerTransform
 
 _TRANSFORM = LayerTransform()
@@ -55,9 +55,13 @@ def _placement_edit(scope_id: uuid.UUID, x: float) -> LayerTransformEdit:
     """Return a representative transform edit in ``scope_id``."""
     return LayerTransformEdit(
         scene_id=scope_id,
-        layer_id=uuid.uuid4(),
-        before=_TRANSFORM,
-        after=LayerTransform(dx=x),
+        transitions=(
+            LayerTransformTransition(
+                layer_id=uuid.uuid4(),
+                before=_TRANSFORM,
+                after=LayerTransform(dx=x),
+            ),
+        ),
     )
 
 

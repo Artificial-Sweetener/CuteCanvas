@@ -30,6 +30,7 @@ from PySide6.QtCore import QEvent, QItemSelectionModel, QPoint, Qt, QTimer, Sign
 from PySide6.QtGui import QCloseEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QMenu,
     QTreeWidget,
     QTreeWidgetItem,
@@ -76,7 +77,7 @@ class CompositionBrowser(QTreeWidget):
         self.setHeaderHidden(True)
         self.setMouseTracking(True)
         self.setUniformRowHeights(True)
-        self.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setExpandsOnDoubleClick(False)
@@ -88,6 +89,7 @@ class CompositionBrowser(QTreeWidget):
         qpane.compositionChanged.connect(self.refresh)
         qpane.compositionSelectionChanged.connect(self._sync_selection)
         qpane.selectedLayerChanged.connect(self._sync_selection)
+        qpane.selectedLayersChanged.connect(self._sync_selection)
         qpane.layerRasterizationCompleted.connect(self._handle_rasterization_completed)
         self._rebuild(qpane.getCompositionSnapshot())
 
@@ -218,9 +220,27 @@ class CompositionBrowser(QTreeWidget):
             source_id = payload[4]
             if source_kind == "coverage":
                 self._qpane.setActiveMaskID(source_id)
-            layer = composition.layer(layer_id)
-            if layer is not None:
-                layer.select()
+            selected_layer_ids = tuple(
+                selected_payload[2]
+                for selected_item in self.selectedItems()
+                if (selected_payload := selected_item.data(0, _BROWSER_ROLE))
+                and selected_payload[0] == "layer"
+                and selected_payload[1] == composition_id
+            )
+            removing = bool(
+                QApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier
+                and not item.isSelected()
+            )
+            if removing and not selected_layer_ids:
+                self._qpane.clearSelectedLayer()
+            elif layer_id not in selected_layer_ids and not removing:
+                selected_layer_ids = (*selected_layer_ids, layer_id)
+            if selected_layer_ids:
+                self._qpane.setSelectedLayers(
+                    composition_id,
+                    selected_layer_ids,
+                    active_layer_id=(selected_layer_ids[-1] if removing else layer_id),
+                )
         self._on_focus_requested(payload[3] if payload[0] == "layer" else "composition")
         self._sync_selection()
 
@@ -232,6 +252,7 @@ class CompositionBrowser(QTreeWidget):
         try:
             composition_id = self._qpane.currentCompositionID()
             selected = self._qpane.selectedLayer()
+            selected_layers = self._qpane.selectedLayers()
             target = None
             if composition_id is not None and selected is not None:
                 target = self._layer_items.get((composition_id, selected.layer_id))
@@ -243,9 +264,14 @@ class CompositionBrowser(QTreeWidget):
                 else (composition_id, selected.layer_id)
             )
             self.clearSelection()
+            for layer_selection in selected_layers:
+                selected_item = self._layer_items.get(
+                    (composition_id, layer_selection.layer_id)
+                )
+                if selected_item is not None:
+                    selected_item.setSelected(True)
             if target is None:
                 return
-            target.setSelected(True)
             parent = target.parent()
             if parent is not None:
                 parent.setExpanded(True)

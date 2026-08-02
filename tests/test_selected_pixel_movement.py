@@ -29,6 +29,7 @@ from cutecanvas.editor.floating_history import (
     LayerPixelTransition,
 )
 from cutecanvas.editor.floating_layers import FloatingLayerPromotionRegistry
+from cutecanvas.editor.move_configuration import MoveToolConfiguration
 from cutecanvas.editor.movement import EditorMovementInteraction
 from cutecanvas.editor.operation_resolution import (
     EditorOperation,
@@ -585,6 +586,7 @@ class _LayerMovementSpy:
     def __init__(self) -> None:
         """Initialize without calls."""
         self.begin_calls = 0
+        self.selected = None
 
     def clear_hover(self) -> bool:
         """Report no hover."""
@@ -601,7 +603,7 @@ class _LayerMovementSpy:
         """Report unchanged hover state."""
         return False
 
-    def begin(self, _candidate) -> bool:
+    def begin(self, _candidate, _scene_point, **_options) -> bool:
         """Record an invalid layer fallback."""
         self.begin_calls += 1
         return True
@@ -671,6 +673,7 @@ def test_active_selection_rejection_never_falls_through_to_layer_movement() -> N
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
         snapping=_MovementSnapSpy(),
+        configuration=MoveToolConfiguration(),
     )
 
     assert not interaction.begin(QPointF(50.0, 50.0))
@@ -687,6 +690,7 @@ def test_no_selection_preserves_whole_layer_movement_branch() -> None:
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
         snapping=_MovementSnapSpy(),
+        configuration=MoveToolConfiguration(),
     )
 
     assert interaction.begin(QPointF(5.0, 5.0))
@@ -703,6 +707,7 @@ def test_selection_without_layer_content_falls_through_to_layer_movement() -> No
         panel_to_scene=lambda point: point,
         refresh_preview=lambda: None,
         snapping=_MovementSnapSpy(),
+        configuration=MoveToolConfiguration(),
     )
 
     assert interaction.begin(QPointF(5.0, 5.0))

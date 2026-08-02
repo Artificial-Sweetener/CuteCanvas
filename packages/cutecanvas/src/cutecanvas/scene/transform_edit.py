@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""History value for one durable scene-layer affine transform edit."""
+"""History values for atomic scene-layer affine transform edits."""
 
 from __future__ import annotations
 
@@ -26,13 +26,28 @@ from ..composition.layers import CompositionLayerStore
 
 
 @dataclass(frozen=True, slots=True)
-class LayerTransformEdit:
-    """Capture one exact applied scene-layer transform transition."""
+class LayerTransformTransition:
+    """Capture one layer's exact transform transition."""
 
-    scene_id: uuid.UUID
     layer_id: uuid.UUID
     before: LayerTransform
     after: LayerTransform
+
+
+@dataclass(frozen=True, slots=True)
+class LayerTransformEdit:
+    """Capture one atomic set of scene-layer transform transitions."""
+
+    scene_id: uuid.UUID
+    transitions: tuple[LayerTransformTransition, ...]
+
+    def __post_init__(self) -> None:
+        """Require a non-empty set of unique layer transitions."""
+        if not self.transitions:
+            raise ValueError("transform edits require at least one transition")
+        layer_ids = {transition.layer_id for transition in self.transitions}
+        if len(layer_ids) != len(self.transitions):
+            raise ValueError("transform edit layer identities must be unique")
 
     @property
     def scope_id(self) -> uuid.UUID:
@@ -42,7 +57,7 @@ class LayerTransformEdit:
     @property
     def retained_bytes(self) -> int:
         """Return the fixed value-storage cost used for history budgeting."""
-        return 96
+        return 32 + 64 * len(self.transitions)
 
 
 class LayerTransformHistoryOwner:
@@ -64,8 +79,13 @@ class LayerTransformHistoryOwner:
         """Apply one validated history value without recording a new command."""
         if not isinstance(command, LayerTransformEdit):
             return False
-        return self._layers.update_transform(
+        return self._layers.update_transforms(
             command.scene_id,
-            command.layer_id,
-            command.after if use_after else command.before,
+            tuple(
+                (
+                    transition.layer_id,
+                    transition.after if use_after else transition.before,
+                )
+                for transition in command.transitions
+            ),
         )

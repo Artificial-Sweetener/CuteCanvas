@@ -51,6 +51,7 @@ __all__ = [
     "LayerSelectionSnapshot",
     "LayerSnapshot",
     "MaskSavedPayload",
+    "MoveToolOptions",
     "NonEditablePaintPolicy",
     "PaintTargetKind",
     "PaintTargetSnapshot",
@@ -285,6 +286,13 @@ class LayerSelectionSnapshot:
 
     scene_id: uuid.UUID
     layer_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class MoveToolOptions:
+    """Public configuration for direct layer movement."""
+
+    auto_select_layers: bool = True
 
 
 @dataclass(frozen=True, slots=True)

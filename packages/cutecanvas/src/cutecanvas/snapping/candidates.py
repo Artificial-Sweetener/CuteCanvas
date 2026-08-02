@@ -63,6 +63,7 @@ class SnapCandidateProvider:
         *,
         excluded_layer_id: uuid.UUID | None = None,
         excluded_bounds: QRectF | None = None,
+        excluded_layer_ids: tuple[uuid.UUID, ...] = (),
     ) -> SnapTargetSnapshot | None:
         """Return one immutable target set under the current policy."""
         scene = self._active_scene()
@@ -78,10 +79,18 @@ class SnapCandidateProvider:
         candidates: list[SnapCandidate] = []
         if policy.canvas:
             candidates.extend(
-                bounds_candidates("composition", composition_bounds, priority=20)
+                bounds_candidates(
+                    "composition",
+                    composition_bounds,
+                    priority=20,
+                    cross_feature_center=True,
+                )
             )
         if policy.layers:
-            candidates.extend(self._layer_candidates(scene, excluded_layer_id))
+            excluded = frozenset(excluded_layer_ids)
+            if excluded_layer_id is not None:
+                excluded = excluded | {excluded_layer_id}
+            candidates.extend(self._layer_candidates(scene, excluded))
         self._append_selection_candidates(
             candidates,
             scene,
@@ -98,14 +107,14 @@ class SnapCandidateProvider:
     def _layer_candidates(
         self,
         scene: SceneDescriptor,
-        excluded_layer_id: uuid.UUID | None,
+        excluded_layer_ids: frozenset[uuid.UUID],
     ) -> tuple[SnapCandidate, ...]:
         """Return content-tight targets for visible scene layers."""
         candidates: list[SnapCandidate] = []
         for layer in scene.layers:
             if (
                 not layer.visible
-                or layer.layer_id == excluded_layer_id
+                or layer.layer_id in excluded_layer_ids
                 or layer.transform is None
             ):
                 continue

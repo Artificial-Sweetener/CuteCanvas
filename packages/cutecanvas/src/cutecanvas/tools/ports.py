@@ -77,7 +77,9 @@ class AuthoringSnapPort:
 class MoveInteractionPort:
     """Dependencies used by source-neutral layer and pixel movement."""
 
-    begin_move: Callable[[QPointF, bool], bool] = lambda _point, _copy: False
+    begin_move: Callable[[QPointF, bool, bool, bool], bool] = (
+        lambda _point, _copy, _extend, _toggle_auto: False
+    )
     update_move: Callable[[QPointF, bool], bool] = lambda _point, _suppress: False
     finish_move: Callable[[QPointF, bool], bool] = lambda _point, _suppress: False
     suspend_move: Callable[[], bool] = _false

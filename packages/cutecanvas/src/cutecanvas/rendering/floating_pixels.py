@@ -178,8 +178,19 @@ class FloatingPixelRenderCompiler:
             self._resolved_key = key
             self._resolved = resolved
             return resolved
-        product_bounds = item.descriptor.raster_bounds
-        if product_bounds is None:
+        resolved = self._compile_patch_resolved(preview, item)
+        self._resolved_key = key
+        self._resolved = resolved
+        return resolved
+
+    def _compile_patch_resolved(
+        self,
+        preview: RasterPixelMovePreview,
+        item: RasterLayerRenderItem | SampledLayerRenderItem,
+    ) -> TransientRasterResolvedContribution | None:
+        """Present one settled patch independently of durable source bounds."""
+        transition = preview.settled_transition
+        if transition is None:
             return None
         scale_x, scale_y = _item_sample_scale(item)
         replacement_size = QSize(
@@ -202,19 +213,26 @@ class FloatingPixelRenderCompiler:
             source_image=replacement,
             source_bounds=transition.patch_bounds,
         )
-        self._resolved_key = key
-        self._resolved = resolved
         return resolved
 
     def _compile_sampled_resolved(
         self,
         preview: RasterPixelMovePreview,
         item: SampledLayerRenderItem,
-    ) -> TransientSampledResolvedContribution | None:
+    ) -> (
+        TransientRasterResolvedContribution
+        | TransientSampledResolvedContribution
+        | None
+    ):
         """Patch a settled edit into the sampled source's exact tile products."""
         transition = preview.settled_transition
         if transition is None:
             return None
+        sampled_bounds = item.descriptor.raster_bounds
+        if sampled_bounds is None or not sampled_bounds.contains(
+            transition.patch_bounds
+        ):
+            return self._compile_patch_resolved(preview, item)
         scale_x, scale_y = _item_sample_scale(item)
         sample_geometry = tuple(
             _sample_geometry(tile, scale_x, scale_y) for tile in item.tiles

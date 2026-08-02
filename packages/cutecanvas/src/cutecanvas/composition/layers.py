@@ -414,6 +414,44 @@ class CompositionLayerStore:
             lambda current: replace(current, transform=transform),
         )
 
+    def update_transforms(
+        self,
+        composition_id: uuid.UUID,
+        transforms: tuple[tuple[uuid.UUID, LayerTransform], ...],
+    ) -> bool:
+        """Replace multiple instance transforms as one validated publication."""
+        layers = self._layers_by_composition.get(composition_id)
+        if not layers or not transforms:
+            return False
+        requested = dict(transforms)
+        if len(requested) != len(transforms):
+            raise ValueError("layer transform identities must be unique")
+        known_ids = {layer.layer_id for layer in layers}
+        if not requested.keys() <= known_ids:
+            return False
+        candidate = [
+            (
+                replace(layer, transform=requested[layer.layer_id])
+                if layer.layer_id in requested
+                else layer
+            )
+            for layer in layers
+        ]
+        changed_ids = tuple(
+            current.layer_id
+            for current, replacement in zip(layers, candidate, strict=True)
+            if current != replacement
+        )
+        if not changed_ids:
+            return False
+        self._validate(composition_id, tuple(candidate))
+        layers[:] = candidate
+        for layer_id in changed_ids:
+            self._advance_instance_revision(composition_id, layer_id)
+        self._revision += 1
+        self._publish_changed(composition_id)
+        return True
+
     def update_label(
         self,
         composition_id: uuid.UUID,

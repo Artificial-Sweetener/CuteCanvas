@@ -33,7 +33,7 @@ from qpane.sdk.scene import (
 )
 
 from ..composition.edit_controller import CompositionEditController
-from .transform_edit import LayerTransformEdit
+from .transform_edit import LayerTransformEdit, LayerTransformTransition
 
 
 class SceneMutationStatus(str, Enum):
@@ -354,9 +354,11 @@ class SceneMutationCoordinator:
             self._edit_controller.record_applied(
                 LayerTransformEdit(
                     scene_id=scene.scene_id,
-                    layer_id=layer.layer_id,
-                    before=layer.transform,
-                    after=after,
+                    transitions=(
+                        LayerTransformTransition(
+                            layer.layer_id, layer.transform, after
+                        ),
+                    ),
                 )
             )
         return result
@@ -403,9 +405,13 @@ class SceneMutationCoordinator:
             self._edit_controller.record_applied(
                 LayerTransformEdit(
                     scene_id=scene.scene_id,
-                    layer_id=layer.layer_id,
-                    before=layer.transform,
-                    after=transform,
+                    transitions=(
+                        LayerTransformTransition(
+                            layer.layer_id,
+                            layer.transform,
+                            transform,
+                        ),
+                    ),
                 )
             )
         return result

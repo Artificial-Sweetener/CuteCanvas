@@ -29,6 +29,7 @@ from examples.demonstration.coverage_controls import CoverageControls
 from examples.demonstration.editor_controls import EditorControls
 from examples.demonstration.editor_policy_controls import EditorPolicyControls
 from examples.demonstration.extension_tutorial import CUSTOM_TOOL_MODE, LENS_TOOL_MODE
+from examples.demonstration.move_controls import MoveControls
 from examples.demonstration.vector_controls import VectorControls
 
 
@@ -78,9 +79,18 @@ class ToolModeTutorialController:
         self.coverage_controls: CoverageControls | None = None
         self.brush_controls: BrushControls | None = None
         self.clone_stamp_controls: CloneStampControls | None = None
+        self.move_controls: MoveControls | None = None
 
     def build_context_toolbars(self) -> None:
         """Create the persistent editing context toolbars once."""
+        if self.move_controls is None:
+            move_toolbar = QToolBar("Move Controls", self._parent)
+            self._parent.addToolBar(move_toolbar)
+            self.move_controls = MoveControls(
+                self._canvas,
+                move_toolbar,
+                parent=self._parent,
+            )
         if self.coverage_controls is None:
             coverage_toolbar = QToolBar("Coverage Controls", self._parent)
             self._parent.addToolBar(coverage_toolbar)
@@ -266,6 +276,8 @@ class ToolModeTutorialController:
         if lens_action is not None:
             lens_action.setChecked(mode == LENS_TOOL_MODE)
         self.editor_controls.sync_mode(mode)
+        if self.move_controls is not None:
+            self.move_controls.sync_mode(mode)
         if self.coverage_controls is not None:
             self.coverage_controls.sync_mode(mode)
         if self.brush_controls is not None:

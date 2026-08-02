@@ -28,7 +28,11 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 
 from tests.harness.mounted_qpane import MountedQPaneHarness
-from tests.harness.timing import interaction_clock, tail_interaction_latency_ms
+from tests.harness.timing import (
+    average_interaction_latency_ms,
+    interaction_clock,
+    tail_interaction_latency_ms,
+)
 
 
 def test_moving_top_edge_acquires_document_center_while_left_edge_stays_snapped() -> (
@@ -38,7 +42,11 @@ def test_moving_top_edge_acquires_document_center_while_left_edge_stays_snapped(
     session = SnapSession(
         "rectangle",
         QRectF(0.0, 600.0, 200.0, 100.0),
-        bounds_candidates("document", QRectF(0.0, 0.0, 1000.0, 800.0)),
+        bounds_candidates(
+            "document",
+            QRectF(0.0, 0.0, 1000.0, 800.0),
+            cross_feature_center=True,
+        ),
     )
 
     result = session.resolve(
@@ -62,11 +70,15 @@ def test_cross_feature_snapping_stays_bounded_under_dense_reversals() -> None:
             QRectF(index * 20.0, index * 13.0, 10.0, 8.0),
         )
     )
-    construction_ms: list[float] = []
-    for _ in range(100):
-        started = interaction_clock()
-        session = SnapSession("source", QRectF(1.0, 2.0, 10.0, 8.0), candidates)
-        construction_ms.append((interaction_clock() - started) * 1000.0)
+    construction_ms = average_interaction_latency_ms(
+        lambda: SnapSession(
+            "source",
+            QRectF(1.0, 2.0, 10.0, 8.0),
+            candidates,
+        ),
+        repetitions=100,
+    )
+    session = SnapSession("source", QRectF(1.0, 2.0, 10.0, 8.0), candidates)
 
     latencies_ms: list[float] = []
     for index in range(2_000):
@@ -75,7 +87,7 @@ def test_cross_feature_snapping_stays_bounded_under_dense_reversals() -> None:
         session.resolve(point, scene_units_per_device_pixel=1.0)
         latencies_ms.append((interaction_clock() - started) * 1000.0)
 
-    assert sum(construction_ms) / len(construction_ms) < 0.5
+    assert construction_ms < 0.5
     assert tail_interaction_latency_ms(latencies_ms) < 0.1
 
 

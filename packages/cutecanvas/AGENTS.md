@@ -40,6 +40,13 @@ Retained pixel-selection and mask shapes delegate canvas clipping and preview
 projection to `CoverageCanvasAperture`. Mask-specific aperture geometry remains
 owned by `ActiveMaskCanvasAperture`; tools never reproduce either concern.
 
+Layer selection is an ordered set owned by `SceneLayerSelectionController`,
+with its active member last. `SceneLayerMoveController` owns translation-only
+layer-set sessions, while `SceneLayerTransformController` owns single-layer
+affine transforms. `SceneLayerTransformPreview` presents either workflow as one
+coherent transient set, and `LayerMovementMutationOwner` commits Move-tool sets
+through one layer-store publication and one history edit.
+
 ## Cross-package performance work
 
 CuteCanvas changes may and should modify QPane when profiling or ownership

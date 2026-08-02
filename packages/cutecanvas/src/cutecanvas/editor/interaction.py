@@ -66,6 +66,11 @@ class EditorInteractionCoordinator:
         """Return stable generic layer selection."""
         return self._layer_selection.current
 
+    @property
+    def selected_layers(self) -> tuple[SceneLayerSelection, ...]:
+        """Return every selected layer with the active member last."""
+        return self._layer_selection.selected
+
     def select_layer(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
         """Select one policy-enabled layer in the active scene."""
         resolved = self._scene_mutations.find_layer(
@@ -74,6 +79,28 @@ class EditorInteractionCoordinator:
         if resolved is None or not resolved[1].interaction.selectable:
             return False
         return self._layer_selection.select(scene_id, layer_id)
+
+    def select_layers(
+        self,
+        scene_id: uuid.UUID,
+        layer_ids: tuple[uuid.UUID, ...],
+        *,
+        active_layer_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Replace selection with policy-enabled layers in one active scene."""
+        scene = self._active_scene()
+        if scene is None or scene.scene_id != scene_id:
+            return False
+        selectable_ids = {
+            layer.layer_id for layer in scene.layers if layer.interaction.selectable
+        }
+        if not layer_ids or not set(layer_ids) <= selectable_ids:
+            return False
+        return self._layer_selection.select_many(
+            scene_id,
+            layer_ids,
+            active_layer_id=active_layer_id,
+        )
 
     def clear_selected_layer(self) -> bool:
         """Clear layer selection without changing pixel selection."""

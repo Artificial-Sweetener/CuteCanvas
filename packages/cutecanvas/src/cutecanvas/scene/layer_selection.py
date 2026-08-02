@@ -34,20 +34,29 @@ class SceneLayerSelection:
 
 
 class SceneLayerSelectionController:
-    """Own persistent generic selection for direct layer interaction."""
+    """Own an ordered scene-layer selection with one active member."""
 
     def __init__(
         self,
-        changed: Callable[[SceneLayerSelection | None], None] | None = None,
+        changed: Callable[[tuple[SceneLayerSelection, ...]], None] | None = None,
     ) -> None:
-        """Initialize without a selected scene layer."""
-        self._selection: SceneLayerSelection | None = None
+        """Initialize without selected scene layers."""
+        self._selections: tuple[SceneLayerSelection, ...] = ()
         self._changed = changed
 
     @property
     def current(self) -> SceneLayerSelection | None:
-        """Return the current stable scene/layer selection."""
-        return self._selection
+        """Return the active selection member, if any."""
+        return self._selections[-1] if self._selections else None
+
+    @property
+    def selected(self) -> tuple[SceneLayerSelection, ...]:
+        """Return selected identities with the active member last."""
+        return self._selections
+
+    def contains(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
+        """Return whether an exact scene/layer identity is selected."""
+        return SceneLayerSelection(scene_id, layer_id) in self._selections
 
     def select_hit(self, hit: SceneLayerHitTestResult) -> bool:
         """Select a selectable hit and report whether identity changed."""
@@ -56,25 +65,74 @@ class SceneLayerSelectionController:
         return self.select(hit.scene_id, hit.layer_id)
 
     def select(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
-        """Select one scene/layer identity and report whether it changed."""
+        """Replace selection with one active scene/layer identity."""
         selection = SceneLayerSelection(scene_id=scene_id, layer_id=layer_id)
-        if selection == self._selection:
+        if self._selections == (selection,):
             return False
-        self._selection = selection
+        self._selections = (selection,)
+        self._publish()
+        return True
+
+    def select_many(
+        self,
+        scene_id: uuid.UUID,
+        layer_ids: tuple[uuid.UUID, ...],
+        *,
+        active_layer_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Replace selection with unique same-scene identities."""
+        unique_ids = tuple(dict.fromkeys(layer_ids))
+        if active_layer_id is not None and active_layer_id not in unique_ids:
+            raise ValueError("active_layer_id must be one of layer_ids")
+        active_id = active_layer_id or (unique_ids[-1] if unique_ids else None)
+        ordered_ids = tuple(
+            layer_id for layer_id in unique_ids if layer_id != active_id
+        ) + (() if active_id is None else (active_id,))
+        selections = tuple(
+            SceneLayerSelection(scene_id, layer_id) for layer_id in ordered_ids
+        )
+        if selections == self._selections:
+            return False
+        self._selections = selections
+        self._publish()
+        return True
+
+    def add(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
+        """Add one identity and make it active without collapsing selection."""
+        selection = SceneLayerSelection(scene_id, layer_id)
+        selections = tuple(
+            candidate
+            for candidate in self._selections
+            if candidate.scene_id == scene_id and candidate != selection
+        ) + (selection,)
+        if selections == self._selections:
+            return False
+        self._selections = selections
+        self._publish()
+        return True
+
+    def activate(self, scene_id: uuid.UUID, layer_id: uuid.UUID) -> bool:
+        """Make one selected identity active without collapsing the set."""
+        selection = SceneLayerSelection(scene_id, layer_id)
+        if selection not in self._selections or self.current == selection:
+            return False
+        self._selections = tuple(
+            candidate for candidate in self._selections if candidate != selection
+        ) + (selection,)
         self._publish()
         return True
 
     def clear(self) -> bool:
         """Clear selection and report whether state changed."""
-        if self._selection is None:
+        if not self._selections:
             return False
-        self._selection = None
+        self._selections = ()
         self._publish()
         return True
 
     def resolve(self, scene: SceneDescriptor | None) -> LayerDescriptor | None:
         """Return the selected descriptor when it belongs to ``scene``."""
-        selection = self._selection
+        selection = self.current
         if scene is None or selection is None or selection.scene_id != scene.scene_id:
             return None
         return next(
@@ -84,18 +142,23 @@ class SceneLayerSelectionController:
 
     def validate(self, scene: SceneDescriptor | None) -> bool:
         """Clear selection when its scene or layer is no longer resolved."""
-        selection = self._selection
-        if selection is None:
+        if not self._selections:
             return False
-        if (
-            scene is not None
-            and scene.scene_id == selection.scene_id
-            and any(layer.layer_id == selection.layer_id for layer in scene.layers)
-        ):
+        if scene is None:
+            return self.clear()
+        layer_ids = {layer.layer_id for layer in scene.layers}
+        selections = tuple(
+            selection
+            for selection in self._selections
+            if selection.scene_id == scene.scene_id and selection.layer_id in layer_ids
+        )
+        if selections == self._selections:
             return False
-        return self.clear()
+        self._selections = selections
+        self._publish()
+        return True
 
     def _publish(self) -> None:
         """Notify the configured observer after identity changes."""
         if self._changed is not None:
-            self._changed(self._selection)
+            self._changed(self._selections)

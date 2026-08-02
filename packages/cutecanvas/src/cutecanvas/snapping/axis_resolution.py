@@ -26,7 +26,10 @@ from operator import attrgetter
 
 from .model import SnapAxis, SnapCandidate, SnapFeatureKind, SnapGrid
 
-SnapRelationshipRank = Callable[[SnapFeatureKind, SnapFeatureKind], int | None]
+SnapRelationshipRank = Callable[
+    [SnapFeatureKind, SnapFeatureKind, bool],
+    int | None,
+]
 _CANDIDATE_POSITION = attrgetter("position")
 
 
@@ -66,18 +69,29 @@ class AxisSnapResolver:
         self._release_pixels = float(release_device_pixels)
         self._grid = grid
         self._relationship_rank = relationship_rank
-        candidates_by_kind: dict[SnapFeatureKind, list[SnapCandidate]] = {
-            kind: [] for kind in SnapFeatureKind
-        }
+        candidates_by_kind: dict[tuple[SnapFeatureKind, bool], list[SnapCandidate]] = {}
         for candidate in candidates:
-            candidates_by_kind[candidate.kind].append(candidate)
+            candidates_by_kind.setdefault(
+                (candidate.kind, candidate.accepts_cross_feature),
+                [],
+            ).append(candidate)
         for target_candidates in candidates_by_kind.values():
             target_candidates.sort(key=_CANDIDATE_POSITION)
         self._matches_by_moving_kind = {
             moving_kind: tuple(
                 (target_candidates, rank)
-                for target_kind, target_candidates in candidates_by_kind.items()
-                if (rank := relationship_rank(moving_kind, target_kind)) is not None
+                for (
+                    target_kind,
+                    accepts_cross_feature,
+                ), target_candidates in candidates_by_kind.items()
+                if (
+                    rank := relationship_rank(
+                        moving_kind,
+                        target_kind,
+                        accepts_cross_feature,
+                    )
+                )
+                is not None
                 and target_candidates
             )
             for moving_kind in moving_kinds
@@ -143,7 +157,11 @@ class AxisSnapResolver:
                             )
                         )
             for candidate in grid_candidates:
-                rank = self._relationship_rank(moving_kind, candidate.kind)
+                rank = self._relationship_rank(
+                    moving_kind,
+                    candidate.kind,
+                    candidate.accepts_cross_feature,
+                )
                 if rank is None:
                     continue
                 correction = candidate.position - moving_position

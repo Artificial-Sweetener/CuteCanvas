@@ -173,7 +173,12 @@ def test_moved_mask_uses_layer_transform_for_edit_coordinates(
     movement = qpane.sceneLayerMovementInteraction()
     candidate = movement.candidate_at(panel_point)
     assert candidate is not None
-    assert movement.begin(candidate)
+    assert movement.begin(
+        candidate,
+        candidate.scene_point,
+        auto_select=True,
+        extend_selection=False,
+    )
     assert movement.update(target_panel_point)
     preview_scene = qpane.view().current_scene_descriptor()
     assert preview_scene is not None

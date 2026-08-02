@@ -151,7 +151,11 @@ geometric authoring tools. `LayerHandle` is stable application-facing identity,
 and `LayerEffectHandle` is stable identity for one temporary visual treatment.
 
 A `LayerSelectionSnapshot.scene_id` identifies the open scene and
-`LayerSelectionSnapshot.layer_id` identifies its selected layer.
+`LayerSelectionSnapshot.layer_id` identifies one selected layer. The tuple from
+`selectedLayers()` is ordered with its active member last.
+
+`MoveToolOptions.auto_select_layers` controls whether a Move gesture selects
+visible content under its initial pointer or preserves the existing layer set.
 
 `LayerSnapshot.layer_id` identifies the instance, while
 `LayerSnapshot.source_kind` and `LayerSnapshot.source_id` describe its backing

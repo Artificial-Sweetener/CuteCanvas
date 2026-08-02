@@ -128,20 +128,29 @@ source, destination, selection, and layer-selection change.
 
 ## Move a Whole Layer
 
-Without a pixel selection, Move chooses a layer. It prefers the selected layer
-when the pointer is over its visible content; otherwise it may select the
-topmost eligible content under the pointer.
+Without a pixel selection, Move auto-selects the topmost eligible layer whose
+visible pixels are under the pointer. If that layer already belongs to the
+current layer selection, dragging moves the complete selected set without
+collapsing it. Shift-click adds a layer, and the most recently selected
+layer becomes the active member reported by `selectedLayer()`.
+
+`MoveToolOptions(auto_select_layers=False)` keeps the existing layer selection
+when a drag begins over another layer or transparent canvas space. Ctrl at the
+start of a gesture temporarily inverts the configured auto-selection behavior.
+The demonstration exposes the same option in its Move controls.
 
 Layer policy must allow selection and movement. Transparent padding does not
 capture the gesture. Hover feedback shows which content will move, and that
 feedback disappears during the drag.
 
-Arrow keys nudge by one local pixel. Shift+Arrow nudges by ten. Holding Shift
-during a pointer drag constrains movement to the nearest 45-degree direction.
+Arrow keys nudge every movable selected layer by one local pixel. Shift+Arrow
+nudges by ten. Holding Shift during a pointer drag constrains movement to the
+nearest 45-degree direction.
 
-The live preview uses the same transform and clipping rules as the committed
-frame, so content does not temporarily escape a fixed clip or leave stale
-strips behind.
+The layer set uses one preview publication and one atomic durable update. One
+undo restores every member. The live preview uses the same transform and
+clipping rules as the committed frame, so content does not temporarily escape
+a fixed clip or leave stale strips behind.
 
 ## Transform a Layer
 

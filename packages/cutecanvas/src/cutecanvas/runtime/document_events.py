@@ -160,6 +160,8 @@ class DocumentEventsMixin:
         resolved_scene = self.sceneMutationCoordinator().active_scene()
         if self._scene_movement is not None:
             self._scene_movement.synchronize_scene(resolved_scene)
+        if self._scene_transform is not None:
+            self._scene_transform.synchronize_scene(resolved_scene)
         self._scene_selection.validate(resolved_scene)
         self._reconcile_selected_paint_target()
         if self._vector_editor is not None:
@@ -433,9 +435,10 @@ class DocumentEventsMixin:
 
     def _handle_selected_layer_changed(
         self,
-        selection: SceneLayerSelection | None,
+        selections: tuple[SceneLayerSelection, ...],
     ) -> None:
-        """Publish selected-layer identity and refresh direct-edit feedback."""
+        """Publish layer selection and refresh active direct-edit feedback."""
+        selection = selections[-1] if selections else None
         painting = self.paintingCoordinator()
         active_target = painting.identity
         if selection is None:
@@ -458,6 +461,7 @@ class DocumentEventsMixin:
             ):
                 painting.clear()
         self.selectedLayerChanged.emit(self.selectedLayer())
+        self.selectedLayersChanged.emit(self.selectedLayers())
         self.update()
 
     def _handle_paint_target_changed(

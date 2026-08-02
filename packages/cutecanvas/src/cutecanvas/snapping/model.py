@@ -51,6 +51,7 @@ class SnapCandidate:
     span_start: float
     span_end: float
     priority: int = 0
+    accepts_cross_feature: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,7 @@ def bounds_candidates(
     bounds: QRectF,
     *,
     priority: int = 0,
+    cross_feature_center: bool = False,
 ) -> tuple[SnapCandidate, ...]:
     """Return side and center candidates for positive scene bounds."""
     rectangle = bounds.normalized()
@@ -127,6 +129,7 @@ def bounds_candidates(
                 rectangle.top(),
                 rectangle.bottom(),
                 priority,
+                cross_feature_center and kind is SnapFeatureKind.CENTER,
             )
             for position, kind in horizontal
         ),
@@ -139,6 +142,7 @@ def bounds_candidates(
                 rectangle.left(),
                 rectangle.right(),
                 priority,
+                cross_feature_center and kind is SnapFeatureKind.CENTER,
             )
             for position, kind in vertical
         ),
