@@ -715,7 +715,7 @@ class SceneItemCompositor:
         plan: SceneRenderPlan,
         item: SceneRenderItem,
     ) -> None:
-        """Apply one layer clip in its declared coordinate space."""
+        """Intersect one layer clip without broadening ambient frame damage."""
         clip = item.clip
         if clip is None:
             return
@@ -736,14 +736,18 @@ class SceneItemCompositor:
                 clip.width * plan.qpane_rect.width(),
                 clip.height * plan.qpane_rect.height(),
             )
-            painter.setClipRect(self._viewport_clip_to_source(item, viewport_clip))
+            painter.setClipRect(
+                self._viewport_clip_to_source(item, viewport_clip),
+                Qt.ClipOperation.IntersectClip,
+            )
             return
         elif clip.coordinate_space == ClipCoordinateSpace.VIEWPORT:
             painter.setClipRect(
                 self._viewport_clip_to_source(
                     item,
                     QRectF(clip.x, clip.y, clip.width, clip.height),
-                )
+                ),
+                Qt.ClipOperation.IntersectClip,
             )
             return
         else:
@@ -754,7 +758,8 @@ class SceneItemCompositor:
                 scene_clip,
                 source_width=source_width,
                 source_height=source_height,
-            )
+            ),
+            Qt.ClipOperation.IntersectClip,
         )
 
     @staticmethod

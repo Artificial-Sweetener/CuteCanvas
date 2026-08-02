@@ -103,7 +103,12 @@ class _MouseSequenceProbe(QObject):
             QEvent.Type.MouseButtonRelease,
         }:
             self.samples.append(
-                (event.type(), event.button(), event.buttons(), event.source())
+                (
+                    event.type(),
+                    event.button(),
+                    event.buttons(),
+                    event.source(),
+                )
             )
         return False
 
@@ -348,6 +353,63 @@ def test_moved_default_mask_expands_only_inside_the_canvas_aperture(
         assert exported.pixelColor(50, 200).red() > 0
         assert exported.pixelColor(150, 200).red() > 0
         assert exported.pixelColor(350, 200).red() == 0
+    finally:
+        harness.close()
+
+
+def test_clipped_mask_partial_repaints_preserve_retained_opacity(
+    qapp: QApplication,
+) -> None:
+    """A layer aperture must not broaden the renderer's outer damage clip."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(800, 600),
+        widget_size=QSize(800, 600),
+        mask_count=1,
+        brush_size=40,
+    )
+    mask_id = harness.mask_ids[0]
+    mask_info = harness.viewer.listMasksForComposition()[0]
+    driver = QtStrokeDriver(harness)
+    retained_point = QPoint(200, 300)
+    retained_stroke = StrokeAction(
+        PointerKind.MOUSE,
+        points=(HarnessPoint(180, 300), HarnessPoint(220, 300)),
+        brush_size=40,
+    )
+    remote_stroke = StrokeAction(
+        PointerKind.MOUSE,
+        points=tuple(HarnessPoint(x, 300) for x in range(600, 681, 10)),
+        brush_size=40,
+    )
+    try:
+        assert mask_info.scene_id is not None
+        assert mask_info.layer_id is not None
+        assert harness.viewer.setLayerPlacement(
+            mask_info.scene_id,
+            mask_info.layer_id,
+            QRectF(1.0, 0.0, 800.0, 600.0),
+        )
+        harness.viewer.setControlMode(harness.viewer.CONTROL_MODE_DRAW_BRUSH)
+
+        driver.begin(retained_stroke)
+        driver.move(retained_stroke, 1)
+        driver.end(retained_stroke)
+        assert harness.wait_for_mask_undo_depth(mask_id, 1)
+        retained_color = harness.color_at(retained_point)
+        assert harness.is_mask_tint(retained_color)
+
+        with harness.observe_presented_frames() as frames:
+            driver.begin(remote_stroke)
+            for point_index in range(1, len(remote_stroke.points)):
+                driver.move(remote_stroke, point_index)
+            driver.end(remote_stroke)
+            assert harness.wait_for_mask_undo_depth(mask_id, 2)
+
+        assert frames.frames
+        assert all(
+            frame.color_at(retained_point) == retained_color for frame in frames.frames
+        )
     finally:
         harness.close()
 
