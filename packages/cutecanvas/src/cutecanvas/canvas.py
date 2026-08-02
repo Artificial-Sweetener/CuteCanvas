@@ -554,8 +554,7 @@ class CuteCanvas(
         self._editor_overlays.draw(
             painter,
             self.view().scene_to_panel_transform(),
-            self.view().current_scene_descriptor(),
-            None if movement is None else movement.hovered,
+            () if movement is None else movement.hovered_scene_corners,
             () if self._snapping is None else self._snapping.guides,
         )
         self._tools_manager.draw_overlay(painter)

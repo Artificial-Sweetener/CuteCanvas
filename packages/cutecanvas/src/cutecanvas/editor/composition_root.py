@@ -394,6 +394,8 @@ class EditorCompositionRoot:
         scene_movement_interaction = SceneLayerMovementInteraction(
             movement=scene_movement,
             selection=inputs.layer_selection,
+            geometry=layer_geometry,
+            scene_provider=view.current_scene_descriptor,
             hit_test=view.scene_selection_hit_test,
             panel_to_scene=view.panel_to_scene_point,
             publish_change=callbacks.transform_changed,

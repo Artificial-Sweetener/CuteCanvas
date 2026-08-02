@@ -34,7 +34,7 @@ from qpane import (
     RenderScene,
     ViewerCatalogEntry,
 )
-from tests.harness.timing import INTERACTIVE_PERFORMANCE, interaction_clock
+from tests.harness.timing import INTERACTIVE_PERFORMANCE, average_interaction_latency_ms
 
 
 def _image(width: int, height: int, color: QColor) -> QImage:
@@ -426,21 +426,27 @@ def test_middle_mouse_summons_and_drags_comparison_divider(qapp) -> None:
 def test_catalog_comparison_abuse_stays_synchronous_and_coherent(qapp) -> None:
     """Rapid selection, split, orientation, and removal never leave stale scenes."""
     pane, entries = _mounted_catalog(qapp)
-    started = interaction_clock()
-    for index in range(240):
-        pane.selectCatalogImage(entries[index % len(entries)].entry_id)
-        pane.compareWithNextImage()
-        pane.setComparisonSplit(
-            (index % 101) / 100.0,
-            (
-                ComparisonOrientation.VERTICAL
-                if index % 2
-                else ComparisonOrientation.HORIZONTAL
-            ),
-        )
-        if index % 7 == 0:
-            pane.clearComparison()
-    elapsed_ms = (interaction_clock() - started) * 1000.0
+
+    def churn_catalog_comparison() -> None:
+        """Apply one complete hostile catalog/comparison interaction sequence."""
+        for index in range(240):
+            pane.selectCatalogImage(entries[index % len(entries)].entry_id)
+            pane.compareWithNextImage()
+            pane.setComparisonSplit(
+                (index % 101) / 100.0,
+                (
+                    ComparisonOrientation.VERTICAL
+                    if index % 2
+                    else ComparisonOrientation.HORIZONTAL
+                ),
+            )
+            if index % 7 == 0:
+                pane.clearComparison()
+
+    elapsed_ms = average_interaction_latency_ms(
+        churn_catalog_comparison,
+        repetitions=4,
+    )
     qapp.processEvents()
 
     current = pane.catalog().current

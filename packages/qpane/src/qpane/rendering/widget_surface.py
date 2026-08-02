@@ -33,7 +33,6 @@ class WidgetRenderSurface:
         self._pixmap = QPixmap()
         self._image = QImage()
         self._staging_pixmap = QPixmap()
-        self._staging_painter: QPainter | None = None
         self._spare_pixmap = QPixmap()
         self._image_current = False
         self._storage_origin = QPoint()
@@ -260,7 +259,6 @@ class WidgetRenderSurface:
         """Claim one preallocated detached surface for atomic replacement."""
         if not self.is_allocated:
             raise RuntimeError("render surface must be allocated before staging")
-        self._end_staging_painter()
         if (
             self._spare_pixmap.size() == self._pixmap.size()
             and self._spare_pixmap.devicePixelRatio() == self._pixmap.devicePixelRatio()
@@ -271,16 +269,18 @@ class WidgetRenderSurface:
             self._staging_pixmap = QPixmap(self._pixmap.size())
             self._staging_pixmap.setDevicePixelRatio(self._pixmap.devicePixelRatio())
             self._staging_pixmap.fill(Qt.GlobalColor.transparent)
-        self._staging_painter = QPainter(self._staging_pixmap)
 
     def paint_staging(self, draw: Callable[[QPainter], None]) -> None:
         """Apply one bounded mutation to the unpublished staging image."""
         if self._staging_pixmap.isNull():
             raise RuntimeError("staging must be prepared before painting")
-        painter = self._staging_painter
-        if painter is None or not painter.isActive():
-            raise RuntimeError("staging painter must remain active while painting")
-        draw(painter)
+        painter = QPainter(self._staging_pixmap)
+        if not painter.isActive():
+            raise RuntimeError("staging painter could not be activated")
+        try:
+            draw(painter)
+        finally:
+            painter.end()
 
     def transfer_staging_patch(self, image: QImage, physical_rect: QRect) -> None:
         """Copy one exact physical image rectangle into native staging storage."""
@@ -293,11 +293,10 @@ class WidgetRenderSurface:
             raise ValueError("transfer image geometry must match native staging")
         if not image.rect().contains(physical_rect):
             raise ValueError("transfer patch must be inside the source image")
-        painter = self._staging_painter
-        if painter is None or not painter.isActive():
-            raise RuntimeError("staging painter must remain active during transfer")
+        painter = QPainter(self._staging_pixmap)
+        if not painter.isActive():
+            raise RuntimeError("staging painter could not be activated")
         device_pixel_ratio = self._staging_pixmap.devicePixelRatio()
-        painter.save()
         try:
             painter.setCompositionMode(QPainter.CompositionMode_Source)
             painter.scale(1.0 / device_pixel_ratio, 1.0 / device_pixel_ratio)
@@ -307,13 +306,12 @@ class WidgetRenderSurface:
                 QRectF(physical_rect),
             )
         finally:
-            painter.restore()
+            painter.end()
 
     def publish_staging(self) -> None:
         """Atomically replace native presentation with the completed staging image."""
         if self._staging_pixmap.isNull():
             raise RuntimeError("staging must be prepared before publication")
-        self._end_staging_painter()
         previous = self._pixmap
         self._pixmap = self._staging_pixmap
         self._staging_pixmap = QPixmap()
@@ -324,17 +322,9 @@ class WidgetRenderSurface:
 
     def discard_staging(self) -> None:
         """Release an incomplete staged frame without touching presentation."""
-        self._end_staging_painter()
         if not self._staging_pixmap.isNull():
             self._spare_pixmap = self._staging_pixmap
         self._staging_pixmap = QPixmap()
-
-    def _end_staging_painter(self) -> None:
-        """End the persistent staging painter before storage ownership changes."""
-        painter = self._staging_painter
-        if painter is not None and painter.isActive():
-            painter.end()
-        self._staging_painter = None
 
     def restore(self, image: QImage) -> None:
         """Replace native storage with a saved image snapshot."""

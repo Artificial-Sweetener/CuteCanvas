@@ -22,8 +22,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import SceneLayerHitTestResult
+from qpane.sdk.scene import SceneDescriptor, SceneLayerHitTestResult
 
+from .layer_geometry import LayerGeometryResolver
 from .layer_move import SceneLayerMoveController
 from .layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from .transform_session import LayerTransformBoxState
@@ -49,6 +50,8 @@ class SceneLayerMovementInteraction:
         *,
         movement: SceneLayerMoveController,
         selection: SceneLayerSelectionController,
+        geometry: LayerGeometryResolver,
+        scene_provider: Callable[[], SceneDescriptor | None],
         hit_test: Callable[[QPointF], SceneLayerHitTestResult | None],
         panel_to_scene: Callable[[QPointF], QPointF | None],
         publish_change: Callable[[], None],
@@ -57,11 +60,16 @@ class SceneLayerMovementInteraction:
         """Capture coordinate, movement, and presentation collaborators."""
         self._movement = movement
         self._selection = selection
+        self._geometry = geometry
+        self._scene_provider = scene_provider
         self._hit_test = hit_test
         self._panel_to_scene = panel_to_scene
         self._publish_change = publish_change
         self._refresh_preview = refresh_preview
         self._hovered: SceneLayerSelection | None = None
+        self._hovered_scene_corners: (
+            tuple[QPointF, QPointF, QPointF, QPointF] | tuple[()]
+        ) = ()
 
     @property
     def hovered(self) -> SceneLayerSelection | None:
@@ -72,6 +80,13 @@ class SceneLayerMovementInteraction:
     def selected(self) -> SceneLayerSelection | None:
         """Return the active member of the layer selection."""
         return self._selection.current
+
+    @property
+    def hovered_scene_corners(
+        self,
+    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | tuple[()]:
+        """Return content-derived scene geometry for the current hover target."""
+        return self._hovered_scene_corners
 
     def transform_box_state(self) -> LayerTransformBoxState | None:
         """Return current content-tight movement geometry for snapping."""
@@ -93,9 +108,11 @@ class SceneLayerMovementInteraction:
                 candidate.hit.scene_id,
                 candidate.hit.layer_id,
             )
-        if hovered == self._hovered:
+        scene_corners = self._scene_corners_for(hovered)
+        if hovered == self._hovered and scene_corners == self._hovered_scene_corners:
             return False
         self._hovered = hovered
+        self._hovered_scene_corners = scene_corners
         self._refresh_preview()
         return True
 
@@ -104,6 +121,7 @@ class SceneLayerMovementInteraction:
         if self._hovered is None:
             return False
         self._hovered = None
+        self._hovered_scene_corners = ()
         self._refresh_preview()
         return True
 
@@ -185,3 +203,21 @@ class SceneLayerMovementInteraction:
             return False
         self._publish_change()
         return True
+
+    def _scene_corners_for(
+        self,
+        hovered: SceneLayerSelection | None,
+    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | tuple[()]:
+        """Resolve one hover target through the authoritative geometry owner."""
+        scene = self._scene_provider()
+        if hovered is None or scene is None or hovered.scene_id != scene.scene_id:
+            return ()
+        layer = next(
+            (
+                candidate
+                for candidate in scene.layers
+                if candidate.layer_id == hovered.layer_id
+            ),
+            None,
+        )
+        return () if layer is None else self._geometry.resolved_scene_corners(layer)

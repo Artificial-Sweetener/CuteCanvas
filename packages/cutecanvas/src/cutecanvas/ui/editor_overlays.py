@@ -21,9 +21,7 @@ from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import QObject, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF, QTransform
-from qpane.sdk.scene import SceneDescriptor
 
-from ..scene.layer_selection import SceneLayerSelection
 from ..selection import PixelSelectionState, SelectionBoundaryBuilder
 from ..snapping import SnapAxis, SnapGuide
 
@@ -165,48 +163,26 @@ class EditorOverlayPresenter:
         self,
         painter: QPainter,
         scene_to_panel: QTransform | None,
-        scene: SceneDescriptor | None,
-        hovered: SceneLayerSelection | None,
+        hovered_scene_corners: Sequence[QPointF],
         snap_guides: Sequence[SnapGuide] = (),
     ) -> None:
         """Draw selection and move-hover feedback in panel coordinates."""
         self._selection.draw(painter, scene_to_panel)
         self._hover.draw(
             painter,
-            self._hovered_layer_panel_corners(scene_to_panel, scene, hovered),
+            self._hovered_layer_panel_corners(
+                scene_to_panel,
+                hovered_scene_corners,
+            ),
         )
         self._guides.draw(painter, scene_to_panel, snap_guides)
 
     @staticmethod
     def _hovered_layer_panel_corners(
         scene_to_panel: QTransform | None,
-        scene: SceneDescriptor | None,
-        hovered: SceneLayerSelection | None,
+        scene_corners: Sequence[QPointF],
     ) -> tuple[QPointF, ...]:
         """Return panel-space perimeter corners for move-tool hover feedback."""
-        if hovered is None or scene is None or scene_to_panel is None:
+        if scene_to_panel is None or len(scene_corners) != 4:
             return ()
-        layer = next(
-            (
-                candidate
-                for candidate in scene.layers
-                if candidate.scene_id == hovered.scene_id
-                and candidate.layer_id == hovered.layer_id
-            ),
-            None,
-        )
-        if layer is None:
-            return ()
-        placement = layer.placement
-        return tuple(
-            scene_to_panel.map(point)
-            for point in (
-                QPointF(placement.x, placement.y),
-                QPointF(placement.x + placement.width, placement.y),
-                QPointF(
-                    placement.x + placement.width,
-                    placement.y + placement.height,
-                ),
-                QPointF(placement.x, placement.y + placement.height),
-            )
-        )
+        return tuple(scene_to_panel.map(point) for point in scene_corners)

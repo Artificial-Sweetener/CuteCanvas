@@ -40,7 +40,7 @@ from qpane.scene.raster import RasterBounds
 from qpane.vector.model import VectorObject
 from qpane.vector.public import VectorObjectKind, VectorShapeKind, VectorStyle
 
-from tests.harness.timing import interaction_clock
+from tests.harness.timing import average_interaction_latency_ms, interaction_clock
 
 
 def _rectangle(x: float, y: float, width: float, height: float) -> VectorObject:
@@ -300,15 +300,19 @@ def test_thousand_sparse_vectors_keep_tiled_content_bounds_bounded() -> None:
     )
     evaluator = CoverageDocumentEvaluator(tile_size=512)
 
-    manipulation_started = interaction_clock()
     manipulation_bounds = evaluator.vector_content_bounds(document)
-    manipulation_elapsed = interaction_clock() - manipulation_started
+    manipulation_elapsed_ms = average_interaction_latency_ms(
+        lambda: CoverageDocumentEvaluator(tile_size=512).vector_content_bounds(
+            document
+        ),
+        repetitions=32,
+    )
 
     started = interaction_clock()
     bounds = evaluator.content_bounds(document)
     elapsed = interaction_clock() - started
 
     assert manipulation_bounds == QRectF(0.0, 0.0, 31976.0, 8.0)
-    assert manipulation_elapsed < 0.032
+    assert manipulation_elapsed_ms < 32.0
     assert bounds == RasterBounds(0, 0, 31976, 8)
     assert elapsed < 4.0

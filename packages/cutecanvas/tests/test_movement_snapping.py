@@ -25,7 +25,7 @@ from cutecanvas import (
     VectorStyle,
 )
 from cutecanvas.editor.movement import EditorMovementInteraction
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QTransform
 
 
@@ -33,6 +33,16 @@ def _opaque_image(width: int = 100, height: int = 100) -> QImage:
     """Return one detached opaque raster with content-tight full bounds."""
     image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(0xFF4FA3D1)
+    return image
+
+
+def _transparent_padded_image() -> QImage:
+    """Return a raster whose meaningful alpha excludes its storage perimeter."""
+    image = QImage(100, 80, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    for y in range(30, 42):
+        for x in range(20, 30):
+            image.setPixelColor(x, y, QColor(40, 120, 220, 255))
     return image
 
 
@@ -48,6 +58,45 @@ def _movement(canvas: CuteCanvas) -> EditorMovementInteraction:
     movement = canvas._editor_movement_interaction
     assert movement is not None
     return movement
+
+
+def test_move_hover_outline_uses_alpha_tight_layer_geometry(qapp) -> None:
+    """Transparent storage padding must not enlarge Move-tool hover feedback."""
+    canvas = CuteCanvas(features=())
+    canvas.resize(1200, 1200)
+    canvas.show()
+    try:
+        document = canvas.editor.compositions.create(
+            QRectF(0.0, 0.0, 1000.0, 1000.0), title="Content geometry"
+        )
+        layer_id = canvas.addEditableRasterLayer(
+            _transparent_padded_image(),
+            placement=QRectF(100.0, 200.0, 200.0, 160.0),
+            label="Padded",
+        )
+        assert layer_id is not None
+        canvas.setZoom1To1()
+        qapp.processEvents()
+        movement = _movement(canvas)
+        content_point = _panel_point(canvas, QPointF(150.0, 270.0))
+
+        assert movement.update_hover(content_point)
+        assert movement.hovered is not None
+        assert movement.hovered.layer_id == layer_id
+        assert movement.hovered_scene_corners == (
+            QPointF(140.0, 260.0),
+            QPointF(160.0, 260.0),
+            QPointF(160.0, 284.0),
+            QPointF(140.0, 284.0),
+        )
+        assert canvas.layerLocalBounds(document.id, layer_id) == QRectF(
+            20.0,
+            30.0,
+            10.0,
+            12.0,
+        )
+    finally:
+        canvas.deleteLater()
 
 
 def test_mounted_move_centers_layer_on_both_canvas_axes(qapp) -> None:

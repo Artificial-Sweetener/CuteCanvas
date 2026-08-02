@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from cutecanvas import CuteCanvas
 from cutecanvas.document import CanvasDocument, CanvasInspectionGroup
 from cutecanvas.presentation import CanvasWorkspace
@@ -177,6 +178,7 @@ def test_comparison_pair_storm_reuses_one_native_scene_and_remains_interactive(
         qapp.processEvents()
 
 
+@pytest.mark.interactive_performance
 def test_comparison_tile_abuse_preserves_dense_patterned_pixels(qapp) -> None:
     """Keep tiled heterogeneous pairs coherent through mounted navigation churn."""
 

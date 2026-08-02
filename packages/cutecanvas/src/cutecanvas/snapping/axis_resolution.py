@@ -30,6 +30,11 @@ SnapRelationshipRank = Callable[
     [SnapFeatureKind, SnapFeatureKind, bool],
     int | None,
 ]
+AxisCandidateGroup = tuple[
+    SnapFeatureKind,
+    bool,
+    tuple[SnapCandidate, ...],
+]
 _CANDIDATE_POSITION = attrgetter("position")
 
 
@@ -49,13 +54,51 @@ class AxisSnapResolution:
     lock: AxisSnapLock | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class SnapCandidateIndex:
+    """Retain stationary candidates grouped and sorted for both axes."""
+
+    x: tuple[AxisCandidateGroup, ...]
+    y: tuple[AxisCandidateGroup, ...]
+
+    def for_axis(self, axis: SnapAxis) -> tuple[AxisCandidateGroup, ...]:
+        """Return immutable candidate groups for one axis."""
+        return self.x if axis is SnapAxis.X else self.y
+
+
+def build_candidate_index(
+    candidates: tuple[SnapCandidate, ...],
+    *,
+    excluded_owner_id: str | None = None,
+) -> SnapCandidateIndex:
+    """Partition and sort stationary candidates in one bounded pass."""
+    groups = {
+        axis: {
+            (kind, accepts_cross_feature): []
+            for kind in SnapFeatureKind
+            for accepts_cross_feature in (False, True)
+        }
+        for axis in SnapAxis
+    }
+    for candidate in candidates:
+        if excluded_owner_id is not None and candidate.owner_id == excluded_owner_id:
+            continue
+        groups[candidate.axis][
+            (candidate.kind, candidate.accepts_cross_feature)
+        ].append(candidate)
+    return SnapCandidateIndex(
+        _freeze_candidate_groups(groups[SnapAxis.X]),
+        _freeze_candidate_groups(groups[SnapAxis.Y]),
+    )
+
+
 class AxisSnapResolver:
     """Resolve one gesture axis with deterministic priority and hysteresis."""
 
     def __init__(
         self,
         axis: SnapAxis,
-        candidates: tuple[SnapCandidate, ...],
+        candidate_groups: tuple[AxisCandidateGroup, ...],
         *,
         threshold_device_pixels: float,
         release_device_pixels: float,
@@ -69,21 +112,14 @@ class AxisSnapResolver:
         self._release_pixels = float(release_device_pixels)
         self._grid = grid
         self._relationship_rank = relationship_rank
-        candidates_by_kind: dict[tuple[SnapFeatureKind, bool], list[SnapCandidate]] = {}
-        for candidate in candidates:
-            candidates_by_kind.setdefault(
-                (candidate.kind, candidate.accepts_cross_feature),
-                [],
-            ).append(candidate)
-        for target_candidates in candidates_by_kind.values():
-            target_candidates.sort(key=_CANDIDATE_POSITION)
         self._matches_by_moving_kind = {
             moving_kind: tuple(
                 (target_candidates, rank)
                 for (
                     target_kind,
                     accepts_cross_feature,
-                ), target_candidates in candidates_by_kind.items()
+                    target_candidates,
+                ) in candidate_groups
                 if (
                     rank := relationship_rank(
                         moving_kind,
@@ -217,3 +253,18 @@ class AxisSnapResolver:
             )
             for index in sorted(indexes)
         )
+
+
+def _freeze_candidate_groups(
+    groups: dict[tuple[SnapFeatureKind, bool], list[SnapCandidate]],
+) -> tuple[AxisCandidateGroup, ...]:
+    """Freeze nonempty candidate groups in deterministic feature order."""
+    return tuple(
+        (
+            kind,
+            accepts_cross_feature,
+            tuple(sorted(candidates, key=_CANDIDATE_POSITION)),
+        )
+        for (kind, accepts_cross_feature), candidates in groups.items()
+        if candidates
+    )

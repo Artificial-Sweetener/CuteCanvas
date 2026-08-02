@@ -625,6 +625,7 @@ def test_direct_pan_checks_stable_products_without_repainting_overlap(
         qapp.processEvents()
 
 
+@pytest.mark.interactive_performance
 def test_direct_pan_release_atomically_replaces_a_repaired_ring_frame(qapp) -> None:
     """Settling must replace incrementally repaired pixels with one exact frame."""
     qpane = _make_qpane_with_checker_image(qapp, size=1024)

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF
 
-from .axis_resolution import AxisSnapLock, AxisSnapResolver
+from .axis_resolution import AxisSnapLock, AxisSnapResolver, build_candidate_index
 from .model import (
     SnapAxis,
     SnapCandidate,
@@ -48,17 +48,13 @@ class SnapSession:
             raise ValueError("snap thresholds must be positive and non-negative")
         self._source_owner_id = str(source_owner_id)
         self._source_bounds = QRectF(source_bounds).normalized()
-        x_candidates: list[SnapCandidate] = []
-        y_candidates: list[SnapCandidate] = []
-        for candidate in candidates:
-            if candidate.owner_id == self._source_owner_id:
-                continue
-            (x_candidates if candidate.axis is SnapAxis.X else y_candidates).append(
-                candidate
-            )
+        candidate_index = build_candidate_index(
+            candidates,
+            excluded_owner_id=self._source_owner_id,
+        )
         self._x = AxisSnapResolver(
             SnapAxis.X,
-            tuple(x_candidates),
+            candidate_index.for_axis(SnapAxis.X),
             threshold_device_pixels=threshold_device_pixels,
             release_device_pixels=release_device_pixels,
             grid=grid,
@@ -71,7 +67,7 @@ class SnapSession:
         )
         self._y = AxisSnapResolver(
             SnapAxis.Y,
-            tuple(y_candidates),
+            candidate_index.for_axis(SnapAxis.Y),
             threshold_device_pixels=threshold_device_pixels,
             release_device_pixels=release_device_pixels,
             grid=grid,

@@ -76,7 +76,7 @@ def test_cross_feature_snapping_stays_bounded_under_dense_reversals() -> None:
             QRectF(1.0, 2.0, 10.0, 8.0),
             candidates,
         ),
-        repetitions=100,
+        repetitions=1_000,
     )
     session = SnapSession("source", QRectF(1.0, 2.0, 10.0, 8.0), candidates)
 

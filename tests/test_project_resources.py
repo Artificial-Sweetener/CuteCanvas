@@ -373,6 +373,7 @@ def test_nested_document_dependencies_invalidate_parent_render_revision(qapp) ->
         qapp.processEvents()
 
 
+@pytest.mark.interactive_performance
 def test_nested_document_renders_through_the_mounted_sampled_pipeline(qapp) -> None:
     """A nested document must become visible through normal asynchronous painting."""
     canvas = CuteCanvas(features=())

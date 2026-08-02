@@ -589,6 +589,7 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
         harness.close()
 
 
+@pytest.mark.interactive_performance
 def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
     """The 4K physical, 175%-DPR, 5x workflow must reuse every warm frame."""
     root = Path(__file__).resolve().parents[1]

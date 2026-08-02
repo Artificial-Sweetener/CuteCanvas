@@ -88,6 +88,13 @@ class EditorMovementInteraction:
         return self._layers.hovered
 
     @property
+    def hovered_scene_corners(
+        self,
+    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | tuple[()]:
+        """Return content-derived scene corners for move-hover feedback."""
+        return self._layers.hovered_scene_corners
+
+    @property
     def snap_guides(self) -> tuple[SnapGuide, ...]:
         """Return smart guides for the active movement update."""
         return self._snapping.guides

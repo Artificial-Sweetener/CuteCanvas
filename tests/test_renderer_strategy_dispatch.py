@@ -112,6 +112,7 @@ def test_calculate_render_plan_prefers_direct_when_image_fits(qapp):
     assert item.strategy is RenderStrategy.DIRECT
 
 
+@pytest.mark.interactive_performance
 def test_calculate_render_plan_switches_to_tile_for_large_zoom(qapp):
     qpane = QPane()
     try:

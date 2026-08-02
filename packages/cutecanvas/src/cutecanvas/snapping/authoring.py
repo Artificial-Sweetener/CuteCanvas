@@ -22,11 +22,16 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QPointF
 
-from .axis_resolution import AxisSnapLock, AxisSnapResolver
+from .axis_resolution import (
+    AxisCandidateGroup,
+    AxisSnapLock,
+    AxisSnapResolver,
+    build_candidate_index,
+)
 from .candidates import SnapCandidateProvider, SnapTargetSnapshot
 from .configuration import SnapConfiguration, SnapPolicy
 from .feedback import SnapGuideFeedback
-from .model import SnapAxis, SnapCandidate, SnapFeatureKind, SnapGuide, SnapResult
+from .model import SnapAxis, SnapFeatureKind, SnapGuide, SnapResult
 
 _AUTHORING_OWNER_ID = "geometry-authoring"
 
@@ -45,9 +50,19 @@ class AuthoringSnapSession:
     ) -> None:
         """Snap the anchor once and prepare independent endpoint locks."""
         policy = configuration.policy
-        x_candidates, y_candidates = _axis_candidates(targets)
-        self._x = self._axis(SnapAxis.X, policy, targets, x_candidates)
-        self._y = self._axis(SnapAxis.Y, policy, targets, y_candidates)
+        candidate_index = build_candidate_index(targets.candidates)
+        self._x = self._axis(
+            SnapAxis.X,
+            policy,
+            targets,
+            candidate_index.for_axis(SnapAxis.X),
+        )
+        self._y = self._axis(
+            SnapAxis.Y,
+            policy,
+            targets,
+            candidate_index.for_axis(SnapAxis.Y),
+        )
         anchor_result = (
             self._resolve(
                 QPointF(anchor),
@@ -167,12 +182,12 @@ class AuthoringSnapSession:
         axis: SnapAxis,
         policy: SnapPolicy,
         targets: SnapTargetSnapshot,
-        candidates: tuple[SnapCandidate, ...],
+        candidate_groups: tuple[AxisCandidateGroup, ...],
     ) -> AxisSnapResolver:
         """Create one authoring endpoint axis from captured policy values."""
         return AxisSnapResolver(
             axis,
-            candidates,
+            candidate_groups,
             threshold_device_pixels=policy.threshold_device_pixels,
             release_device_pixels=policy.release_device_pixels,
             grid=targets.grid,
@@ -298,19 +313,6 @@ def _authoring_relationship_rank(
 ) -> int:
     """Allow an authored endpoint to align with every configured target line."""
     return 0
-
-
-def _axis_candidates(
-    targets: SnapTargetSnapshot,
-) -> tuple[tuple[SnapCandidate, ...], tuple[SnapCandidate, ...]]:
-    """Partition captured candidates once for the two axis resolvers."""
-    x_candidates: list[SnapCandidate] = []
-    y_candidates: list[SnapCandidate] = []
-    for candidate in targets.candidates:
-        (x_candidates if candidate.axis is SnapAxis.X else y_candidates).append(
-            candidate
-        )
-    return tuple(x_candidates), tuple(y_candidates)
 
 
 def _square_endpoint(anchor: QPointF, endpoint: QPointF) -> QPointF:

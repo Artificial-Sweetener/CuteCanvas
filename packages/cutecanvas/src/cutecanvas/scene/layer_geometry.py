@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QPointF, QRectF
 from qpane.sdk.scene import LayerDescriptor, RasterBounds
 
 from ..composition.geometry_policy import LayerGeometryMode, LayerGeometryPolicy
@@ -62,6 +62,26 @@ class LayerGeometryResolver:
     def resolved_local_bounds(self, layer: LayerDescriptor) -> QRectF | None:
         """Return policy bounds with intrinsic source geometry as fallback."""
         return self.local_bounds(layer) or _rectf(layer.raster_bounds)
+
+    def resolved_scene_corners(
+        self,
+        layer: LayerDescriptor,
+    ) -> tuple[QPointF, QPointF, QPointF, QPointF] | tuple[()]:
+        """Return manipulation-bound corners mapped through the layer transform."""
+        bounds = self.resolved_local_bounds(layer)
+        transform = layer.transform
+        if bounds is None or transform is None:
+            return ()
+        left = bounds.left()
+        top = bounds.top()
+        right = left + bounds.width()
+        bottom = top + bounds.height()
+        return (
+            transform.map_point(QPointF(left, top)),
+            transform.map_point(QPointF(right, top)),
+            transform.map_point(QPointF(right, bottom)),
+            transform.map_point(QPointF(left, bottom)),
+        )
 
 
 def _rectf(bounds: RasterBounds | None) -> QRectF | None:

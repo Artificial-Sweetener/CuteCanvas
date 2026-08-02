@@ -48,6 +48,7 @@ def _wait_for_color(qapp, canvas: CuteCanvas, expected: QColor) -> None:
     raise AssertionError("nested document pixels were not presented")
 
 
+@pytest.mark.interactive_performance
 def test_nested_document_archive_restores_complete_live_resource_graph(
     qapp,
     tmp_path,
