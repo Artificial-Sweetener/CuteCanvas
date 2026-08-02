@@ -249,7 +249,9 @@ canvas.setControlMode(canvas.CONTROL_MODE_MOVE)
 
 Moving changes the layer transform, not its stored coverage. Content may move
 outside the document canvas and return later. Snapping follows painted coverage
-by default, excluding transparent mask storage around it.
+by default, excluding transparent mask storage around it. The canvas aperture
+clips mask presentation identically during a live drag and after commit;
+off-canvas coverage remains retained without appearing outside the document.
 
 Use the same `LayerPolicy`, `LayerGeometryPolicy`, visibility, order, and
 history APIs described in [Documents and Layers](scenes.md).

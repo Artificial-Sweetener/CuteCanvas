@@ -27,6 +27,19 @@ selection, geometry, pixel, history, permission, or rendering state. Every
 durable edit uses the one document history. Host policy and user locks remain
 separate inputs to the one operation resolver.
 
+Snapping follows explicit ownership boundaries. `SnapConfiguration` owns durable
+policy, guides, and grid settings; `SnapCandidateProvider` captures stationary
+scene targets once per gesture; movement and geometric authoring use separate
+session resolvers; and `SnapGuideFeedback` owns transient Smart Guide
+presentation. `SnappingSubsystem` constructs and groups those collaborators at
+the editor lifecycle boundary. Shape and path tools own gesture lifecycle and
+delegate coordinates through their authoring port. Freehand tools, painting,
+fills, and SAM do not receive that port.
+
+Retained pixel-selection and mask shapes delegate canvas clipping and preview
+projection to `CoverageCanvasAperture`. Mask-specific aperture geometry remains
+owned by `ActiveMaskCanvasAperture`; tools never reproduce either concern.
+
 ## Cross-package performance work
 
 CuteCanvas changes may and should modify QPane when profiling or ownership

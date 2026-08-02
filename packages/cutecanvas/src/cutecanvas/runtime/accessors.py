@@ -69,6 +69,7 @@ from cutecanvas.scene.mutations import SceneMutationCoordinator
 from cutecanvas.scene.source_capabilities import EditorSourceCapabilities
 from cutecanvas.selection import PixelSelectionService
 from cutecanvas.snapping import SnapConfiguration
+from cutecanvas.snapping.system import SnappingSubsystem
 from cutecanvas.tools import Tools
 from cutecanvas.types import (
     LayerPolicy,
@@ -445,10 +446,17 @@ class CanvasAccessorsMixin:
 
     def snapConfiguration(self) -> SnapConfiguration:
         """Expose the authoritative editor snapping configuration."""
-        configuration = self._snap_configuration
-        if configuration is None:
+        snapping = self._snapping
+        if snapping is None:
             raise AttributeError("snapping accessed before initialization")
-        return configuration
+        return snapping.configuration
+
+    def snappingSubsystem(self) -> SnappingSubsystem:
+        """Expose the focused snapping collaboration boundary internally."""
+        snapping = self._snapping
+        if snapping is None:
+            raise AttributeError("snapping accessed before initialization")
+        return snapping
 
     def coverageShapeConfiguration(self) -> CoverageShapeConfiguration:
         """Expose the authoritative retained coverage shape configuration."""

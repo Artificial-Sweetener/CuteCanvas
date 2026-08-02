@@ -83,6 +83,7 @@ from .masks.paint_target import MaskCoveragePaintTargetOwner
 from .masks.pixel_edits import (
     MaskLayerPixelMutationOwner,
 )
+from .masks.presentation_clip import resolve_transform_preview_clip
 from .masks.source_resolver import MaskSourceCapabilities
 from .masks.workflow import Masks
 from .painting import (
@@ -121,7 +122,7 @@ from .scene.source_capabilities import EditorSourceCapabilities
 from .scene.transform_preview import SceneLayerTransformPreview
 from .scene.transform_session import SceneLayerTransformController
 from .selection import PixelSelectionService
-from .snapping import SnapConfiguration
+from .snapping.system import SnappingSubsystem
 from .tools import Tools
 from .tools.delegate import ToolInteractionDelegate
 from .types import (
@@ -391,7 +392,7 @@ class CuteCanvas(
         self._clone_stamp: CloneStampOperation | None = None
         self._paint_bucket: PaintBucketCoordinator | None = None
         self._selection_fill: SelectionFillCoordinator | None = None
-        self._snap_configuration: SnapConfiguration | None = None
+        self._snapping: SnappingSubsystem | None = None
         self._coverage_shape_configuration: CoverageShapeConfiguration | None = None
         self._vector_editor: VectorHostFacade | None = None
         self._vector_interaction: VectorInteractionController | None = None
@@ -423,7 +424,9 @@ class CuteCanvas(
         self._scene_selection = SceneLayerSelectionController(
             self._handle_selected_layer_changed
         )
-        self._scene_transform_preview = SceneLayerTransformPreview()
+        self._scene_transform_preview = SceneLayerTransformPreview(
+            resolve_transform_preview_clip
+        )
         self._scene_movement: SceneLayerTransformController | None = None
         self._scene_movement_interaction: SceneLayerMovementInteraction | None = None
         self._scene_transform_interaction: EditorTransformInteraction | None = None
@@ -541,7 +544,7 @@ class CuteCanvas(
             self.view().scene_to_panel_transform(),
             self.view().current_scene_descriptor(),
             None if movement is None else movement.hovered,
-            () if movement is None else movement.snap_guides,
+            () if self._snapping is None else self._snapping.guides,
         )
         self._tools_manager.draw_overlay(painter)
 

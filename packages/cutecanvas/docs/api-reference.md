@@ -877,8 +877,9 @@ See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and 
 - `CuteCanvas.setLayerVisible` changes composition-local rendering and hit testing as one undoable edit for every layer source. `LayerHandle.set_visible` provides the focused equivalent.
 - `CuteCanvas.translateLayer` adds an exact scene-coordinate displacement without changing the affine linear transform. `CuteCanvas.centerLayer` aligns either or both layer-center axes to the composition canvas. `LayerHandle.translate` and `LayerHandle.center` expose the same commands without raw identifier pairs. Movability remains host policy for translation and alignment.
 - `cutecanvas.SnapPolicy` selects canvas, visible-layer, selection, guide, and grid candidates plus device-pixel acquire/release thresholds. Its default eight-pixel acquire tolerance is evaluated through QPane's physical viewport zoom, independently of display scaling.
-- Bounds snapping admits center-to-center, matching-edge, and opposing-adjacent-edge relationships. Authored guides and grid lines accept the nearest moving feature; layer bounds do not cross-snap edges to centers.
-- `CuteCanvas.snapPolicy`, `CuteCanvas.configureSnapping`, `CuteCanvas.setSnapGuides`, and `CuteCanvas.setSnapGrid` configure the one snapping engine used throughout editor movement. Holding Ctrl temporarily suppresses snapping without changing durable policy.
+- Movement snapping admits center-to-center, matching-edge, opposing-adjacent-edge, and edge-to-center relationships. Authored guides and grid lines accept the nearest moving feature.
+- Rectangle and ellipse mask tools, rectangle and ellipse pixel-selection tools, vector rectangle and ellipse tools, and explicit vector-path anchors snap both their anchor and active endpoint. An authored endpoint may align to any configured target edge or center. Preview and commit use the same resolved geometry.
+- `CuteCanvas.snapPolicy`, `CuteCanvas.configureSnapping`, `CuteCanvas.setSnapGuides`, and `CuteCanvas.setSnapGrid` configure the shared policy for movement and geometric authoring. Holding Ctrl temporarily suppresses snapping without changing durable policy. Freehand lasso, painting, fill, and SAM region gestures remain unsnapped.
 
 ## Vector Documents
 

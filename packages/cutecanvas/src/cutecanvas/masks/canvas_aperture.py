@@ -24,18 +24,14 @@ from collections.abc import Callable
 
 import numpy as np
 from PySide6.QtCore import QPointF
-from PySide6.QtGui import QPainterPath, QPolygonF, QTransform
-from qpane.sdk.rendering import LayerLocalPoint, PanelPoint, SceneCoordinateSystem
+from PySide6.QtGui import QPainterPath, QPolygonF
 from qpane.sdk.scene import (
     LayerDescriptor,
-    LayerTransform,
     RasterBounds,
     SceneDescriptor,
 )
-from qpane.sdk.vector import object_path
 
-from ..coverage import CoverageItem, CoverageSnapshot, VectorCoverageItem
-from ..coverage.path_conversion import retained_vector_path
+from ..coverage import CoverageSnapshot
 from ..resources import ProjectResourceReference
 from ..selection import LayerCoverageProjector, PixelSelectionService
 from ..types import RasterExtentPolicy
@@ -54,64 +50,15 @@ class ActiveMaskCanvasAperture:
         *,
         active_mask_id: Callable[[], uuid.UUID | None],
         active_scene: Callable[[], SceneDescriptor | None],
-        coordinates: SceneCoordinateSystem,
         pixel_selection: PixelSelectionService,
     ) -> None:
-        """Bind mask identity, scene geometry, coordinates, and selection state."""
+        """Bind mask identity, scene geometry, and pixel-selection state."""
         self._active_mask_id = active_mask_id
         self._active_scene = active_scene
-        self._coordinates = coordinates
         self._pixel_selection = pixel_selection
         self._coverage_projector = LayerCoverageProjector()
         self._path_key: tuple[object, ...] | None = None
         self._source_path: QPainterPath | None = None
-
-    def contains_panel_point(self, point: QPointF) -> bool:
-        """Return whether a panel point lies inside the composition canvas."""
-        scene = self._active_scene()
-        scene_point = self._coordinates.panel_to_scene(PanelPoint.from_qt(point))
-        if scene is None or scene_point is None:
-            return False
-        bounds = scene.bounds
-        return (
-            bounds.x <= scene_point.x < bounds.x + bounds.width
-            and bounds.y <= scene_point.y < bounds.y + bounds.height
-        )
-
-    def constrain_item(self, item: CoverageItem) -> CoverageItem | None:
-        """Clip retained vector authorship to the active canvas aperture."""
-        if not isinstance(item, VectorCoverageItem):
-            return item
-        aperture = self._source_aperture_path()
-        if aperture is None:
-            return None
-        path = item.transform.to_qtransform().map(object_path(item.geometry))
-        if aperture.contains(path):
-            return item
-        geometry = retained_vector_path(
-            path.intersected(aperture),
-            style=item.geometry.style,
-            object_id=item.geometry.object_id,
-        )
-        if geometry is None:
-            return None
-        return VectorCoverageItem(
-            item.item_id,
-            geometry,
-            item.combine_mode,
-            LayerTransform(),
-            item.feather_radius,
-        )
-
-    def item_panel_path(self, item: CoverageItem) -> QPainterPath | None:
-        """Project one constrained vector item's exact path into panel space."""
-        if not isinstance(item, VectorCoverageItem):
-            return None
-        transform = self._source_to_panel_transform()
-        if transform is None:
-            return None
-        source_path = item.transform.to_qtransform().map(object_path(item.geometry))
-        return transform.map(source_path)
 
     def stroke_constraint(self, mask_id: uuid.UUID) -> MaskStrokeConstraint | None:
         """Project the canvas and optional pixel selection into mask-local space."""
@@ -133,10 +80,10 @@ class ActiveMaskCanvasAperture:
                 transform,
             )
             return None if projected is None else CoverageStrokeConstraint(projected)
-        path = self._source_aperture_path(mask_id)
+        path = self.coverage_aperture_path(mask_id)
         return None if path is None else PathStrokeConstraint(path)
 
-    def _source_aperture_path(
+    def coverage_aperture_path(
         self,
         mask_id: uuid.UUID | None = None,
     ) -> QPainterPath | None:
@@ -171,33 +118,6 @@ class ActiveMaskCanvasAperture:
         self._path_key = key
         self._source_path = QPainterPath(path)
         return path
-
-    def _source_to_panel_transform(self) -> QTransform | None:
-        """Resolve the active affine source-to-panel projection."""
-        resolved = self._resolved_layer()
-        if resolved is None:
-            return None
-        scene, layer = resolved
-
-        def project(point: QPointF):
-            """Project one source basis point through QPane's public API."""
-            return self._coordinates.layer_local_to_panel(
-                LayerLocalPoint.from_qt(scene.scene_id, layer.layer_id, point)
-            )
-
-        origin = project(QPointF())
-        unit_x = project(QPointF(1.0, 0.0))
-        unit_y = project(QPointF(0.0, 1.0))
-        if origin is None or unit_x is None or unit_y is None:
-            return None
-        return QTransform(
-            unit_x.x - origin.x,
-            unit_x.y - origin.y,
-            unit_y.x - origin.x,
-            unit_y.y - origin.y,
-            origin.x,
-            origin.y,
-        )
 
     def _resolved_layer(
         self,

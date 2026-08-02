@@ -14,6 +14,8 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from dataclasses import fields
+
 import numpy as np
 import pytest
 from cutecanvas.masks.tools.smart_select import SmartSelectTool
@@ -138,6 +140,25 @@ def test_smart_select_emits_bbox_from_origin(smart_select_tool):
     bbox, erase_flag = emissions[0]
     assert np.array_equal(bbox, np.array([0, 0, 10, 10]))
     assert erase_flag is False
+
+
+def test_smart_select_port_excludes_snapping_and_emits_raw_bounds(
+    smart_select_tool,
+) -> None:
+    """SAM receives raw region coordinates and has no Smart Guide capability."""
+    emissions = []
+    smart_select_tool.signals.region_selected_for_masking.connect(
+        lambda bbox, erase: emissions.append((bbox, erase))
+    )
+    _drag_selection(smart_select_tool, QPoint(96, 97), QPoint(204, 203))
+    smart_select_tool.mouseReleaseEvent(
+        _StubMouseEvent(Qt.MouseButton.LeftButton, QPoint(204, 203))
+    )
+
+    assert "snapping" not in {
+        field.name for field in fields(SmartSelectionInteractionPort)
+    }
+    assert np.array_equal(emissions[0][0], np.array([96, 97, 204, 203]))
 
 
 def test_smart_select_accepts_direct_touch_drag(smart_select_tool) -> None:

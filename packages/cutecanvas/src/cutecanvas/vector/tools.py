@@ -54,9 +54,13 @@ class VectorShapeTool(BaseTool):
         if event.button() != Qt.MouseButton.LeftButton:
             event.ignore()
             return
-        panel_point = QPointF(event.position())
+        panel_point = self._port.snapping.begin(
+            QPointF(event.position()),
+            _snap_suppressed(event.modifiers()),
+        )
         source_point = self._port.panel_to_source(panel_point)
         if source_point is None:
+            self._port.snapping.clear()
             event.ignore()
             return
         self._begin_panel = panel_point
@@ -73,7 +77,7 @@ class VectorShapeTool(BaseTool):
         ):
             event.ignore()
             return
-        self._update(QPointF(event.position()))
+        self._update(QPointF(event.position()), event.modifiers())
         event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -81,7 +85,7 @@ class VectorShapeTool(BaseTool):
         if event.button() != Qt.MouseButton.LeftButton or self._begin_source is None:
             event.ignore()
             return
-        self._update(QPointF(event.position()))
+        self._update(QPointF(event.position()), event.modifiers())
         if self._current_source is not None:
             self._port.commit_shape(self._begin_source, self._current_source)
         self._reset()
@@ -100,20 +104,25 @@ class VectorShapeTool(BaseTool):
     def handle_pointer_sample(self, sample: PointerSample) -> bool:
         """Route touch and tablet contacts through the same shape lifecycle."""
         if sample.phase is PointerPhase.BEGIN:
-            source_point = self._port.panel_to_source(sample.position)
+            panel_point = self._port.snapping.begin(
+                sample.position,
+                _snap_suppressed(sample.modifiers),
+            )
+            source_point = self._port.panel_to_source(panel_point)
             if source_point is None:
+                self._port.snapping.clear()
                 return False
-            self._begin_panel = QPointF(sample.position)
-            self._current_panel = QPointF(sample.position)
+            self._begin_panel = QPointF(panel_point)
+            self._current_panel = QPointF(panel_point)
             self._begin_source = QPointF(source_point)
             self._current_source = QPointF(source_point)
             self.signals.repaint_overlay_requested.emit()
             return True
         if sample.phase is PointerPhase.UPDATE and self._begin_source is not None:
-            self._update(sample.position)
+            self._update(sample.position, sample.modifiers)
             return True
         if sample.phase is PointerPhase.END and self._begin_source is not None:
-            self._update(sample.position)
+            self._update(sample.position, sample.modifiers)
             if self._current_source is not None:
                 self._port.commit_shape(self._begin_source, self._current_source)
             self._reset()
@@ -147,17 +156,28 @@ class VectorShapeTool(BaseTool):
         """Return a precise creation cursor."""
         return QCursor(Qt.CursorShape.CrossCursor)
 
-    def _update(self, panel_point: QPointF) -> None:
+    def _update(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
         """Update panel and mapped source endpoints when projection succeeds."""
-        source_point = self._port.panel_to_source(panel_point)
+        snapped_panel = self._port.snapping.update(
+            panel_point,
+            _snap_suppressed(modifiers),
+            False,
+        )
+        source_point = self._port.panel_to_source(snapped_panel)
         if source_point is None:
             return
-        self._current_panel = QPointF(panel_point)
+        self._current_panel = QPointF(snapped_panel)
         self._current_source = QPointF(source_point)
         self.signals.repaint_overlay_requested.emit()
 
     def _reset(self) -> None:
         """Restore inert gesture state and dependencies."""
+        if hasattr(self, "_port"):
+            self._port.snapping.clear()
         self._port = VectorInteractionPort()
         self._begin_panel: QPointF | None = None
         self._current_panel: QPointF | None = None
@@ -188,7 +208,19 @@ class VectorPathTool(BaseTool):
         if event.button() != Qt.MouseButton.LeftButton:
             event.ignore()
             return
-        panel_point = QPointF(event.position())
+        raw_panel = QPointF(event.position())
+        panel_point = (
+            self._port.snapping.begin(
+                raw_panel,
+                _snap_suppressed(event.modifiers()),
+            )
+            if not self._source_points
+            else self._port.snapping.update(
+                raw_panel,
+                _snap_suppressed(event.modifiers()),
+                False,
+            )
+        )
         source_point = self._port.panel_to_source(panel_point)
         if source_point is None:
             event.ignore()
@@ -203,7 +235,11 @@ class VectorPathTool(BaseTool):
         if not self._source_points:
             event.ignore()
             return
-        self._hover_panel = QPointF(event.position())
+        self._hover_panel = self._port.snapping.update(
+            QPointF(event.position()),
+            _snap_suppressed(event.modifiers()),
+            False,
+        )
         self.signals.repaint_overlay_requested.emit()
         event.accept()
 
@@ -236,10 +272,22 @@ class VectorPathTool(BaseTool):
     def handle_pointer_sample(self, sample: PointerSample) -> bool:
         """Add touch/tablet nodes and preserve explicit commit semantics."""
         if sample.phase is PointerPhase.BEGIN:
-            source_point = self._port.panel_to_source(sample.position)
+            panel_point = (
+                self._port.snapping.begin(
+                    sample.position,
+                    _snap_suppressed(sample.modifiers),
+                )
+                if not self._source_points
+                else self._port.snapping.update(
+                    sample.position,
+                    _snap_suppressed(sample.modifiers),
+                    False,
+                )
+            )
+            source_point = self._port.panel_to_source(panel_point)
             if source_point is None:
                 return False
-            self._panel_points.append(QPointF(sample.position))
+            self._panel_points.append(QPointF(panel_point))
             self._source_points.append(QPointF(source_point))
             self.signals.repaint_overlay_requested.emit()
             return True
@@ -247,7 +295,11 @@ class VectorPathTool(BaseTool):
             sample.phase in {PointerPhase.UPDATE, PointerPhase.HOVER}
             and self._source_points
         ):
-            self._hover_panel = QPointF(sample.position)
+            self._hover_panel = self._port.snapping.update(
+                sample.position,
+                _snap_suppressed(sample.modifiers),
+                False,
+            )
             self.signals.repaint_overlay_requested.emit()
             return True
         if sample.phase is PointerPhase.CANCEL and self._source_points:
@@ -288,6 +340,8 @@ class VectorPathTool(BaseTool):
 
     def _reset(self) -> None:
         """Restore inert gesture state and dependencies."""
+        if hasattr(self, "_port"):
+            self._port.snapping.clear()
         self._port = VectorInteractionPort()
         self._panel_points: list[QPointF] = []
         self._source_points: list[QPointF] = []
@@ -300,3 +354,8 @@ def install_vector_tools(register) -> None:
     register(VECTOR_PATH_MODE, VectorPathTool)
     register(VECTOR_NODE_MODE, VectorNodeTool)
     register(VECTOR_TEXT_MODE, VectorTextTool)
+
+
+def _snap_suppressed(modifiers: Qt.KeyboardModifier) -> bool:
+    """Return whether the standard temporary snap override is held."""
+    return bool(modifiers & Qt.KeyboardModifier.ControlModifier)

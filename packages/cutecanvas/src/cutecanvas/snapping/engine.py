@@ -17,11 +17,9 @@
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
-
 from PySide6.QtCore import QPointF, QRectF
 
+from .axis_resolution import AxisSnapLock, AxisSnapResolver
 from .model import (
     SnapAxis,
     SnapCandidate,
@@ -30,14 +28,6 @@ from .model import (
     SnapGuide,
     SnapResult,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _AxisLock:
-    """Retain one axis target through small pointer reversals."""
-
-    moving_kind: SnapFeatureKind
-    candidate: SnapCandidate
 
 
 class SnapSession:
@@ -58,24 +48,40 @@ class SnapSession:
             raise ValueError("snap thresholds must be positive and non-negative")
         self._source_owner_id = str(source_owner_id)
         self._source_bounds = QRectF(source_bounds).normalized()
-        candidates = tuple(
-            candidate
-            for candidate in candidates
-            if candidate.owner_id != self._source_owner_id
+        x_candidates: list[SnapCandidate] = []
+        y_candidates: list[SnapCandidate] = []
+        for candidate in candidates:
+            if candidate.owner_id == self._source_owner_id:
+                continue
+            (x_candidates if candidate.axis is SnapAxis.X else y_candidates).append(
+                candidate
+            )
+        self._x = AxisSnapResolver(
+            SnapAxis.X,
+            tuple(x_candidates),
+            threshold_device_pixels=threshold_device_pixels,
+            release_device_pixels=release_device_pixels,
+            grid=grid,
+            relationship_rank=_relationship_rank,
+            moving_kinds=(
+                SnapFeatureKind.START,
+                SnapFeatureKind.CENTER,
+                SnapFeatureKind.END,
+            ),
         )
-        self._candidates_by_axis = {
-            SnapAxis.X: tuple(
-                candidate for candidate in candidates if candidate.axis is SnapAxis.X
+        self._y = AxisSnapResolver(
+            SnapAxis.Y,
+            tuple(y_candidates),
+            threshold_device_pixels=threshold_device_pixels,
+            release_device_pixels=release_device_pixels,
+            grid=grid,
+            relationship_rank=_relationship_rank,
+            moving_kinds=(
+                SnapFeatureKind.START,
+                SnapFeatureKind.CENTER,
+                SnapFeatureKind.END,
             ),
-            SnapAxis.Y: tuple(
-                candidate for candidate in candidates if candidate.axis is SnapAxis.Y
-            ),
-        }
-        self._threshold_pixels = float(threshold_device_pixels)
-        self._release_pixels = float(release_device_pixels)
-        self._grid = grid
-        self._x_lock: _AxisLock | None = None
-        self._y_lock: _AxisLock | None = None
+        )
 
     def resolve(
         self,
@@ -91,125 +97,35 @@ class SnapSession:
         delta = QPointF(proposed_delta)
         if suppressed:
             return SnapResult(delta)
-        threshold = self._threshold_pixels * scale
-        release = (self._threshold_pixels + self._release_pixels) * scale
-        x, self._x_lock = self._resolve_axis(
-            SnapAxis.X,
+        x = self._x.resolve(
             delta.x(),
-            threshold,
-            release,
-            self._x_lock,
+            _moving_features(self._source_bounds, SnapAxis.X, delta.x()),
+            scene_units_per_device_pixel=scale,
         )
-        y, self._y_lock = self._resolve_axis(
-            SnapAxis.Y,
+        y = self._y.resolve(
             delta.y(),
-            threshold,
-            release,
-            self._y_lock,
+            _moving_features(self._source_bounds, SnapAxis.Y, delta.y()),
+            scene_units_per_device_pixel=scale,
         )
         guides = tuple(
-            self._guide(axis, lock, QPointF(x, y))
+            self._guide(axis, lock, QPointF(x.value, y.value))
             for axis, lock in (
-                (SnapAxis.X, self._x_lock),
-                (SnapAxis.Y, self._y_lock),
+                (SnapAxis.X, x.lock),
+                (SnapAxis.Y, y.lock),
             )
             if lock is not None
         )
         return SnapResult(
-            QPointF(x, y),
+            QPointF(x.value, y.value),
             guides,
-            snapped_x=self._x_lock is not None,
-            snapped_y=self._y_lock is not None,
-        )
-
-    def _resolve_axis(
-        self,
-        axis: SnapAxis,
-        raw_delta: float,
-        threshold: float,
-        release: float,
-        locked: _AxisLock | None,
-    ) -> tuple[float, _AxisLock | None]:
-        """Resolve one axis with deterministic ties and hysteresis."""
-        features = _moving_features(self._source_bounds, axis, raw_delta)
-        if locked is not None:
-            moving_position = dict(features)[locked.moving_kind]
-            correction = locked.candidate.position - moving_position
-            if abs(correction) <= release:
-                resolved = raw_delta + correction
-                return resolved, locked
-        matches = []
-        candidates = (
-            *self._candidates_by_axis[axis],
-            *self._grid_candidates(axis, features),
-        )
-        for moving_kind, moving_position in features:
-            for candidate in candidates:
-                relationship_rank = _relationship_rank(moving_kind, candidate.kind)
-                if relationship_rank is None:
-                    continue
-                correction = candidate.position - moving_position
-                if abs(correction) <= threshold:
-                    matches.append(
-                        (
-                            abs(correction),
-                            -candidate.priority,
-                            relationship_rank,
-                            candidate.position,
-                            candidate.owner_id,
-                            moving_kind,
-                            candidate,
-                            correction,
-                        )
-                    )
-        if not matches:
-            return raw_delta, None
-        match = min(matches)
-        moving_kind = match[5]
-        candidate = match[6]
-        correction = match[7]
-        new_lock = _AxisLock(moving_kind, candidate)
-        resolved = raw_delta + correction
-        return resolved, new_lock
-
-    def _grid_candidates(
-        self,
-        axis: SnapAxis,
-        features: tuple[tuple[SnapFeatureKind, float], ...],
-    ) -> tuple[SnapCandidate, ...]:
-        """Return only nearby infinite-grid lines for one axis update."""
-        grid = self._grid
-        if grid is None:
-            return ()
-        origin = grid.origin.x() if axis is SnapAxis.X else grid.origin.y()
-        spacing = grid.spacing_x if axis is SnapAxis.X else grid.spacing_y
-        span = grid.guide_span
-        span_start, span_end = (
-            (span.top(), span.bottom())
-            if axis is SnapAxis.X
-            else (span.left(), span.right())
-        )
-        indexes: set[int] = set()
-        for _kind, position in features:
-            lower = math.floor((position - origin) / spacing)
-            indexes.update((lower, lower + 1))
-        return tuple(
-            SnapCandidate(
-                f"grid:{axis.value}:{index}",
-                axis,
-                origin + index * spacing,
-                SnapFeatureKind.GRID,
-                span_start,
-                span_end,
-                grid.priority,
-            )
-            for index in sorted(indexes)
+            snapped_x=x.lock is not None,
+            snapped_y=y.lock is not None,
         )
 
     def _guide(
         self,
         axis: SnapAxis,
-        locked: _AxisLock,
+        locked: AxisSnapLock,
         resolved_delta: QPointF,
     ) -> SnapGuide:
         """Build one guide spanning moving and stationary geometry."""
@@ -305,4 +221,6 @@ def _relationship_rank(
         (SnapFeatureKind.END, SnapFeatureKind.START),
     ):
         return 1
+    if SnapFeatureKind.CENTER in (moving, target):
+        return 2
     return None

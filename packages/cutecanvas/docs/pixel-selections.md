@@ -25,6 +25,10 @@ coverage and painted selection strokes may live beside those shapes in the
 same selection. The animated boundary is cached until coverage changes, keeping
 large selections responsive while the user pans and zooms.
 
+The composition canvas is the shared aperture for selection and mask shapes.
+During an out-of-bounds drag, the live boundary, committed coverage, and later
+animated boundary all remain clipped to the same canvas edge.
+
 Use `configureCoverageShapes(feather_radius=...)` before a gesture to create a
 soft retained edge.
 

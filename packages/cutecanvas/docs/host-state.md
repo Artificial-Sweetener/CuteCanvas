@@ -147,8 +147,8 @@ commands. Permission cannot create an operation unsupported by the source.
 
 `LayerGeometryMode` selects the bounds used for manipulation and snapping, while
 `SnapPolicy` contains the global snapping choices shared by movement and
-transform tools. `LayerHandle` is stable application-facing identity, and
-`LayerEffectHandle` is stable identity for one temporary visual treatment.
+geometric authoring tools. `LayerHandle` is stable application-facing identity,
+and `LayerEffectHandle` is stable identity for one temporary visual treatment.
 
 A `LayerSelectionSnapshot.scene_id` identifies the open scene and
 `LayerSelectionSnapshot.layer_id` identifies its selected layer.

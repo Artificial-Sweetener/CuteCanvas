@@ -26,9 +26,11 @@ from qpane.sdk.vector import VectorShapeKind
 from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from ..coverage import CoverageCombineMode
+from ..coverage.canvas_aperture import CoverageCanvasAperture
 from ..editor import EditorOperation
 from ..painting.tools.clone_feedback import CloneStampFeedbackProjector
 from .ports import (
+    AuthoringSnapPort,
     CloneStampInteractionPort,
     MoveInteractionPort,
     PaintBucketInteractionPort,
@@ -90,6 +92,12 @@ def build_editor_tool_ports(
         get_dpr=qpane.devicePixelRatioF,
     )
     movement = qpane.editorMovementInteraction()
+    authoring_snapping = qpane.snappingSubsystem().authoring
+    authoring_snap_port = AuthoringSnapPort(
+        begin=authoring_snapping.begin,
+        update=authoring_snapping.update,
+        clear=authoring_snapping.clear,
+    )
     movement_port = MoveInteractionPort(
         begin_move=movement.begin,
         update_move=movement.update,
@@ -115,6 +123,17 @@ def build_editor_tool_ports(
     painting = qpane.paintingCoordinator()
     paint_destination = qpane.interactivePaintDestination()
     mask_aperture = qpane.activeMaskCanvasAperture()
+    canvas_aperture = CoverageCanvasAperture(
+        active_scene=qpane.view().current_scene_descriptor,
+        panel_to_scene=qpane.view().panel_to_scene_point,
+        target_to_panel=qpane.view().scene_to_panel_point,
+    )
+    mask_shape_aperture = CoverageCanvasAperture(
+        active_scene=qpane.view().current_scene_descriptor,
+        panel_to_scene=qpane.view().panel_to_scene_point,
+        target_to_panel=painting.target_to_panel,
+        target_aperture_path=mask_aperture.coverage_aperture_path,
+    )
     selection_port = PixelSelectionInteractionPort(
         panel_to_scene_point=qpane.view().panel_to_scene_point,
         can_select=lambda: qpane.editorOperationResolver()
@@ -125,6 +144,9 @@ def build_editor_tool_ports(
         is_shift_held=is_shift_held,
         is_alt_held=is_alt_held,
         get_shape_feather_radius=lambda: qpane.coverageShapeConfiguration().options.feather_radius,
+        constrain_coverage_item=canvas_aperture.constrain_item,
+        coverage_item_to_panel_path=canvas_aperture.item_panel_path,
+        snapping=authoring_snap_port,
     )
     coverage_shape_port = PixelSelectionInteractionPort(
         panel_to_scene_point=painting.panel_to_target,
@@ -134,15 +156,16 @@ def build_editor_tool_ports(
         is_alt_held=is_alt_held,
         default_combine_mode=CoverageCombineMode.ADD,
         get_shape_feather_radius=lambda: qpane.coverageShapeConfiguration().options.feather_radius,
-        constrain_coverage_item=mask_aperture.constrain_item,
-        coverage_item_to_panel_path=mask_aperture.item_panel_path,
+        constrain_coverage_item=mask_shape_aperture.constrain_item,
+        coverage_item_to_panel_path=mask_shape_aperture.item_panel_path,
+        snapping=authoring_snap_port,
     )
     painting_port = PaintingInteractionPort(
         is_alt_held=is_alt_held,
         is_shift_held=is_shift_held,
         can_paint=paint_destination.can_prepare,
         prepare_paint=paint_destination.prepare,
-        gesture_start_allowed=mask_aperture.contains_panel_point,
+        gesture_start_allowed=canvas_aperture.contains_panel_point,
         get_brush_size=get_brush_size,
         get_preview_pens=get_preview_pens,
         panel_hit_test=qpane.panelHitTest,
@@ -203,6 +226,7 @@ def build_editor_tool_ports(
         commit_shape=vector.commit_shape,
         commit_path=lambda points, closed: vector.commit_path(points, closed=closed),
         shape_is_ellipse=lambda: vector.shape is VectorShapeKind.ELLIPSE,
+        snapping=authoring_snap_port,
     )
     nodes = qpane._vector_node_controller()
     node_port = VectorNodeInteractionPort(

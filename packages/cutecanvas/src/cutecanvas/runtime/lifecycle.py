@@ -197,7 +197,7 @@ class CanvasLifecycleMixin:
         self._clone_stamp = components.clone_stamp
         self._paint_bucket = components.paint_bucket
         self._selection_fill = components.selection_fill
-        self._snap_configuration = components.snap_configuration
+        self._snapping = components.snapping
         self._coverage_shape_configuration = components.coverage_shape_configuration
         self.destroyed.connect(
             lambda _obj=None, coordinator=components.paint_bucket: (

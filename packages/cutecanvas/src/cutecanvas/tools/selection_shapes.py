@@ -54,6 +54,7 @@ class SelectionShapeTool(BaseTool):
     input_profile = ToolInputProfile(touch=True, tablet=True)
     cursor_style: ClassVar[ToolCursorStyle] = ToolCursorStyle.PRECISE
     supports_alt_erase_indicator: ClassVar[bool] = True
+    supports_snapping: ClassVar[bool] = True
 
     def __init__(self) -> None:
         """Initialize an idle retained-geometry gesture."""
@@ -78,6 +79,7 @@ class SelectionShapeTool(BaseTool):
         self._get_feather_radius = dependencies.get_shape_feather_radius
         self._constrain_item = dependencies.constrain_coverage_item
         self._item_to_panel_path = dependencies.coverage_item_to_panel_path
+        self._snapping = dependencies.snapping
 
     def deactivate(self) -> None:
         """Discard transient geometry and release collaborators."""
@@ -163,13 +165,15 @@ class SelectionShapeTool(BaseTool):
         """Start a gesture when panel coordinates map into the active scene."""
         if not self._can_select():
             return False
-        scene_point = self._panel_to_scene(panel_point)
+        snapped_panel = self._snap_begin(panel_point, modifiers)
+        scene_point = self._panel_to_scene(snapped_panel)
         if scene_point is None:
+            self._snapping.clear()
             return False
-        self._begin_panel = QPointF(panel_point)
-        self._current_panel = QPointF(panel_point)
+        self._begin_panel = QPointF(snapped_panel)
+        self._current_panel = QPointF(snapped_panel)
         self._scene_points = [QPointF(scene_point)]
-        self._panel_points = [QPointF(panel_point)]
+        self._panel_points = [QPointF(snapped_panel)]
         self._pointer_modifiers = modifiers
         self._gesture_combine_mode = self._modifier_combine_mode()
         self.signals.repaint_overlay_requested.emit()
@@ -181,12 +185,13 @@ class SelectionShapeTool(BaseTool):
         modifiers: Qt.KeyboardModifier,
     ) -> None:
         """Append or replace current gesture geometry."""
-        scene_point = self._panel_to_scene(panel_point)
+        snapped_panel = self._snap_update(panel_point, modifiers)
+        scene_point = self._panel_to_scene(snapped_panel)
         if scene_point is None:
             return
         self._pointer_modifiers = modifiers
-        self._current_panel = QPointF(panel_point)
-        self._update_panel_points(panel_point)
+        self._current_panel = QPointF(snapped_panel)
+        self._update_panel_points(snapped_panel)
         self._update_scene_points(scene_point)
         self.signals.repaint_overlay_requested.emit()
 
@@ -223,6 +228,7 @@ class SelectionShapeTool(BaseTool):
 
     def _clear_gesture(self) -> None:
         """Discard transient vector state."""
+        self._snapping.clear()
         self._begin_panel = None
         self._current_panel = None
         self._scene_points.clear()
@@ -244,6 +250,31 @@ class SelectionShapeTool(BaseTool):
         self._item_to_panel_path: (
             Callable[[CoverageItem], QPainterPath | None] | None
         ) = None
+        self._snapping = PixelSelectionInteractionPort().snapping
+
+    def _snap_begin(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> QPointF:
+        """Resolve one geometric anchor when this tool participates in snapping."""
+        if not self.supports_snapping:
+            return QPointF(panel_point)
+        return self._snapping.begin(panel_point, _snap_suppressed(modifiers))
+
+    def _snap_update(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> QPointF:
+        """Resolve one geometric endpoint when this tool participates in snapping."""
+        if not self.supports_snapping:
+            return QPointF(panel_point)
+        return self._snapping.update(
+            panel_point,
+            _snap_suppressed(modifiers),
+            shift_is_active(self._is_shift_held(), modifiers),
+        )
 
     def _shape_rectangle(self, points: list[QPointF]) -> QRectF | None:
         """Return current constrained rectangle in the points' coordinate space."""
@@ -345,6 +376,8 @@ class EllipseSelectionTool(SelectionShapeTool):
 class LassoSelectionTool(SelectionShapeTool):
     """Create freeform polygonal pixel selections."""
 
+    supports_snapping: ClassVar[bool] = False
+
     def _update_scene_points(self, scene_point: QPointF) -> None:
         """Append freeform scene samples while suppressing exact duplicates."""
         if not self._scene_points or scene_point != self._scene_points[-1]:
@@ -390,3 +423,8 @@ def _gesture_rectangle(
         )
     rectangle = QRectF(origin, endpoint).normalized()
     return None if rectangle.isEmpty() else rectangle
+
+
+def _snap_suppressed(modifiers: Qt.KeyboardModifier) -> bool:
+    """Return whether the standard temporary snap override is held."""
+    return bool(modifiers & Qt.KeyboardModifier.ControlModifier)

@@ -23,8 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRect, QRectF
 from qpane.sdk.cache import CacheRegistry, cache_detail_provider
 from qpane.sdk.diagnostics import Diagnostics
 from qpane.sdk.execution import ExecutionScope
@@ -108,9 +107,7 @@ from ..selection import (
     PixelSelectionService,
     PixelSelectionState,
 )
-from ..snapping import SnapConfiguration
-from ..snapping.movement import MovementSnapCoordinator
-from ..snapping.scale import scene_units_per_device_pixel
+from ..snapping.system import SnappingSubsystem
 from ..tools import Tools
 from ..ui import CursorBuilder
 from ..vector.conversion import VectorConversionCompletion
@@ -214,7 +211,7 @@ class EditorRootComponents:
     clone_stamp: CloneStampOperation
     paint_bucket: PaintBucketCoordinator
     selection_fill: SelectionFillCoordinator
-    snap_configuration: SnapConfiguration
+    snapping: SnappingSubsystem
     coverage_shape_configuration: CoverageShapeConfiguration
     raster_paint_target: EditableRasterPaintTargetOwner
     vector: VectorDomainComponents
@@ -525,22 +522,17 @@ class EditorCompositionRoot:
             layers=layer_transform_interaction,
             operations=operation_resolver,
         )
-        snap_configuration = SnapConfiguration(callbacks.pixel_move_preview_changed)
-        coverage_shape_configuration = CoverageShapeConfiguration(
-            callbacks.pixel_move_preview_changed
-        )
-        movement_snapping = MovementSnapCoordinator(
+        snapping = SnappingSubsystem.create(
             active_scene=view.current_scene_descriptor,
             geometry=layer_geometry,
             pixel_selection=pixel_selection,
-            configuration=snap_configuration,
-            scene_units_per_device_pixel=lambda: scene_units_per_device_pixel(
-                view.viewport.zoom
-            ),
-            suppressed=lambda: bool(
-                QApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier
-            ),
+            panel_to_scene=view.panel_to_scene_point,
+            scene_to_panel=view.scene_to_panel_point,
+            viewport_zoom=lambda: view.viewport.zoom,
             changed=callbacks.pixel_move_preview_changed,
+        )
+        coverage_shape_configuration = CoverageShapeConfiguration(
+            callbacks.pixel_move_preview_changed
         )
         editor_movement_interaction = EditorMovementInteraction(
             pixels=selected_pixel_movement,
@@ -548,7 +540,7 @@ class EditorCompositionRoot:
             operations=operation_resolver,
             panel_to_scene=view.panel_to_scene_point,
             refresh_preview=callbacks.pixel_move_preview_changed,
-            snapping=movement_snapping,
+            snapping=snapping.movement,
         )
         floating_pixels = FloatingPixelRenderCompiler(
             editor_source_capabilities.pixel_presentation
@@ -570,7 +562,6 @@ class EditorCompositionRoot:
         active_mask_aperture = ActiveMaskCanvasAperture(
             active_mask_id=callbacks.active_mask_id,
             active_scene=view.coordinate_scene_descriptor,
-            coordinates=view.coordinates,
             pixel_selection=pixel_selection,
         )
 
@@ -650,7 +641,7 @@ class EditorCompositionRoot:
             clone_stamp=clone_stamp,
             paint_bucket=paint_bucket,
             selection_fill=selection_fill,
-            snap_configuration=snap_configuration,
+            snapping=snapping,
             coverage_shape_configuration=coverage_shape_configuration,
             raster_paint_target=raster_paint_target,
             vector=vector,

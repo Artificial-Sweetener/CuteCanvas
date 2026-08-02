@@ -227,10 +227,11 @@ pixels remain temporary until the user anchors them, sends them to another
 compatible layer, promotes them to a new layer, or cancels the operation.
 
 Free Transform provides corner and side handles for scale, rotation, skew, and
-translation. Move and Transform both use the same snapping system. By default,
-snapping follows the visible painted content instead of the transparent storage
-around it; hosts can choose another geometry policy when fixed bounds are
-meaningful.
+translation. The shared snapping policy applies to Move and to geometric mask,
+pixel-selection, vector-shape, and vector-path authoring. By default, snapping
+follows visible painted content instead of transparent storage around it; hosts
+can choose another geometry policy when fixed bounds are meaningful. Freehand
+painting, lasso gestures, fills, and SAM region boxes remain unsnapped.
 
 ## Save the Editable Work
 

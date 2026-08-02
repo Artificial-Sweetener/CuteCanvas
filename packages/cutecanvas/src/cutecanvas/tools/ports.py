@@ -55,6 +55,24 @@ def _one() -> float:
     return 1.0
 
 
+def _point(
+    point: QPointF,
+    _suppressed: bool = False,
+    _constrain: bool = False,
+) -> QPointF:
+    """Return a detached point for inert authoring-snap defaults."""
+    return QPointF(point)
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringSnapPort:
+    """Resolve panel-space geometry through the shared authoring session."""
+
+    begin: Callable[[QPointF, bool], QPointF] = _point
+    update: Callable[[QPointF, bool, bool], QPointF] = _point
+    clear: Callable[[], bool] = _false
+
+
 @dataclass(frozen=True, slots=True)
 class MoveInteractionPort:
     """Dependencies used by source-neutral layer and pixel movement."""
@@ -110,6 +128,7 @@ class PixelSelectionInteractionPort:
     coverage_item_to_panel_path: (
         Callable[[CoverageItem], QPainterPath | None] | None
     ) = None
+    snapping: AuthoringSnapPort = field(default_factory=AuthoringSnapPort)
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +222,7 @@ class VectorInteractionPort:
         lambda _points, _closed: None
     )
     shape_is_ellipse: Callable[[], bool] = _false
+    snapping: AuthoringSnapPort = field(default_factory=AuthoringSnapPort)
 
 
 @dataclass(frozen=True, slots=True)

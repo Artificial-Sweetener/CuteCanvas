@@ -18,9 +18,20 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from qpane.sdk.scene import LayerTransform, SceneDescriptor
+from qpane.sdk.scene import (
+    LayerClip,
+    LayerDescriptor,
+    LayerPlacement,
+    LayerTransform,
+    SceneDescriptor,
+)
+
+TransformPreviewClipResolver = Callable[
+    [SceneDescriptor, LayerDescriptor, LayerPlacement], LayerClip | None
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +46,14 @@ class LayerTransformPreview:
 class SceneLayerTransformPreview:
     """Own and apply one transient layer transform without source mutation."""
 
-    def __init__(self) -> None:
-        """Initialize without an active transform preview."""
+    def __init__(
+        self,
+        resolve_clip: TransformPreviewClipResolver | None = None,
+    ) -> None:
+        """Initialize with an optional source-owned presentation-clip policy."""
         self._preview: LayerTransformPreview | None = None
         self._revision = 0
+        self._resolve_clip = resolve_clip or _preserve_clip
 
     @property
     def current(self) -> LayerTransformPreview | None:
@@ -82,12 +97,23 @@ class SceneLayerTransformPreview:
             if layer.layer_id != preview.layer_id or layer.raster_bounds is None:
                 layers.append(layer)
                 continue
+            placement = preview.transform.map_bounds(layer.raster_bounds)
             layers.append(
                 replace(
                     layer,
-                    placement=preview.transform.map_bounds(layer.raster_bounds),
+                    placement=placement,
                     transform=preview.transform,
+                    clip=self._resolve_clip(scene, layer, placement),
                 )
             )
             changed = True
         return replace(scene, layers=tuple(layers)) if changed else scene
+
+
+def _preserve_clip(
+    _scene: SceneDescriptor,
+    layer: LayerDescriptor,
+    _placement: LayerPlacement,
+) -> LayerClip | None:
+    """Preserve descriptor clips when no source-specific policy is installed."""
+    return layer.clip
