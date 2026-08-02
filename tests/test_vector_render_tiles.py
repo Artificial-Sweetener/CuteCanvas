@@ -255,10 +255,10 @@ def test_rejection_and_shutdown_remain_bounded(qapp: QApplication) -> None:
     disabled.shutdown()
 
 
-def test_fallback_is_atomic_and_limited_to_compatible_source_geometry(
+def test_fallback_is_atomic_and_limited_to_visual_compatibility_identity(
     qapp: QApplication,
 ) -> None:
-    """Revisions may reuse settled tiles only when their coordinate space matches."""
+    """Only revisions with identical rendered content may reuse settled tiles."""
     executor = ControlledExecution()
     cache = RenderTileCache(8 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
@@ -291,17 +291,29 @@ def test_fallback_is_atomic_and_limited_to_compatible_source_geometry(
         assert compatible.pending and not compatible.exact
         assert compatible.products == exact.products
 
+        revised = VectorDocument(
+            original.vector_id,
+            original.bounds,
+            original.objects,
+            revision=original.revision + 1,
+        )
+        changed_content = coordinator.request(
+            source=VectorRenderTileSource(revised, 2),
+            **request_args,
+        )
+        assert changed_content.pending and changed_content.products is None
+
         resized = VectorDocument(
             original.vector_id,
             RasterBounds(-20, 0, 276, 192),
             original.objects,
-            revision=2,
+            revision=original.revision + 2,
         )
-        incompatible = coordinator.request(
-            source=VectorRenderTileSource(resized, 2),
+        changed_geometry = coordinator.request(
+            source=VectorRenderTileSource(resized, 3),
             **request_args,
         )
-        assert incompatible.pending and incompatible.products is None
+        assert changed_geometry.pending and changed_geometry.products is None
     finally:
         coordinator.shutdown()
 

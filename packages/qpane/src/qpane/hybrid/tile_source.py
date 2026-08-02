@@ -57,8 +57,12 @@ class HybridRenderTileSource:
 
     @property
     def fallback_key(self) -> Hashable:
-        """Return source geometry shared by visually compatible revisions."""
-        return self.document.bounds
+        """Return exact content and presentation fallback identity."""
+        return (
+            self.document.bounds,
+            self.document.revision,
+            self.presentation_revision,
+        )
 
     @property
     def bounds(self) -> RasterBounds:

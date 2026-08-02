@@ -58,8 +58,8 @@ class VectorRenderTileSource:
 
     @property
     def fallback_key(self) -> Hashable:
-        """Return source geometry shared by visually compatible revisions."""
-        return self.document.bounds
+        """Return exact semantic-vector content fallback identity."""
+        return self.document.bounds, self.document.revision
 
     def render_tiles(
         self,

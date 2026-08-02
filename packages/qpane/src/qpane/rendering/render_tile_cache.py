@@ -86,7 +86,7 @@ class RenderTileCache:
         self,
         requests: tuple[RenderTileRequest, ...],
     ) -> tuple[RenderTileProduct, ...] | None:
-        """Return one cached revision that completely covers every requested core."""
+        """Return one compatible revision covering every requested core."""
         if not requests:
             return ()
         first = requests[0].key

@@ -71,7 +71,7 @@ class RenderTileBatchSource(Protocol):
 
     @property
     def fallback_key(self) -> Hashable:
-        """Return geometry identity shared by visually compatible revisions."""
+        """Return identity shared only by visually compatible revisions."""
         ...
 
     @property

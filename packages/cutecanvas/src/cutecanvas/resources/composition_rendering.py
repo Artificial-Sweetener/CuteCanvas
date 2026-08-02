@@ -94,9 +94,15 @@ class CompositionRenderTileSource:
 
     @property
     def fallback_key(self) -> Hashable:
-        """Return geometry shared by visually compatible revisions."""
+        """Return exact composition content fallback identity."""
         bounds = self.canvas_bounds
-        return bounds.x(), bounds.y(), bounds.width(), bounds.height()
+        return (
+            bounds.x(),
+            bounds.y(),
+            bounds.width(),
+            bounds.height(),
+            self.resource_revision,
+        )
 
     @property
     def bounds(self) -> RasterBounds:
