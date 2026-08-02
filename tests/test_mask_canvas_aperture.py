@@ -22,7 +22,7 @@ from collections.abc import Iterator
 
 import numpy as np
 import pytest
-from cutecanvas import PixelSelectionMode
+from cutecanvas import PixelSelectionMode, RasterExtentPolicy
 from cutecanvas.masks.stroke_constraints import PathStrokeConstraint
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QPainterPath
@@ -328,6 +328,56 @@ def test_brush_authors_only_the_exposed_canvas_of_an_infinite_moved_mask(
     restored = viewer.exportMaskImage(mask_id)
     assert restored is not None
     assert restored.pixelColor(50, 200).value() == 255
+
+
+def test_mask_shape_authors_after_raster_storage_expands_from_layer_origin(
+    wide_harness: MountedQPaneHarness,
+) -> None:
+    """Retained shapes must remain in layer-local space after raster expansion."""
+    harness = wide_harness
+    viewer = harness.viewer
+    mask_id = harness.mask_ids[0]
+    mask_info = viewer.listMasksForComposition()[0]
+    assert mask_info.scene_id is not None
+    assert mask_info.layer_id is not None
+    viewer.setRasterExtentPolicy(
+        mask_info.scene_id,
+        mask_info.layer_id,
+        RasterExtentPolicy.EXPAND_ON_WRITE,
+    )
+    initial_state = viewer.rasterSurfaceState(
+        mask_info.scene_id,
+        mask_info.layer_id,
+    )
+    assert initial_state is not None
+    assert initial_state.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
+    layer = _active_mask_layer(harness)
+    assert layer.translate(QPointF(500.0, 0.0))
+
+    viewer.setBrushSize(20)
+    viewer.setControlMode(viewer.CONTROL_MODE_DRAW_BRUSH)
+    QTest.mouseClick(
+        viewer,
+        Qt.MouseButton.LeftButton,
+        pos=_panel_point(harness, 50.0, 200.0),
+    )
+    assert harness.wait_for_mask_undo_depth(mask_id, 1)
+    state = viewer.rasterSurfaceState(mask_info.scene_id, mask_info.layer_id)
+    assert state is not None
+    assert state.bounds.x() < 0
+
+    viewer.setControlMode(viewer.CONTROL_MODE_MASK_RECTANGLE)
+    start = _panel_point(harness, 100.0, 100.0)
+    end = _panel_point(harness, 200.0, 200.0)
+    QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(viewer, end)
+    QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+    harness.drain_events()
+
+    assert viewer.getMaskUndoState(mask_id).undo_depth == 2
+    authored = viewer.exportMaskImage(mask_id)
+    assert authored is not None
+    assert authored.pixelColor(150, 150).value() == 255
 
 
 def test_large_canvas_aperture_samples_only_the_requested_dirty_region() -> None:

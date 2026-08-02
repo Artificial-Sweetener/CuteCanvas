@@ -50,10 +50,16 @@ class ActiveMaskLayerCoordinates:
 
     def panel_to_source(self, panel_point: QPoint | QPointF) -> QPointF | None:
         """Project a canvas panel point into unbounded mask-local space."""
-        scene_point = self._coordinates.panel_to_scene(PanelPoint.from_qt(panel_point))
-        return (
-            None if scene_point is None else self.scene_to_source(scene_point.to_qt())
+        resolved = self._resolved_layer()
+        if resolved is None:
+            return None
+        scene, layer = resolved
+        local = self._coordinates.panel_to_layer_local(
+            scene.scene_id,
+            layer.layer_id,
+            PanelPoint.from_qt(panel_point),
         )
+        return None if local is None else local.to_qt()
 
     def scene_to_source(self, scene_point: QPoint | QPointF) -> QPointF | None:
         """Project a canvas scene point into unbounded mask-local space."""

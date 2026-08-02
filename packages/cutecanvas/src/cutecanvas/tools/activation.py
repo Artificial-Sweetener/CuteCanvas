@@ -123,6 +123,7 @@ def build_editor_tool_ports(
     painting = qpane.paintingCoordinator()
     paint_destination = qpane.interactivePaintDestination()
     mask_aperture = qpane.activeMaskCanvasAperture()
+    mask_coordinates = qpane.activeMaskLayerCoordinates()
     canvas_aperture = CoverageCanvasAperture(
         active_scene=qpane.view().current_scene_descriptor,
         panel_to_scene=qpane.view().panel_to_scene_point,
@@ -131,31 +132,37 @@ def build_editor_tool_ports(
     mask_shape_aperture = CoverageCanvasAperture(
         active_scene=qpane.view().current_scene_descriptor,
         panel_to_scene=qpane.view().panel_to_scene_point,
-        target_to_panel=painting.target_to_panel,
+        target_to_panel=mask_coordinates.source_to_panel,
         target_aperture_path=mask_aperture.coverage_aperture_path,
     )
     selection_port = PixelSelectionInteractionPort(
         panel_to_scene_point=qpane.view().panel_to_scene_point,
-        can_select=lambda: qpane.editorOperationResolver()
-        .resolve(EditorOperation.SELECT_PIXELS)
-        .allowed,
+        can_select=lambda: (
+            qpane.editorOperationResolver()
+            .resolve(EditorOperation.SELECT_PIXELS)
+            .allowed
+        ),
         commit_pixel_selection=qpane.editorInteraction().commit_active_pixel_selection,
         commit_coverage_item=qpane.editorInteraction().commit_active_coverage_item,
         is_shift_held=is_shift_held,
         is_alt_held=is_alt_held,
-        get_shape_feather_radius=lambda: qpane.coverageShapeConfiguration().options.feather_radius,
+        get_shape_feather_radius=lambda: (
+            qpane.coverageShapeConfiguration().options.feather_radius
+        ),
         constrain_coverage_item=canvas_aperture.constrain_item,
         coverage_item_to_panel_path=canvas_aperture.item_panel_path,
         snapping=authoring_snap_port,
     )
     coverage_shape_port = PixelSelectionInteractionPort(
-        panel_to_scene_point=painting.panel_to_target,
+        panel_to_scene_point=mask_coordinates.panel_to_source,
         can_select=painting.can_commit_coverage_item,
         commit_coverage_item=painting.commit_coverage_item,
         is_shift_held=is_shift_held,
         is_alt_held=is_alt_held,
         default_combine_mode=CoverageCombineMode.ADD,
-        get_shape_feather_radius=lambda: qpane.coverageShapeConfiguration().options.feather_radius,
+        get_shape_feather_radius=lambda: (
+            qpane.coverageShapeConfiguration().options.feather_radius
+        ),
         constrain_coverage_item=mask_shape_aperture.constrain_item,
         coverage_item_to_panel_path=mask_shape_aperture.item_panel_path,
         snapping=authoring_snap_port,
@@ -207,7 +214,6 @@ def build_editor_tool_ports(
         is_shift_held=is_shift_held,
         is_alt_held=is_alt_held,
     )
-    mask_coordinates = qpane.activeMaskLayerCoordinates()
     smart_selection_port = SmartSelectionInteractionPort(
         is_alt_held=is_alt_held,
         get_dpr=qpane.devicePixelRatioF,
