@@ -66,6 +66,10 @@ class FramePatchPainter:
         clip_path.setFillRule(Qt.FillRule.WindingFill)
         for buffer_clip in buffer_clips:
             clip_path.addRect(buffer_clip)
+        if len(buffer_clips) > 1:
+            # Remove shared subpath edges so Qt keeps one raster-sampling phase
+            # across adjacent repair cells at fractional zoom levels.
+            clip_path = clip_path.simplified()
         painter.save()
         try:
             painter.setClipPath(clip_path, Qt.ClipOperation.IntersectClip)

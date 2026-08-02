@@ -24,6 +24,7 @@ from qpane.rendering.navigation_plan import translated_navigation_plan
 from qpane.scene.render_plan import RenderStrategy
 
 from qpane.rendering import Renderer
+from tests.helpers.render_compare import checker_image
 from tests.helpers.render_plan import make_render_plan
 
 
@@ -117,6 +118,39 @@ def test_canonical_physical_patches_never_remerge(qapp) -> None:
         and patch.height() <= renderer._COMPOSITING_PATCH_PHYSICAL_PX
         for patch in patches
     )
+
+
+def test_adjacent_damage_patches_preserve_fractional_zoom_pixels(qapp) -> None:
+    """Adjacent repair clips must keep the full-frame raster sampling phase."""
+    qpane_rect = QRect(0, 0, 600, 400)
+    host = _DummyRendererHost(qpane_rect)
+    host.viewport.zoom = 2.01
+    renderer = Renderer(host)
+    renderer.allocate_buffers(qpane_rect.size(), 1.0)
+    source_image = checker_image(QSize(320, 240))
+    transform = QTransform()
+    transform.translate(qpane_rect.center().x(), qpane_rect.center().y())
+    transform.scale(host.viewport.zoom, host.viewport.zoom)
+    transform.translate(-source_image.width() / 2.0, -source_image.height() / 2.0)
+    plan = make_render_plan(
+        qpane_rect,
+        source_image=source_image,
+        transform=transform,
+        zoom=host.viewport.zoom,
+        physical_viewport_rect=QRectF(qpane_rect),
+    )
+    renderer._redraw_base_image_buffer(QRegion(qpane_rect), plan)
+    expected = renderer.get_base_buffer()
+    assert expected is not None
+    adjacent_patch_damage = QRegion(QRect(430, 180, 40, 40))
+
+    renderer._redraw_base_image_buffer(adjacent_patch_damage, plan)
+
+    assert renderer._physical_buffer_rects_for_damage(adjacent_patch_damage) == [
+        QRect(0, 0, 512, 512),
+        QRect(512, 0, 216, 512),
+    ]
+    assert renderer.get_base_buffer() == expected
 
 
 def test_mark_dirty_supports_qregion_inputs():
