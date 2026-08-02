@@ -180,11 +180,18 @@ def _product_identity(item: SceneRenderItem) -> tuple[object, ...]:
     if isinstance(item, SampledLayerRenderItem):
         return (
             *common,
+            None if item.source_bounds is None else _rect_identity(item.source_bounds),
             tuple(
                 (
                     tile.image.cacheKey(),
                     _rect_identity(tile.source_rect),
                     _rect_identity(tile.image_source_rect),
+                    (
+                        None
+                        if tile.source_clip_rect is None
+                        else _rect_identity(tile.source_clip_rect)
+                    ),
+                    tile.integer_origin_sampling,
                 )
                 for tile in item.tiles
             ),

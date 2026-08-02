@@ -93,7 +93,6 @@ class RasterLayerRenderItem:
     visible_tile_range: tuple[int, int, int, int] | None
     is_base_raster: bool = False
     effect_clip_path: QPainterPath | None = None
-    source_clip_rect: QRectF | None = None
 
     def __post_init__(self) -> None:
         """Validate stable raster planning values."""
@@ -104,12 +103,6 @@ class RasterLayerRenderItem:
                 self,
                 "effect_clip_path",
                 QPainterPath(self.effect_clip_path),
-            )
-        if self.source_clip_rect is not None:
-            object.__setattr__(
-                self,
-                "source_clip_rect",
-                QRectF(self.source_clip_rect),
             )
         if self.pyramid_scale <= 0.0:
             raise ValueError("pyramid scale must be positive")
@@ -131,6 +124,8 @@ class SampledTileRenderData:
     image: QImage
     source_rect: QRectF
     image_source_rect: QRectF
+    source_clip_rect: QRectF | None = None
+    integer_origin_sampling: bool = False
 
     def __post_init__(self) -> None:
         """Detach mutable Qt values from the cache-owned product."""
@@ -141,6 +136,12 @@ class SampledTileRenderData:
             "image_source_rect",
             QRectF(self.image_source_rect),
         )
+        if self.source_clip_rect is not None:
+            object.__setattr__(
+                self,
+                "source_clip_rect",
+                QRectF(self.source_clip_rect),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,12 +194,15 @@ class SampledLayerRenderItem:
     render_hint_enabled: bool
     tiles: tuple[SampledTileRenderData, ...]
     effect_clip_path: QPainterPath | None = None
+    source_bounds: QRectF | None = None
 
     def __post_init__(self) -> None:
         """Detach mutable Qt drawing and geometry values."""
         object.__setattr__(self, "transform", QTransform(self.transform))
         object.__setattr__(self, "source_size", QSize(self.source_size))
         object.__setattr__(self, "tiles", tuple(self.tiles))
+        if self.source_bounds is not None:
+            object.__setattr__(self, "source_bounds", QRectF(self.source_bounds))
         if self.effect_clip_path is not None:
             object.__setattr__(
                 self,

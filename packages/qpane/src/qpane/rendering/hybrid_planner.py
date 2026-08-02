@@ -22,18 +22,26 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QSize
 
+from ..hybrid.model import HybridRasterPrimitive
 from ..hybrid.tile_source import HybridRenderTileSource
-from ..scene.model import LayerDescriptor
+from ..scene.identity import source_render_asset_key
+from ..scene.model import LayerDescriptor, LayerKind
 from ..scene.render_plan import SampledLayerRenderItem, SampledTileRenderData
 from .compiled_scene import CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
+from .raster_products import RasterRenderProductStore
 from .raster_sampling import (
     raster_sample_scale_limit,
     smooth_raster_sampling_enabled,
 )
 from .render_tile_types import RenderTileBatchSource
 from .render_tiles import RenderTileWorkCoordinator
+from .sampled_atlas import compact_native_sampled_tiles
+from .sampled_lattice import (
+    sampled_source_lattice,
+    source_sampling_phase_is_fractional,
+)
 from .sdk import HybridSource
 
 
@@ -53,10 +61,12 @@ class HybridRenderPlanner:
         *,
         projector: SceneFrameProjector,
         refinement: RenderTileWorkCoordinator,
+        products: RasterRenderProductStore,
     ) -> None:
         """Bind hybrid snapshots, frame projection, and shared refinement."""
         self._projector = projector
         self._refinement = refinement
+        self._products = products
 
     def build_frame_items(
         self,
@@ -85,6 +95,15 @@ class HybridRenderPlanner:
             )
             if not document.primitives:
                 continue
+            raster_only = all(
+                isinstance(primitive, HybridRasterPrimitive)
+                for primitive in document.primitives
+            )
+            raster_backed_mask = layer.kind is LayerKind.MASK and any(
+                isinstance(primitive, HybridRasterPrimitive)
+                for primitive in document.primitives
+            )
+            native_phase_stable = raster_only or raster_backed_mask
             refinement = self._refinement.request(
                 source=HybridRenderTileSource(
                     document,
@@ -94,9 +113,13 @@ class HybridRenderPlanner:
                 source_to_panel=layer_to_panel,
                 panel_rect=frame.sampling_panel_rect,
                 device_pixel_ratio=frame.device_pixel_ratio,
-                maximum_scale=raster_sample_scale_limit(
-                    layer_to_panel,
-                    frame.device_pixel_ratio,
+                maximum_scale=(
+                    1.0
+                    if native_phase_stable
+                    else raster_sample_scale_limit(
+                        layer_to_panel,
+                        frame.device_pixel_ratio,
+                    )
                 ),
             )
             products = refinement.products
@@ -104,6 +127,41 @@ class HybridRenderPlanner:
                 pending_layer_ids.add(layer.layer_id)
             if products is None:
                 continue
+            tiles = tuple(
+                SampledTileRenderData(
+                    product.image,
+                    product.source_rect,
+                    product.image_source_rect,
+                )
+                for product in products
+            )
+            source_bounds = None
+            if native_phase_stable and source_sampling_phase_is_fractional(
+                layer_to_panel,
+                frame.device_pixel_ratio,
+            ):
+                lattice = sampled_source_lattice(
+                    descriptor=layer,
+                    source_size=source_size,
+                    source_to_panel=layer_to_panel,
+                    panel_rect=frame.sampling_panel_rect,
+                )
+                if lattice is not None:
+                    atlas = compact_native_sampled_tiles(
+                        products=self._products,
+                        asset_key=source_render_asset_key(
+                            source_id=document.source_id,
+                            source_kind="hybrid",
+                            revision=snapshot.revision,
+                            source_path=None,
+                        ),
+                        product_identity=tuple(product.key for product in products),
+                        atlas_rect=lattice.source_rect,
+                        tiles=tiles,
+                    )
+                    if atlas is not None:
+                        tiles = (atlas,)
+                        source_bounds = atlas.source_rect
             items.append(
                 SampledLayerRenderItem(
                     descriptor=layer,
@@ -112,14 +170,8 @@ class HybridRenderPlanner:
                     clip=layer.clip,
                     source_size=source_size,
                     render_hint_enabled=render_hint_enabled,
-                    tiles=tuple(
-                        SampledTileRenderData(
-                            product.image,
-                            product.source_rect,
-                            product.image_source_rect,
-                        )
-                        for product in products
-                    ),
+                    tiles=tiles,
+                    source_bounds=source_bounds,
                 )
             )
         for compiled_layer in compiled.sampled_layers:

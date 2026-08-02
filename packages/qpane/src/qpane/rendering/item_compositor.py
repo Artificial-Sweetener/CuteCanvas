@@ -36,6 +36,7 @@ from ..scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
     SampledLayerRenderItem,
+    SampledTileRenderData,
     SceneRenderItem,
     SceneRenderPlan,
     TransientRasterContribution,
@@ -269,7 +270,39 @@ class SceneItemCompositor:
                 tile.source_rect.intersects(source_clip) for source_clip in source_clips
             ):
                 continue
-            painter.drawImage(tile.source_rect, tile.image, tile.image_source_rect)
+            SceneItemCompositor._draw_sampled_tile(painter, tile)
+
+    @staticmethod
+    def _draw_sampled_tile(
+        painter: QPainter,
+        tile: SampledTileRenderData,
+    ) -> None:
+        """Draw one sample with optional source-local core clipping."""
+        source_clip_rect = tile.source_clip_rect
+        if source_clip_rect is None:
+            SceneItemCompositor._draw_sampled_image(painter, tile)
+            return
+        painter.save()
+        try:
+            painter.setClipRect(source_clip_rect, Qt.ClipOperation.IntersectClip)
+            SceneItemCompositor._draw_sampled_image(painter, tile)
+        finally:
+            painter.restore()
+
+    @staticmethod
+    def _draw_sampled_image(
+        painter: QPainter,
+        tile: SampledTileRenderData,
+    ) -> None:
+        """Preserve native sample phase while scaling derived products as needed."""
+        if tile.integer_origin_sampling:
+            painter.drawImage(
+                round(tile.source_rect.x()),
+                round(tile.source_rect.y()),
+                tile.image,
+            )
+            return
+        painter.drawImage(tile.source_rect, tile.image, tile.image_source_rect)
 
     def _draw_sampled_replacement(
         self,
@@ -286,7 +319,7 @@ class SceneItemCompositor:
         self._apply_layer_effects(painter, item)
         painter.setOpacity(item.descriptor.opacity)
         for tile in preview.tiles:
-            painter.drawImage(tile.source_rect, tile.image, tile.image_source_rect)
+            self._draw_sampled_tile(painter, tile)
 
     def _draw_resolved_sampled_item(
         self,
@@ -396,24 +429,15 @@ class SceneItemCompositor:
         panel_clips: tuple[QRectF, ...] | None = None,
     ) -> None:
         """Draw one raster source through its selected strategy."""
-        painter.save()
-        try:
-            if item.source_clip_rect is not None:
-                painter.setClipRect(
-                    item.source_clip_rect,
-                    Qt.ClipOperation.IntersectClip,
-                )
-            if item.strategy == RenderStrategy.DIRECT:
-                self._draw_direct_view(painter, item)
-            elif item.strategy == RenderStrategy.TILE:
-                self._draw_tiled_view(
-                    painter,
-                    plan,
-                    item,
-                    source_clips=self._source_clips(item, panel_clips),
-                )
-        finally:
-            painter.restore()
+        if item.strategy == RenderStrategy.DIRECT:
+            self._draw_direct_view(painter, item)
+        elif item.strategy == RenderStrategy.TILE:
+            self._draw_tiled_view(
+                painter,
+                plan,
+                item,
+                source_clips=self._source_clips(item, panel_clips),
+            )
 
     @staticmethod
     def _source_clips(
@@ -439,7 +463,12 @@ class SceneItemCompositor:
         source_width, source_height = SceneItemCompositor.item_source_size(item)
         if source_width <= 0 or source_height <= 0:
             return QRect()
-        source_rect = QRectF(0.0, 0.0, float(source_width), float(source_height))
+        source_rect = (
+            QRectF(item.source_bounds)
+            if isinstance(item, SampledLayerRenderItem)
+            and item.source_bounds is not None
+            else QRectF(0.0, 0.0, float(source_width), float(source_height))
+        )
         return (
             item.transform.mapRect(source_rect).toAlignedRect().adjusted(-1, -1, 1, 1)
         )

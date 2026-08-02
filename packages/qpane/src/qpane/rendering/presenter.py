@@ -199,6 +199,7 @@ class RenderingPresenter:
         self._hybrid_planner = HybridRenderPlanner(
             projector=self._frame_projector,
             refinement=self._render_refinement,
+            products=self._raster_products,
         )
         self._layer_effects = LayerEffectFrameCompiler(layer_effects)
         self._layer_clip_presentations = LayerClipPresentationRegistry()

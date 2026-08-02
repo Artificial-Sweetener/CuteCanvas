@@ -21,11 +21,11 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from math import isclose
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF
-from PySide6.QtGui import QImage, QTransform
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF, Qt
+from PySide6.QtGui import QImage, QPainter, QTransform
 
 from ..scene.identity import (
     SceneLayerAssetKey,
@@ -38,10 +38,13 @@ from ..scene.raster import RasterBounds
 from ..scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
+    SampledLayerRenderItem,
+    SampledTileRenderData,
     TileRenderData,
 )
 from ..scene.source_capabilities import (
     RasterPatchPresentationRegistry,
+    RasterPresentation,
     RasterPresentationRegistry,
     RasterProductPolicy,
     RasterSourcePatch,
@@ -55,12 +58,19 @@ from .raster_sampling import (
     smooth_raster_sampling_for_physical_scale,
 )
 from .render_tile_geometry import scale_bucket
+from .sampled_lattice import (
+    sampled_source_lattice,
+    source_sampling_phase_is_fractional,
+)
 from .scene_compiler import SceneRenderCompiler
 from .tiles import TileManager
 from .viewport import Viewport
 from .visibility import visible_source_rect_for_layer
 
 logger = logging.getLogger(__name__)
+
+_MAX_SPARSE_ATLAS_PIXELS = 4 * 1024 * 1024
+_MAX_SPARSE_ATLAS_EXPANSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +105,7 @@ class RasterLayerGeometry:
 class _RasterPlanningResult:
     """Raster primitive plus tile keys requested while building it."""
 
-    item: RasterLayerRenderItem
+    item: RasterLayerRenderItem | SampledLayerRenderItem
     visible_tile_keys: frozenset[SceneLayerTileKey]
 
 
@@ -153,7 +163,7 @@ class RasterRenderPlanner:
         frame: RenderFrameGeometry,
         *,
         layers: tuple[CompiledRenderLayer, ...] | None = None,
-    ) -> tuple[RasterLayerRenderItem, ...]:
+    ) -> tuple[RasterLayerRenderItem | SampledLayerRenderItem, ...]:
         """Build ordered raster primitives for one viewport frame."""
         planned_layers = compiled.layers if layers is None else layers
         results = tuple(
@@ -228,28 +238,16 @@ class RasterRenderPlanner:
         frame: RenderFrameGeometry,
         qpane_rect: QRectF,
     ) -> tuple[RasterLayerGeometry, ...]:
-        """Return ordinary geometry for each sparse patch or dense source."""
-        patch_layers = self._patch_layers(compiled, layer, frame)
-        candidates = ((layer, None),) if patch_layers is None else patch_layers
-        geometries: list[RasterLayerGeometry] = []
-        for candidate, patch in candidates:
-            source_product = (
-                self._source_image(compiled, candidate, frame)
-                if patch is None
-                else self._patch_product(candidate, patch, frame)
-            )
-            if source_product is None:
-                continue
-            geometry = self._layer_geometry_for_product(
-                compiled=compiled,
-                layer=candidate,
-                frame=frame,
-                qpane_rect=qpane_rect,
-                source_product=source_product,
-            )
-            if geometry is not None:
-                geometries.append(geometry)
-        return tuple(geometries)
+        """Return tile-worker geometry only for a dense raster product."""
+        if self._source_patches(compiled, layer, frame) is not None:
+            return ()
+        geometry = self._layer_geometry(
+            compiled=compiled,
+            layer=layer,
+            frame=frame,
+            qpane_rect=qpane_rect,
+        )
+        return () if geometry is None else (geometry,)
 
     def tile_draw_position(self, key: SceneLayerTileKey) -> QPointF:
         """Return a tile's upper-left source coordinate."""
@@ -346,28 +344,201 @@ class RasterRenderPlanner:
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
     ) -> tuple[_RasterPlanningResult, ...]:
-        """Build one dense item or multiple ordinary sparse-patch items."""
-        patch_layers = self._patch_layers(compiled, layer, frame)
-        if patch_layers is None:
+        """Build one dense item or one globally sampled sparse-patch batch."""
+        patches = self._source_patches(compiled, layer, frame)
+        if patches is None:
             result = self._build_item(compiled=compiled, layer=layer, frame=frame)
             return () if result is None else (result,)
-        results: list[_RasterPlanningResult] = []
-        for patch_layer, patch in patch_layers:
-            source_product = self._patch_product(patch_layer, patch, frame)
-            if source_product is None:
-                continue
-            result = self._build_product_item(
-                compiled=compiled,
-                layer=patch_layer,
-                frame=frame,
-                source_product=source_product,
-                source_clip_bounds=(
-                    patch.bounds if patch.sample_bounds != patch.bounds else None
-                ),
+        result = self._build_patch_item(
+            compiled=compiled,
+            layer=layer,
+            frame=frame,
+            patches=patches,
+        )
+        return () if result is None else (result,)
+
+    def _build_patch_item(
+        self,
+        *,
+        compiled: CompiledRenderScene,
+        layer: CompiledRenderLayer,
+        frame: RenderFrameGeometry,
+        patches: tuple[RasterSourcePatch, ...],
+    ) -> _RasterPlanningResult | None:
+        """Build visible sparse patches on one logical source sampling lattice."""
+        if not patches:
+            return None
+        transform = self._projector.layer_to_panel(
+            scene=compiled.scene,
+            layer=layer.descriptor,
+            source_size=layer.source_size,
+            frame=frame,
+        )
+        lattice = (
+            sampled_source_lattice(
+                descriptor=layer.descriptor,
+                source_size=layer.source_size,
+                source_to_panel=transform,
+                panel_rect=frame.sampling_panel_rect,
             )
-            if result is not None:
-                results.append(result)
-        return tuple(results)
+            if source_sampling_phase_is_fractional(
+                transform,
+                frame.device_pixel_ratio,
+            )
+            else None
+        )
+        resolved_patches: list[tuple[RasterSourcePatch, _RasterSourceProduct]] = []
+        for patch in patches:
+            source_product = self._patch_product(layer, patch, frame)
+            if source_product is not None and patch.sample_bounds is not None:
+                resolved_patches.append((patch, source_product))
+        atlas_tile = self._native_patch_atlas(
+            layer,
+            tuple(resolved_patches),
+            atlas_bounds=None if lattice is None else lattice.local_bounds,
+        )
+        if atlas_tile is not None:
+            return _RasterPlanningResult(
+                item=SampledLayerRenderItem(
+                    descriptor=layer.descriptor,
+                    transform=transform,
+                    placement=layer.descriptor.placement,
+                    clip=layer.descriptor.clip,
+                    source_size=layer.source_size,
+                    render_hint_enabled=smooth_raster_sampling_enabled(
+                        transform,
+                        frame.device_pixel_ratio,
+                    ),
+                    tiles=(atlas_tile,),
+                    source_bounds=atlas_tile.source_rect,
+                ),
+                visible_tile_keys=frozenset(),
+            )
+        tiles: list[SampledTileRenderData] = []
+        source_bounds: QRectF | None = None
+        for patch, source_product in resolved_patches:
+            sample_bounds = patch.sample_bounds
+            if sample_bounds is None:
+                continue
+            sample_rect = self._patch_source_rect(layer, sample_bounds)
+            core_rect = self._patch_source_rect(layer, patch.bounds)
+            tiles.append(
+                SampledTileRenderData(
+                    source_product.image,
+                    sample_rect,
+                    QRectF(source_product.image.rect()),
+                    core_rect if patch.bounds != sample_bounds else None,
+                )
+            )
+            source_bounds = (
+                QRectF(core_rect)
+                if source_bounds is None
+                else source_bounds.united(core_rect)
+            )
+        if not tiles:
+            return None
+        return _RasterPlanningResult(
+            item=SampledLayerRenderItem(
+                descriptor=layer.descriptor,
+                transform=transform,
+                placement=layer.descriptor.placement,
+                clip=layer.descriptor.clip,
+                source_size=layer.source_size,
+                render_hint_enabled=smooth_raster_sampling_enabled(
+                    transform,
+                    frame.device_pixel_ratio,
+                ),
+                tiles=tuple(tiles),
+                source_bounds=source_bounds,
+            ),
+            visible_tile_keys=frozenset(),
+        )
+
+    def _native_patch_atlas(
+        self,
+        layer: CompiledRenderLayer,
+        patches: tuple[tuple[RasterSourcePatch, _RasterSourceProduct], ...],
+        *,
+        atlas_bounds: RasterBounds | None,
+    ) -> SampledTileRenderData | None:
+        """Return one cached native atlas when sparse spacing remains bounded."""
+        if not patches or any(
+            product.scale != 1.0 or product.image.size() != patch.image.size()
+            for patch, product in patches
+        ):
+            return None
+        resolved_atlas_bounds = (
+            patches[0][0].bounds if atlas_bounds is None else atlas_bounds
+        )
+        core_pixels = 0
+        for patch, _product in patches:
+            if atlas_bounds is None:
+                resolved_atlas_bounds = resolved_atlas_bounds.united(patch.bounds)
+            core_pixels += patch.bounds.width * patch.bounds.height
+        atlas_pixels = resolved_atlas_bounds.width * resolved_atlas_bounds.height
+        if (
+            atlas_pixels > _MAX_SPARSE_ATLAS_PIXELS
+            or atlas_pixels > core_pixels * _MAX_SPARSE_ATLAS_EXPANSION
+        ):
+            return None
+        atlas_id = uuid.uuid5(
+            layer.pyramid_asset_key.source_id,
+            "atlas:"
+            + ":".join(
+                f"{patch.bounds.x},{patch.bounds.y},{patch.bounds.width},{patch.bounds.height}"
+                for patch, _product in patches
+            )
+            + f":{resolved_atlas_bounds.x},{resolved_atlas_bounds.y},"
+            f"{resolved_atlas_bounds.width},{resolved_atlas_bounds.height}",
+        )
+        atlas_key = source_render_asset_key(
+            source_id=atlas_id,
+            source_kind=f"{layer.pyramid_asset_key.source_kind}-patch-atlas",
+            revision=layer.pyramid_asset_key.source_revision,
+            source_path=layer.pyramid_asset_key.source_path,
+        )
+        atlas = self._products.sampled_image(
+            asset_key=atlas_key,
+            source_width=resolved_atlas_bounds.width,
+            target_width=float(resolved_atlas_bounds.width),
+            producer=lambda _scale: _compose_patch_atlas(
+                resolved_atlas_bounds,
+                patches,
+            ),
+        )
+        if atlas is None or atlas.isNull():
+            return None
+        atlas_rect = self._patch_source_rect(layer, resolved_atlas_bounds)
+        image_rect = QRectF(atlas.rect())
+        integer_origin_sampling = (
+            atlas_rect.size() == image_rect.size()
+            and isclose(atlas_rect.x(), round(atlas_rect.x()))
+            and isclose(atlas_rect.y(), round(atlas_rect.y()))
+        )
+        return SampledTileRenderData(
+            atlas,
+            atlas_rect,
+            image_rect,
+            integer_origin_sampling=integer_origin_sampling,
+        )
+
+    @staticmethod
+    def _patch_source_rect(
+        layer: CompiledRenderLayer,
+        bounds: RasterBounds,
+    ) -> QRectF:
+        """Map source-local patch bounds into the logical raster product."""
+        raster_bounds = layer.descriptor.raster_bounds
+        if raster_bounds is None:
+            return _rectf(bounds)
+        scale_x = layer.source_size.width() / raster_bounds.width
+        scale_y = layer.source_size.height() / raster_bounds.height
+        return QRectF(
+            (bounds.x - raster_bounds.x) * scale_x,
+            (bounds.y - raster_bounds.y) * scale_y,
+            bounds.width * scale_x,
+            bounds.height * scale_y,
+        )
 
     def _build_product_item(
         self,
@@ -376,7 +547,6 @@ class RasterRenderPlanner:
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
         source_product: _RasterSourceProduct,
-        source_clip_bounds: RasterBounds | None = None,
     ) -> _RasterPlanningResult | None:
         """Build the sole raster primitive from one resolved source product."""
         source_image = source_product.image
@@ -389,15 +559,6 @@ class RasterRenderPlanner:
             pyramid_scale=pyramid_scale,
             frame=frame,
         )
-        tile_plan = self._tile_plan(
-            compiled=compiled,
-            layer=layer,
-            frame=frame,
-            source_image=source_image,
-            pyramid_scale=pyramid_scale,
-            transform=transform,
-            strategy=strategy,
-        )
         device_pixel_ratio = frame.device_pixel_ratio
         relative_base_raster_scale = max(frame.zoom, 0.0) / max(
             frame.native_zoom,
@@ -408,17 +569,27 @@ class RasterRenderPlanner:
             if layer.is_base_raster
             else smooth_raster_sampling_enabled(transform, device_pixel_ratio)
         )
-        descriptor_bounds = layer.descriptor.raster_bounds
-        source_clip_rect = None
-        if source_clip_bounds is not None and descriptor_bounds is not None:
-            scale_x = source_image.width() / descriptor_bounds.width
-            scale_y = source_image.height() / descriptor_bounds.height
-            source_clip_rect = QRectF(
-                (source_clip_bounds.x - descriptor_bounds.x) * scale_x,
-                (source_clip_bounds.y - descriptor_bounds.y) * scale_y,
-                source_clip_bounds.width * scale_x,
-                source_clip_bounds.height * scale_y,
+        phase_stable_item = self._phase_stable_dense_item(
+            layer=layer,
+            frame=frame,
+            source_product=source_product,
+            transform=transform,
+            render_hint_enabled=render_hint_enabled,
+        )
+        if phase_stable_item is not None:
+            return _RasterPlanningResult(
+                item=phase_stable_item,
+                visible_tile_keys=frozenset(),
             )
+        tile_plan = self._tile_plan(
+            compiled=compiled,
+            layer=layer,
+            frame=frame,
+            source_image=source_image,
+            pyramid_scale=pyramid_scale,
+            transform=transform,
+            strategy=strategy,
+        )
         return _RasterPlanningResult(
             item=RasterLayerRenderItem(
                 descriptor=layer.descriptor,
@@ -439,18 +610,64 @@ class RasterRenderPlanner:
                 max_tile_rows=tile_plan.max_tile_rows,
                 visible_tile_range=tile_plan.visible_tile_range,
                 is_base_raster=layer.is_base_raster,
-                source_clip_rect=source_clip_rect,
             ),
             visible_tile_keys=tile_plan.visible_keys,
         )
 
-    def _patch_layers(
+    def _phase_stable_dense_item(
+        self,
+        *,
+        layer: CompiledRenderLayer,
+        frame: RenderFrameGeometry,
+        source_product: _RasterSourceProduct,
+        transform: QTransform,
+        render_hint_enabled: bool,
+    ) -> SampledLayerRenderItem | None:
+        """Present patch-capable dense overlays on the shared source lattice."""
+        source_image = source_product.image
+        if (
+            layer.presentation is not RasterPresentation.OVERLAY
+            or self._raster_patches.owner_for(layer.descriptor.source) is None
+            or source_product.scale != 1.0
+            or source_image.size() != layer.source_size
+            or not source_sampling_phase_is_fractional(
+                transform,
+                frame.device_pixel_ratio,
+            )
+        ):
+            return None
+        lattice = sampled_source_lattice(
+            descriptor=layer.descriptor,
+            source_size=layer.source_size,
+            source_to_panel=transform,
+            panel_rect=frame.sampling_panel_rect,
+        )
+        if lattice is None:
+            return None
+        return SampledLayerRenderItem(
+            descriptor=layer.descriptor,
+            transform=transform,
+            placement=layer.descriptor.placement,
+            clip=layer.descriptor.clip,
+            source_size=layer.source_size,
+            render_hint_enabled=render_hint_enabled,
+            tiles=(
+                SampledTileRenderData(
+                    source_image,
+                    lattice.source_rect,
+                    lattice.source_rect,
+                ),
+            ),
+            source_bounds=lattice.source_rect,
+        )
+
+    def _source_patches(
         self,
         compiled: CompiledRenderScene,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
-    ) -> tuple[tuple[CompiledRenderLayer, RasterSourcePatch], ...] | None:
-        """Adapt visible sparse products into ordinary compiled raster layers."""
+    ) -> tuple[RasterSourcePatch, ...] | None:
+        """Return visible sparse products or request the dense fallback."""
         owner = self._raster_patches.owner_for(layer.descriptor.source)
         local_bounds = self._visible_local_bounds(compiled, layer, frame)
         if owner is None:
@@ -460,41 +677,21 @@ class RasterRenderPlanner:
         patches = owner.source_patches(layer.descriptor.source, local_bounds)
         if patches is None:
             return None
-        transformed: list[tuple[CompiledRenderLayer, RasterSourcePatch]] = []
-        for patch in patches:
-            if patch.image.isNull() or layer.descriptor.transform is None:
-                continue
-            sample_bounds = patch.sample_bounds
-            if sample_bounds is None:
-                continue
-            descriptor = replace(
-                layer.descriptor,
-                raster_bounds=sample_bounds,
-                placement=layer.descriptor.transform.map_bounds(sample_bounds),
-            )
-            patch_id = uuid.uuid5(
-                layer.pyramid_asset_key.source_id,
-                f"patch:{patch.bounds.x}:{patch.bounds.y}:{patch.bounds.width}:{patch.bounds.height}",
-            )
-            product_key = source_render_asset_key(
-                source_id=patch_id,
-                source_kind=f"{layer.pyramid_asset_key.source_kind}-patch",
-                revision=layer.pyramid_asset_key.source_revision,
-                source_path=layer.pyramid_asset_key.source_path,
-            )
-            transformed.append(
+        return tuple(
+            sorted(
                 (
-                    replace(
-                        layer,
-                        descriptor=descriptor,
-                        pyramid_asset_key=product_key,
-                        source_size=patch.image.size(),
-                        uses_default_base_tile_math=False,
-                    ),
-                    patch,
-                )
+                    patch
+                    for patch in patches
+                    if not patch.image.isNull() and patch.sample_bounds is not None
+                ),
+                key=lambda patch: (
+                    patch.bounds.y,
+                    patch.bounds.x,
+                    patch.bounds.height,
+                    patch.bounds.width,
+                ),
             )
-        return tuple(transformed)
+        )
 
     def _visible_local_bounds(
         self,
@@ -535,10 +732,25 @@ class RasterRenderPlanner:
         policy = self._raster_sources.product_policy(layer.descriptor.source)
         if policy is RasterProductPolicy.VOLATILE:
             return _RasterSourceProduct(image=image, scale=1.0, cacheable=False)
+        sample_bounds = patch.sample_bounds
+        layer_transform = layer.descriptor.transform
+        if sample_bounds is None or layer_transform is None:
+            return None
+        patch_id = uuid.uuid5(
+            layer.pyramid_asset_key.source_id,
+            f"patch:{patch.bounds.x}:{patch.bounds.y}:{patch.bounds.width}:{patch.bounds.height}",
+        )
+        product_key = source_render_asset_key(
+            source_id=patch_id,
+            source_kind=f"{layer.pyramid_asset_key.source_kind}-patch",
+            revision=layer.pyramid_asset_key.source_revision,
+            source_path=layer.pyramid_asset_key.source_path,
+        )
+        patch_placement = layer_transform.map_bounds(sample_bounds)
         selected = self._products.best_fit_image(
-            asset_key=layer.pyramid_asset_key,
+            asset_key=product_key,
             full_image=image,
-            target_width=layer.descriptor.placement.width * frame.zoom,
+            target_width=patch_placement.width * frame.zoom,
         )
         scale = selected.width() / image.width() if image.width() > 0 else 1.0
         return _RasterSourceProduct(image=selected, scale=scale, cacheable=True)
@@ -818,3 +1030,49 @@ class RasterRenderPlanner:
         if start_col > end_col or start_row > end_row:
             return 0, -1, 0, -1
         return start_row, end_row, start_col, end_col
+
+
+def _rectf(bounds: RasterBounds) -> QRectF:
+    """Return floating source geometry for integer raster bounds."""
+    return QRectF(
+        float(bounds.x),
+        float(bounds.y),
+        float(bounds.width),
+        float(bounds.height),
+    )
+
+
+def _compose_patch_atlas(
+    atlas_bounds: RasterBounds,
+    patches: tuple[tuple[RasterSourcePatch, _RasterSourceProduct], ...],
+) -> QImage:
+    """Combine sparse native cores into one transparent source-local image."""
+    atlas = QImage(
+        atlas_bounds.width,
+        atlas_bounds.height,
+        QImage.Format.Format_ARGB32_Premultiplied,
+    )
+    atlas.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(atlas)
+    painter.setCompositionMode(QPainter.CompositionMode_Source)
+    try:
+        for patch, product in patches:
+            sample_bounds = patch.sample_bounds
+            if sample_bounds is None:
+                continue
+            destination = QRectF(
+                float(patch.bounds.x - atlas_bounds.x),
+                float(patch.bounds.y - atlas_bounds.y),
+                float(patch.bounds.width),
+                float(patch.bounds.height),
+            )
+            source = QRectF(
+                float(patch.bounds.x - sample_bounds.x),
+                float(patch.bounds.y - sample_bounds.y),
+                float(patch.bounds.width),
+                float(patch.bounds.height),
+            )
+            painter.drawImage(destination, product.image, source)
+    finally:
+        painter.end()
+    return atlas

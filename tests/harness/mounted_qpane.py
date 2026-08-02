@@ -230,6 +230,7 @@ class MountedQPaneHarness:
         self,
         qapp: QApplication,
         *,
+        source_image: QImage | None = None,
         image_size: QSize | None = None,
         widget_size: QSize | None = None,
         mask_count: int = 1,
@@ -241,7 +242,15 @@ class MountedQPaneHarness:
             raise ValueError("mask_count must be at least one")
         if cache_budget_mb < 1:
             raise ValueError("cache_budget_mb must be at least one")
-        image_size = QSize(400, 400) if image_size is None else QSize(image_size)
+        if source_image is not None and source_image.isNull():
+            raise ValueError("source_image must not be null")
+        if source_image is not None and image_size is not None:
+            raise ValueError("source_image and image_size are mutually exclusive")
+        image_size = (
+            QSize(source_image.size())
+            if source_image is not None
+            else QSize(400, 400) if image_size is None else QSize(image_size)
+        )
         widget_size = QSize(400, 400) if widget_size is None else QSize(widget_size)
         self.qapp = qapp
         self.host = QWidget()
@@ -258,8 +267,13 @@ class MountedQPaneHarness:
         )
         self.viewer.resize(widget_size)
         self.host.show()
-        self.image = QImage(image_size, QImage.Format.Format_ARGB32)
-        self.image.fill(Qt.GlobalColor.white)
+        self.image = (
+            QImage(source_image)
+            if source_image is not None
+            else QImage(image_size, QImage.Format.Format_ARGB32)
+        )
+        if source_image is None:
+            self.image.fill(Qt.GlobalColor.white)
         self.image_id = self.viewer.createCompositionFromImage(
             self.image,
             title="Abuse harness",
@@ -271,12 +285,21 @@ class MountedQPaneHarness:
         self.viewer.setBrushSize(brush_size)
         self.drain_events(wait_ms=5)
         center = QPoint(widget_size.width() // 2, widget_size.height() // 2)
-        readiness = self.wait_for_background(center, timeout_ms=3000)
-        if readiness.latency_ms is None:
+        if source_image is None:
+            ready = (
+                self.wait_for_background(center, timeout_ms=3000).latency_ms is not None
+            )
+        else:
+            deadline = time.perf_counter() + 3.0
+            renderer = self.viewer.view().presenter.renderer
+            while not renderer.has_base_buffer() and time.perf_counter() < deadline:
+                self.qapp.processEvents()
+                QTest.qWait(1)
+            ready = renderer.has_base_buffer()
+        if not ready:
             self.close()
             raise RuntimeError(
-                "Mounted CuteCanvas did not present source pixels before input "
-                f"(center={readiness.color.getRgb()})"
+                "Mounted CuteCanvas did not present source pixels before input"
             )
 
     def close(self) -> None:

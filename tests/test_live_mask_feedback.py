@@ -23,18 +23,20 @@ from pathlib import Path
 import numpy as np
 import pytest
 from cutecanvas import CuteCanvas
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QImage,
     QInputDevice,
     QMouseEvent,
+    QPainter,
     QPointingDevice,
     QTabletEvent,
 )
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane.scene.render_plan import SampledLayerRenderItem
+from qpane.sdk.raster import qimage_to_numpy_const_view_bgra32
 
 from tests.harness import MountedQPaneHarness
 from tests.harness.abuse_model import HarnessPoint, PointerKind, StrokeAction
@@ -43,6 +45,25 @@ from tests.harness.timing import INTERACTIVE_PERFORMANCE, interaction_clock
 
 _ZOOMED_OUT_4K_AVERAGE_POINTER_BUDGET_MS = 10.0
 _ZOOMED_OUT_4K_COLD_CONTACT_BUDGET_MS = 25.0
+
+
+def _fractional_zoom_source() -> QImage:
+    """Return a detailed source that exposes transient sampling changes."""
+    image = QImage(4096, 4096, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor(22, 34, 58))
+    painter = QPainter(image)
+    try:
+        for offset in range(1792, 2305, 4):
+            color = QColor(
+                70 + offset % 157,
+                35 + (offset * 3) % 181,
+                55 + (offset * 7) % 173,
+            )
+            painter.fillRect(offset, 1792, 2, 513, color)
+            painter.fillRect(1792, offset, 513, 2, color)
+    finally:
+        painter.end()
+    return image
 
 
 class MountedMaskFeedbackProbe(MountedQPaneHarness):
@@ -355,6 +376,133 @@ def test_cold_decimated_preview_accumulates_without_internal_patch_edges(
         probe.close()
 
 
+@pytest.mark.parametrize(
+    ("zoom", "with_retained_coverage"),
+    [
+        (1.95, False),
+        (2.01, False),
+        (2.125, False),
+        (3.9, False),
+        (4.1, False),
+        (1.95, True),
+    ],
+)
+def test_fractional_zoom_mask_pixels_do_not_change_when_stroke_settles(
+    qapp: QApplication,
+    zoom: float,
+    with_retained_coverage: bool,
+) -> None:
+    """Durable raster-backed presentation must match the held mask exactly."""
+    probe = MountedQPaneHarness(
+        qapp,
+        source_image=_fractional_zoom_source(),
+        widget_size=QSize(800, 600),
+        brush_size=80,
+    )
+    start = QPoint(300, 300)
+    end = QPoint(500, 300)
+    pressed = False
+    try:
+        if with_retained_coverage:
+            assert probe.viewer.editor.coverage.rectangle(
+                QRectF(1800.0, 1800.0, 256.0, 256.0)
+            )
+            assert probe.wait_for_mask_render_idle()
+            assert probe.wait_for_render_refinement_idle()
+        probe.viewer.setZoom1To1()
+        probe.viewer.view().viewport.applyZoom(zoom)
+        probe.drain_events()
+        assert probe.viewer.currentZoom() == pytest.approx(zoom)
+
+        QTest.mousePress(
+            probe.viewer,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            start,
+        )
+        pressed = True
+        for x_position in range(start.x() + 10, end.x() + 1, 10):
+            QTest.mouseMove(probe.viewer, QPoint(x_position, end.y()), delay=0)
+            qapp.processEvents()
+        probe.drain_events()
+        held = probe.capture()
+        held_buffer = probe.viewer.view().presenter.renderer.get_base_buffer()
+        assert held_buffer is not None
+
+        with probe.observe_presented_frames() as presented:
+            QTest.mouseRelease(
+                probe.viewer,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                end,
+            )
+            pressed = False
+            assert probe.wait_for_mask_undo_depth(probe.mask_ids[0], 1)
+            assert probe.wait_for_mask_render_idle()
+            assert probe.wait_for_raster_render_idle()
+            assert probe.wait_for_render_refinement_idle()
+        settled = probe.capture()
+        render_plan = probe.viewer.view().calculateRenderPlan()
+
+        assert render_plan is not None
+        mask_items = tuple(
+            item
+            for item in render_plan.render_items
+            if getattr(item.descriptor.source, "resource_id", None) == probe.mask_ids[0]
+        )
+        assert len(mask_items) == 1
+        assert isinstance(mask_items[0], SampledLayerRenderItem)
+        held_pixels, _held_backing = qimage_to_numpy_const_view_bgra32(held)
+        settled_pixels, _settled_backing = qimage_to_numpy_const_view_bgra32(settled)
+        changed = np.any(held_pixels != settled_pixels, axis=2)
+        assert not np.any(changed), (
+            int(np.count_nonzero(changed)),
+            int(
+                np.max(
+                    np.abs(
+                        held_pixels.astype(np.int16) - settled_pixels.astype(np.int16)
+                    )
+                )
+            ),
+            tuple(frame.mask_item_states for frame in presented.frames),
+        )
+        transition_deltas = []
+        held_buffer_pixels, _held_buffer_backing = qimage_to_numpy_const_view_bgra32(
+            held_buffer
+        )
+        for frame in presented.frames:
+            frame_pixels, _frame_backing = qimage_to_numpy_const_view_bgra32(
+                frame.image
+            )
+            frame_changed = np.any(frame_pixels != held_buffer_pixels, axis=2)
+            transition_deltas.append(
+                (
+                    int(np.count_nonzero(frame_changed)),
+                    int(
+                        np.max(
+                            np.abs(
+                                frame_pixels.astype(np.int16)
+                                - held_buffer_pixels.astype(np.int16)
+                            )
+                        )
+                    ),
+                    frame.mask_item_states,
+                )
+            )
+        assert all(
+            changed_count == 0 for changed_count, _delta, _state in transition_deltas
+        ), transition_deltas
+    finally:
+        if pressed:
+            QTest.mouseRelease(
+                probe.viewer,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                end,
+            )
+        probe.close()
+
+
 def test_intersecting_mask_previews_preserve_both_layers_while_held(
     qapp: QApplication,
 ) -> None:
@@ -431,7 +579,7 @@ def test_settled_mask_tiles_stay_seamless_when_another_mask_is_added(
     qapp: QApplication,
     tmp_path: Path,
 ) -> None:
-    """Settled mask alpha must remain uniform across refinement and layer changes."""
+    """A tiled mask refinement must stay uniform across later layer changes."""
     image_size = QSize(2048, 2048)
     probe = MountedQPaneHarness(
         qapp,
@@ -470,7 +618,8 @@ def test_settled_mask_tiles_stay_seamless_when_another_mask_is_added(
             for item in render_plan.render_items
             if isinstance(item, SampledLayerRenderItem)
         )
-        assert len(loaded_mask_items[0].tiles) >= 2
+        assert len(loaded_mask_items[0].tiles) == 1
+        assert probe.viewer.view().presenter._render_tile_cache.entry_count >= 2
 
         for offset_index in range(12):
             probe.viewer.setPan(
