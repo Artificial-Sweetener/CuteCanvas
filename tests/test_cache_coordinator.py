@@ -23,6 +23,7 @@ import logging
 import pytest
 from cutecanvas import Config
 from cutecanvas.core.config_features import MaskConfigSlice
+from cutecanvas.masks.live_preview_store import MaskLivePreviewStore
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.resources import ProjectResourceStore
@@ -379,6 +380,7 @@ def test_mask_overlay_consumer_uses_controller_callback():
         lambda pt: pt,
         fixed_cache_config(),
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
     coordinator = CacheCoordinator(active_budget_bytes=8 * 1024 * 1024)
     consumer = EvictableCacheConsumer(
@@ -425,6 +427,7 @@ def test_mask_guard_rejects_oversized_item(
             }
         ),
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
     mask_image = QImage(128, 128, QImage.Format_Grayscale8)
     mask_image.fill(Qt.white)

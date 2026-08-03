@@ -40,6 +40,7 @@ from .item_compositor import SceneItemCompositor
 from .navigation_buffer import navigation_buffer_transform
 from .navigation_plan import (
     navigation_products_match,
+    navigation_repair_sources_match,
     retained_raster_navigation_delta,
 )
 from .navigation_reuse_policy import requires_linear_scroll_storage
@@ -388,7 +389,7 @@ class Renderer:
         if not self._plan_supports_strip_repair(settled_plan):
             self._scroll_misses += 1
             return False
-        if not navigation_products_match(buffer_plan, settled_plan):
+        if not navigation_repair_sources_match(buffer_plan, settled_plan):
             self._scroll_misses += 1
             return False
         if requires_linear_scroll_storage(settled_plan):

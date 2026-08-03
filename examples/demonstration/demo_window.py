@@ -321,6 +321,7 @@ class ExampleWindow(QMainWindow):
             execution_runtime=self._execution_runtime,
             config_strict=self.options.config_strict,
         )
+        self.qpane.setViewportCornerRadius(8.0)
         self.qpane.setFocusPolicy(Qt.StrongFocus)
         self._active_features = tuple(self.qpane.installedFeatures)
         mask_enabled = self._mask_tools_available()

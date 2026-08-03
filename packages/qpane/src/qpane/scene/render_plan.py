@@ -251,6 +251,7 @@ class TransientRasterResolvedContribution:
     source_asset_key: SceneLayerAssetKey
     source_image: QImage
     source_bounds: RasterBounds
+    retain_until_durable: bool = True
 
     def __post_init__(self) -> None:
         """Detach mutable Qt resources from the compiling presenter."""
@@ -267,6 +268,7 @@ class TransientSampledResolvedContribution:
     source_asset_key: SceneLayerAssetKey
     source_bounds: RasterBounds
     tiles: tuple[SampledTileRenderData, ...]
+    retain_until_durable: bool = True
 
     def __post_init__(self) -> None:
         """Detach the immutable sampled tile batch."""

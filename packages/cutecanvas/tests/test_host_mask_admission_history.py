@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cutecanvas import CuteCanvas
+from cutecanvas import CuteCanvas, RasterExtentPolicy
 from PySide6.QtCore import QRectF, QSize, QTemporaryDir
 from PySide6.QtGui import QImage
 
@@ -78,6 +78,15 @@ def test_imported_host_mask_starts_without_admission_history(qapp) -> None:
         mask_id = canvas.loadMaskFromFile(str(path), undoable=False)
 
         assert mask_id is not None
+        exported = canvas.exportMaskImage(mask_id)
+        assert exported is not None
+        assert exported.pixelColor(32, 24).red() == 255
+        info = canvas.listMasksForComposition()[0]
+        assert info.scene_id is not None
+        assert info.layer_id is not None
+        state = canvas.rasterSurfaceState(info.scene_id, info.layer_id)
+        assert state is not None
+        assert state.extent_policy is RasterExtentPolicy.EXPAND_ON_WRITE
         assert canvas.editor.history.can_undo is False
         assert canvas.maskIDsForComposition(composition.id) == [mask_id]
     finally:

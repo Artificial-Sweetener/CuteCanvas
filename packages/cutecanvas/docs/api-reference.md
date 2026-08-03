@@ -40,6 +40,10 @@ layer subset, or a mounted resource through stable content references.
 document structure, and `CuteCanvas.viewportSpec()` returns the view-local
 policy. `CanvasViewportInteraction.FIT_ONLY` refits after size changes and
 locks direct navigation; `INTERACTIVE` retains pan and zoom.
+`CuteCanvas.setViewportCornerRadius()` clips the final presented frame with
+QPane's antialiased border compositor, while
+`CuteCanvas.viewportCornerRadius()` reports the configured logical-pixel
+radius.
 `CanvasRenderVariant.MASK_COVERAGE` presents selected masks as neutral
 grayscale coverage, while `COMPOSITE` and `MASK_OVERLAY` retain ordinary
 presentation.

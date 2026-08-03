@@ -99,6 +99,9 @@ class CanvasLifecycleMixin:
                 latest_requests=(
                     self._execution_binding.document_runtime._latest_request_registry
                 ),
+                mask_live_previews=(
+                    self._execution_binding.document_runtime._mask_live_preview_store
+                ),
                 cache_registry=self._state.cache_registry,
                 diagnostics=self._diagnostics_manager,
                 layer_selection=self._scene_selection,
@@ -442,6 +445,17 @@ class CanvasLifecycleMixin:
             MaskCoverageSourceReference,
             coverage_capabilities,
         )
+        editor_capabilities = self._editor_source_capabilities
+        if editor_capabilities is None:
+            raise RuntimeError("editor source capability registry is unavailable")
+        editor_capabilities.coverage.register(
+            MaskCoverageSourceReference,
+            coverage_capabilities,
+        )
+        editor_capabilities.pixel_presentation.register(
+            MaskCoverageSourceReference,
+            coverage_capabilities,
+        )
         self._mask_coverage_source_capabilities = coverage_capabilities
         from cutecanvas.masks.raster_mutations import MaskRasterMutationOwner
 
@@ -576,6 +590,16 @@ class CanvasLifecycleMixin:
                 MaskCoverageSourceReference,
                 coverage_capabilities,
             )
+            editor_capabilities = self._editor_source_capabilities
+            if editor_capabilities is not None:
+                editor_capabilities.coverage.unregister(
+                    MaskCoverageSourceReference,
+                    coverage_capabilities,
+                )
+                editor_capabilities.pixel_presentation.unregister(
+                    MaskCoverageSourceReference,
+                    coverage_capabilities,
+                )
         self._mask_coverage_source_capabilities = None
         self._masks_controller.detachMaskService()
 

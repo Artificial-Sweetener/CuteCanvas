@@ -174,3 +174,27 @@ def test_handoff_discards_a_cancelled_transform_preview_immediately() -> None:
 
     assert settled.transient_raster is None
     assert needs_redraw
+
+
+def test_handoff_discards_nonretained_resolved_preview_immediately() -> None:
+    """In-flight resolved feedback must disappear without a durable revision."""
+    plan = make_render_plan(QRect(0, 0, 64, 64))
+    item = plan.render_items[0]
+    image = QImage(16, 16, QImage.Format_ARGB32_Premultiplied)
+    image.fill(QColor(220, 40, 140, 255))
+    contribution = TransientRasterResolvedContribution(
+        session_id=uuid.uuid4(),
+        scene_id=item.descriptor.scene_id,
+        layer_id=item.descriptor.layer_id,
+        source_asset_key=item.asset_key,
+        source_image=image,
+        source_bounds=RasterBounds(8, 8, 16, 16),
+        retain_until_durable=False,
+    )
+    handoff = TransientRasterHandoff()
+    handoff.settled_plan(replace(plan, transient_raster=contribution))
+
+    settled, needs_redraw = handoff.settled_plan(plan)
+
+    assert settled.transient_raster is None
+    assert needs_redraw

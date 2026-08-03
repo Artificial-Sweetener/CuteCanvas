@@ -22,15 +22,21 @@ from dataclasses import replace
 import pytest
 from cutecanvas import CuteCanvas
 from cutecanvas.resources import ProjectResourceReference
-from PySide6.QtCore import QPointF, QRect, QRectF
-from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt, QTransform
 from PySide6.QtTest import QTest
-from qpane.rendering.navigation_plan import retained_raster_navigation_delta
+from qpane.rendering.navigation_plan import (
+    navigation_repair_sources_match,
+    retained_raster_navigation_delta,
+    sampled_navigation_plan_covers_panel_rect,
+)
 from qpane.rendering.render import Renderer
 from qpane.scene.identity import scene_image_asset_key, source_render_asset_key
 from qpane.scene.model import LayerKind
 from qpane.scene.render_plan import (
     RenderStrategy,
+    SampledLayerRenderItem,
+    SampledTileRenderData,
     TileRenderData,
 )
 
@@ -245,6 +251,88 @@ def test_try_scroll_buffers_rejects_changed_resolved_products(
     assert after.scroll_misses == before.scroll_misses + 1
     assert renderer._surface.storage_origin == origin_before
     assert renderer._buffer_pan == QPointF()
+
+
+def test_sampled_navigation_coverage_requires_a_complete_tile_union() -> None:
+    """Retained navigation may repair only panel regions covered by sampled tiles."""
+    plan = make_render_plan(QRect(0, 0, 128, 128))
+    base_item = plan.base_raster_item
+    assert base_item is not None
+    tile_image = QImage(1, 1, QImage.Format_ARGB32_Premultiplied)
+    tile_image.fill(Qt.transparent)
+
+    def sampled_tile(rect: QRectF) -> SampledTileRenderData:
+        """Return one minimal sampled product with detached source geometry."""
+        return SampledTileRenderData(tile_image, rect, QRectF(0.0, 0.0, 1.0, 1.0))
+
+    complete_item = SampledLayerRenderItem(
+        descriptor=base_item.descriptor,
+        transform=QTransform(),
+        placement=base_item.placement,
+        clip=base_item.clip,
+        source_size=QSize(128, 128),
+        render_hint_enabled=False,
+        tiles=(
+            sampled_tile(QRectF(0.0, 0.0, 64.0, 64.0)),
+            sampled_tile(QRectF(64.0, 0.0, 64.0, 64.0)),
+            sampled_tile(QRectF(0.0, 64.0, 64.0, 64.0)),
+            sampled_tile(QRectF(64.0, 64.0, 64.0, 64.0)),
+        ),
+    )
+    complete_plan = replace(plan, render_items=(complete_item,))
+    required = QRectF(0.0, 0.0, 128.0, 128.0)
+    assert sampled_navigation_plan_covers_panel_rect(complete_plan, required)
+
+    incomplete_item = replace(complete_item, tiles=complete_item.tiles[:-1])
+    incomplete_plan = replace(plan, render_items=(incomplete_item,))
+    assert not sampled_navigation_plan_covers_panel_rect(incomplete_plan, required)
+
+
+def test_navigation_repair_accepts_spatial_sample_changes_for_one_revision() -> None:
+    """Strip repair may mix spatial products only under one source revision."""
+    plan = make_render_plan(QRect(0, 0, 128, 128))
+    base_item = plan.base_raster_item
+    assert base_item is not None
+    tile_image = QImage(1, 1, QImage.Format_ARGB32_Premultiplied)
+    tile_image.fill(Qt.transparent)
+    first_item = SampledLayerRenderItem(
+        descriptor=base_item.descriptor,
+        transform=QTransform(),
+        placement=base_item.placement,
+        clip=base_item.clip,
+        source_size=QSize(128, 128),
+        render_hint_enabled=False,
+        tiles=(
+            SampledTileRenderData(
+                tile_image,
+                QRectF(0.0, 0.0, 64.0, 128.0),
+                QRectF(0.0, 0.0, 1.0, 1.0),
+            ),
+        ),
+    )
+    second_item = replace(
+        first_item,
+        tiles=(
+            SampledTileRenderData(
+                tile_image,
+                QRectF(64.0, 0.0, 64.0, 128.0),
+                QRectF(0.0, 0.0, 1.0, 1.0),
+            ),
+        ),
+    )
+    first_plan = replace(plan, render_items=(first_item,))
+    second_plan = replace(plan, render_items=(second_item,))
+    assert navigation_repair_sources_match(first_plan, second_plan)
+
+    changed_item = replace(
+        second_item,
+        descriptor=replace(
+            second_item.descriptor,
+            source_revision=second_item.descriptor.source_revision + 1,
+        ),
+    )
+    changed_plan = replace(plan, render_items=(changed_item,))
+    assert not navigation_repair_sources_match(first_plan, changed_plan)
 
 
 def test_base_scroll_strip_repair_uses_direct_fast_path(
@@ -629,6 +717,7 @@ def test_direct_pan_checks_stable_products_without_repainting_overlap(
 def test_direct_pan_release_atomically_replaces_a_repaired_ring_frame(qapp) -> None:
     """Settling must replace incrementally repaired pixels with one exact frame."""
     qpane = _make_qpane_with_checker_image(qapp, size=1024)
+    qpane.applySettings(cache={"mode": "hard", "budget_mb": 256})
     presenter = qpane.view().presenter
     try:
         presenter.paint(

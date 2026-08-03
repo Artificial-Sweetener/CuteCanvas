@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import QPoint, QPointF, QSize
 from PySide6.QtWidgets import QApplication
 from qpane.rendering.render_tile_geometry import RenderTileRequest
@@ -28,6 +29,7 @@ from tests.harness.input_driver import QtStrokeDriver
 from tests.harness.mounted_qpane import MountedQPaneHarness
 
 
+@pytest.mark.interactive_performance
 def test_erased_mask_revision_is_not_used_as_navigation_fallback(
     qapp: QApplication,
 ) -> None:

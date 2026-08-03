@@ -19,8 +19,9 @@ from __future__ import annotations
 
 from time import monotonic
 
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QRegion
+from PySide6.QtWidgets import QWidget
 
 from qpane import QPane, RasterSource, RenderLayer, RenderScene
 
@@ -42,6 +43,21 @@ def _wait_for_render_plan(pane: QPane, qapp, timeout_seconds: float = 3.0):
     return plan
 
 
+def _render_transparent(widget: QWidget) -> QImage:
+    """Render one widget into an alpha-preserving image."""
+    image = QImage(widget.size(), QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    widget.render(
+        painter,
+        QPoint(),
+        QRegion(),
+        QWidget.RenderFlag.DrawChildren,
+    )
+    painter.end()
+    return image
+
+
 def test_qpane_mounts_and_renders_the_convenient_image_path(qapp) -> None:
     """The focused viewer mounts and renders a large image without editor code."""
     pane = QPane()
@@ -56,6 +72,39 @@ def test_qpane_mounts_and_renders_the_convenient_image_path(qapp) -> None:
     assert pane.scene().canvas.size().toSize() == QSize(4096, 3072)
     assert _wait_for_render_plan(pane, qapp) is not None
     assert pane.currentZoom() > 0.0
+    pane.close()
+    pane.deleteLater()
+    qapp.processEvents()
+
+
+def test_qpane_antialiases_the_configured_viewport_corner_radius(qapp) -> None:
+    """Viewport presentation clipping must preserve partial edge coverage."""
+    pane = QPane()
+    pane.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    pane.resize(100, 50)
+    image = QImage(100, 50, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor("magenta"))
+
+    pane.setViewportCornerRadius(8.0)
+    pane.setImage(image)
+    pane.show()
+    assert _wait_for_render_plan(pane, qapp) is not None
+    qapp.processEvents()
+
+    actual = _render_transparent(pane)
+    expected = QImage(actual.size(), QImage.Format.Format_ARGB32_Premultiplied)
+    expected.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(expected)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(0, 0, 100, 50), 8.0, 8.0)
+    painter.setClipPath(path)
+    painter.fillRect(expected.rect(), QColor("magenta"))
+    painter.end()
+
+    assert pane.viewportCornerRadius() == 8.0
+    assert actual == expected
+    assert actual.pixelColor(4, 0).alpha() not in {0, 255}
     pane.close()
     pane.deleteLater()
     qapp.processEvents()

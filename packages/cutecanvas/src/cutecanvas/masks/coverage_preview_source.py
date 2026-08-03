@@ -21,14 +21,22 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSize
-from PySide6.QtGui import QColor
-from qpane.sdk.scene import LayerSourceReference
+import numpy as np
+from PySide6.QtCore import QPointF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from qpane.sdk.raster import present_hybrid_pixels
+from qpane.sdk.scene import LayerSourceReference, RasterBounds
 
 from qpane import HybridPresentationStyle, HybridSource
 
+from ..coverage import CoverageSnapshot
 from ..resources import ProjectResourceReference
+from ..scene.pixel_fragments import RasterPixelFormat
+from ..scene.pixel_transitions import RasterPixelTransition
+from ..scene.source_capabilities import PixelSampleGeometry
 from .source_resolver import MaskSourceCapabilities
+
+_NEUTRAL_MASK_STYLE = HybridPresentationStyle(QColor("white"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,13 +77,54 @@ class MaskCoverageSourceCapabilities:
     ) -> HybridSource | None:
         """Return current mask pixels with a neutral white presentation."""
         resource = _resource(reference)
-        layer = self.source.assets.get_layer(resource.resource_id)
-        if layer is None:
+        return self.source.hybrid_document_with_style(
+            resource,
+            _NEUTRAL_MASK_STYLE,
+        )
+
+    def coverage_snapshot(
+        self,
+        reference: LayerSourceReference,
+        bounds: RasterBounds | None = None,
+    ) -> CoverageSnapshot | None:
+        """Return authoritative coverage for exact transient presentation."""
+        return self.source.coverage_snapshot(_resource(reference), bounds)
+
+    def present_pixels(
+        self,
+        reference: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        pixels: np.ndarray,
+        target_size: QSize | None = None,
+    ) -> QImage | None:
+        """Present canonical coverage with the neutral preview style."""
+        _resource(reference)
+        if pixel_format is not RasterPixelFormat.COVERAGE8:
             return None
-        return self.source.hybrids.source(
-            layer,
-            HybridPresentationStyle(QColor("white")),
-            self.source.renders.render_revision(resource.resource_id),
+        image = present_hybrid_pixels(pixels, _NEUTRAL_MASK_STYLE)
+        if target_size is not None and image.size() != target_size:
+            image = image.scaled(
+                target_size,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        return image
+
+    def present_transition_samples(
+        self,
+        reference: LayerSourceReference,
+        pixel_format: RasterPixelFormat,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+    ) -> tuple[QImage, ...] | None:
+        """Sample a virtual transition through the neutral hybrid evaluator."""
+        if pixel_format is not RasterPixelFormat.COVERAGE8:
+            return None
+        return self.source.present_transition_samples_with_style(
+            _resource(reference),
+            transition,
+            samples,
+            _NEUTRAL_MASK_STYLE,
         )
 
 

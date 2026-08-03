@@ -381,6 +381,23 @@ class QPane(QWidget):
         self._placeholder.apply_config(candidate)
         self._viewer_diagnostics.apply_preferences(candidate)
 
+    def setViewportCornerRadius(self, radius: float) -> None:
+        """Clip the final viewport frame to an antialiased logical-pixel radius.
+
+        Args:
+            radius: Non-negative finite radius in widget logical pixels.
+
+        Raises:
+            ValueError: If ``radius`` is negative or non-finite.
+        """
+        self._rendering.set_viewport_corner_radius(radius)
+        if radius > 0.0:
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+    def viewportCornerRadius(self) -> float:
+        """Return the final viewport presentation radius in logical pixels."""
+        return self._rendering.viewport_corner_radius()
+
     def registerTool(
         self,
         mode: str,

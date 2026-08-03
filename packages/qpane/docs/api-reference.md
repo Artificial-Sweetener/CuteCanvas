@@ -45,6 +45,8 @@ responsive layout contract.
   policy.
 - `QPane.applySettings` atomically applies a detached `Config`.
 - `QPane.settings` exposes the viewer's current detached configuration snapshot.
+- `QPane.setViewportCornerRadius` clips the final presented frame with an
+  antialiased logical-pixel radius; `QPane.viewportCornerRadius` reports it.
 - `QPane.calculateRenderPlan` returns a detached plan for the active presentation.
 - `QPane.physicalViewportRect` returns the device-pixel render viewport.
 - `QPane.panelHitTest` projects one panel position through authoritative viewport geometry.
@@ -215,7 +217,7 @@ root facade and declarative SDK above.
 - `SceneProviderRegistry`, `SceneContribution`, and `SourceCapabilityRegistry` compose independent scene and source owners.
 - `LayerSourceCapabilities` routes renderer capabilities for each supported `LayerSourceReference` value.
 - `SceneRenderItem`, `RasterLayerRenderItem`, `SampledLayerRenderItem`, `SampledTileRenderData`, and `SceneLayerHitTestResult` are detached presentation products.
-- `TransientRasterContribution`, `TransientRasterResolvedContribution`, `TransientSampledResolvedContribution`, and `TransientRasterTransformContribution` carry editor-owned raster edits through normal scene presentation.
+- `TransientRasterContribution`, `TransientRasterResolvedContribution`, `TransientSampledResolvedContribution`, and `TransientRasterTransformContribution` carry editor-owned raster edits through normal scene presentation. Resolved contributions use `retain_until_durable` to distinguish committed handoff pixels from cancellable in-flight feedback.
 - `SceneLayerAssetKey` separates reusable source identity from placed layer identity.
 - `RasterPresentation`, `RasterProductPolicy`, and `RasterSourcePatch` describe sampling, reuse, and bounded damage.
 - `AffineTransformGeometry`, `TransformOperation`, and `TransformOperationKind` own exact affine interaction math.

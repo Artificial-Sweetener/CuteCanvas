@@ -161,6 +161,11 @@ or `CanvasViewportSource.layer_subset()`. Choose
 `CanvasRenderVariant.MASK_COVERAGE` for neutral mask coverage. Query the
 view-local policy with `CuteCanvas.viewportSpec()`.
 
+Rounded node cards and inspectors call `CuteCanvas.setViewportCornerRadius()`
+before showing the view. The shared renderer clips its final presentation
+border, and `CuteCanvas.viewportCornerRadius()` reports the configured
+logical-pixel radius.
+
 Use `CuteCanvas.captureEmbeddedImageExport()` to obtain an
 `EmbeddedImageExportSnapshot` and `CuteCanvas.captureMaskExport()` to obtain a
 `MaskExportSnapshot`. Both carry detached pixels and the exact captured

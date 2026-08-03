@@ -33,6 +33,7 @@ from PySide6.QtTest import QTest
 from qpane.sdk.scene import RasterBounds
 
 from .harness.timing import completion_clock
+from .helpers.config import fixed_cache_config
 
 
 def _wait_for_rasterization(
@@ -376,7 +377,7 @@ def test_nested_document_dependencies_invalidate_parent_render_revision(qapp) ->
 @pytest.mark.interactive_performance
 def test_nested_document_renders_through_the_mounted_sampled_pipeline(qapp) -> None:
     """A nested document must become visible through normal asynchronous painting."""
-    canvas = CuteCanvas(features=())
+    canvas = CuteCanvas(config=fixed_cache_config(), features=())
     canvas.resize(320, 240)
     image = QImage(64, 48, QImage.Format.Format_ARGB32_Premultiplied)
     expected = QColor(220, 30, 40, 255)

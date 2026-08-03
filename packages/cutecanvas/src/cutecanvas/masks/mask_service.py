@@ -595,13 +595,19 @@ class MaskService:
         self, mask_layer: MaskLayer, *, scale: float | None = None
     ) -> QPixmap | None:
         """Get the colorized pixmap for ``mask_layer`` when available."""
-        return self._mask_controller.renders.get(mask_layer, scale=scale)
+        return self._mask_controller.renders.get_with_live_preview(
+            mask_layer,
+            scale=scale,
+        )
 
     def getColorizedMaskById(
         self, mask_id: uuid.UUID, *, scale: float | None = None
     ) -> QPixmap | None:
         """Get the colorized pixmap for ``mask_id`` when available."""
-        return self._mask_controller.renders.get_by_id(mask_id, scale=scale)
+        return self._mask_controller.renders.get_by_id_with_live_preview(
+            mask_id,
+            scale=scale,
+        )
 
     def get_latest_status_message(self, *labels: str) -> tuple[str, str] | None:
         """Return the most recent status message filtered by labels when provided."""

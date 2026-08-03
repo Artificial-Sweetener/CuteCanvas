@@ -44,6 +44,7 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
     if resources is None:
         raise RuntimeError("project resource store is unavailable")
     mask_manager = qpane.document().masks
+    live_previews = qpane._execution_binding.document_runtime._mask_live_preview_store
     mask_manager.set_undo_limit(mask_config.mask_undo_limit)
     diagnostics_tracker = MaskStrokeDiagnostics(
         enabled=False,
@@ -54,6 +55,7 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
         source_to_panel_point=qpane.activeMaskLayerCoordinates().source_to_panel,
         config=qpane.settings,
         mask_config=mask_config,
+        live_previews=live_previews,
         stroke_diagnostics=diagnostics_tracker,
         structure_changed=qpane._handle_raster_structure_changed,
         render_scale=lambda: qpane.view().viewport.zoom,
@@ -77,11 +79,12 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
     service.configureStrokeDiagnostics(qpane.settings)
     controller = service.controller
     live_source_modes: dict[uuid.UUID, bool] = {}
+    shared_source_modes: dict[uuid.UUID, bool] = {}
 
     def _handle_render_dirty(mask_id, rect=None):
         """Apply presentation damage that is already in panel coordinates."""
         if isinstance(mask_id, uuid.UUID):
-            live_source = controller.renders.is_live_preview(mask_id)
+            live_source = controller.renders.uses_local_live_preview(mask_id)
             if live_source_modes.get(mask_id, False) != live_source:
                 live_source_modes[mask_id] = live_source
                 qpane._handle_scene_source_changed()
@@ -100,7 +103,7 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
     def _handle_mask_updated(mask_id, rect=None):
         """Recompile durable state while preserving render-owned local damage."""
         if isinstance(mask_id, uuid.UUID):
-            live_source = controller.renders.is_live_preview(mask_id)
+            live_source = controller.renders.uses_local_live_preview(mask_id)
             live_source_modes[mask_id] = live_source
             if live_source:
                 return
@@ -110,8 +113,17 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
         qpane.markDirty()
         qpane.update()
 
+    def _handle_shared_preview_changed(mask_id, rect):
+        """Damage one view after its document-shared transient mask changes."""
+        shared_live = live_previews.contains(mask_id)
+        if shared_source_modes.get(mask_id, False) != shared_live:
+            shared_source_modes[mask_id] = shared_live
+            qpane._handle_scene_source_changed()
+        controller.renders.notify_live_preview_changed(mask_id, rect)
+
     controller.render_dirty.connect(_handle_render_dirty)
     controller.mask_updated.connect(_handle_mask_updated)
+    live_previews.changed.connect(_handle_shared_preview_changed)
     controller.active_mask_properties_changed.connect(qpane.refreshCursor)
     controller.active_mask_properties_changed.connect(
         qpane._synchronize_active_mask_layer_selection

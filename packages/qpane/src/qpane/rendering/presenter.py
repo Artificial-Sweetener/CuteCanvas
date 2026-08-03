@@ -21,11 +21,18 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping
-from math import isclose
+from math import ceil, isclose, isfinite
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF, QTimer
-from PySide6.QtGui import QPainter, QRegion, Qt, QTransform
+from PySide6.QtGui import (
+    QPainter,
+    QPainterPath,
+    QPixmap,
+    QRegion,
+    Qt,
+    QTransform,
+)
 from PySide6.QtWidgets import QWidget
 
 from ..scene.identity import (
@@ -59,6 +66,7 @@ from .hybrid_planner import HybridRenderPlanner, SampledFramePlan
 from .layer_clip_presentation import LayerClipPresentationRegistry
 from .layer_effects import LayerEffectFrameCompiler
 from .navigation_plan import (
+    sampled_navigation_plan_covers_panel_rect,
     translated_navigation_plan,
 )
 from .presentation_effect_registry import LayerPresentationEffectRegistry
@@ -147,6 +155,10 @@ class RenderingPresenter:
             qpane,
             execution_scope=self._execution_scope,
         )
+        self._viewport_corner_radius = 0.0
+        self._viewport_border_masks: tuple[QPixmap, ...] = ()
+        self._viewport_border_buffers: tuple[QPixmap, ...] = ()
+        self._viewport_border_mask_signature: tuple[QSize, float] | None = None
         self._tile_grid_runtime = RasterTileGridRuntime(
             config=qpane.settings,
             initial_physical_size=initial_physical_size,
@@ -466,6 +478,23 @@ class RenderingPresenter:
         )
         return self._presentation_effects.snapshot()
 
+    def set_viewport_corner_radius(self, radius: float) -> None:
+        """Clip final viewport presentation to one antialiased rounded rectangle."""
+        resolved = float(radius)
+        if not isfinite(resolved) or resolved < 0.0:
+            raise ValueError("radius must be finite and non-negative")
+        if self._viewport_corner_radius == resolved:
+            return
+        self._viewport_corner_radius = resolved
+        self._viewport_border_masks = ()
+        self._viewport_border_buffers = ()
+        self._viewport_border_mask_signature = None
+        self._qpane.update()
+
+    def viewport_corner_radius(self) -> float:
+        """Return the host-configured logical-pixel viewport corner radius."""
+        return self._viewport_corner_radius
+
     def paint(
         self,
         *,
@@ -485,19 +514,24 @@ class RenderingPresenter:
             )
             painter = QPainter(self._qpane)
             try:
-                painter.fillRect(self._qpane.rect(), Qt.transparent)
-                self._draw_content_overlays(
-                    painter,
-                    render_plan,
-                    content_overlays,
-                    overlays_suspended=overlays_suspended,
-                )
-                self._draw_scene_overlays(
-                    painter,
-                    render_plan,
-                    active_scene_overlays,
-                    overlays_suspended=overlays_suspended,
-                )
+
+                def draw_blank_frame(target: QPainter) -> None:
+                    """Draw one empty viewport and its registered overlays."""
+                    target.fillRect(self._qpane.rect(), Qt.transparent)
+                    self._draw_content_overlays(
+                        target,
+                        render_plan,
+                        content_overlays,
+                        overlays_suspended=overlays_suspended,
+                    )
+                    self._draw_scene_overlays(
+                        target,
+                        render_plan,
+                        active_scene_overlays,
+                        overlays_suspended=overlays_suspended,
+                    )
+
+                self._paint_viewport_frame(painter, draw_blank_frame)
             finally:
                 painter.end()
             return render_plan
@@ -514,24 +548,165 @@ class RenderingPresenter:
             self._last_scroll_reuse_signature = None
         painter = QPainter(self._qpane)
         try:
-            self.renderer.draw_base_buffer(painter)
-            self._draw_content_overlays(
-                painter,
-                render_plan,
-                content_overlays,
-                overlays_suspended=overlays_suspended,
-            )
-            self._draw_scene_overlays(
-                painter,
-                render_plan,
-                active_scene_overlays,
-                overlays_suspended=overlays_suspended,
-            )
-            if draw_tool_overlay and not is_blank:
-                draw_tool_overlay(painter)
+
+            def draw_frame(target: QPainter) -> None:
+                """Draw the current retained frame and every transient overlay."""
+                self.renderer.draw_base_buffer(target)
+                self._draw_content_overlays(
+                    target,
+                    render_plan,
+                    content_overlays,
+                    overlays_suspended=overlays_suspended,
+                )
+                self._draw_scene_overlays(
+                    target,
+                    render_plan,
+                    active_scene_overlays,
+                    overlays_suspended=overlays_suspended,
+                )
+                if draw_tool_overlay:
+                    draw_tool_overlay(target)
+
+            self._paint_viewport_frame(painter, draw_frame)
         finally:
             painter.end()
         return render_plan
+
+    def _paint_viewport_frame(
+        self,
+        painter: QPainter,
+        draw_frame: Callable[[QPainter], None],
+    ) -> None:
+        """Present the center directly and alpha-compose the rounded border."""
+        radius = self._viewport_corner_radius
+        if radius == 0.0:
+            draw_frame(painter)
+            return
+        viewport_rect = self._qpane.rect()
+        extent = ceil(
+            min(radius, viewport_rect.width() / 2.0, viewport_rect.height() / 2.0)
+        )
+        if extent <= 0:
+            draw_frame(painter)
+            return
+        border_rects = [
+            QRect(
+                viewport_rect.left() - 1,
+                viewport_rect.top() - 1,
+                viewport_rect.width() + 2,
+                extent + 1,
+            ),
+            QRect(
+                viewport_rect.left() - 1,
+                viewport_rect.bottom() - extent + 1,
+                viewport_rect.width() + 2,
+                extent + 1,
+            ),
+        ]
+        middle_height = viewport_rect.height() - extent * 2
+        if middle_height > 0:
+            border_rects.extend(
+                (
+                    QRect(
+                        viewport_rect.left() - 1,
+                        viewport_rect.top() + extent,
+                        extent + 1,
+                        middle_height,
+                    ),
+                    QRect(
+                        viewport_rect.right() - extent + 1,
+                        viewport_rect.top() + extent,
+                        extent + 1,
+                        middle_height,
+                    ),
+                )
+            )
+        resolved_border_rects = tuple(border_rects)
+        masks = self._viewport_border_alpha_masks(resolved_border_rects)
+        center_region = QRegion(viewport_rect)
+        for border_rect in resolved_border_rects:
+            center_region -= QRegion(border_rect)
+        painter.save()
+        try:
+            painter.setClipRegion(center_region, Qt.ClipOperation.IntersectClip)
+            draw_frame(painter)
+        finally:
+            painter.restore()
+        for border_rect, mask, buffer in zip(
+            resolved_border_rects,
+            masks,
+            self._viewport_border_buffers,
+            strict=True,
+        ):
+            buffer.fill(Qt.GlobalColor.transparent)
+            border_painter = QPainter(buffer)
+            try:
+                border_painter.translate(
+                    -border_rect.left(),
+                    -border_rect.top(),
+                )
+                draw_frame(border_painter)
+                border_painter.resetTransform()
+                border_painter.setCompositionMode(
+                    QPainter.CompositionMode_DestinationIn
+                )
+                border_painter.drawPixmap(QPoint(), mask)
+            finally:
+                border_painter.end()
+            painter.save()
+            try:
+                painter.setRenderHint(
+                    QPainter.RenderHint.SmoothPixmapTransform,
+                    True,
+                )
+                painter.drawPixmap(border_rect.topLeft(), buffer)
+            finally:
+                painter.restore()
+
+    def _viewport_border_alpha_masks(
+        self,
+        border_rects: tuple[QRect, ...],
+    ) -> tuple[QPixmap, ...]:
+        """Return cached masks covering the exact antialiased rounded boundary."""
+        signature = (
+            self._qpane.size(),
+            self._viewport_corner_radius,
+        )
+        if self._viewport_border_mask_signature == signature:
+            return self._viewport_border_masks
+        rounded_path = QPainterPath()
+        rounded_path.addRoundedRect(
+            QRectF(self._qpane.rect()),
+            self._viewport_corner_radius,
+            self._viewport_corner_radius,
+        )
+        masks: list[QPixmap] = []
+        buffers: list[QPixmap] = []
+        for border_rect in border_rects:
+            mask = QPixmap(border_rect.size())
+            mask.fill(Qt.GlobalColor.transparent)
+            opaque = QPixmap(border_rect.size())
+            opaque.fill(Qt.GlobalColor.white)
+            mask_painter = QPainter(mask)
+            try:
+                mask_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                mask_painter.setClipPath(
+                    rounded_path.translated(
+                        -border_rect.left(),
+                        -border_rect.top(),
+                    )
+                )
+                mask_painter.drawPixmap(QPoint(), opaque)
+            finally:
+                mask_painter.end()
+            masks.append(mask)
+            buffer = QPixmap(border_rect.size())
+            buffer.fill(Qt.GlobalColor.transparent)
+            buffers.append(buffer)
+        self._viewport_border_masks = tuple(masks)
+        self._viewport_border_buffers = tuple(buffers)
+        self._viewport_border_mask_signature = signature
+        return self._viewport_border_masks
 
     def _draw_content_overlays(
         self,
@@ -748,7 +923,17 @@ class RenderingPresenter:
                     self._scroll_reuse_signature_for_plan(projected_plan)
                 )
                 return True
-            candidate_plan = projected_plan
+            candidate_plan = (
+                projected_plan
+                if sampled_navigation_plan_covers_panel_rect(
+                    projected_plan,
+                    self._navigation_sampling_panel_rect(),
+                )
+                else self.calculateRenderPlan(
+                    use_pan=target_pan,
+                    is_blank=False,
+                )
+            )
         if candidate_plan is None:
             candidate_plan = self.calculateRenderPlan(
                 use_pan=target_pan,

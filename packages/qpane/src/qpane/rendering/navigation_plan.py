@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from itertools import pairwise
 
 from PySide6.QtCore import QPoint, QPointF, QRectF
 from PySide6.QtGui import QTransform
@@ -52,6 +53,18 @@ def translated_navigation_plan(
     )
 
 
+def sampled_navigation_plan_covers_panel_rect(
+    plan: SceneRenderPlan,
+    panel_rect: QRectF,
+) -> bool:
+    """Return whether retained sampled products cover one panel rectangle."""
+    return all(
+        _sampled_item_covers_panel_rect(item, panel_rect)
+        for item in plan.render_items
+        if item.descriptor.visible and isinstance(item, SampledLayerRenderItem)
+    )
+
+
 def navigation_products_match(
     first: SceneRenderPlan,
     second: SceneRenderPlan,
@@ -69,6 +82,28 @@ def navigation_products_match(
         _product_identity(first_item) == _product_identity(second_item)
         for first_item, second_item in zip(first_visible, second_visible, strict=True)
     )
+
+
+def navigation_repair_sources_match(
+    first: SceneRenderPlan,
+    second: SceneRenderPlan,
+) -> bool:
+    """Return whether spatially different products share current source pixels."""
+    first_visible = tuple(
+        item for item in first.render_items if item.descriptor.visible
+    )
+    second_visible = tuple(
+        item for item in second.render_items if item.descriptor.visible
+    )
+    if len(first_visible) != len(second_visible):
+        return False
+    for first_item, second_item in zip(first_visible, second_visible, strict=True):
+        first_identity = _repair_source_identity(first_item)
+        if first_identity is None or first_identity != _repair_source_identity(
+            second_item
+        ):
+            return False
+    return True
 
 
 def retained_raster_navigation_delta(
@@ -124,6 +159,72 @@ def retained_raster_navigation_delta(
         elif item_delta != shared_delta:
             return None
     return shared_delta
+
+
+def _sampled_item_covers_panel_rect(
+    item: SampledLayerRenderItem,
+    panel_rect: QRectF,
+) -> bool:
+    """Return whether one sampled item can paint its visible panel coverage."""
+    panel_to_source, invertible = item.transform.inverted()
+    if not invertible:
+        return True
+    source_bounds = QRectF(
+        0.0,
+        0.0,
+        float(item.source_size.width()),
+        float(item.source_size.height()),
+    )
+    required = panel_to_source.mapRect(panel_rect).intersected(source_bounds)
+    if required.isEmpty():
+        return True
+    return _rectangles_cover(required, tuple(tile.source_rect for tile in item.tiles))
+
+
+def _rectangles_cover(required: QRectF, candidates: tuple[QRectF, ...]) -> bool:
+    """Return whether a rectangle union completely covers ``required``."""
+    tolerance = 1e-9
+    clipped = tuple(
+        candidate.intersected(required)
+        for candidate in candidates
+        if candidate.intersects(required)
+    )
+    if not clipped:
+        return False
+    left = required.x()
+    right = left + required.width()
+    top = required.y()
+    bottom = top + required.height()
+    x_edges = sorted(
+        {
+            left,
+            right,
+            *(edge for rect in clipped for edge in (rect.x(), rect.x() + rect.width())),
+        }
+    )
+    for start, end in pairwise(x_edges):
+        if end - start <= tolerance:
+            continue
+        sample_x = (start + end) / 2.0
+        intervals = sorted(
+            (
+                rect.y(),
+                rect.y() + rect.height(),
+            )
+            for rect in clipped
+            if rect.x() <= sample_x + tolerance
+            and rect.x() + rect.width() >= sample_x - tolerance
+        )
+        if not intervals or intervals[0][0] > top + tolerance:
+            return False
+        covered_bottom = intervals[0][1]
+        for interval_top, interval_bottom in intervals[1:]:
+            if interval_top > covered_bottom + tolerance:
+                break
+            covered_bottom = max(covered_bottom, interval_bottom)
+        if covered_bottom < bottom - tolerance:
+            return False
+    return True
 
 
 def _translate_item(item: SceneRenderItem, delta: QPointF) -> SceneRenderItem:
@@ -212,6 +313,30 @@ def _product_identity(item: SceneRenderItem) -> tuple[object, ...]:
     raise TypeError(f"Unsupported render item: {type(item)!r}")
 
 
+def _repair_source_identity(item: SceneRenderItem) -> tuple[object, ...] | None:
+    """Return stable source identity independent of spatial tile selection."""
+    common = (
+        type(item),
+        item.descriptor,
+        item.placement,
+        item.clip,
+        item.source_size,
+        item.render_hint_enabled,
+    )
+    if isinstance(item, RasterLayerRenderItem):
+        return (
+            *common,
+            item.asset_key,
+            item.pyramid_asset_key,
+            item.pyramid_scale,
+            item.strategy,
+            item.source_image.cacheKey(),
+        )
+    if isinstance(item, SampledLayerRenderItem):
+        return common
+    return None
+
+
 def _rect_identity(rect: QRectF) -> tuple[float, float, float, float]:
     """Return stable scalar geometry for one detached floating rectangle."""
     return (rect.x(), rect.y(), rect.width(), rect.height())
@@ -219,6 +344,8 @@ def _rect_identity(rect: QRectF) -> tuple[float, float, float, float]:
 
 __all__ = [
     "navigation_products_match",
+    "navigation_repair_sources_match",
     "retained_raster_navigation_delta",
+    "sampled_navigation_plan_covers_panel_rect",
     "translated_navigation_plan",
 ]

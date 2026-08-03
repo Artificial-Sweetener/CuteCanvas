@@ -113,6 +113,14 @@ class ViewerRenderingRuntime(QObject):
         """Return whether no render scene is active."""
         return self._blank
 
+    def set_viewport_corner_radius(self, radius: float) -> None:
+        """Set final viewport clipping without affecting scene render products."""
+        self._presenter.set_viewport_corner_radius(radius)
+
+    def viewport_corner_radius(self) -> float:
+        """Return the final viewport presentation radius."""
+        return self._presenter.viewport_corner_radius()
+
     @property
     def scene(self) -> RenderScene | None:
         """Return the immutable scene accepted by the SDK adapter."""

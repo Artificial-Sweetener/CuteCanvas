@@ -42,7 +42,8 @@ from qpane import HybridPresentationStyle
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from ..coverage.raster_sampling import CoverageSurfaceSampler
-from .live_preview_raster import LiveMaskPreviewRaster
+from .live_preview_raster import LiveMaskPreviewPatches, LiveMaskPreviewRaster
+from .live_preview_store import MaskLivePreviewStore
 from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
 from .rasterizer import MaskRasterizer
@@ -102,6 +103,7 @@ class MaskRenderCache:
         config: Config,
         mask_config: MaskConfigSlice,
         *,
+        live_previews: MaskLivePreviewStore,
         active_mask_id: Callable[[], uuid.UUID | None],
         async_epoch: Callable[[uuid.UUID], int],
         color_for_mask: Callable[[uuid.UUID | None], QColor],
@@ -113,6 +115,7 @@ class MaskRenderCache:
         self._source_to_panel_point = source_to_panel_point
         self._config_source = config
         self._mask_config = mask_config
+        self._shared_live_previews = live_previews
         self._active_mask_id = active_mask_id
         self._async_epoch = async_epoch
         self._color_for_mask = color_for_mask
@@ -213,13 +216,42 @@ class MaskRenderCache:
 
     def is_live_preview(self, mask_id: uuid.UUID) -> bool:
         """Return whether cached pixels include an in-flight provisional preview."""
+        return mask_id in self._live_previews or self._shared_live_previews.contains(
+            mask_id
+        )
+
+    def uses_local_live_preview(self, mask_id: uuid.UUID) -> bool:
+        """Return whether this view renders a decimated provisional product."""
         return mask_id in self._live_previews
+
+    def live_preview_patches(
+        self,
+        mask_id: uuid.UUID,
+    ) -> LiveMaskPreviewPatches | None:
+        """Return native provisional patches for region-sampled presentation."""
+        return self._shared_live_previews.preview(mask_id)
+
+    def notify_live_preview_changed(
+        self,
+        mask_id: uuid.UUID,
+        storage_rect: QRect,
+    ) -> None:
+        """Project shared provisional damage through this view's coordinates."""
+        if storage_rect.isNull() or storage_rect.isEmpty():
+            self._render_changed(mask_id, QRect())
+            return
+        self._emit_dirty_rect(mask_id, storage_rect)
+
+    def discard_live_preview(self, mask_id: uuid.UUID) -> None:
+        """Release every provisional product owned for one mask."""
+        self._discard_live_preview(mask_id)
 
     def discard_source(self, mask_id: uuid.UUID) -> None:
         """Forget render state associated with a deleted source."""
         self.cancel_async(mask_id)
         self._requested_scales.pop(mask_id, None)
-        self._discard_live_preview(mask_id)
+        self._discard_local_live_preview(mask_id)
+        self._shared_live_previews.discard(mask_id)
         self.invalidate(mask_id)
 
     def set_cache_usage_callback(self, callback: Callable[[], None] | None) -> None:
@@ -425,7 +457,7 @@ class MaskRenderCache:
         """Invalidate every cached scale for a source."""
         if mask_id is None:
             return
-        self._discard_live_preview(mask_id)
+        self._discard_local_live_preview(mask_id)
         self._forget_prefetched(mask_id)
         for key in list(self._mask_index.get(mask_id, ())):
             self._drop(key, reason=reason)
@@ -500,6 +532,42 @@ class MaskRenderCache:
     def get(self, layer: MaskLayer, *, scale: float | None = None) -> QPixmap | None:
         """Return a colorized cached raster for a layer."""
         return self._get(layer, scale=scale)
+
+    def get_with_live_preview(
+        self,
+        layer: MaskLayer,
+        *,
+        scale: float | None = None,
+    ) -> QPixmap | None:
+        """Return an explicit full product including provisional native coverage."""
+        preview = self._shared_live_previews.preview(layer.mask_id)
+        if preview is None:
+            return self._get(layer, scale=scale)
+        snapshot = layer.coverage.snapshot()
+        bounds = snapshot.bounds
+        if bounds is None:
+            return None
+        pixels = np.array(snapshot.pixels, copy=True, order="C")
+        preview.apply_to(bounds, pixels)
+        scale_key = self.normalize_scale(scale)
+        target_size = (
+            None
+            if scale_key is None
+            else self.target_scaled_size(QSize(bounds.width, bounds.height), scale_key)
+        )
+        return QPixmap.fromImage(
+            self.present_pixels(layer.mask_id, pixels, target_size)
+        )
+
+    def get_by_id_with_live_preview(
+        self,
+        mask_id: uuid.UUID,
+        *,
+        scale: float | None = None,
+    ) -> QPixmap | None:
+        """Return an explicit full provisional product for one source ID."""
+        layer = self._assets.get_layer(mask_id)
+        return None if layer is None else self.get_with_live_preview(layer, scale=scale)
 
     def get_by_id(
         self, mask_id: uuid.UUID, *, scale: float | None = None
@@ -969,6 +1037,18 @@ class MaskRenderCache:
         if bounds is None:
             return
         normalized_stride = max(1, int(stride))
+        if normalized_stride == 1:
+            self._live_previews.pop(mask_id, None)
+            self._live_preview_products.pop(mask_id, None)
+            self._forget_prefetched(mask_id)
+            self._shared_live_previews.apply_patch(
+                mask_id,
+                bounds,
+                dirty_rect,
+                patch,
+            )
+            return
+        self._shared_live_previews.discard(mask_id)
         preview = self._live_previews.get(mask_id)
         source_size = QSize(bounds.width, bounds.height)
         if (
@@ -1029,6 +1109,11 @@ class MaskRenderCache:
 
     def _discard_live_preview(self, mask_id: uuid.UUID) -> None:
         """Release volatile coverage and its revision-independent product together."""
+        self._discard_local_live_preview(mask_id)
+        self._shared_live_previews.discard(mask_id)
+
+    def _discard_local_live_preview(self, mask_id: uuid.UUID) -> None:
+        """Release view-specific decimated products without changing shared state."""
         self._live_previews.pop(mask_id, None)
         self._live_preview_products.pop(mask_id, None)
 

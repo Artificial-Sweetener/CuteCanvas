@@ -216,7 +216,10 @@ def test_comparison_tile_abuse_preserves_dense_patterned_pixels(qapp) -> None:
         qapp.processEvents()
         pane = workspace.currentCanvas()
         assert pane is not None
-        pane.applySettings(smooth_zoom_enabled=False)
+        pane.applySettings(
+            cache={"mode": "hard", "budget_mb": 1024},
+            smooth_zoom_enabled=False,
+        )
         pane.viewport.zoom_mode = ViewportZoomMode.CUSTOM
         pane.viewport.setZoomAndPan(1.75, QPointF(117.0, -83.0))
         pane.setComparisonSplit(1.0, ComparisonOrientation.VERTICAL)

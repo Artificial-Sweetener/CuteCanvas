@@ -53,6 +53,7 @@ class ViewerWindow(QMainWindow):
         self._execution_closed = False
         self.pane = QPane(execution_runtime=self._execution_runtime)
         self.pane.setObjectName("qpaneViewer")
+        self.pane.setViewportCornerRadius(8.0)
         self.pane.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.pane.registerTool(
             _INSPECTION_MODE,

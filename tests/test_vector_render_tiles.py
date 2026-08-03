@@ -552,10 +552,10 @@ def test_pan_uses_exact_cached_tiles_over_fallback_for_newly_exposed_coverage(
         coordinator.shutdown()
 
 
-def test_partial_previous_view_is_never_presented_as_fallback(
+def test_small_budget_reserves_whole_source_continuity_before_detail(
     qapp: QApplication,
 ) -> None:
-    """A cache without whole-source coverage must not draw unrelated old strips."""
+    """A constrained cache must retain compatible coverage for a distant pan."""
     executor = ControlledExecution()
     cache = RenderTileCache(3 * 1024 * 1024)
     coordinator = RenderTileWorkCoordinator(
@@ -572,7 +572,7 @@ def test_partial_previous_view_is_never_presented_as_fallback(
     panel_rect = QRectF(0.0, 0.0, 1024.0, 768.0)
 
     def request_at(panel_x: float) -> RenderRefinement:
-        """Request one translated view under a detail-only cache budget."""
+        """Request one translated view under a constrained continuity budget."""
         return coordinator.request(
             source=source,
             source_to_panel=QTransform(4.0, 0.0, 0.0, 4.0, panel_x, 0.0),
@@ -587,7 +587,10 @@ def test_partial_previous_view_is_never_presented_as_fallback(
 
         distant = request_at(-6400.0)
         assert distant.pending
-        assert distant.products is None
+        assert distant.products
+        assert not distant.exact
+        assert min(product.key.scale for product in distant.products) < 1.0
+        assert cache.usage_bytes <= cache.budget_bytes
     finally:
         coordinator.shutdown()
 

@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+
 from ..document import CanvasViewportInteraction, CanvasViewportSpec
 from ..scene.viewport_selection import ViewportSceneSelection
 
@@ -50,6 +52,16 @@ class ViewportApiMixin:
     def viewportSpec(self) -> CanvasViewportSpec | None:
         """Return the explicit source and policy mounted by this view."""
         return self.viewSession().viewport_spec
+
+    def setViewportCornerRadius(self, radius: float) -> None:
+        """Clip final viewport pixels using QPane's bounded border compositor."""
+        self.presenter().set_viewport_corner_radius(radius)
+        if radius > 0.0:
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+    def viewportCornerRadius(self) -> float:
+        """Return the final viewport presentation radius in logical pixels."""
+        return self.presenter().viewport_corner_radius()
 
 
 __all__ = ["ViewportApiMixin"]

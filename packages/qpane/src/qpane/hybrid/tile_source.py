@@ -21,8 +21,10 @@ import math
 import uuid
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
+from functools import lru_cache
 
 from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QImage
 
 from ..rendering.render_tile_geometry import RenderTileRequest
 from ..rendering.render_tile_types import RenderTileProduct
@@ -53,7 +55,11 @@ class HybridRenderTileSource:
     @property
     def revision_key(self) -> Hashable:
         """Return content plus presentation revision identity."""
-        return self.document.revision, self.presentation_revision
+        return (
+            self.document.revision,
+            self.presentation_revision,
+            _presentation_key(self.style),
+        )
 
     @property
     def fallback_key(self) -> Hashable:
@@ -62,6 +68,7 @@ class HybridRenderTileSource:
             self.document.bounds,
             self.document.revision,
             self.presentation_revision,
+            _presentation_key(self.style),
         )
 
     @property
@@ -83,6 +90,8 @@ class HybridRenderTileSource:
         for request in requests[1:]:
             batch_rect = batch_rect.united(request.paint_rect)
         document_rect = _to_document_rect(batch_rect, self.document.bounds)
+        if not _has_primitive_overlap(self.document, document_rect):
+            return tuple(_transparent_product(request, scale) for request in requests)
         batch_size = _sample_size(batch_rect, scale)
         coverage = HybridDocumentEvaluator().evaluate_pixels(
             self.document,
@@ -111,6 +120,22 @@ class HybridRenderTileSource:
             )
         return tuple(products)
 
+    def immediate_products(
+        self,
+        requests: tuple[RenderTileRequest, ...],
+    ) -> tuple[RenderTileProduct, ...] | None:
+        """Return transparent products when bounded geometry proves no coverage."""
+        if not requests:
+            return ()
+        scale = requests[0].key.scale
+        batch_rect = QRectF(requests[0].paint_rect)
+        for request in requests[1:]:
+            batch_rect = batch_rect.united(request.paint_rect)
+        document_rect = _to_document_rect(batch_rect, self.document.bounds)
+        if _has_primitive_overlap(self.document, document_rect):
+            return None
+        return tuple(_transparent_product(request, scale) for request in requests)
+
 
 def _to_document_rect(rect: QRectF, bounds: RasterBounds) -> QRectF:
     """Translate zero-origin sampling coordinates into document coordinates."""
@@ -133,3 +158,51 @@ def _pixel_rect(rect: QRectF, origin: QRectF, scale: float) -> QRectF:
         rect.width() * scale,
         rect.height() * scale,
     )
+
+
+def _has_primitive_overlap(document: HybridDocument, source_rect: QRectF) -> bool:
+    """Return whether any bounded primitive can affect the sampled region."""
+    return any(
+        not QRectF(
+            primitive.bounds.x,
+            primitive.bounds.y,
+            primitive.bounds.width,
+            primitive.bounds.height,
+        )
+        .intersected(source_rect)
+        .isEmpty()
+        for primitive in document.primitives
+    )
+
+
+def _transparent_product(
+    request: RenderTileRequest,
+    scale: float,
+) -> RenderTileProduct:
+    """Return one transparent tile without evaluating an empty hybrid region."""
+    size = _sample_size(request.paint_rect, scale)
+    image = QImage(_transparent_image(size.width(), size.height()))
+    return RenderTileProduct(
+        request.key,
+        request.source_rect,
+        image,
+        _pixel_rect(request.source_rect, request.paint_rect, scale),
+    )
+
+
+def _presentation_key(
+    style: HybridPresentationStyle,
+) -> tuple[int, int | None]:
+    """Return the exact 8-bit style identity used by presented tile pixels."""
+    return (
+        int(style.color.rgba()),
+        None if style.outline_color is None else int(style.outline_color.rgba()),
+    )
+
+
+@lru_cache(maxsize=32)
+def _transparent_image(width: int, height: int) -> QImage:
+    """Return one implicitly shared immutable transparent tile allocation."""
+    image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    return image

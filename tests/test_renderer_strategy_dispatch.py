@@ -25,6 +25,7 @@ from qpane.scene.render_plan import RenderStrategy
 
 from qpane import QPane
 from qpane.rendering import Renderer
+from tests.helpers.config import fixed_cache_config
 from tests.helpers.render_plan import make_render_plan
 
 
@@ -114,7 +115,7 @@ def test_calculate_render_plan_prefers_direct_when_image_fits(qapp):
 
 @pytest.mark.interactive_performance
 def test_calculate_render_plan_switches_to_tile_for_large_zoom(qapp):
-    qpane = QPane()
+    qpane = QPane(config=fixed_cache_config())
     try:
         qpane.resize(128, 128)
         image = QImage(128, 128, QImage.Format_ARGB32_Premultiplied)

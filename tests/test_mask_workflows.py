@@ -31,6 +31,7 @@ from cutecanvas.composition.model import (
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks.autosave import AutosaveManager
 from cutecanvas.masks.edit_service import MaskEditService
+from cutecanvas.masks.live_preview_store import MaskLivePreviewStore
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.mask_service import MaskService
@@ -111,6 +112,7 @@ def _make_test_qpane(qapp):
         source_to_panel_point=_panel_point,
         config=base_config,
         mask_config=mask_config,
+        live_previews=MaskLivePreviewStore(),
     )
     service = MaskService(
         qpane=qpane,
@@ -326,6 +328,7 @@ def qpane_with_mask(qapp, monkeypatch):
             mask_manager,
             source_to_panel_point=_panel_point,
             config=qpane.settings,
+            live_previews=MaskLivePreviewStore(),
         )
         service = MaskService(
             qpane=qpane,
@@ -456,6 +459,7 @@ def test_mask_autosave_coordinator_disconnects_when_disabled(
             mask_manager,
             source_to_panel_point=_panel_point,
             config=qpane.settings,
+            live_previews=MaskLivePreviewStore(),
         )
         service = MaskService(
             qpane=qpane,

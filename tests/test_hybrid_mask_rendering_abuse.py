@@ -157,6 +157,107 @@ def test_retained_vector_mask_zoom_storm_never_presents_blank_or_partial_frames(
         harness.close()
 
 
+@pytest.mark.parametrize("raster_backed", (False, True), ids=("vector", "raster"))
+@pytest.mark.parametrize("pan_axis", ("horizontal", "vertical"))
+def test_zoomed_mask_pan_crosses_cold_tile_boundary_without_pop_in(
+    qapp: QApplication,
+    raster_backed: bool,
+    pan_axis: str,
+) -> None:
+    """A direct pan must retain complete mask coverage across cold tile boundaries."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(4096, 4096),
+        widget_size=QSize(800, 600),
+        cache_budget_mb=8,
+    )
+    viewer = harness.viewer
+    center = QPoint(400, 300)
+    horizontal = pan_axis == "horizontal"
+    probe_points = tuple(
+        QPoint(position, center.y()) if horizontal else QPoint(center.x(), position)
+        for position in (20, 80, 200, center.x() if horizontal else center.y())
+    )
+    try:
+        if raster_backed:
+            layer = viewer.mask_service.assets.get_layer(harness.mask_ids[0])
+            assert layer is not None
+
+            def paint_mask(pixels: np.ndarray, _image: QImage) -> None:
+                """Paint complete raster coverage across every sampled tile."""
+                pixels.fill(255)
+
+            layer.coverage.raster.mutate(paint_mask)
+            viewer.mask_service.invalidateMaskCache(harness.mask_ids[0])
+            viewer.mask_service.controller.mask_updated.emit(None, QRect())
+        else:
+            assert viewer.editor.coverage.rectangle(QRectF(0.0, 0.0, 4096.0, 4096.0))
+        viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
+        viewer.applyZoom(5.0, center)
+        assert harness.wait_for_mask_render_idle(timeout_ms=8000)
+        assert harness.wait_for_render_refinement_idle(
+            timeout_ms=8000,
+            include_prefetch=True,
+        )
+        harness.drain_events(wait_ms=30)
+        assert all(
+            harness.is_mask_tint(harness.color_at(point)) for point in probe_points
+        )
+
+        frames: list[tuple[int, tuple[bool, ...]]] = []
+        pan_latencies: list[float] = []
+        active_worker_counts: list[int] = []
+        metrics_before = viewer.view().renderer.snapshot_metrics()
+        QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, center)
+        try:
+            for delta in range(300, 3300, 300):
+                started = interaction_clock()
+                pan_delta = QPoint(delta, 0) if horizontal else QPoint(0, delta)
+                QTest.mouseMove(viewer, center + pan_delta, delay=0)
+                harness.drain_events()
+                pan_latencies.append((interaction_clock() - started) * 1000.0)
+                active_worker_counts.append(
+                    len(viewer.view().presenter._render_refinement._pending)
+                )
+                frames.append(
+                    (
+                        delta,
+                        tuple(
+                            harness.is_mask_tint(harness.color_at(point))
+                            for point in probe_points
+                        ),
+                    )
+                )
+        finally:
+            QTest.mouseRelease(
+                viewer,
+                Qt.LeftButton,
+                Qt.NoModifier,
+                center + (QPoint(3000, 0) if horizontal else QPoint(0, 3000)),
+            )
+
+        release_tint = tuple(
+            harness.is_mask_tint(harness.color_at(point)) for point in probe_points
+        )
+        metrics_after = viewer.view().renderer.snapshot_metrics()
+        stable_pan = stable_latency_samples(pan_latencies, parallel_batch_size=4)
+        assert all(all(tinted) for _delta, tinted in frames), frames
+        assert all(release_tint), release_tint
+        assert not any(active_worker_counts), active_worker_counts
+        assert metrics_after.scroll_misses == metrics_before.scroll_misses
+        assert metrics_after.scroll_hits - metrics_before.scroll_hits >= len(frames)
+        assert sum(stable_pan) / len(stable_pan) < _SIXTY_HZ_FRAME_BUDGET_MS
+        assert (
+            tail_interaction_latency_ms(
+                pan_latencies,
+                parallel_batch_size=4,
+            )
+            < 30.0
+        )
+    finally:
+        harness.close()
+
+
 def test_many_retained_shapes_refine_one_large_viewport_with_bounded_cpu() -> None:
     """A dense authored document must not repeat viewport work per tile."""
     geometry = CoverageGeometryFactory()

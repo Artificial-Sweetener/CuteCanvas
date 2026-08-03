@@ -27,6 +27,7 @@ from PySide6.QtGui import QColor, QImage
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
 from .edit_service import MaskEditEpochs, MaskEditService
+from .live_preview_store import MaskLivePreviewStore
 from .mask import MaskAssetStore, MaskLayer
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .render_cache import MaskRenderCache
@@ -48,6 +49,8 @@ class MaskController(QObject):
         source_to_panel_point: Callable[[QPoint], QPoint | QPointF | None],
         config: Config,
         mask_config: MaskConfigSlice | None = None,
+        *,
+        live_previews: MaskLivePreviewStore,
         stroke_diagnostics: MaskStrokeDiagnostics | None = None,
         color_for_mask: Callable[[uuid.UUID], QColor | None] | None = None,
         structure_changed: Callable[[], None] | None = None,
@@ -61,6 +64,7 @@ class MaskController(QObject):
             config: Feature-aware configuration providing cache budgets.
             mask_config: Optional mask slice override when the caller already
                 resolved the feature configuration.
+            live_previews: Document-scoped provisional mask presentation owner.
             stroke_diagnostics: Optional diagnostics helper for stroke timing/counters.
             color_for_mask: Composition-owned mask appearance lookup.
             structure_changed: Callback for source-bounds geometry changes.
@@ -83,6 +87,7 @@ class MaskController(QObject):
             source_to_panel_point,
             config,
             self._mask_config,
+            live_previews=live_previews,
             active_mask_id=lambda: self._active_mask_id,
             async_epoch=self._epochs.current,
             color_for_mask=self.color_for_mask,

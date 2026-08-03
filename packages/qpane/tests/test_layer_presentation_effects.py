@@ -480,6 +480,7 @@ def test_mounted_effect_pan_storm_stays_responsive(qapp) -> None:
         qapp.processEvents()
 
 
+@pytest.mark.interactive_performance
 def test_effect_lifecycle_storm_is_bounded(qapp) -> None:
     """Pointer-hover style replacement must stay cheap and retain no stale effects."""
     pane = QPane()

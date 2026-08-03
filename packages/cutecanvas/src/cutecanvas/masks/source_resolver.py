@@ -42,6 +42,7 @@ from qpane import HybridPresentationStyle, HybridSource
 
 from ..resources import ProjectResourceReference
 from .hybrid_source import MaskHybridSourceFactory
+from .live_preview_raster import LiveMaskPreviewPatches
 from .mask import MaskLayer
 
 _MAX_VISIBLE_PATCH_PRODUCTS = 4
@@ -77,6 +78,17 @@ class MaskRenderLookup(Protocol):
 
     def is_live_preview(self, mask_id: uuid.UUID) -> bool:
         """Return whether a volatile preview currently changes this mask product."""
+        ...
+
+    def uses_local_live_preview(self, mask_id: uuid.UUID) -> bool:
+        """Return whether this view renders a decimated provisional product."""
+        ...
+
+    def live_preview_patches(
+        self,
+        mask_id: uuid.UUID,
+    ) -> LiveMaskPreviewPatches | None:
+        """Return native provisional patches for region-sampled presentation."""
         ...
 
     def render_revision(self, mask_id: uuid.UUID) -> int:
@@ -126,12 +138,12 @@ class MaskSourceCapabilities:
         )
 
     def product_policy(self, source: LayerSourceReference) -> RasterProductPolicy:
-        """Bypass shared products only while this mask's preview is changing."""
+        """Keep durable mask products cacheable during transient native painting."""
         if not isinstance(source, ProjectResourceReference):
             return RasterProductPolicy.CACHEABLE
         return (
             RasterProductPolicy.VOLATILE
-            if self.renders.is_live_preview(source.resource_id)
+            if self.renders.uses_local_live_preview(source.resource_id)
             else RasterProductPolicy.CACHEABLE
         )
 
@@ -149,7 +161,18 @@ class MaskSourceCapabilities:
             if scale is None
             else self.renders.get_best_by_id(source.resource_id, scale=scale)
         )
-        return None if pixmap is None or pixmap.isNull() else pixmap.toImage()
+        if pixmap is not None and not pixmap.isNull():
+            return pixmap.toImage()
+        layer = self.assets.get_layer(source.resource_id)
+        if (
+            layer is None
+            or layer.coverage.raster.content_bounds() is not None
+            or layer.coverage.has_retained_items
+        ):
+            return None
+        transparent = QImage(1, 1, QImage.Format_ARGB32_Premultiplied)
+        transparent.fill(0)
+        return transparent
 
     def source_size(self, source: LayerSourceReference) -> QSize | None:
         """Return mask storage dimensions without copying authoritative pixels."""
@@ -167,7 +190,9 @@ class MaskSourceCapabilities:
         """Return stable sparse tiles while volatile previews use dense fallback."""
         if not isinstance(source, ProjectResourceReference):
             return ()
-        if self.renders.is_live_preview(source.resource_id):
+        if self.renders.live_preview_patches(source.resource_id) is not None:
+            return None
+        if self.renders.uses_local_live_preview(source.resource_id):
             return None
         layer = self.assets.get_layer(source.resource_id)
         logical_bounds = None if layer is None else layer.coverage.source_bounds()
@@ -207,13 +232,29 @@ class MaskSourceCapabilities:
         """Return stable coverage through QPane's hybrid tile renderer."""
         if not isinstance(source, ProjectResourceReference):
             return None
+        if self.renders.uses_local_live_preview(source.resource_id):
+            return None
+        return self.hybrid_document_with_style(
+            source,
+            self.renders.hybrid_style(source.resource_id),
+        )
+
+    def hybrid_document_with_style(
+        self,
+        source: ProjectResourceReference,
+        style: HybridPresentationStyle,
+    ) -> HybridSource | None:
+        """Resolve durable or provisional coverage with one requested style."""
         layer = self.assets.get_layer(source.resource_id)
-        if layer is None or self.renders.is_live_preview(source.resource_id):
+        if layer is None:
             return None
         return self.hybrids.source(
             layer,
-            self.renders.hybrid_style(source.resource_id),
+            style,
             self.renders.render_revision(source.resource_id),
+            include_empty_raster=(
+                self.renders.live_preview_patches(source.resource_id) is not None
+            ),
         )
 
     def source_path(self, source: LayerSourceReference) -> Path | None:
@@ -296,12 +337,27 @@ class MaskSourceCapabilities:
             or pixel_format is not RasterPixelFormat.COVERAGE8
         ):
             return None
+        return self.present_transition_samples_with_style(
+            source,
+            transition,
+            samples,
+            self.renders.hybrid_style(source.resource_id),
+        )
+
+    def present_transition_samples_with_style(
+        self,
+        source: ProjectResourceReference,
+        transition: RasterPixelTransition,
+        samples: tuple[PixelSampleGeometry, ...],
+        style: HybridPresentationStyle,
+    ) -> tuple[QImage, ...] | None:
+        """Sample one virtual mask transition with an authoritative style."""
         layer = self.assets.get_layer(source.resource_id)
         if layer is None:
             return None
         hybrid = self.hybrids.source_with_transition(
             layer,
-            self.renders.hybrid_style(source.resource_id),
+            style,
             self.renders.render_revision(source.resource_id),
             transition,
         )

@@ -28,6 +28,7 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage
 
 from .harness.timing import completion_clock
+from .helpers.config import fixed_cache_config
 
 
 def _image(color: str, width: int = 64, height: int = 48) -> QImage:
@@ -54,8 +55,8 @@ def test_nested_document_archive_restores_complete_live_resource_graph(
     tmp_path,
 ) -> None:
     """Saving a root must preserve nested documents and shared child resources."""
-    source = CuteCanvas(features=())
-    restored = CuteCanvas(features=())
+    source = CuteCanvas(config=fixed_cache_config(), features=())
+    restored = CuteCanvas(config=fixed_cache_config(), features=())
     try:
         child_id = source.createCompositionFromImage(
             _image("red"),

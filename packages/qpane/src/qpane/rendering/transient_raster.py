@@ -47,6 +47,9 @@ class TransientRasterHandoff:
         pending = self._pending
         if pending is None:
             return plan, False
+        if not getattr(pending, "retain_until_durable", True):
+            self._clear()
+            return plan, True
         if isinstance(pending, TransientRasterTransformContribution):
             self._clear()
             return plan, True

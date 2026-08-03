@@ -96,7 +96,7 @@ class MaskLayerWorkflow:
             if not self._commit_image(mask_id, prepared):
                 return None
         else:
-            mask_id = self._assets.create_mask(prepared)
+            mask_id = self._assets.create_mask_from_image(prepared)
         layer = self._assets.get_layer(mask_id)
         layer_index = len(self._layers.mask_ids_for_composition(composition_id))
         if layer is None or not self._layers.attach_to_composition(

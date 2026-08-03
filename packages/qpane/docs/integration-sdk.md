@@ -7,6 +7,10 @@ own cache, scheduling, source-capability, diagnostics, and presentation
 lifecycle. CuteCanvas is one such host. Import only the concern you actually
 integrate:
 
+Rounded host surfaces call `QPane.setViewportCornerRadius()` so clipping stays
+inside the final renderer presentation boundary.
+`QPane.viewportCornerRadius()` returns the configured logical-pixel radius.
+
 ```python
 from qpane.sdk.execution import ExecutionRuntime
 from qpane.sdk.scene import LayerSourceCapabilities, SceneProviderRegistry
@@ -63,7 +67,11 @@ product without resampling it on every pointer event. These values let the
 normal compositor preserve clip, ordering, and damage rules during previews.
 `TransientSampledResolvedContribution` provides the same preview contract for
 tile-backed sampled content, including the layer clip and source geometry
-needed for a stable temporary edit.
+needed for a stable temporary edit. Resolved contributions retain their last
+frame until the corresponding durable source revision arrives by default.
+Set `retain_until_durable=False` for cancellable in-flight feedback whose
+disappearance is authoritative and must immediately repair the underlying
+durable frame.
 When a host must sample immutable hybrid content for a transient product,
 `present_hybrid_sample()` evaluates the requested source rectangle at an
 explicit output size using the same source-space phase as settled hybrid

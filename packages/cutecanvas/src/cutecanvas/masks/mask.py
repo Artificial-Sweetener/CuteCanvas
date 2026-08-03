@@ -160,6 +160,21 @@ class MaskAssetStore:
 
     def create_mask(self, image: QImage) -> uuid.UUID:
         """Create a blank asset matching ``image`` dimensions."""
+        return self._create_mask(
+            CoverageSurface.blank(
+                image.size(),
+                extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
+            )
+        )
+
+    def create_mask_from_image(self, image: QImage) -> uuid.UUID:
+        """Create an expandable asset initialized from trusted image pixels."""
+        coverage = CoverageSurface.from_qimage(image)
+        coverage.set_extent_policy(RasterExtentPolicy.EXPAND_ON_WRITE)
+        return self._create_mask(coverage)
+
+    def _create_mask(self, coverage: CoverageSurface) -> uuid.UUID:
+        """Register one authoritative coverage surface as a mask asset."""
         mask_id = uuid.uuid4()
         self._resources.create(
             ProjectResourceKind.COVERAGE,
@@ -170,10 +185,7 @@ class MaskAssetStore:
             mask_id=mask_id,
             coverage=CoverageAsset(
                 mask_id,
-                CoverageSurface.blank(
-                    image.size(),
-                    extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
-                ),
+                coverage,
             ),
         )
         self._history.initialize_mask(mask_id)

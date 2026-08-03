@@ -27,6 +27,7 @@ from cutecanvas.coverage import (
     CoverageGeometryFactory,
     VectorCoverageItem,
 )
+from cutecanvas.masks.live_preview_store import MaskLivePreviewStore
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.mask_undo import (
@@ -58,6 +59,7 @@ def test_preview_stride_defaults_to_visible_density_before_cache_warmup(qapp) ->
         source_to_panel_point=lambda point: QPointF(point),
         config=Config(),
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
 
     assert controller.renders.preview_stride(mask_id, 0.125) == 8
@@ -82,6 +84,7 @@ def test_scaled_mask_render_does_not_materialize_full_surface(
         source_to_panel_point=lambda point: QPointF(point),
         config=Config(),
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
     resolver = MaskSourceCapabilities(assets=assets, renders=controller.renders)
 
@@ -113,6 +116,7 @@ def test_worker_colorized_mask_patch_does_not_materialize_full_surface(
         source_to_panel_point=lambda point: QPointF(point),
         config=Config(),
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
     dirty_rect = QRect(2048, 2048, 1024, 1024)
     colorized = QImage(dirty_rect.size(), QImage.Format.Format_ARGB32_Premultiplied)
@@ -144,6 +148,7 @@ def test_history_delta_reads_only_dirty_surface_regions(qapp, monkeypatch) -> No
         source_to_panel_point=lambda point: QPointF(point),
         config=Config(),
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
     assert controller.renders.get(layer, scale=0.125) is not None
     dirty = QRect(1024, 768, 48, 32)
@@ -183,10 +188,10 @@ def test_history_delta_reads_only_dirty_surface_regions(qapp, monkeypatch) -> No
     assert captured_regions == [RasterBounds.from_qrect(dirty)]
 
 
-def test_live_preview_uses_one_exact_sample_lattice_during_scale_transition(
+def test_native_live_preview_uses_document_shared_transient_coverage(
     qapp,
 ) -> None:
-    """A stroke must not resample independent patches into another cache density."""
+    """Native stroke feedback must bypass durable source products."""
     assets = MaskAssetStore(ProjectResourceStore())
     image = QImage(64, 48, QImage.Format.Format_Grayscale8)
     image.fill(0)
@@ -200,6 +205,7 @@ def test_live_preview_uses_one_exact_sample_lattice_during_scale_transition(
         source_to_panel_point=lambda point: QPointF(point),
         config=config,
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
     fit_pixmap = controller.renders.get(layer, scale=0.5)
     assert fit_pixmap is not None
@@ -218,17 +224,79 @@ def test_live_preview_uses_one_exact_sample_lattice_during_scale_transition(
         sub_mask_image=preview,
     )
 
-    live_pixmap = controller.renders.get(layer, scale=1.0)
-
-    assert live_pixmap is not fit_pixmap
-    assert live_pixmap is not None
-    assert live_pixmap.size() == image.size()
-    assert live_pixmap.toImage().pixelColor(8, 8).alpha() > 0
-    row = tuple(
-        live_pixmap.toImage().pixelColor(x_position, 12).rgba()
-        for x_position in range(8, 24)
+    patches = MaskSourceCapabilities(
+        assets=assets,
+        renders=controller.renders,
+    ).source_patches(
+        ProjectResourceReference(mask_id),
+        RasterBounds(8, 8, 16, 8),
     )
-    assert len(set(row)) == 1
+
+    assert patches is None
+    shared = controller.renders.live_preview_patches(mask_id)
+    assert shared is not None
+    bounds = RasterBounds(8, 8, 16, 8)
+    pixels = np.zeros((bounds.height, bounds.width), dtype=np.uint8)
+    shared.apply_to(bounds, pixels)
+    assert np.all(pixels == 255)
+
+
+def test_oversized_sparse_mask_live_dot_never_snapshots_its_full_storage(
+    qapp,
+    monkeypatch,
+) -> None:
+    """A native live dot must cost only its sampled region, not the mask envelope."""
+    assets = MaskAssetStore(ProjectResourceStore())
+    image = QImage(64, 48, QImage.Format.Format_Grayscale8)
+    image.fill(0)
+    mask_id = assets.create_mask(image)
+    layer = assets.get_layer(mask_id)
+    assert layer is not None
+    surface = layer.coverage.raster
+    oversized = RasterBounds(-3840, -2688, 7680, 10752)
+    assert surface.set_bounds(oversized)
+    controller = MaskController(
+        assets,
+        source_to_panel_point=lambda point: QPointF(point),
+        config=Config(),
+        mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
+    )
+    resolver = MaskSourceCapabilities(assets=assets, renders=controller.renders)
+    dirty_rect = QRect(4096, 3072, 32, 24)
+    preview = QImage(dirty_rect.size(), QImage.Format.Format_Grayscale8)
+    preview.fill(255)
+    preview.setText("qpane_preview_stride", "1")
+    preview.setText("qpane_preview_provisional", "1")
+
+    def reject_dense_snapshot(
+        _region: RasterBounds,
+        *,
+        stride: int = 1,
+    ) -> np.ndarray:
+        del stride
+        raise AssertionError("live preview materialized mask storage")
+
+    monkeypatch.setattr(surface, "snapshot_storage_region", reject_dense_snapshot)
+
+    controller.renders.update_region(dirty_rect, layer, sub_mask_image=preview)
+    visible = RasterBounds(
+        oversized.x + dirty_rect.x(),
+        oversized.y + dirty_rect.y(),
+        dirty_rect.width(),
+        dirty_rect.height(),
+    )
+    patches = resolver.source_patches(
+        ProjectResourceReference(mask_id),
+        visible,
+    )
+
+    assert patches is None
+    shared = controller.renders.live_preview_patches(mask_id)
+    assert shared is not None
+    pixels = np.zeros((visible.height, visible.width), dtype=np.uint8)
+    shared.apply_to(visible, pixels)
+    assert np.all(pixels == 255)
 
 
 def test_retained_mask_publishes_hybrid_source_without_visible_patch_evaluation(
@@ -253,6 +321,7 @@ def test_retained_mask_publishes_hybrid_source_without_visible_patch_evaluation(
         source_to_panel_point=lambda point: QPointF(point),
         config=Config(),
         mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
     )
     resolver = MaskSourceCapabilities(assets=assets, renders=controller.renders)
     source = ProjectResourceReference(mask_id)
@@ -319,6 +388,7 @@ def test_qpane_hybrid_evaluation_matches_authoritative_mask_algebra(qapp) -> Non
             source_to_panel_point=lambda point: QPointF(point),
             config=Config(),
             mask_config=MaskConfigSlice(),
+            live_previews=MaskLivePreviewStore(),
         ).renders,
     ).hybrids.source(
         layer,

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from unittest.mock import patch
 
@@ -31,8 +32,87 @@ from cutecanvas import (
     PixelSelectionMode,
     VectorShapeKind,
 )
-from PySide6.QtCore import QRectF, QSize
-from PySide6.QtTest import QSignalSpy
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt
+from PySide6.QtTest import QSignalSpy, QTest
+
+
+def test_live_brush_contact_updates_neutral_shared_mask_view(qapp) -> None:
+    """Present provisional mask coverage in a passive view before stroke commit."""
+    document = CanvasDocument()
+    runtime = CanvasDocumentRuntime(document)
+    editor = CuteCanvas(
+        document=document,
+        document_runtime=runtime,
+        features=("mask",),
+    )
+    preview = CuteCanvas(
+        document=document,
+        document_runtime=runtime,
+        features=("mask",),
+    )
+    pressed = False
+    try:
+        composition = editor.editor.compositions.create(
+            QRectF(0.0, 0.0, 256.0, 256.0),
+            title="Shared live mask",
+        )
+        mask_id = editor.createBlankMask(QSize(256, 256), undoable=False)
+        assert mask_id is not None
+        assert editor.setActiveMaskID(mask_id)
+        mask = editor.listMasksForComposition(composition.id)[0]
+        assert mask.layer_id is not None
+        preview.setViewportSpec(
+            CanvasViewportSpec(
+                CanvasViewportSource.content(
+                    document.content_reference(
+                        composition.id,
+                        layer_id=mask.layer_id,
+                    )
+                ),
+                viewport_id=uuid.uuid4(),
+                interaction=CanvasViewportInteraction.FIT_ONLY,
+                render_variant=CanvasRenderVariant.MASK_COVERAGE,
+            )
+        )
+        editor.resize(320, 320)
+        preview.resize(192, 192)
+        editor.show()
+        preview.show()
+        editor.setControlMode(editor.CONTROL_MODE_DRAW_BRUSH)
+        editor.setBrushSize(48)
+        for _ in range(12):
+            qapp.processEvents()
+        preview_point = QPoint(96, 96)
+        before = preview.grab().toImage().pixelColor(preview_point)
+
+        QTest.mousePress(
+            editor,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+            QPoint(160, 160),
+        )
+        pressed = True
+        deadline = time.perf_counter() + 1.0
+        after = before
+        while after == before and time.perf_counter() < deadline:
+            qapp.processEvents()
+            QTest.qWait(1)
+            after = preview.grab().toImage().pixelColor(preview_point)
+
+        assert after != before
+        assert editor.getMaskUndoState(mask_id).undo_depth == 0
+    finally:
+        if pressed:
+            QTest.mouseRelease(
+                editor,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+                QPoint(160, 160),
+            )
+        editor.close()
+        preview.close()
+        runtime.close()
+        document.close()
 
 
 def test_committed_mask_edit_invalidates_passive_shared_view(qapp) -> None:

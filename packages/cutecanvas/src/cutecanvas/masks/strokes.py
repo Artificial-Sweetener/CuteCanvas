@@ -239,6 +239,8 @@ class MaskStrokePipeline:
             ):
                 had_state = True
                 preview_tokens.pop(target, None)
+            if not preserved_ids:
+                self._controller.renders.discard_live_preview(target)
             if had_state and not preserved_ids:
                 if request_redraw and manager is not None:
                     layer = manager.get_layer(target)

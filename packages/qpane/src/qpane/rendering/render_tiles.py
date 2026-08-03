@@ -23,6 +23,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol, runtime_checkable
 
 from PySide6.QtCore import QRectF, QTimer
 from PySide6.QtGui import QTransform
@@ -63,6 +64,18 @@ logger = logging.getLogger(__name__)
 _REFINEMENT_CHUNK_TILES = 4
 _PREFETCH_CHUNK_TILES = 1
 _PREFETCH_SETTLE_MS = 150
+
+
+@runtime_checkable
+class _ImmediateTileSource(Protocol):
+    """Provide products whose bounded result is safe to derive on the GUI thread."""
+
+    def immediate_products(
+        self,
+        requests: tuple[RenderTileRequest, ...],
+    ) -> tuple[RenderTileProduct, ...] | None:
+        """Return immediate products or decline synchronous derivation."""
+        ...
 
 
 class _RefinementLane(str, Enum):
@@ -232,6 +245,11 @@ class RenderTileWorkCoordinator:
         maximum_scale: float | None = None,
     ) -> RenderRefinement:
         """Return, schedule, or explicitly decline one visible tile set."""
+        if self._cache.budget_bytes <= 0:
+            return RenderRefinement.unavailable()
+        overview_requests = self._overview_requests_for(source)
+        overview_bytes = estimated_request_bytes(overview_requests)
+        detail_budget_bytes = max(0, self._cache.budget_bytes - overview_bytes)
         visible_requests = _visible_tile_requests(
             source_kind=source.source_kind,
             source_id=source.source_id,
@@ -241,22 +259,21 @@ class RenderTileWorkCoordinator:
             source_to_panel=source_to_panel,
             panel_rect=panel_rect,
             device_pixel_ratio=device_pixel_ratio,
-            budget_bytes=self._cache.budget_bytes,
+            budget_bytes=detail_budget_bytes,
             maximum_scale=maximum_scale,
         )
         if visible_requests is None:
-            return RenderRefinement.unavailable()
+            visible_requests = overview_requests
         visible_signature = tuple(request.key for request in visible_requests)
         if not visible_signature:
             return RenderRefinement.ready(())
-        overview_requests = self._overview_requests_for(source)
-        overview_bytes = estimated_request_bytes(overview_requests)
-        visible_bytes = estimated_request_bytes(visible_requests)
-        if visible_bytes + overview_bytes > self._cache.budget_bytes:
-            overview_requests = ()
-            overview_bytes = 0
         overview_signature = tuple(request.key for request in overview_requests)
         cached = self._cache.products(visible_signature)
+        if cached is None and isinstance(source, _ImmediateTileSource):
+            immediate = source.immediate_products(visible_requests)
+            if immediate is not None:
+                self._cache.admit(immediate, retain_keys=visible_signature)
+                return RenderRefinement.ready(immediate)
         if not self._navigation_suspended:
             self._ensure_work(
                 lane=_RefinementLane.CONTINUITY,
@@ -465,7 +482,7 @@ class RenderTileWorkCoordinator:
             revision_key=source.revision_key,
             fallback_key=source.fallback_key,
             bounds=source.bounds,
-            budget_bytes=budget_bytes,
+            budget_bytes=budget_bytes // 2,
         )
         self._overview_requests[identity] = _OverviewRequestBatch(
             source.revision_key,

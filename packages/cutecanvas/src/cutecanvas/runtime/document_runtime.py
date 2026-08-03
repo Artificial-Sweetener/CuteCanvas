@@ -33,6 +33,7 @@ from qpane.sdk.execution import (
 )
 
 from ..document import CanvasDocument
+from ..masks.live_preview_store import MaskLivePreviewStore
 from .latest_requests import DocumentLatestRequestRegistry
 
 
@@ -73,6 +74,7 @@ class CanvasDocumentRuntime(QObject):
             dispatcher=QtOwnerDispatcher(self),
         )
         self.__latest_requests = DocumentLatestRequestRegistry()
+        self.__mask_live_previews = MaskLivePreviewStore()
         self._native_runtime: ExecutionRuntime | None = None
         self._native_scope: ExecutionScope | None = None
         self._native_lock = Lock()
@@ -97,6 +99,11 @@ class CanvasDocumentRuntime(QObject):
     def _latest_request_registry(self) -> DocumentLatestRequestRegistry:
         """Return the package-owned document freshness registry."""
         return self.__latest_requests
+
+    @property
+    def _mask_live_preview_store(self) -> MaskLivePreviewStore:
+        """Return document-scoped provisional mask presentation authority."""
+        return self.__mask_live_previews
 
     def open_view_scope(self, owner: QObject) -> ExecutionScope:
         """Open a receiver-safe scope whose lifetime belongs to one view."""
@@ -135,6 +142,7 @@ class CanvasDocumentRuntime(QObject):
             return
         self._closed = True
         self.__latest_requests.close()
+        self.__mask_live_previews.clear()
         self._scope.close(reason="document_runtime_closed")
         with self._native_lock:
             native_scope = self._native_scope

@@ -65,7 +65,7 @@ from ..raster.layers import (
 from ..raster.paint_target import EditableRasterPaintTargetOwner
 from ..raster.pixel_edits import EditableRasterPixelMutationOwner
 from ..raster.structure_mutations import EditableRasterStructureMutationOwner
-from ..rendering.floating_pixels import FloatingPixelRenderCompiler
+from ..rendering.transient_rasters import TransientRasterRenderCoordinator
 from ..resources import (
     LayerRasterizationCompletion,
     LayerResourceRasterizationRouter,
@@ -135,6 +135,7 @@ from .transform_interaction import (
 
 if TYPE_CHECKING:
     from ..canvas import CuteCanvas
+    from ..masks.live_preview_store import MaskLivePreviewStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +179,7 @@ class EditorRootInputs:
     execution_scope: ExecutionScope
     document_execution_scope: ExecutionScope
     latest_requests: DocumentLatestRequestRegistry
+    mask_live_previews: MaskLivePreviewStore
     cache_registry: CacheRegistry | None
     diagnostics: Diagnostics
     layer_selection: SceneLayerSelectionController
@@ -564,17 +566,19 @@ class EditorCompositionRoot:
             snapping=snapping.movement,
             configuration=inputs.move_configuration,
         )
-        floating_pixels = FloatingPixelRenderCompiler(
-            editor_source_capabilities.pixel_presentation
+        transient_rasters = TransientRasterRenderCoordinator(
+            editor_source_capabilities,
+            inputs.mask_live_previews,
+            view.current_scene_descriptor,
         )
         view.presenter.set_transient_raster_provider(
-            lambda render_items: floating_pixels.compile(
+            lambda render_items: transient_rasters.compile(
                 selected_pixel_movement.raster_preview,
                 render_items,
             )
         )
         view.presenter.set_transient_raster_target_provider(
-            lambda: floating_pixels.target(selected_pixel_movement.raster_preview)
+            lambda: transient_rasters.target(selected_pixel_movement.raster_preview)
         )
         active_mask_coordinates = ActiveMaskLayerCoordinates(
             active_mask_id=callbacks.active_mask_id,
