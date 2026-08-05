@@ -1,0 +1,50 @@
+target-version = "py310"
+preview = true
+line-length = 100
+include = [
+  "packages/ferrastra/**/*.py",
+  "packages/ferrastra/**/*.pyi",
+  "tools/architecture/**/*.py",
+  "tools/check_ferrastra_*.py",
+  "tools/ferrastra_ownership.py",
+  "tools/verify_ferrastra_wheel.py",
+  "tests/test_ferrastra_*.py",
+]
+
+[lint]
+select = [
+  "ANN",
+  "ASYNC",
+  "B",
+  "C4",
+  "E4",
+  "E7",
+  "E9",
+  "F",
+  "FURB",
+  "I",
+  "ISC",
+  "PERF",
+  "PGH",
+  "PIE",
+  "PLC",
+  "PLE",
+  "PLW",
+  "PTH",
+  "PT",
+  "PYI",
+  "RET",
+  "RSE",
+  "RUF",
+  "SIM",
+  "TID",
+  "UP",
+]
+ignore = [
+  # The public package boundary validates native/Python version agreement.
+  "RUF067",
+]
+
+[lint.per-file-ignores]
+"**/tests/*.py" = ["PLC2701"]
+"tests/test_ferrastra_*.py" = ["PLC2701"]

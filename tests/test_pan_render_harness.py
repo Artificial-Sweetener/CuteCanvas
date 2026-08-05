@@ -21,8 +21,8 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
-
 from qpane import LayerPresentationStyle
+
 from tools.pan_render_harness import (
     FrameArtifactDetector,
     HeadlessPanHarness,

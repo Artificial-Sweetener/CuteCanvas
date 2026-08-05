@@ -18,15 +18,16 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import QPoint, QPointF, QRect
 from PySide6.QtGui import QColor, QPainterPath, QPen
+from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from cutecanvas.coverage import CoverageCombineMode
-from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from .dependencies import ToolDependencies
 
@@ -43,6 +44,33 @@ if TYPE_CHECKING:
 def _false() -> bool:
     """Return the inert false-valued tool default."""
     return False
+
+
+class SmartSegmentationPromptProjection(Protocol):
+    """Project one stable segmentation gesture through its raster instance."""
+
+    @property
+    def scene_id(self) -> uuid.UUID:
+        """Return the scene containing the targeted raster instance."""
+        ...
+
+    @property
+    def layer_id(self) -> uuid.UUID:
+        """Return the raster layer instance targeted by this projection."""
+        ...
+
+    @property
+    def resource_id(self) -> uuid.UUID:
+        """Return the raster resource targeted by this projection."""
+        ...
+
+    def panel_to_source(self, point: QPoint | QPointF) -> QPointF | None:
+        """Project a panel point into raster-source pixels."""
+        ...
+
+    def source_to_panel(self, point: QPoint | QPointF) -> QPointF | None:
+        """Project raster-source pixels into the panel."""
+        ...
 
 
 def _true() -> bool:
@@ -71,6 +99,18 @@ class AuthoringSnapPort:
     begin: Callable[[QPointF, bool], QPointF] = _point
     update: Callable[[QPointF, bool, bool], QPointF] = _point
     clear: Callable[[], bool] = _false
+
+
+@dataclass(frozen=True, slots=True)
+class SelectionTranslationPort:
+    """Dependencies used to move selection coverage without moving content."""
+
+    can_begin: Callable[[QPointF], bool] = lambda _point: False
+    begin: Callable[[QPointF], bool] = lambda _point: False
+    update: Callable[[QPointF], bool] = lambda _point: False
+    finish: Callable[[QPointF], bool] = lambda _point: False
+    cancel: Callable[[], bool] = _false
+    suspend: Callable[[], bool] = _false
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +156,7 @@ class PixelSelectionInteractionPort:
 
     panel_to_scene_point: Callable[[QPointF], QPointF | None] = lambda _point: None
     can_select: Callable[[], bool] = _true
+    clear_selected_pixels: Callable[[], bool] = _false
     commit_pixel_selection: Callable[[CoverageSnapshot, CoverageCombineMode], bool] = (
         lambda _coverage, _mode: False
     )
@@ -131,6 +172,9 @@ class PixelSelectionInteractionPort:
         Callable[[CoverageItem], QPainterPath | None] | None
     ) = None
     snapping: AuthoringSnapPort = field(default_factory=AuthoringSnapPort)
+    translation: SelectionTranslationPort = field(
+        default_factory=SelectionTranslationPort
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +192,7 @@ class PaintingInteractionPort:
     panel_hit_test_precise: Callable[[QPointF], PanelHitTest | None] | None = None
     panel_to_content_point: Callable[[QPoint], QPoint | None] = lambda _point: None
     image_to_panel_point: Callable[[QPoint | QPointF], QPointF | None] = (
-        lambda _point: None
+        lambda _point: (None)
     )
     panel_to_target_point: Callable[[QPoint | QPointF], QPointF | None] | None = None
     target_to_panel_point: Callable[[QPoint | QPointF], QPointF | None] | None = None
@@ -172,8 +216,8 @@ class CloneStampInteractionPort:
 
     painting: PaintingInteractionPort = field(default_factory=PaintingInteractionPort)
     set_source_from_panel: Callable[[QPointF], bool] = lambda _point: False
-    source_footprint: Callable[[float], AffineBrushPreview | None] = (
-        lambda _diameter: None
+    source_footprint: Callable[[float], AffineBrushPreview | None] = lambda _diameter: (
+        None
     )
     source_set: Callable[[], bool] = _false
 
@@ -193,23 +237,20 @@ class PaintBucketInteractionPort:
 
 
 @dataclass(frozen=True, slots=True)
-class SmartSelectionInteractionPort:
-    """Dependencies used by the factory SAM selection interaction."""
+class SmartSegmentationInteractionPort:
+    """Dependencies shared by selection- and mask-producing segmentation tools."""
 
     is_alt_held: Callable[[], bool] = _false
-    get_dpr: Callable[[], float] = _one
-    panel_to_content_point: Callable[[QPoint], QPoint | None] = lambda _point: None
-    image_to_panel_point: Callable[[QPoint | QPointF], QPointF | None] = (
+    is_shift_held: Callable[[], bool] = _false
+    resolve_prompt_projection: Callable[
+        [], SmartSegmentationPromptProjection | None
+    ] = lambda: None
+    panel_to_active_mask_point: Callable[[QPoint | QPointF], QPointF | None] = (
         lambda _point: None
-    )
-    panel_to_active_mask_point: Callable[[QPoint | QPointF], QPointF | None] | None = (
-        None
-    )
-    active_mask_to_panel_point: Callable[[QPoint | QPointF], QPointF | None] | None = (
-        None
     )
     get_min_selection_size: Callable[[], int] = lambda: 5
     get_active_mask_color: Callable[[], QColor | None] = lambda: None
+    get_active_mask_id: Callable[[], uuid.UUID | None] = lambda: None
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,8 +258,8 @@ class VectorInteractionPort:
     """Dependencies used by semantic vector shape and path gestures."""
 
     panel_to_source: Callable[[QPointF], QPointF | None] = lambda _point: None
-    commit_shape: Callable[[QPointF, QPointF], object | None] = (
-        lambda _begin, _end: None
+    commit_shape: Callable[[QPointF, QPointF], object | None] = lambda _begin, _end: (
+        None
     )
     commit_path: Callable[[tuple[QPointF, ...], bool], object | None] = (
         lambda _points, _closed: None
@@ -264,7 +305,7 @@ BuiltInToolPort = (
     | PaintingInteractionPort
     | CloneStampInteractionPort
     | PaintBucketInteractionPort
-    | SmartSelectionInteractionPort
+    | SmartSegmentationInteractionPort
     | VectorInteractionPort
     | VectorNodeInteractionPort
     | VectorTextInteractionPort
@@ -296,8 +337,8 @@ class ToolActivationPorts:
     paint_bucket: PaintBucketInteractionPort = field(
         default_factory=PaintBucketInteractionPort
     )
-    smart_selection: SmartSelectionInteractionPort = field(
-        default_factory=SmartSelectionInteractionPort
+    smart_segmentation: SmartSegmentationInteractionPort = field(
+        default_factory=SmartSegmentationInteractionPort
     )
     domain_ports: Mapping[str, BuiltInToolPort] = field(default_factory=dict)
     extension: ToolDependencies = field(default_factory=ToolDependencies)
@@ -318,7 +359,8 @@ class ToolActivationPorts:
             "draw-brush": self.painting,
             "clone-stamp": self.clone_stamp,
             "paint-bucket": self.paint_bucket,
-            "smart-select": self.smart_selection,
+            "smart-select": self.smart_segmentation,
+            "smart-mask": self.smart_segmentation,
         }
         return ports.get(mode, self.domain_ports.get(mode, self.extension))
 
@@ -333,7 +375,7 @@ def tool_activation_ports(
     painting: PaintingInteractionPort,
     clone_stamp: CloneStampInteractionPort | None = None,
     paint_bucket: PaintBucketInteractionPort | None = None,
-    smart_selection: SmartSelectionInteractionPort,
+    smart_segmentation: SmartSegmentationInteractionPort,
     coverage_shapes: PixelSelectionInteractionPort | None = None,
     domain_ports: Mapping[str, BuiltInToolPort] | None = None,
 ) -> ToolActivationPorts:
@@ -363,7 +405,7 @@ def tool_activation_ports(
         active_mask_to_panel_point=painting.target_to_panel_point,
         is_point_in_widget=painting.is_point_in_widget,
         get_image_rect=painting.get_image_rect,
-        get_min_selection_size=smart_selection.get_min_selection_size,
+        get_min_selection_size=smart_segmentation.get_min_selection_size,
         get_active_mask_color=painting.get_preview_color,
         begin_move=movement.begin_move,
         update_move=lambda point: movement.update_move(point, False),
@@ -406,7 +448,7 @@ def tool_activation_ports(
         painting=painting,
         clone_stamp=clone_stamp or CloneStampInteractionPort(painting=painting),
         paint_bucket=paint_bucket or PaintBucketInteractionPort(),
-        smart_selection=smart_selection,
+        smart_segmentation=smart_segmentation,
         domain_ports={} if domain_ports is None else dict(domain_ports),
         extension=extension,
     )

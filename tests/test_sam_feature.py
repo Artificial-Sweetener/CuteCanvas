@@ -24,18 +24,23 @@ from pathlib import Path
 import numpy as np
 import pytest
 from cutecanvas import Config, CuteCanvas, LayerPolicy
+from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.masks import sam_feature
 from cutecanvas.masks.sam_feature import (
     _sam_detail_diagnostics_provider,
     _sam_summary_diagnostics_provider,
 )
 from cutecanvas.sam import service
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from cutecanvas.sam.segmentation_request import (
+    SmartSegmentationProduct,
+    SmartSegmentationRequest,
+)
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
+from qpane.features import FeatureInstallError
 from qpane.types import DiagnosticRecord
 
-from qpane.features import FeatureInstallError
 from tests.helpers.execution_backend import TestExecution
 
 
@@ -114,40 +119,50 @@ def qpane_with_sam(monkeypatch, qapp):
         qapp.processEvents()
 
 
-def test_sam_feature_ignores_empty_bbox(monkeypatch, qpane_with_sam, caplog):
+def test_sam_feature_ignores_unrecognized_request(
+    monkeypatch,
+    qpane_with_sam,
+    caplog,
+):
     qpane = qpane_with_sam
     calls = []
     raster = qpane.activeRasterResolver().resolve()
     assert raster is not None
 
-    def record_mask(captured_id, bbox, erase_mode=False):
-        calls.append((captured_id, bbox, erase_mode))
+    def record_mask(captured_id, bbox, erase_mode=False, *, context=None):
+        calls.append((captured_id, bbox, erase_mode, context))
 
     manager = qpane.samManager()
     monkeypatch.setattr(manager, "generateMaskFromBox", record_mask)
     caplog.clear()
     tools = qpane._tools_manager
-    tools.signals.region_selected_for_masking.emit(
-        np.array([]),
-        False,
-    )
+    tools.signals.smart_segmentation_requested.emit(object())
     assert not calls
-    valid_bbox = np.array([0, 0, 4, 4])
-    tools.signals.region_selected_for_masking.emit(
-        valid_bbox,
-        True,
+    valid_bbox = (0.0, 0.0, 4.0, 4.0)
+    request = SmartSegmentationRequest(
+        scene_id=raster.scene_id,
+        layer_id=raster.layer_id,
+        resource_id=raster.resource_id,
+        bounds=valid_bbox,
+        product=SmartSegmentationProduct.PIXEL_SELECTION,
+        combine_mode=CoverageCombineMode.SUBTRACT,
     )
-    assert calls[-1] == (raster.resource_id, valid_bbox, True)
+    tools.signals.smart_segmentation_requested.emit(request)
+    captured_id, captured_bbox, erase, context = calls[-1]
+    assert captured_id == raster.resource_id
+    assert np.array_equal(captured_bbox, np.asarray(valid_bbox))
+    assert erase is True
+    assert context is request
 
 
-def test_sam_feature_component_adjusts_mask_from_fractional_coordinates(
+def test_sam_feature_does_not_reproject_mask_local_component_point(
     qpane_with_sam: CuteCanvas,
 ) -> None:
+    """Component adjustment must consume the mask-local point emitted by the tool."""
     qpane = qpane_with_sam
     adjustments = []
-    qpane.activeMaskLayerCoordinates().scene_to_source = lambda _point: QPointF(
-        1.25,
-        2.75,
+    qpane.activeMaskLayerCoordinates().scene_to_source = lambda _point: pytest.fail(
+        "mask-local component points must not be projected a second time"
     )
 
     def adjust(mask_id, point, *, grow):
@@ -156,7 +171,7 @@ def test_sam_feature_component_adjusts_mask_from_fractional_coordinates(
 
     qpane.mask_service.adjust_mask_component = adjust
     qpane._tools_manager.signals.mask_component_adjustment_requested.emit(
-        QPoint(1, 2), True
+        QPoint(1, 3), True
     )
     assert adjustments == [("mask-1", QPoint(1, 3), True)]
 
@@ -165,7 +180,7 @@ def test_sam_component_adjustment_accepts_real_transformed_mask_coordinates(
     monkeypatch: pytest.MonkeyPatch,
     qapp: QApplication,
 ) -> None:
-    """The factory adjustment hook must accept the mapper's QPointF contract."""
+    """The adjustment hook must accept a transformed mask-local point once."""
     _stub_sam_service(monkeypatch)
     execution = TestExecution()
     qpane = CuteCanvas(features=("mask", "sam"), execution_runtime=execution.runtime)
@@ -200,7 +215,7 @@ def test_sam_component_adjustment_accepts_real_transformed_mask_coordinates(
 
         qpane.mask_service.adjust_mask_component = adjust
         qpane._tools_manager.signals.mask_component_adjustment_requested.emit(
-            QPoint(10, 10),
+            mapped.toPoint(),
             False,
         )
 

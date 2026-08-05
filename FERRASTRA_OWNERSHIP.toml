@@ -1,0 +1,47 @@
+schema_version = 1
+
+[[migrations]]
+id = "exact-pyramid-scaling"
+status = "planned"
+owner = "ferrastra-raster"
+activation_phase = "Phase 2"
+forbidden = [
+  { path = "packages/qpane/src/qpane/**", pattern = "QImage.scaled" },
+]
+
+[[migrations]]
+id = "affine-raster-projection"
+status = "planned"
+owner = "ferrastra-raster"
+activation_phase = "Phase 3"
+forbidden = [
+  { path = "packages/cutecanvas/src/cutecanvas/**", pattern = "AffineImageResampler" },
+]
+
+[[migrations]]
+id = "scaled-image-conversion"
+status = "planned"
+owner = "ferrastra-raster"
+activation_phase = "Phase 3"
+forbidden = [
+  { path = "packages/qpane/src/qpane/**", pattern = "numpy_to_qimage_rgb_at_size" },
+  { path = "packages/qpane/src/qpane/**", pattern = "numpy_to_qimage_rgba_at_size" },
+]
+
+[[migrations]]
+id = "canonical-painting"
+status = "planned"
+owner = "ferrastra-paint"
+activation_phase = "Phase 7"
+forbidden = [
+  { path = "packages/cutecanvas/src/cutecanvas/painting/**", pattern = "drawEllipse" },
+]
+
+[[migrations]]
+id = "coverage-algebra"
+status = "planned"
+owner = "ferrastra-raster"
+activation_phase = "Phase 5"
+forbidden = [
+  { path = "packages/cutecanvas/src/cutecanvas/coverage/**", pattern = "np.maximum" },
+]

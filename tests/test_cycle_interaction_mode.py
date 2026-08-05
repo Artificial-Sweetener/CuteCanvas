@@ -132,6 +132,7 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
             CuteCanvas.CONTROL_MODE_VECTOR_PATH,
             CuteCanvas.CONTROL_MODE_VECTOR_NODE,
             CuteCanvas.CONTROL_MODE_VECTOR_TEXT,
+            CuteCanvas.CONTROL_MODE_SMART_MASK,
             CuteCanvas.CONTROL_MODE_CURSOR,
         ):
             _cycle(qpane)

@@ -31,7 +31,8 @@ and `ControlMode.CLONE_STAMP` retouches an editable RGBA layer.
 
 Selection gestures use `ControlMode.SELECT_RECTANGLE`,
 `ControlMode.SELECT_ELLIPSE`, and `ControlMode.SELECT_LASSO`.
-`ControlMode.SMART_SELECT` supplies optional assisted selection. Vector tools
+`ControlMode.SMART_SELECT` supplies optional assisted selection, while
+`ControlMode.SMART_MASK` sends the same prompt to active mask coverage. Vector tools
 use `ControlMode.VECTOR_SHAPE`, `ControlMode.VECTOR_PATH`,
 `ControlMode.VECTOR_NODE`, and `ControlMode.VECTOR_TEXT` for their distinct
 direct-manipulation jobs.

@@ -28,6 +28,7 @@ from cutecanvas.core import (
     ToolFactory,
     ToolSignalBinder,
 )
+from cutecanvas.cursor import EditorCursorTheme
 from cutecanvas.overlay_contracts import (
     CanvasOverlayDrawFn,
     CanvasOverlayState,
@@ -127,6 +128,11 @@ class InteractionApiMixin:
     def unregisterCursorProvider(self, mode: str) -> None:
         """Detach a previously registered cursor provider."""
         self.interaction.unregisterCursorProvider(mode)
+
+    def setEditorCursorTheme(self, theme: EditorCursorTheme | None) -> None:
+        """Set optional host artwork for built-in semantic cursor feedback."""
+
+        self.interaction.setEditorCursorTheme(theme)
 
     def registerTool(
         self,

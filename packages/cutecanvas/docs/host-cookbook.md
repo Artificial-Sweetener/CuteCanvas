@@ -149,6 +149,11 @@ simple image tools. `CuteCanvas.sceneHitTest()` returns the topmost eligible
 composition layer with panel, scene, and source coordinates. Use the latter
 when layer identity matters.
 
+`CuteCanvas.sceneToPanelRect()` maps absolute scene geometry into logical
+widget coordinates for host-owned overlays that follow selections or layers.
+Recompute the mapped rectangle when `zoomChanged` fires; that signal covers
+both zoom and pan changes in the mounted viewport.
+
 The normal navigation behavior remains available through
 `CuteCanvas.CONTROL_MODE_PANZOOM`, while `CuteCanvas.CONTROL_MODE_CURSOR`
 provides non-navigating pointer inspection.
@@ -360,10 +365,11 @@ chronological document edits exposed by `CuteCanvas.undoSceneEdit()` and
 `CuteCanvas.sceneEditUndoAvailable()` and `CuteCanvas.sceneEditRedoAvailable()`
 provide direct availability queries.
 
-## Use Assisted Selection
+## Use Assisted Segmentation
 
-`CuteCanvas.CONTROL_MODE_SMART_SELECT` turns a dragged box into active-mask
-coverage when the optional feature is ready. `CuteCanvas.samCheckpointReady()`
+`CuteCanvas.CONTROL_MODE_SMART_SELECT` turns a dragged box into pixel-selection
+coverage. `CuteCanvas.CONTROL_MODE_SMART_MASK` sends the same prompt to the
+active mask. `CuteCanvas.samCheckpointReady()`
 reports readiness, `CuteCanvas.samCheckpointPath()` reports the resolved model
 file, and `CuteCanvas.refreshSamFeature()` reapplies model settings.
 
@@ -477,6 +483,16 @@ was accepted. Pan/Zoom remains the active mode while Space is held and the
 latest accepted selection becomes active when Space is released.
 `CuteCanvas.registerCursorProvider()` supplies contextual cursor behavior, and
 `CuteCanvas.unregisterCursorProvider()` removes it.
+
+`CuteCanvas.setEditorCursorTheme()` lets the host choose artwork for built-in
+semantic feedback such as precise selection, additive or subtractive
+selection, and selection-boundary translation. `EditorCursorIntent` identifies
+each stable semantic request. Implement
+`EditorCursorTheme.resolve_cursor()` and return a `QCursor` for the intents the
+host owns. Return `None` for other intents so CuteCanvas uses its portable
+fallback. Tool cursor providers remain appropriate for complete custom modes;
+the editor cursor theme changes presentation without duplicating interaction
+state in the host.
 
 ## Watch Diagnostics
 

@@ -15,8 +15,8 @@ CuteCanvas accepts touchscreen and active-pen input directly through Qt. Host ap
 | Brush | Active-pen hover | Shows the configured brush size and paint or erase identity without editing the target. |
 | Brush | Active-pen contact | Paints immediately with subpixel coordinates and optional pressure sizing. |
 | Brush | Eraser end of an active pen | Erases without requiring the Alt modifier. |
-| Smart Select | One-finger drag | Draws the selection rectangle. |
-| Smart Select | Two contacts before selection wins | Navigates the viewport. |
+| Smart Select or Smart Mask | One-finger drag | Draws the segmentation prompt. |
+| Smart Select or Smart Mask | Two contacts before the prompt wins | Navigates the viewport. |
 | Comparison | Touch near the split boundary | Drags the divider using a 44-pixel touch target. |
 
 Contact-count transitions are re-anchored before another transform is applied, so adding or removing a finger does not jump the content. A gesture keeps its winner for the rest of the contact sequence: once a brush stroke or selection has started, another contact cannot silently turn that edit into navigation.

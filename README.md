@@ -1,11 +1,26 @@
-# QPane + CuteCanvas
+# Ferrastra + QPane + CuteCanvas
 
-This monorepo contains two independently published PySide6 packages with one
-deliberate dependency direction:
+This monorepo contains three independently published graphics packages with
+enforced dependency directions:
 
 ```text
 CuteCanvas -> QPane
-QPane      x  CuteCanvas
+CuteCanvas -> Ferrastra
+QPane      -> Ferrastra
+```
+
+## Ferrastra
+
+Ferrastra is the CPU-first, Qt-neutral native graphics product engine described by
+[`FERRASTRA_DESIGN.md`](FERRASTRA_DESIGN.md). Its Stage 0 package establishes the
+Rust/PyO3/Python boundary, ownership policy, architecture gates, and
+conformance infrastructure without adding production graphics behavior.
+
+See [the Ferrastra package guide](packages/ferrastra/README.md) and
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+```powershell
+python examples\ferrastra_demo.py
 ```
 
 ## QPane
@@ -59,16 +74,19 @@ covers its public facade and workflows.
 
 - `packages/qpane/`: QPane metadata, source, contract, tests, and documentation.
 - `packages/cutecanvas/`: CuteCanvas metadata, source, contract, tests, and documentation.
+- `packages/ferrastra/`: Ferrastra metadata, typed facade, tests, and documentation.
+- `crates/`: executable Ferrastra native crates.
+- `examples/ferrastra_demo.py`: the single public Ferrastra example.
 - `examples/qpane_demo.py`: the single polished QPane example.
 - `examples/cutecanvas_demo.py`: the single polished CuteCanvas example.
 - `tests/`: renderer, editor, integration, abuse, performance, and packaging
   proof shared by the monorepo.
 
-Both packages are licensed under GPL-3.0-or-later.
+All three packages are licensed under GPL-3.0-or-later.
 
 ## Development and releases
 
 Install `requirements-dev.txt` into the repository virtual environment to use
-both editable packages and the shared verification tools. QPane and CuteCanvas
-build from their own `pyproject.toml`, produce independent wheels, and publish
-only from product-specific tags: `qpane-vX.Y.Z` and `cutecanvas-vX.Y.Z`.
+all editable packages and the shared verification tools. Each product builds
+an independent wheel and publishes only from its product tag:
+`ferrastra-vX.Y.Z`, `qpane-vX.Y.Z`, or `cutecanvas-vX.Y.Z`.

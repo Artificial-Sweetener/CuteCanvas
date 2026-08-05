@@ -26,7 +26,6 @@ from cutecanvas.ui.cursor_builder import CursorBuilder
 from cutecanvas.ui.erase_indicator import EraseIndicatorRenderer
 from PySide6.QtCore import QPointF, QRect, QRectF, QSizeF
 from PySide6.QtGui import QColor, QFont, QImage, QPainter
-
 from qpane import PointerDeviceKind
 
 
@@ -119,6 +118,26 @@ def test_cursor_rasters_preserve_logical_geometry_at_fractional_dpr(qapp) -> Non
     assert precision_175x.pixmap().deviceIndependentSize() == QSizeF(40.0, 40.0)
     assert precision_175x.pixmap().size().width() == 70
     assert precision_175x.hotSpot() == precision_1x.hotSpot()
+
+
+def test_precision_add_cursor_is_cached_and_preserves_hotspot(qapp) -> None:
+    """Addition feedback should add detail without changing pointing geometry."""
+
+    builder = CursorBuilder()
+
+    plain = builder.create_precision_cursor(device_pixel_ratio=1.5)
+    addition = builder.create_precision_cursor(
+        add_indicator=True,
+        device_pixel_ratio=1.5,
+    )
+    repeated = builder.create_precision_cursor(
+        add_indicator=True,
+        device_pixel_ratio=1.5,
+    )
+
+    assert addition.hotSpot() == plain.hotSpot()
+    assert addition.pixmap().cacheKey() == repeated.pixmap().cacheKey()
+    assert addition.pixmap().cacheKey() != plain.pixmap().cacheKey()
 
 
 def test_precision_erase_glyph_matches_same_diameter_brush_across_dprs(qapp) -> None:

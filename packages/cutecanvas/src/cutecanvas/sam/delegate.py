@@ -25,6 +25,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 from qpane.sdk.cache import CachePriority, KeyedCacheConsumer
 
+from cutecanvas.sam.segmentation_request import (
+    SmartSegmentationProduct,
+    SmartSegmentationRequest,
+)
+from cutecanvas.selection.smart_segmentation import SmartSelectionResultCommitter
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,6 +62,10 @@ class SamDelegate:
         self._manager: SamManager | None = None
         self._active_predictor = None
         self._warned_missing_mask_service = False
+        self._selection_results = SmartSelectionResultCommitter(
+            active_scene=qpane.view().current_scene_descriptor,
+            selections=qpane.pixelSelectionService(),
+        )
 
     @property
     def manager(self) -> SamManager | None:
@@ -155,6 +165,7 @@ class SamDelegate:
         bbox: np.ndarray,
         *,
         erase_mode: bool,
+        context: object | None = None,
     ) -> bool:
         """Queue box inference through the manager's native session."""
         reference = self._active_predictor
@@ -162,7 +173,12 @@ class SamDelegate:
         image_id = getattr(reference, "image_id", None)
         if manager is None or image_id is None:
             return False
-        return manager.generateMaskFromBox(image_id, bbox, erase_mode=erase_mode)
+        return manager.generateMaskFromBox(
+            image_id,
+            bbox,
+            erase_mode=erase_mode,
+            context=context,
+        )
 
     def _on_predictor_ready(self, predictor, image_id: uuid.UUID) -> None:
         """Activate a predictor that matches the active raster resource."""
@@ -180,10 +196,29 @@ class SamDelegate:
             qpane.update()
 
     def _on_sam_mask_ready(
-        self, mask_array_uint8: np.ndarray | None, bbox: np.ndarray, erase_mode: bool
+        self,
+        mask_array_uint8: np.ndarray | None,
+        bbox: np.ndarray,
+        erase_mode: bool,
+        context: object | None,
     ) -> None:
-        """Forward generated mask data to the mask service when available and ignore missing services gracefully."""
+        """Route generated coverage through its captured product owner."""
         qpane = self._qpane
+        if isinstance(context, SmartSegmentationRequest):
+            if context.product is SmartSegmentationProduct.PIXEL_SELECTION:
+                self._selection_results.commit(context, mask_array_uint8)
+                return
+            if qpane.currentCompositionID() != context.scene_id:
+                return
+            service = qpane._masks_controller.mask_service()
+            if service is not None and context.mask_id is not None:
+                service.handleGeneratedMaskFor(
+                    context.mask_id,
+                    mask_array_uint8,
+                    bbox,
+                    erase_mode,
+                )
+            return
         service = qpane._masks_controller.mask_service()
         if service is not None:
             service.handleGeneratedMask(mask_array_uint8, bbox, erase_mode)

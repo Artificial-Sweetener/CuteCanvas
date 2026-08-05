@@ -1,4 +1,4 @@
-#    CuteCanvas - High-performance layered image editor
+#    Ferrastra - CPU-first native graphics product engine
 #    Copyright (C) 2025  Artificial Sweetener and contributors
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -14,18 +14,4 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Mask-specific smart-selection tool registrations and helpers."""
-
-from .smart_select import (
-    SmartSelectTool,
-    connect_smart_select_signals,
-    disconnect_smart_select_signals,
-    smart_select_cursor_provider,
-)
-
-__all__ = (
-    "SmartSelectTool",
-    "connect_smart_select_signals",
-    "disconnect_smart_select_signals",
-    "smart_select_cursor_provider",
-)
+__version__: str

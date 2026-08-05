@@ -133,10 +133,11 @@ retain their relative path:
 
 ## 1. `check_consistency.py` (The "Trinity" Check)
 
-This is the primary validation tool for both published packages. It treats the
-QPane and CuteCanvas root stubs plus QPane's typed integration SDK stubs as the
-authoritative public contracts, then verifies implementation, documentation,
-examples, configuration defaults, and package boundaries against them.
+This is the primary validation tool for all three published packages. It treats
+the Ferrastra, QPane, and CuteCanvas root stubs plus QPane's typed integration
+SDK as the authoritative public contracts, then verifies implementation,
+documentation, examples, configuration defaults, and package boundaries
+against them.
 
 **Usage:**
 ```powershell

@@ -35,6 +35,8 @@ from .store import ProjectResourceStore
 class ActiveRasterSnapshot:
     """Detached raster input selected from an active editor document."""
 
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
     resource_id: uuid.UUID
     image: QImage
     source_path: Path | None
@@ -87,13 +89,19 @@ class ActiveRasterResolver:
                 ProjectResourceReference,
             ):
                 continue
-            snapshot = self._resolve_resource(layer.source.resource_id)
+            snapshot = self._resolve_resource(
+                document_id,
+                layer.layer_id,
+                layer.source.resource_id,
+            )
             if snapshot is not None:
                 return snapshot
         return None
 
     def _resolve_resource(
         self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
         resource_id: uuid.UUID,
     ) -> ActiveRasterSnapshot | None:
         """Resolve one raster payload according to its authoritative kind."""
@@ -108,6 +116,8 @@ class ActiveRasterResolver:
             if payload is None or payload.image is None:
                 return None
             return ActiveRasterSnapshot(
+                scene_id,
+                layer_id,
                 resource_id,
                 payload.image,
                 payload.source_path,
@@ -117,6 +127,8 @@ class ActiveRasterResolver:
             if payload is None:
                 return None
             return ActiveRasterSnapshot(
+                scene_id,
+                layer_id,
                 resource_id,
                 payload.surface.snapshot_qimage(),
                 None,

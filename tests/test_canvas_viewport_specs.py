@@ -27,6 +27,7 @@ from cutecanvas import (
     CanvasViewportSpec,
     CuteCanvas,
 )
+from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.document import CanvasDocument
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QImage
@@ -60,6 +61,32 @@ def test_viewport_source_rejects_cross_document_layer_subsets() -> None:
     finally:
         first.close()
         second.close()
+
+
+def test_mask_coverage_viewport_rejects_noncoverage_layers() -> None:
+    """Neutral mask rendering must remain restricted to coverage resources."""
+
+    document = CanvasDocument()
+    canvas = CuteCanvas(document=document, features=("mask",))
+    try:
+        composition_id = canvas.createCompositionFromImage(_image())
+        layer = document.snapshot().compositions[composition_id].layers[0]
+
+        with pytest.raises(ValueError, match="at least one mask layer"):
+            canvas.setViewportSpec(
+                CanvasViewportSpec(
+                    CanvasViewportSource.content(
+                        document.content_reference(
+                            composition_id,
+                            layer_id=layer.layer_id,
+                        )
+                    ),
+                    render_variant=CanvasRenderVariant.MASK_COVERAGE,
+                )
+            )
+    finally:
+        canvas.close()
+        document.close()
 
 
 def test_layer_viewport_is_live_and_does_not_mutate_the_composition(qapp) -> None:
@@ -114,6 +141,24 @@ def test_layer_viewport_is_live_and_does_not_mutate_the_composition(qapp) -> Non
         assert center.red() > 220
         assert abs(center.red() - center.green()) <= 1
         assert abs(center.green() - center.blue()) <= 1
+
+        mask = document.masks.get_layer(mask_id)
+        assert mask is not None
+        current = mask.coverage.snapshot()
+        assert document.masks.coverage_edits.commit_surface(
+            mask_id,
+            CoverageSnapshot(
+                None,
+                current.extent_policy,
+                current.pixels[:0, :0],
+            ),
+        )
+        qapp.processEvents()
+
+        empty_scene = preview.currentScene()
+        assert empty_scene is not None
+        assert empty_scene.layers == ()
+        assert len(document.snapshot().compositions[composition_id].layers) == 2
     finally:
         preview.close()
         author.close()

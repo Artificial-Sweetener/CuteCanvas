@@ -28,14 +28,16 @@ from PySide6.QtCore import QPoint
 from qpane.sdk.features import FeatureInstallError
 from qpane.sdk.types import DiagnosticRecord
 
+from cutecanvas.sam.segmentation_request import SmartSegmentationRequest
+from cutecanvas.tools.smart_segmentation import (
+    SmartMaskTool,
+    SmartSelectTool,
+    connect_smart_segmentation_signals,
+    disconnect_smart_segmentation_signals,
+)
+
 from ..core.config import SAM_DEFAULT_MODEL_HASH, SAM_DEFAULT_MODEL_URL
 from ..core.config_features import require_sam_config
-from .tools import (
-    SmartSelectTool,
-    connect_smart_select_signals,
-    disconnect_smart_select_signals,
-    smart_select_cursor_provider,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +51,6 @@ if TYPE_CHECKING:
 def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
     """Install SAM support without loading predictor dependencies eagerly."""
     hooks = qpane.hooks
-    masks = qpane._masks_controller
-    if not masks.mask_feature_available():
-        raise RuntimeError("Mask feature must be installed before the SAM feature")
     try:
         from cutecanvas.sam.service import (
             SamDependencyError,
@@ -67,8 +66,17 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
         hooks.registerTool(
             qpane.CONTROL_MODE_SMART_SELECT,
             SmartSelectTool,
-            on_connect=connect_smart_select_signals,
-            on_disconnect=disconnect_smart_select_signals,
+            on_connect=connect_smart_segmentation_signals,
+            on_disconnect=disconnect_smart_segmentation_signals,
+        )
+    except ValueError:
+        pass
+    try:
+        hooks.registerTool(
+            qpane.CONTROL_MODE_SMART_MASK,
+            SmartMaskTool,
+            on_connect=connect_smart_segmentation_signals,
+            on_disconnect=disconnect_smart_segmentation_signals,
         )
     except ValueError:
         pass
@@ -169,9 +177,6 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
         checkpoint_acquisition=acquisition,
     )
     qpane.attachSamManager(sam_manager)
-    hooks.registerCursorProvider(
-        qpane.CONTROL_MODE_SMART_SELECT, smart_select_cursor_provider
-    )
     hooks.register_diagnostics_provider(
         _sam_detail_diagnostics_provider,
         domain="sam",
@@ -203,53 +208,35 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
                 source_path=raster.source_path,
             )
 
-    def _handle_region_selected(bbox, is_erase: bool):
-        """Forward a bounding box selection to SAM when valid."""
+    def _handle_region_selected(request: object) -> None:
+        """Forward one raster-bound rectangular prompt to SAM."""
         manager = qpane.samManager()
         if manager is None:
             return
-        raster = qpane.activeRasterResolver().resolve(
-            preferred_layer_id=(
-                None
-                if qpane.selectedLayer() is None
-                else qpane.selectedLayer().layer_id
-            )
-        )
-        if raster is None:
+        if not isinstance(request, SmartSegmentationRequest):
             logger.warning(
-                "Ignoring smart-select request: no raster resource is active"
-            )
-            return
-        if bbox is None:
-            logger.warning("Ignoring smart-select request: bounding box missing")
-            return
-        bbox_array = np.asarray(bbox)
-        if bbox_array.size < 4:
-            logger.warning(
-                "Ignoring smart-select request: bounding box invalid (size=%s)",
-                bbox_array.size,
+                "Ignoring smart-select request: unexpected request type %s",
+                type(request).__name__,
             )
             return
         manager.generateMaskFromBox(
-            raster.resource_id,
-            bbox_array,
-            erase_mode=is_erase,
+            request.resource_id,
+            np.asarray(request.bounds),
+            erase_mode=request.erase,
+            context=request,
         )
 
-    def _handle_component_adjustment(image_point: QPoint, grow: bool):
-        """Adjust components on the active mask at the provided image point."""
+    def _handle_component_adjustment(mask_point: QPoint, grow: bool) -> None:
+        """Adjust components at the mask-local point emitted by the tool."""
         service = getattr(qpane, "mask_service", None)
         if service is None:
             return
         active_mask_id = service.getActiveMaskId()
-        if image_point is None or active_mask_id is None:
-            return
-        mask_point = qpane.activeMaskLayerCoordinates().scene_to_source(image_point)
-        if mask_point is None:
+        if mask_point is None or active_mask_id is None:
             return
         new_surface = service.adjust_mask_component(
             active_mask_id,
-            mask_point.toPoint(),
+            mask_point,
             grow=grow,
         )
         if new_surface is None:
@@ -259,7 +246,7 @@ def install_sam_feature(qpane: CuteCanvas, device: str | None = None) -> None:
         qpane.markDirty()
         qpane.update()
 
-    tm_signals.region_selected_for_masking.connect(_handle_region_selected)
+    tm_signals.smart_segmentation_requested.connect(_handle_region_selected)
     tm_signals.mask_component_adjustment_requested.connect(_handle_component_adjustment)
     qpane.compositionSelectionChanged.connect(_prepare_active_raster)
     qpane.selectedLayerChanged.connect(_prepare_active_raster)

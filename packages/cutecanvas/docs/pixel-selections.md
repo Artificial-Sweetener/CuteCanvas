@@ -32,6 +32,17 @@ animated boundary all remain clipped to the same canvas edge.
 Use `configureCoverageShapes(feather_radius=...)` before a gesture to create a
 soft retained edge.
 
+When the optional SAM feature is active, Smart Select turns a rectangular
+prompt over a raster layer into segmented pixel-selection coverage:
+
+```python
+canvas.setControlMode(canvas.CONTROL_MODE_SMART_SELECT)
+```
+
+The result follows the prompted raster layer's affine transform into document
+coordinates. Switching documents or removing the prompted raster before the
+asynchronous result arrives safely discards that stale result.
+
 ## Inspect and Clear the Selection
 
 The focused facade returns the current selection snapshot:
@@ -78,6 +89,77 @@ if scene is not None and layer is not None:
 
 For a mask this selects its painted coverage. For an editable RGBA layer it
 selects nontransparent pixels. Transparent storage around content is excluded.
+
+## Expand, Contract, or Feather the Selection
+
+Selection-edge modifications change only the composition's 8-bit selection
+coverage. Layer and mask pixels remain unchanged until a later command uses the
+selection for painting, filling, deletion, or movement.
+
+```python
+expand_request = canvas.editor.selection.expand(12)
+contract_request = canvas.editor.selection.contract(8)
+feather_request = canvas.editor.selection.feather(6.5)
+```
+
+Expansion and contraction preserve soft coverage values while moving the edge
+outward or inward. Feathering creates a graduated grayscale edge. Every result
+is clipped to the finite composition canvas, and contracting a selection away
+completely clears it.
+
+These operations run in the background and return a request ID when accepted.
+The top-level `CuteCanvas.expandPixelSelection`,
+`CuteCanvas.contractPixelSelection`, and `CuteCanvas.featherPixelSelection`
+methods expose the same operations. Connect
+`CuteCanvas.pixelSelectionModificationCompleted` to receive the corresponding
+`PixelSelectionModificationResult`. `cutecanvas.LayerEdgeOperation`
+identifies the source-neutral operation as `LayerEdgeOperation.EXPAND`,
+`LayerEdgeOperation.CONTRACT`, or
+`LayerEdgeOperation.FEATHER`. The result exposes
+`PixelSelectionModificationResult.request_id`,
+`PixelSelectionModificationResult.scene_id`,
+`PixelSelectionModificationResult.operation`,
+`PixelSelectionModificationResult.succeeded`, and
+`PixelSelectionModificationResult.message`. A successful result creates one entry in
+the composition's chronological history. Undo restores the exact prior
+selection, including retained shape authorship; redo restores the modified
+raster selection.
+
+If the user changes the selection, switches compositions, replaces the request,
+or closes the editor while filtering is underway, the detached result is
+discarded without altering document state.
+
+For an interactive control, begin one replaceable preview transaction instead
+of issuing one-shot edits:
+
+```python
+from cutecanvas import LayerEdgeOperation
+
+session_id = canvas.editor.selection.begin_modification()
+if session_id is not None:
+    canvas.editor.selection.preview_modification(
+        session_id,
+        LayerEdgeOperation.EXPAND,
+        4,
+    )
+    canvas.editor.selection.preview_modification(
+        session_id,
+        LayerEdgeOperation.EXPAND,
+        5,
+    )
+    canvas.editor.selection.apply_modification(session_id)
+```
+
+Both previews above derive from the selection captured by
+`begin_modification()`; the second preview is five pixels from that original,
+not five pixels beyond the first preview. `apply_modification()` records the
+latest product once after its background work finishes.
+`cancel_modification()` restores the captured original without adding history.
+The equivalent top-level methods are
+`CuteCanvas.beginPixelSelectionModificationPreview()`,
+`CuteCanvas.updatePixelSelectionModificationPreview()`,
+`CuteCanvas.settlePixelSelectionModificationPreview()`, and
+`CuteCanvas.cancelPixelSelectionModificationPreview()`.
 
 ## Supply Coverage from Host Code
 
@@ -130,6 +212,11 @@ Pixels outside the selection remain unchanged.
 The operation creates one entry in the document history. The visible frame is
 updated before the command returns to user interaction, so immediate undo does
 not show a stale pre-delete frame.
+
+The rectangle, ellipse, and lasso pixel-selection tools also route the Delete
+key through this command. Painting and mask-authoring tools leave Delete
+unhandled, allowing hosts to assign tool-specific behavior without a competing
+global canvas shortcut.
 
 If the selected layer cannot accept direct pixel edits, the command returns
 `False`. Ask `editorOperationState(EditorIntent.DELETE_PIXELS)` to explain why
@@ -218,7 +305,9 @@ used elsewhere in the editor.
 Connect `pixelSelectionChanged` for Select All, Invert, Deselect, Delete, and
 Fill availability. Connect `floatingPixelEditChanged` for Anchor, New Layer,
 destination, and Cancel controls. Connect `sceneEditHistoryChanged` for Undo
-and Redo.
+and Redo. Connect `CuteCanvas.layerPixelsChanged` when the host must persist or
+otherwise react to generic pixel mutations, including their undo and redo
+replay.
 
 Do not infer floating state from the active tool. An unresolved edit may remain
 active while the user temporarily pans or chooses another tool.

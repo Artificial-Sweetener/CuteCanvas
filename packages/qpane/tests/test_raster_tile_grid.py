@@ -22,13 +22,12 @@ from dataclasses import dataclass, field
 import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtTest import QTest
+from qpane import Config
 from qpane.rendering.raster_tile_grid import (
     RasterTileGrid,
     resolve_raster_tile_grid,
 )
 from qpane.rendering.raster_tile_grid_runtime import RasterTileGridRuntime
-
-from qpane import Config
 
 
 @pytest.mark.parametrize(

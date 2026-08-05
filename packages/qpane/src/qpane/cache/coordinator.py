@@ -214,7 +214,7 @@ class CacheCoordinator:
         state.usage_bytes = normalized_usage
         if self._enforcing:
             self._pending_enforce = self._pending_enforce or usage_changed
-        else:
+        elif usage_changed:
             self._enforce_budget()
         self._mark_dirty()
 

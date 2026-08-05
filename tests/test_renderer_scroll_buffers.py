@@ -25,6 +25,15 @@ from cutecanvas.resources import ProjectResourceReference
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt, QTransform
 from PySide6.QtTest import QTest
+from qpane import (
+    ClipCoordinateSpace,
+    LayerClip,
+    LayerTransform,
+    QPane,
+    RasterSource,
+    RenderLayer,
+    RenderScene,
+)
 from qpane.rendering.navigation_plan import (
     navigation_repair_sources_match,
     retained_raster_navigation_delta,
@@ -40,15 +49,6 @@ from qpane.scene.render_plan import (
     TileRenderData,
 )
 
-from qpane import (
-    ClipCoordinateSpace,
-    LayerClip,
-    LayerTransform,
-    QPane,
-    RasterSource,
-    RenderLayer,
-    RenderScene,
-)
 from tests.harness.timing import completion_clock
 from tests.helpers.render_compare import (
     assert_images_match,

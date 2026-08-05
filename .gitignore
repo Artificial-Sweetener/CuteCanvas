@@ -5,6 +5,10 @@ __pycache__/
 .pytest-tmp/
 .ruff_cache/
 .mypy_cache/
+.pyright/
+.hypothesis/
+.tox/
+.nox/
 
 # Virtual environments
 .venv/
@@ -25,10 +29,23 @@ qpane.egg-info/
 *.egg
 *.whl
 qpane/_version.py
+target/
+
+# Native crash and profiling artifacts
+*.pdb
+*.dmp
+*.profraw
+*.profdata
+
+# Editable native extension artifacts outside Cargo target directories
+/packages/ferrastra/src/ferrastra/_native*.so
+/packages/ferrastra/src/ferrastra/_native*.dylib
 
 # Coverage reports
 .coverage
+.coverage.*
 coverage.xml
+junit*.xml
 htmlcov/
 
 # Logs
@@ -38,7 +55,6 @@ log.txt
 # Editor and OS files
 .vscode/
 .idea/
-.editorconfig
 *.swp
 *.tmp
 .DS_Store

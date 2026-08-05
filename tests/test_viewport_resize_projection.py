@@ -31,9 +31,9 @@ from cutecanvas.document import CanvasDocument, CanvasViewSession
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
+from qpane import QPane
 from qpane.sdk.rendering import ViewportZoomMode
 
-from qpane import QPane
 from tests.harness.viewport_resize_probe import (
     MountedViewportResizeProbe,
     ViewportResizeObservation,

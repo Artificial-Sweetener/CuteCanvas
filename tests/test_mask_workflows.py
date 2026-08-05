@@ -1497,7 +1497,8 @@ def test_handle_generated_mask_routes_canvas_pixels_through_generated_edit_owner
     dirty_rect = QRect(0, 0, 12, 10)
     captured: dict[str, object] = {}
 
-    def apply_generated(mask, *, erase):
+    def apply_generated(target_mask_id, mask, *, erase):
+        assert target_mask_id == mask_id
         captured["mask"] = mask
         captured["erase"] = erase
         return mask_id, True
@@ -2622,6 +2623,8 @@ def test_drop_oldest_cached_mask_respects_exclude(qpane_with_mask):
     assert pixmap is not None
     controller.setActiveMaskID(mask_id)
     metrics_before = controller.renders.snapshot_metrics()
+    assert controller.renders.cache_usage_bytes > 0
+    assert controller.renders.evictable_cache_usage_bytes == 0
     freed = controller.renders.drop_oldest(reason="test", exclude={mask_id})
     assert freed == 0
     metrics_after = controller.renders.snapshot_metrics()

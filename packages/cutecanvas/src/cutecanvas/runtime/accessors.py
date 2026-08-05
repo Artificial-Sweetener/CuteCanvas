@@ -51,6 +51,7 @@ from cutecanvas.editor import (
     EditorOperationResolver,
     InteractivePaintDestinationCoordinator,
 )
+from cutecanvas.editor.layer_edge_modification import LayerEdgeModificationCoordinator
 from cutecanvas.editor.transform_interaction import EditorTransformInteraction
 from cutecanvas.fill import PaintBucketCoordinator, SelectionFillCoordinator
 from cutecanvas.masks.canvas_aperture import ActiveMaskCanvasAperture
@@ -61,13 +62,19 @@ from cutecanvas.painting.clone_operation import CloneStampOperation
 from cutecanvas.raster.layers import EditableRasterLayerController
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.resources.active_raster import ActiveRasterResolver
+from cutecanvas.resources.active_raster_coordinates import (
+    ActiveRasterCoordinateResolver,
+)
 from cutecanvas.runtime.document_runtime import CanvasDocumentRuntime
 from cutecanvas.scene.geometry import aspect_scene_rect
 from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from cutecanvas.scene.movement_interaction import SceneLayerMovementInteraction
 from cutecanvas.scene.mutations import SceneMutationCoordinator
 from cutecanvas.scene.source_capabilities import EditorSourceCapabilities
-from cutecanvas.selection import PixelSelectionService
+from cutecanvas.selection import (
+    PixelSelectionModificationCoordinator,
+    PixelSelectionService,
+)
 from cutecanvas.snapping import SnapConfiguration
 from cutecanvas.snapping.system import SnappingSubsystem
 from cutecanvas.tools import Tools
@@ -90,6 +97,13 @@ class CanvasAccessorsMixin:
         resolver = self._active_raster
         if resolver is None:
             raise RuntimeError("active raster resolver is not initialized")
+        return resolver
+
+    def active_raster_coordinates(self) -> ActiveRasterCoordinateResolver:
+        """Return the active raster-instance coordinate resolver."""
+        resolver = self._active_raster_coordinates
+        if resolver is None:
+            raise RuntimeError("active raster coordinates are not initialized")
         return resolver
 
     def _cache_metric_source(self, consumer_id: str) -> object | None:
@@ -142,6 +156,26 @@ class CanvasAccessorsMixin:
                 "Pixel selection service accessed before initialization"
             )
         return service
+
+    def pixelSelectionModificationCoordinator(
+        self,
+    ) -> PixelSelectionModificationCoordinator:
+        """Expose the asynchronous pixel-selection modification owner internally."""
+        coordinator = self._pixel_selection_modifications
+        if coordinator is None:
+            raise AttributeError(
+                "Pixel selection modification accessed before initialization"
+            )
+        return coordinator
+
+    def layerEdgeModificationCoordinator(self) -> LayerEdgeModificationCoordinator:
+        """Expose the generic whole-layer edge session owner internally."""
+        coordinator = self._layer_edge_modifications
+        if coordinator is None:
+            raise AttributeError(
+                "Layer edge modification accessed before initialization"
+            )
+        return coordinator
 
     def editorInteraction(self) -> EditorInteractionCoordinator:
         """Expose source-neutral editor interaction coordination internally."""

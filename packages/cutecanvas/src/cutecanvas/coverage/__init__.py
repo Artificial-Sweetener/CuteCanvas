@@ -25,7 +25,17 @@ from .document import (
     VectorCoverageItem,
 )
 from .evaluation import CoverageDocumentEvaluator
+from .filters import (
+    CoverageFilterCancelledError,
+    dilate_coverage,
+    erode_coverage,
+    feather_coverage,
+)
 from .geometry import CoverageGeometryFactory
+from .modification import (
+    CoverageEdgeModificationRequest,
+    build_coverage_edge_modification,
+)
 from .movement import CoverageItemMoveSession
 from .operations import CoverageCombineMode, combine_coverage
 from .projection import AffineCoverageResampler
@@ -45,6 +55,8 @@ __all__ = [
     "CoverageCombineMode",
     "CoverageDocument",
     "CoverageDocumentEvaluator",
+    "CoverageEdgeModificationRequest",
+    "CoverageFilterCancelledError",
     "CoverageGeometryFactory",
     "CoverageItem",
     "CoverageItemMoveSession",
@@ -57,7 +69,11 @@ __all__ = [
     "StrokeCoverageItem",
     "VectorCoverageItem",
     "WritableCoverageRegion",
+    "build_coverage_edge_modification",
     "combine_coverage",
+    "dilate_coverage",
+    "erode_coverage",
+    "feather_coverage",
     "normalize_coverage_array",
     "reframe_coverage_snapshot",
 ]

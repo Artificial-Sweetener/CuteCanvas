@@ -46,6 +46,8 @@ __all__ = [
     "EditorPolicy",
     "FloatingPixelMode",
     "FloatingPixelSnapshot",
+    "LayerEdgeModificationResult",
+    "LayerEdgeOperation",
     "LayerHit",
     "LayerPolicy",
     "LayerSelectionSnapshot",
@@ -56,6 +58,7 @@ __all__ = [
     "PaintTargetKind",
     "PaintTargetSnapshot",
     "PixelSelectionMode",
+    "PixelSelectionModificationResult",
     "PixelSelectionSnapshot",
     "PlacedAssetSnapshot",
     "RasterExtentPolicy",
@@ -89,6 +92,7 @@ class ControlMode(str, Enum):
     DRAW_BRUSH = "draw-brush"
     CLONE_STAMP = "clone-stamp"
     SMART_SELECT = "smart-select"
+    SMART_MASK = "smart-mask"
     SELECT_RECTANGLE = "select-rectangle"
     SELECT_ELLIPSE = "select-ellipse"
     SELECT_LASSO = "select-lasso"
@@ -128,6 +132,14 @@ class PixelSelectionMode(str, Enum):
     ADD = "add"
     SUBTRACT = "subtract"
     INTERSECT = "intersect"
+
+
+class LayerEdgeOperation(str, Enum):
+    """Identify one source-neutral layer edge transformation."""
+
+    EXPAND = "expand"
+    CONTRACT = "contract"
+    FEATHER = "feather"
 
 
 class CoverageCoordinateSpace(str, Enum):
@@ -332,6 +344,30 @@ class PixelSelectionSnapshot:
     def has_selection(self) -> bool:
         """Return whether nonzero pixel-selection coverage is active."""
         return self.coverage is not None
+
+
+@dataclass(frozen=True, slots=True)
+class PixelSelectionModificationResult:
+    """Report one terminal asynchronous selection modification request."""
+
+    request_id: uuid.UUID
+    scene_id: uuid.UUID
+    operation: LayerEdgeOperation
+    succeeded: bool
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class LayerEdgeModificationResult:
+    """Report one terminal whole-layer edge modification request."""
+
+    request_id: uuid.UUID
+    session_id: uuid.UUID
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    operation: LayerEdgeOperation
+    succeeded: bool
+    message: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -74,6 +74,7 @@ from ..resources import (
     ProjectResourceStore,
 )
 from ..resources.active_raster import ActiveRasterResolver
+from ..resources.active_raster_coordinates import ActiveRasterCoordinateResolver
 from ..resources.composition_rasterization import (
     CompositionResourceRasterizationService,
 )
@@ -88,13 +89,14 @@ from ..resources.lifecycle import ProjectResourceLifecycleOwner
 from ..resources.source_capabilities import ProjectResourceSourceCapabilities
 from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
+from ..scene.layer_edge_preview import LayerEdgePreviewStore
 from ..scene.layer_geometry import LayerGeometryPolicy, LayerGeometryResolver
 from ..scene.layer_move import SceneLayerMoveController
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.movement_interaction import SceneLayerMovementInteraction
 from ..scene.movement_mutations import LayerMovementMutationOwner
 from ..scene.mutations import SceneMutationCoordinator
-from ..scene.pixel_edits import LayerPixelMutationCoordinator
+from ..scene.pixel_edits import LayerPixelContentChange, LayerPixelMutationCoordinator
 from ..scene.pixel_owners import LayerPixelOwnerRegistry
 from ..scene.raster_mutations import (
     RasterBoundsCompletion,
@@ -105,18 +107,22 @@ from ..scene.transform_preview import SceneLayerTransformPreview
 from ..scene.transform_session import SceneLayerTransformController
 from ..scene.viewport_selection import ViewportSceneSelection
 from ..selection import (
+    PixelSelectionModificationCoordinator,
     PixelSelectionPaintTargetOwner,
     PixelSelectionService,
     PixelSelectionState,
 )
 from ..snapping.system import SnappingSubsystem
 from ..tools import Tools
+from ..types import LayerEdgeModificationResult, PixelSelectionModificationResult
 from ..ui import CursorBuilder
 from ..vector.conversion import VectorConversionCompletion
 from ..vector.install import VectorDomainComponents, VectorDomainInstaller
 from ..vector.tools import install_vector_tools
 from .floating_layers import FloatingLayerPromotionRegistry
 from .interaction import EditorInteractionCoordinator
+from .layer_edge_modification import LayerEdgeModificationCoordinator
+from .layer_edge_targets import LayerEdgeEditRegistry
 from .move_configuration import MoveToolConfiguration
 from .movement import EditorMovementInteraction
 from .operation_resolution import (
@@ -145,12 +151,17 @@ class EditorRootCallbacks:
     composition_history_changed: Callable[[uuid.UUID], None]
     composition_layers_changed: Callable[[uuid.UUID], None]
     pixel_selection_changed: Callable[[PixelSelectionState], None]
+    pixel_selection_modification_completed: Callable[
+        [PixelSelectionModificationResult], None
+    ]
+    layer_edge_modification_completed: Callable[[LayerEdgeModificationResult], None]
     transform_changed: Callable[[], None]
     transform_preview_changed: Callable[[], None]
     raster_structure_changed: Callable[[], None]
     raster_bounds_completed: Callable[[RasterBoundsCompletion], None]
     scene_content_changed: Callable[[QRect | QRectF | None], None]
     resource_content_changed: Callable[[uuid.UUID], None]
+    layer_pixels_changed: Callable[[LayerPixelContentChange], None]
     pixel_move_preview_changed: Callable[[], None]
     active_mask_id: Callable[[], uuid.UUID | None]
     placed_asset_completed: Callable[[PlacedAssetCompletion], None]
@@ -208,6 +219,7 @@ class EditorRootComponents:
     placed_assets: PlacedAssetStore
     image_documents: ImageDocumentWorkflow
     active_raster: ActiveRasterResolver
+    active_raster_coordinates: ActiveRasterCoordinateResolver
     layer_resource_operations: LayerResourceOperations
     placed_asset_workflow: PlacedAssetWorkflow
     placed_asset_rasterization: PlacedAssetRasterizationService
@@ -222,6 +234,9 @@ class EditorRootComponents:
     raster_paint_target: EditableRasterPaintTargetOwner
     vector: VectorDomainComponents
     pixel_selection: PixelSelectionService
+    pixel_selection_modifications: PixelSelectionModificationCoordinator
+    layer_edge_targets: LayerEdgeEditRegistry
+    layer_edge_modifications: LayerEdgeModificationCoordinator
     layer_geometry: LayerGeometryResolver
     layer_assembler: CompositionLayerSceneAssembler
     scene_rasterizer: SceneRegionRasterizer
@@ -477,6 +492,7 @@ class EditorCompositionRoot:
             pixel_selection=pixel_selection,
             owners=pixel_owners,
             edit_controller=compositions.edit_controller,
+            changed=callbacks.layer_pixels_changed,
         )
         editor_interaction = EditorInteractionCoordinator(
             active_scene=view.current_scene_descriptor,
@@ -486,6 +502,24 @@ class EditorCompositionRoot:
             pixel_mutations=pixel_mutations,
             source_coverage=editor_source_capabilities.coverage,
             selection_projections=inputs.selection_projections,
+        )
+        pixel_selection_modifications = PixelSelectionModificationCoordinator(
+            active_scene=view.current_scene_descriptor,
+            selections=pixel_selection,
+            execution_scope=inputs.execution_scope,
+            latest_requests=inputs.latest_requests,
+            completed=callbacks.pixel_selection_modification_completed,
+        )
+        layer_edge_targets = LayerEdgeEditRegistry()
+        layer_edge_previews = LayerEdgePreviewStore()
+        layer_edge_modifications = LayerEdgeModificationCoordinator(
+            active_scene=view.current_scene_descriptor,
+            targets=layer_edge_targets,
+            previews=layer_edge_previews,
+            execution_scope=inputs.execution_scope,
+            latest_requests=inputs.latest_requests,
+            preview_changed=callbacks.pixel_move_preview_changed,
+            completed=callbacks.layer_edge_modification_completed,
         )
 
         raster_floating_owner = EditableRasterFloatingLayerOwner(
@@ -569,6 +603,7 @@ class EditorCompositionRoot:
         transient_rasters = TransientRasterRenderCoordinator(
             editor_source_capabilities,
             inputs.mask_live_previews,
+            layer_edge_previews,
             view.current_scene_descriptor,
         )
         view.presenter.set_transient_raster_provider(
@@ -584,6 +619,15 @@ class EditorCompositionRoot:
             active_mask_id=callbacks.active_mask_id,
             active_scene=view.coordinate_scene_descriptor,
             coordinates=view.coordinates,
+        )
+        active_raster_coordinates = ActiveRasterCoordinateResolver(
+            rasters=active_raster,
+            coordinates=view.coordinates,
+            preferred_layer_id=lambda: (
+                None
+                if inputs.layer_selection.current is None
+                else inputs.layer_selection.current.layer_id
+            ),
         )
         active_mask_aperture = ActiveMaskCanvasAperture(
             active_mask_id=callbacks.active_mask_id,
@@ -658,6 +702,7 @@ class EditorCompositionRoot:
             placed_assets=placed_assets,
             image_documents=image_documents,
             active_raster=active_raster,
+            active_raster_coordinates=active_raster_coordinates,
             layer_resource_operations=layer_resource_operations,
             placed_asset_workflow=placed_asset_workflow,
             placed_asset_rasterization=placed_asset_rasterization,
@@ -672,6 +717,9 @@ class EditorCompositionRoot:
             raster_paint_target=raster_paint_target,
             vector=vector,
             pixel_selection=pixel_selection,
+            pixel_selection_modifications=pixel_selection_modifications,
+            layer_edge_targets=layer_edge_targets,
+            layer_edge_modifications=layer_edge_modifications,
             layer_geometry=layer_geometry,
             layer_assembler=layer_assembler,
             scene_rasterizer=resource_domain.scene_rasterizer,

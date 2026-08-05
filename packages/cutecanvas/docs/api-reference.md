@@ -319,6 +319,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- ControlMode.DRAW_BRUSH — Mask painting mode (`draw-brush`).
 	- ControlMode.CLONE_STAMP — Clone Stamp retouching mode (`clone-stamp`).
 	- ControlMode.SMART_SELECT — SAM-based selection mode (`smart-select`).
+	- ControlMode.SMART_MASK — SAM-based mask-authoring mode (`smart-mask`).
 	- ControlMode.SELECT_RECTANGLE — Rectangular pixel-selection mode (`select-rectangle`).
 	- ControlMode.SELECT_ELLIPSE — Elliptical pixel-selection mode (`select-ellipse`).
 	- ControlMode.SELECT_LASSO — Freeform pixel-selection mode (`select-lasso`).
@@ -673,6 +674,7 @@ CuteCanvas receives touch and tablet input automatically. Pan/zoom mode supports
 - CuteCanvas.samCheckpointProgress — Signal that reports checkpoint download progress (downloaded, total or None).
 - CuteCanvas.refreshSamFeature — Reinstall SAM tooling using the current configuration snapshot.
 - CuteCanvas.CONTROL_MODE_SMART_SELECT — Built-in smart-select mode using SAM predictions.
+- CuteCanvas.CONTROL_MODE_SMART_MASK — Built-in smart-mask mode using SAM predictions.
 
 See also: [Masks and SAM](masks-and-sam.md) and [Interaction Modes](interaction-modes.md).
 
@@ -698,6 +700,9 @@ See also: [Masks and SAM](masks-and-sam.md) and [Interaction Modes](interaction-
 - CuteCanvas.unregisterTool — Remove a custom tool; cannot remove the active mode or built-ins.
 - CuteCanvas.registerCursorProvider — Attach a cursor provider to a control mode.
 - CuteCanvas.unregisterCursorProvider — Remove a cursor provider and refresh if active.
+- CuteCanvas.setEditorCursorTheme — Install optional host artwork for built-in semantic editor cursor feedback; pass `None` to restore all portable defaults.
+- EditorCursorIntent — Stable semantic intents for default, forbidden, precise, additive, subtractive, and selection-boundary translation feedback.
+- EditorCursorTheme — Host protocol that resolves an intent and device-pixel ratio to a `QCursor`, or returns `None` to defer to CuteCanvas.
 
 Custom editor tools use QPane's public `ViewerTool` and `ViewerToolSignals`
 contract. `CuteCanvas.registerTool` installs those tools into the same generic
@@ -712,6 +717,7 @@ See also: [Extensibility](extensibility.md) and [Interaction Modes](interaction-
 - CuteCanvas.applyZoom — Clamp zoom requests and remap unity to the device-native scale.
 - CuteCanvas.viewportRectChanged — `QRectF` signal fired whenever the physical viewport changes size (resizes or monitor/DPR changes). Emits once after initialization so status bars and overlays can seed layout state before user interaction.
 - CuteCanvas.currentViewportRect — Returns the most recent physical viewport rect snapshot, falling back to the live `physicalViewportRect()` when no emission occurred yet.
+- CuteCanvas.sceneToPanelRect — Map a valid absolute scene rectangle into detached logical widget coordinates, or return `None` when no scene is active.
 - CuteCanvas.panelHitTest — Facade helper returning the DPR-aware `PanelHitTest` metadata (raw/clamped coordinates plus inside-image flag) for a panel-space `QPoint`.
 - CuteCanvas.sceneHitTest — Return scene-layer hit metadata for a panel-space `QPoint` when a layered scene composition is active.
 
@@ -724,6 +730,7 @@ See also: [Documents and Layers](scenes.md) and [Interaction Modes](interaction-
 - CuteCanvas.compositionChanged — `CompositionSnapshot` payload emitted after composition records change.
 - CuteCanvas.compositionSelectionChanged — Composition UUID or `None` payload emitted when selection changes.
 - CuteCanvas.sceneChanged — `SceneSnapshot` or `None` payload emitted when the normalized active render scene changes.
+- CuteCanvas.layerPixelsChanged — Scene, layer, and resource UUIDs emitted once after a durable generic layer-pixel mutation, including chronological undo and redo replay.
 - CuteCanvas.sceneEditHistoryChanged — Two booleans reporting active-scene chronological editor undo and redo availability.
 - CuteCanvas.pixelSelectionChanged — `PixelSelectionSnapshot` payload emitted when the active composition selection changes.
 - CuteCanvas.floatingPixelEditChanged — `FloatingPixelSnapshot` or `None` emitted when unresolved fragment state changes.
@@ -879,6 +886,19 @@ See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and 
 - `CuteCanvas.fillSelection` projects the active soft selection into the active editable target as one chronological edit.
 - `CuteCanvas.paintBucketOptions` and `CuteCanvas.configurePaintBucket` expose tolerance, contiguous fill, and antialiasing. `CuteCanvas.CONTROL_MODE_PAINT_BUCKET` activates the asynchronous tool.
 - `CuteCanvas.rasterizeMaskCoverage` explicitly flattens retained mask items without changing the exported result and remains undoable.
+- `cutecanvas.LayerEdgeOperation` identifies source-neutral asynchronous edge operations.
+  - `LayerEdgeOperation.EXPAND` grows the coverage edge.
+  - `LayerEdgeOperation.CONTRACT` shrinks the coverage edge.
+  - `LayerEdgeOperation.FEATHER` softens the coverage edge.
+- `cutecanvas.PixelSelectionModificationResult` reports each request's terminal state.
+  - `PixelSelectionModificationResult.request_id` is the accepted request UUID.
+  - `PixelSelectionModificationResult.scene_id` is the public composition UUID.
+  - `PixelSelectionModificationResult.operation` identifies the requested operation.
+  - `PixelSelectionModificationResult.succeeded` reports whether the detached result was adopted.
+  - `PixelSelectionModificationResult.message` provides the terminal explanation.
+- `CuteCanvas.pixelSelectionModificationCompleted` emits one `PixelSelectionModificationResult` for each accepted request.
+- `CuteCanvas.expandPixelSelection`, `CuteCanvas.contractPixelSelection`, and `CuteCanvas.featherPixelSelection` transform only the active composition selection and return a request ID when work is accepted. `CuteCanvas.editor.selection.expand`, `.contract`, and `.feather` provide the focused equivalents. Successful adoption creates one chronological selection edit; stale results never replace newer selection state.
+- `CuteCanvas.beginPixelSelectionModificationPreview`, `CuteCanvas.updatePixelSelectionModificationPreview`, `CuteCanvas.settlePixelSelectionModificationPreview`, and `CuteCanvas.cancelPixelSelectionModificationPreview` expose one reversible interactive selection transaction. Updates always derive from the selection captured at begin time; settlement records only the latest product, while cancellation restores the original without history. `CuteCanvas.editor.selection.begin_modification`, `.preview_modification`, `.apply_modification`, and `.cancel_modification` provide the focused equivalents.
 
 ## Manipulation geometry and snapping
 
@@ -887,6 +907,18 @@ See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and 
 - `LayerGeometryPolicy` pairs the chosen manipulation mode with validated custom bounds when the host selects `CUSTOM`.
 - `CuteCanvas.layerGeometryPolicy` and `CuteCanvas.setLayerGeometryPolicy` query or replace one layer's manipulation geometry. `CuteCanvas.layerLocalBounds` returns the resolved bounds actually used by move, transform, snapping, and editor overlays.
 - `CuteCanvas.setLayerVisible` changes composition-local rendering and hit testing as one undoable edit for every layer source. `LayerHandle.set_visible` provides the focused equivalent.
+- `CuteCanvas.setLayerOpacity` changes the final visual-only layer multiplier without rewriting authored pixels, scalar coverage, brush hardness, or paint opacity. `LayerHandle.set_opacity` provides the focused equivalent. Coverage sources keep their full scalar curve and apply this multiplier at composition.
+- `CuteCanvas.expandLayerEdges`, `CuteCanvas.contractLayerEdges`, and `CuteCanvas.featherLayerEdges` route source-neutral requests through the adapter registered for the addressed layer kind. Coverage/mask layers are supported directly and settle as one reversible baked edit.
+- `CuteCanvas.beginLayerEdgePreview`, `CuteCanvas.updateLayerEdgePreview`, `CuteCanvas.settleLayerEdgePreview`, and `CuteCanvas.cancelLayerEdgePreview` expose a nonmodal latest-value session. Every update derives from one immutable base revision; settlement commits the latest product once, and cancellation leaves durable content unchanged.
+- `CuteCanvas.beginMaskEdgePreview`, `CuteCanvas.expandMaskEdges`, `CuteCanvas.contractMaskEdges`, and `CuteCanvas.featherMaskEdges` are mask-identity conveniences over the generic layer route.
+- `CuteCanvas.layerEdgeModificationCompleted` emits `LayerEdgeModificationResult` when a settled or one-shot whole-layer request terminates.
+- `cutecanvas.LayerEdgeModificationResult` reports one terminal whole-layer request.
+  - `LayerEdgeModificationResult.request_id` is the accepted update or one-shot request UUID.
+  - `LayerEdgeModificationResult.session_id` identifies the preview transaction.
+  - `LayerEdgeModificationResult.scene_id` and `LayerEdgeModificationResult.layer_id` identify the addressed layer instance.
+  - `LayerEdgeModificationResult.operation` identifies the requested edge operation.
+  - `LayerEdgeModificationResult.succeeded` reports whether the product was committed.
+  - `LayerEdgeModificationResult.message` provides the terminal explanation.
 - `CuteCanvas.translateLayer` adds an exact scene-coordinate displacement without changing the affine linear transform. `CuteCanvas.centerLayer` aligns either or both layer-center axes to the composition canvas. `LayerHandle.translate` and `LayerHandle.center` expose the same commands without raw identifier pairs. Movability remains host policy for translation and alignment.
 - Move auto-selects the topmost eligible visible content by default. Shift-click adds to the layer set; dragging any selected member and keyboard nudging move all movable members through one preview, one durable publication, and one history edit. `MoveToolOptions.auto_select_layers=False` preserves the existing set, and Ctrl at gesture start temporarily inverts that option.
 - `cutecanvas.SnapPolicy` selects canvas, visible-layer, selection, guide, and grid candidates plus device-pixel acquire/release thresholds. Its default eight-pixel acquire tolerance is evaluated through QPane's physical viewport zoom, independently of display scaling.

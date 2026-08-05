@@ -41,6 +41,7 @@ from .document import (
     StrokeCoverageItem,
     VectorCoverageItem,
 )
+from .filters import feather_coverage
 from .operations import CoverageCombineMode, combine_coverage
 from .projection import AffineCoverageResampler
 from .surface import CoverageSnapshot
@@ -252,7 +253,7 @@ class CoverageDocumentEvaluator:
         painter.end()
         pixels = qimage_to_numpy_grayscale8(image)
         if item.feather_radius > 0.0:
-            pixels = _gaussian_box_blur(pixels, item.feather_radius)
+            pixels = feather_coverage(pixels, item.feather_radius)
         if not padding:
             return pixels
         return np.ascontiguousarray(
@@ -433,32 +434,3 @@ def _union_bounds(bounds: Iterable[RasterBounds]) -> RasterBounds | None:
     for candidate in bounds:
         result = candidate if result is None else result.united(candidate)
     return result
-
-
-def _gaussian_box_blur(pixels: np.ndarray, radius: float) -> np.ndarray:
-    """Approximate a Gaussian feather with three linear-time box passes."""
-    box_radius = max(1, round(float(radius) * 0.57735))
-    result = pixels.astype(np.float32)
-    for _ in range(3):
-        result = _box_blur_axis(result, box_radius, axis=1)
-        result = _box_blur_axis(result, box_radius, axis=0)
-    return np.ascontiguousarray(np.clip(np.rint(result), 0, 255).astype(np.uint8))
-
-
-def _box_blur_axis(pixels: np.ndarray, radius: int, *, axis: int) -> np.ndarray:
-    """Apply one edge-padded moving average along ``axis``."""
-    pad_width = [(0, 0), (0, 0)]
-    pad_width[axis] = (radius, radius)
-    padded = np.pad(pixels, pad_width, mode="constant")
-    cumulative = np.cumsum(padded, axis=axis, dtype=np.float32)
-    zero_shape = list(cumulative.shape)
-    zero_shape[axis] = 1
-    cumulative = np.concatenate(
-        (np.zeros(zero_shape, dtype=np.float32), cumulative), axis=axis
-    )
-    width = radius * 2 + 1
-    leading = [slice(None), slice(None)]
-    trailing = [slice(None), slice(None)]
-    leading[axis] = slice(width, None)
-    trailing[axis] = slice(None, -width)
-    return (cumulative[tuple(leading)] - cumulative[tuple(trailing)]) / width

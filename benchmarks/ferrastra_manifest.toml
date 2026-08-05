@@ -1,0 +1,63 @@
+schema_version = 1
+stage = 0
+
+[reference_system]
+cpu = "Intel Core i9-14900K"
+architecture = "x86_64"
+operating_system = "Windows 11"
+rust_version = "1.93.1"
+profile = "bench"
+
+[measurement]
+warmup_iterations = 25
+sample_iterations = 200
+percentiles = [50, 95, 99]
+required_metrics = [
+  "latency_ms",
+  "throughput_per_second",
+  "peak_resident_bytes",
+  "allocated_bytes",
+  "cancellation_latency_ms",
+]
+
+[determinism]
+fixed_seeds = [0, 1, 18446744073709551615]
+thread_counts = [1, 2, 4, 8]
+repeated_runs = 3
+
+[[input_classes]]
+id = "small"
+width = 256
+height = 256
+
+[[input_classes]]
+id = "viewport"
+width = 2048
+height = 2048
+
+[[input_classes]]
+id = "large"
+width = 16384
+height = 16384
+
+[registration]
+required_operation_fields = [
+  "semantic_id",
+  "semantic_version",
+  "input_products",
+  "output_product",
+  "demand",
+  "damage",
+  "memory_budget",
+  "cancellation",
+  "quality",
+  "conformance",
+]
+require_reference_result = true
+require_memory_ceiling = true
+require_latency_thresholds = true
+require_adversarial_inputs = true
+
+# Stage 0 has no graphics operation and therefore no benchmark registrations.
+# An operation must add a complete [[operations]] entry before implementation.
+operations = []

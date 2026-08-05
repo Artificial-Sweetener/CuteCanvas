@@ -26,7 +26,12 @@ from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage
 from qpane.sdk.vector import VectorShapeKind
 
-from ..types import CoverageCoordinateSpace, PixelSelectionMode, PixelSelectionSnapshot
+from ..types import (
+    CoverageCoordinateSpace,
+    LayerEdgeOperation,
+    PixelSelectionMode,
+    PixelSelectionSnapshot,
+)
 from .clone_stamp import CloneStampFacade, CloneStampHost
 from .effects import EffectsFacade
 from .handles import CompositionCollection, EditorHandleHost
@@ -57,6 +62,39 @@ class EditorCommandHost(EditorHandleHost, CloneStampHost, Protocol):
 
     def clearPixelSelection(self) -> bool:
         """Deselect pixels, resolving any floating edit first."""
+        ...
+
+    def expandPixelSelection(self, pixels: int) -> uuid.UUID | None:
+        """Expand active selection coverage asynchronously."""
+        ...
+
+    def contractPixelSelection(self, pixels: int) -> uuid.UUID | None:
+        """Contract active selection coverage asynchronously."""
+        ...
+
+    def featherPixelSelection(self, radius: float) -> uuid.UUID | None:
+        """Feather active selection coverage asynchronously."""
+        ...
+
+    def beginPixelSelectionModificationPreview(self) -> uuid.UUID | None:
+        """Capture active selection state for a reversible preview."""
+        ...
+
+    def updatePixelSelectionModificationPreview(
+        self,
+        session_id: uuid.UUID,
+        operation: LayerEdgeOperation,
+        radius: float,
+    ) -> uuid.UUID | None:
+        """Replace a selection preview from its immutable base."""
+        ...
+
+    def settlePixelSelectionModificationPreview(self, session_id: uuid.UUID) -> bool:
+        """Commit one selection preview."""
+        ...
+
+    def cancelPixelSelectionModificationPreview(self, session_id: uuid.UUID) -> bool:
+        """Cancel one selection preview."""
         ...
 
     def sceneEditUndoAvailable(self) -> bool:
@@ -171,6 +209,47 @@ class SelectionFacade:
     def clear(self) -> bool:
         """Deselect pixels after resolving any unresolved floating edit."""
         return self._host.clearPixelSelection()
+
+    def expand(self, pixels: int) -> uuid.UUID | None:
+        """Expand active selection coverage by whole pixels."""
+        return self._host.expandPixelSelection(pixels)
+
+    def contract(self, pixels: int) -> uuid.UUID | None:
+        """Contract active selection coverage by whole pixels."""
+        return self._host.contractPixelSelection(pixels)
+
+    def feather(self, radius: float) -> uuid.UUID | None:
+        """Feather active selection coverage by a pixel radius."""
+        return self._host.featherPixelSelection(radius)
+
+    def begin_modification(self) -> uuid.UUID | None:
+        """Capture the current selection for reversible modification previews."""
+
+        return self._host.beginPixelSelectionModificationPreview()
+
+    def preview_modification(
+        self,
+        session_id: uuid.UUID,
+        operation: LayerEdgeOperation,
+        radius: float,
+    ) -> uuid.UUID | None:
+        """Replace the current preview using the session's original selection."""
+
+        return self._host.updatePixelSelectionModificationPreview(
+            session_id,
+            operation,
+            radius,
+        )
+
+    def apply_modification(self, session_id: uuid.UUID) -> bool:
+        """Commit the latest selection preview as one history edit."""
+
+        return self._host.settlePixelSelectionModificationPreview(session_id)
+
+    def cancel_modification(self, session_id: uuid.UUID) -> bool:
+        """Restore the selection captured at preview start."""
+
+        return self._host.cancelPixelSelectionModificationPreview(session_id)
 
 
 class CoverageFacade:

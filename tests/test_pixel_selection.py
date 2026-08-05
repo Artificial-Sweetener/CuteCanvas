@@ -142,6 +142,35 @@ def test_selection_records_edits_and_restore_does_not_record() -> None:
     assert not service.state(scene_id).has_selection
 
 
+def test_revision_guarded_replacement_records_one_reversible_edit() -> None:
+    """Modified coverage must commit atomically without accepting stale revisions."""
+    scene_id = uuid.uuid4()
+    edits = []
+    service = PixelSelectionService(record_edit=edits.append)
+    initial = _snapshot(4, 5, [[64, 255]])
+    replacement = _snapshot(3, 4, [[64, 64, 255, 255]])
+    assert service.commit(scene_id, initial)
+
+    assert not service.replace_coverage(
+        scene_id,
+        replacement,
+        expected_revision=0,
+    )
+    assert service.state(scene_id).coverage.bounds == initial.bounds
+    assert service.replace_coverage(
+        scene_id,
+        replacement,
+        expected_revision=1,
+    )
+
+    assert len(edits) == 2
+    assert service.state(scene_id).revision == 2
+    assert service.undo_edit(edits[-1])
+    assert service.state(scene_id).coverage.bounds == initial.bounds
+    assert service.redo_edit(edits[-1])
+    assert service.state(scene_id).coverage.bounds == replacement.bounds
+
+
 def test_randomized_selection_algebra_matches_independent_finite_canvas_oracle() -> (
     None
 ):

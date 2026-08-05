@@ -20,6 +20,11 @@ from .compositor import compose_selection_coverage, trim_selection_coverage
 from .geometry import SelectionGeometryRasterizer
 from .history import PixelSelectionEdit
 from .model import PixelSelectionState
+from .modification import (
+    PixelSelectionModificationRequest,
+    build_pixel_selection_modification,
+)
+from .modification_coordinator import PixelSelectionModificationCoordinator
 from .paint_target import PixelSelectionPaintTargetOwner
 from .projection import LayerCoverageProjector
 from .service import PixelSelectionService
@@ -27,11 +32,14 @@ from .service import PixelSelectionService
 __all__ = [
     "LayerCoverageProjector",
     "PixelSelectionEdit",
+    "PixelSelectionModificationCoordinator",
+    "PixelSelectionModificationRequest",
     "PixelSelectionPaintTargetOwner",
     "PixelSelectionService",
     "PixelSelectionState",
     "SelectionBoundaryBuilder",
     "SelectionGeometryRasterizer",
+    "build_pixel_selection_modification",
     "compose_selection_coverage",
     "trim_selection_coverage",
 ]

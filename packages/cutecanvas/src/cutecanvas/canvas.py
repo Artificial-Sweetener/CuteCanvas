@@ -101,6 +101,7 @@ from .raster.layers import (
     EditableRasterLayerController,
 )
 from .resources.active_raster import ActiveRasterResolver
+from .resources.active_raster_coordinates import ActiveRasterCoordinateResolver
 from .resources.composition_rasterization import (
     CompositionResourceRasterizationService,
 )
@@ -123,7 +124,7 @@ from .scene.raster_mutations import (
 from .scene.source_capabilities import EditorSourceCapabilities
 from .scene.transform_preview import SceneLayerTransformPreview
 from .scene.transform_session import SceneLayerTransformController
-from .selection import PixelSelectionService
+from .selection import PixelSelectionModificationCoordinator, PixelSelectionService
 from .snapping.system import SnappingSubsystem
 from .tools import Tools
 from .tools.delegate import ToolInteractionDelegate
@@ -164,6 +165,7 @@ from .facade.placed_api import PlacedAssetApiMixin
 from .facade.projection_api import ProjectionApiMixin
 from .facade.raster_api import RasterApiMixin
 from .facade.resource_api import ResourceApiMixin
+from .facade.selection_api import SelectionApiMixin
 from .facade.snapping_api import SnappingApiMixin
 from .facade.vector_api import VectorApiMixin
 from .facade.view_api import ViewApiMixin
@@ -192,6 +194,7 @@ class CuteCanvas(
     PlacedAssetApiMixin,
     ProjectionApiMixin,
     VectorApiMixin,
+    SelectionApiMixin,
     RasterApiMixin,
     CoverageApiMixin,
     EffectApiMixin,
@@ -215,6 +218,7 @@ class CuteCanvas(
     CONTROL_MODE_CLONE_STAMP = Tools.CONTROL_MODE_CLONE_STAMP
     CONTROL_MODE_PAINT_BUCKET = Tools.CONTROL_MODE_PAINT_BUCKET
     CONTROL_MODE_SMART_SELECT = Tools.CONTROL_MODE_SMART_SELECT
+    CONTROL_MODE_SMART_MASK = Tools.CONTROL_MODE_SMART_MASK
     CONTROL_MODE_SELECT_RECTANGLE = Tools.CONTROL_MODE_SELECT_RECTANGLE
     CONTROL_MODE_SELECT_ELLIPSE = Tools.CONTROL_MODE_SELECT_ELLIPSE
     CONTROL_MODE_SELECT_LASSO = Tools.CONTROL_MODE_SELECT_LASSO
@@ -243,10 +247,16 @@ class CuteCanvas(
     """Emit the active composition UUID or ``None`` when selection changes."""
     sceneChanged: Signal = Signal(object)
     """Emit the normalized active scene snapshot or ``None`` when it changes."""
+    layerPixelsChanged: Signal = Signal(uuid.UUID, uuid.UUID, uuid.UUID)
+    """Emit scene, layer, and resource UUIDs after durable pixel mutation."""
     sceneEditHistoryChanged: Signal = Signal(bool, bool)
     """Emit composition-edit undo and redo availability after history changes."""
     pixelSelectionChanged: Signal = Signal(object)
     """Emit active composition pixel-selection state after it changes."""
+    pixelSelectionModificationCompleted: Signal = Signal(object)
+    """Emit one terminal asynchronous pixel-selection modification result."""
+    layerEdgeModificationCompleted: Signal = Signal(object)
+    """Emit one terminal whole-layer edge modification result."""
     paintTargetChanged: Signal = Signal(object)
     """Emit the active generalized paint target or ``None`` after it changes."""
     brushPresetChanged: Signal = Signal(object)
@@ -383,6 +393,7 @@ class CuteCanvas(
         self._placed_assets: PlacedAssetStore | None = None
         self._image_documents: ImageDocumentWorkflow | None = None
         self._active_raster: ActiveRasterResolver | None = None
+        self._active_raster_coordinates: ActiveRasterCoordinateResolver | None = None
         self._layer_resource_operations: LayerResourceOperations | None = None
         self._project_resource_descriptors = None
         self._project_resource_capabilities = None
@@ -395,6 +406,11 @@ class CuteCanvas(
         ) = None
         self._resource_rasterization: LayerResourceRasterizationRouter | None = None
         self._pixel_selection: PixelSelectionService | None = None
+        self._pixel_selection_modifications: (
+            PixelSelectionModificationCoordinator | None
+        ) = None
+        self._layer_edge_targets = None
+        self._layer_edge_modifications = None
         self._layer_geometry: LayerGeometryResolver | None = None
         self._painting: PaintingCoordinator | None = None
         self._clone_stamp: CloneStampOperation | None = None

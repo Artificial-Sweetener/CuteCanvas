@@ -44,7 +44,7 @@ MASK_CHAPTER = (
 )
 
 SAM_CHAPTER = (
-    "SAM: when enabled, trigger smart select with drag, tune predictor/cache controls, "
+    "SAM: when enabled, create Smart selections or Smart masks with a drag, tune predictor/cache controls, "
     "and surface installer guidance if extras are missing. When downloads are enabled, "
     "CuteCanvas preflights the checkpoint and fetches it on demand; connect to "
     "samCheckpointStatusChanged/samCheckpointProgress to mirror readiness and progress in host UI. "
@@ -145,5 +145,5 @@ def reference_hints(mask_enabled: bool, sam_enabled: bool) -> list[str]:
             ]
         )
     if mask_enabled and sam_enabled:
-        hints.append("Drag a box in Smart Select mode to run SAM")
+        hints.append("Drag a box in Smart Select or Smart Mask mode to run SAM")
     return hints

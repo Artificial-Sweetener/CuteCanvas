@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Verify independent QPane and CuteCanvas distribution contracts."""
+"""Verify independent Ferrastra, QPane, and CuteCanvas distribution contracts."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ _PACKAGES = {
     "qpane": _PROJECT_ROOT / "packages/qpane",
     "cutecanvas": _PROJECT_ROOT / "packages/cutecanvas",
 }
+_FERRASTRA_ROOT = _PROJECT_ROOT / "packages/ferrastra"
 
 
 def _metadata(package: str) -> dict[str, object]:
@@ -114,8 +115,8 @@ def test_each_distribution_declares_the_runtime_packages_it_imports() -> None:
     assert {"qpane", "pyside6", "numpy", "typing-extensions"} <= canvas_dependencies
 
 
-def test_repository_bootstrap_installs_both_editable_packages() -> None:
-    """Keep the root setup path aligned with the two package roots."""
+def test_repository_bootstrap_installs_all_editable_packages() -> None:
+    """Keep the root setup path aligned with all three package roots."""
     development_requirements = (
         (_PROJECT_ROOT / "requirements-dev.txt").read_text("utf-8").splitlines()
     )
@@ -126,8 +127,68 @@ def test_repository_bootstrap_installs_both_editable_packages() -> None:
 
     assert "-e ./packages/qpane" in development_requirements
     assert "-e ./packages/cutecanvas" in development_requirements
+    assert "-e ./packages/ferrastra" in development_requirements
     assert "-r requirements-dev.txt" in root_requirements
     assert 'repo_root / "requirements-dev.txt"' in setup_source
+
+
+def test_ferrastra_declares_an_independent_maturin_wheel() -> None:
+    """Keep Ferrastra native, dependency-free, and independently packageable."""
+    metadata = tomllib.loads((_FERRASTRA_ROOT / "pyproject.toml").read_text("utf-8"))
+
+    assert metadata["build-system"] == {
+        "requires": ["maturin==1.14.1"],
+        "build-backend": "maturin",
+    }
+    assert metadata["project"]["dependencies"] == []
+    assert metadata["tool"]["maturin"]["module-name"] == "ferrastra._native"
+    source = _FERRASTRA_ROOT / "src/ferrastra"
+    assert (source / "py.typed").is_file()
+    assert (source / "ferrastra.pyi").is_file()
+    assert (source / "_native.pyi").is_file()
+
+
+def test_ferrastra_declares_the_supported_platform_and_python_matrix() -> None:
+    """Keep published metadata aligned with the native CI contract."""
+    metadata = tomllib.loads((_FERRASTRA_ROOT / "pyproject.toml").read_text("utf-8"))
+    classifiers = set(metadata["project"]["classifiers"])
+
+    assert metadata["project"]["requires-python"] == ">=3.10,<3.15"
+    assert {
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: MacOS :: MacOS X",
+        "Operating System :: POSIX :: Linux",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+        "Programming Language :: Python :: Implementation :: CPython",
+    } <= classifiers
+
+
+def test_ferrastra_ci_and_dependency_policy_cover_minimum_native_targets() -> None:
+    """Keep build, verification, and dependency graphs on the same platforms."""
+    verify_workflow = (_PROJECT_ROOT / ".github/workflows/verify.yml").read_text(
+        "utf-8"
+    )
+    publish_workflow = (_PROJECT_ROOT / ".github/workflows/publish.yml").read_text(
+        "utf-8"
+    )
+    for runner in ("windows-2025", "ubuntu-24.04", "macos-15"):
+        assert runner in verify_workflow
+        assert runner in publish_workflow
+
+    deny_policy = tomllib.loads((_PROJECT_ROOT / "deny.toml").read_text("utf-8"))
+    assert deny_policy["graph"]["targets"] == [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+    ]
+    rust_toolchain = tomllib.loads(
+        (_PROJECT_ROOT / "rust-toolchain.toml").read_text("utf-8")
+    )
+    assert "targets" not in rust_toolchain["toolchain"]
 
 
 def test_runtime_source_and_dependencies_do_not_require_opencv() -> None:

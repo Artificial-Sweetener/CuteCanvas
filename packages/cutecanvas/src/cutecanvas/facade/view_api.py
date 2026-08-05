@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
 from qpane.sdk.rendering import PanelHitTest
 
@@ -44,6 +46,35 @@ class ViewApiMixin:
         """Return the latest physical viewport rectangle."""
         rect = self._last_viewport_rect
         return QRectF(rect) if rect is not None else self.physicalViewportRect()
+
+    def sceneToPanelRect(self, scene_rect: QRectF) -> QRectF | None:
+        """Map one absolute scene rectangle into logical widget coordinates.
+
+        Args:
+            scene_rect: Finite geometry in the active scene coordinate system.
+
+        Returns:
+            A detached widget-coordinate rectangle, or ``None`` when no active
+            scene can provide a mapping.
+
+        Raises:
+            TypeError: If ``scene_rect`` is not a ``QRectF``.
+            ValueError: If ``scene_rect`` is empty or contains non-finite values.
+        """
+        if not isinstance(scene_rect, QRectF):
+            raise TypeError("scene_rect must be a QRectF")
+        if not scene_rect.isValid() or not all(
+            isfinite(value)
+            for value in (
+                scene_rect.x(),
+                scene_rect.y(),
+                scene_rect.width(),
+                scene_rect.height(),
+            )
+        ):
+            raise ValueError("scene_rect must be a valid QRectF")
+        transform = self.view().scene_to_panel_transform()
+        return None if transform is None else transform.mapRect(QRectF(scene_rect))
 
     def setPanZoomLocked(self, locked: bool) -> None:
         """Replace direct pan and zoom interaction permission."""

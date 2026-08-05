@@ -12,6 +12,11 @@ QPane contains no document-authoring concepts and never imports CuteCanvas.
 Masks, selections, edit history, painting, editable layer policy, smart-object
 workflow, vector editing, persistence, and SAM are not QPane concerns.
 
+QPane consumes Ferrastra through `qpane.ferrastra` adapters. Those adapters translate
+generic QPane product demand into Ferrastra requests and convert completed native
+products into Qt presentation products. They do not move viewport policy,
+retained-frame ownership, GUI-thread rules, or Qt presentation into Ferrastra.
+
 ## Ownership
 
 QPane owns:
@@ -57,3 +62,11 @@ viewer with restrained public SDK teaching, not an editor or renderer lab.
 Focused proof includes large-image navigation, raster/vector frame equality,
 source reuse, revision invalidation, cache pressure, refinement, teardown, and
 isolated installation without CuteCanvas or editor/SAM dependencies.
+
+## Ferrastra migration rule
+
+An exact numerical path moves to Ferrastra only as a complete vertical slice:
+characterize the current result, establish the native owner, adapt every QPane
+caller, remove the old canonical implementation, and activate the matching
+ownership ban. Immediate navigation previews may remain Qt-owned only when the
+exact product is unambiguously Ferrastra-owned and cache identities stay distinct.

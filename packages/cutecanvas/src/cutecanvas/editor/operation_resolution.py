@@ -25,6 +25,8 @@ from enum import Enum
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import LayerDescriptor, LayerSourceReference, SceneDescriptor
 
+from cutecanvas.coverage.containment import coverage_contains
+
 from ..painting.targets import (
     PaintTargetContext,
     PaintTargetIdentity,
@@ -37,7 +39,6 @@ from ..types import EditorCapability, PaintTargetKind
 from .pixel_move_target import (
     SelectedPixelMoveTarget,
     SelectedPixelMoveTargetResolver,
-    coverage_contains,
 )
 
 
@@ -68,6 +69,7 @@ class EditorOperationDenial(str, Enum):
     NO_ACTIVE_SCENE = "no-active-scene"
     NO_SELECTED_LAYER = "no-selected-layer"
     NO_PIXEL_SELECTION = "no-pixel-selection"
+    NO_SELECTED_PIXELS = "no-selected-pixels"
     POINTER_OUTSIDE_SELECTION = "pointer-outside-selection"
     DIRECT_PIXEL_EDIT_UNSUPPORTED = "direct-pixel-edit-unsupported"
     HOST_POLICY_DENIED = "host-policy-denied"
@@ -268,6 +270,28 @@ class EditorOperationResolver:
                 selected_pixels.layer.layer_id,
                 selected_pixels=selected_pixels,
             )
+        if (
+            operation is EditorOperation.TRANSFORM
+            and self._pixel_selection.state(scene.scene_id).coverage is not None
+        ):
+            if not self._capability_allowed(
+                self._geometry_capability(
+                    operation,
+                    EditorOperationTarget.SELECTED_PIXELS,
+                )
+            ):
+                return self._denied(
+                    operation,
+                    EditorOperationDenial.HOST_POLICY_DENIED,
+                    scene_id=scene.scene_id,
+                    layer_id=None if selected is None else selected.layer_id,
+                )
+            return self._denied(
+                operation,
+                EditorOperationDenial.NO_SELECTED_PIXELS,
+                scene_id=scene.scene_id,
+                layer_id=None if selected is None else selected.layer_id,
+            )
         layer = (
             self._layer_by_id(scene, candidate_layer_id)
             if candidate_layer_id is not None
@@ -317,15 +341,7 @@ class EditorOperationResolver:
         selected_pixels: SelectedPixelMoveTarget | None = None,
     ) -> EditorOperationResolution:
         """Apply target-specific host capability policy to geometry operations."""
-        if target in {
-            EditorOperationTarget.FLOATING_PIXELS,
-            EditorOperationTarget.SELECTED_PIXELS,
-        }:
-            capability = EditorCapability.EDIT_PIXELS
-        elif operation is EditorOperation.MOVE:
-            capability = EditorCapability.MOVE_LAYERS
-        else:
-            capability = EditorCapability.TRANSFORM_LAYERS
+        capability = self._geometry_capability(operation, target)
         if not self._capability_allowed(capability):
             return self._denied(
                 operation,
@@ -340,6 +356,21 @@ class EditorOperationResolver:
             layer_id,
             selected_pixels=selected_pixels,
         )
+
+    @staticmethod
+    def _geometry_capability(
+        operation: EditorOperation,
+        target: EditorOperationTarget,
+    ) -> EditorCapability:
+        """Return the one host capability governing a geometry target."""
+        if target in {
+            EditorOperationTarget.FLOATING_PIXELS,
+            EditorOperationTarget.SELECTED_PIXELS,
+        }:
+            return EditorCapability.EDIT_PIXELS
+        if operation is EditorOperation.MOVE:
+            return EditorCapability.MOVE_LAYERS
+        return EditorCapability.TRANSFORM_LAYERS
 
     def _resolve_paint(
         self,
@@ -466,8 +497,10 @@ class EditorOperationResolver:
         if selected is None or selected.scene_id != scene.scene_id:
             return None
         resolved = self._scene_mutations.find_layer(
-            lambda layer: layer.scene_id == selected.scene_id
-            and layer.layer_id == selected.layer_id
+            lambda layer: (
+                layer.scene_id == selected.scene_id
+                and layer.layer_id == selected.layer_id
+            )
         )
         return None if resolved is None else resolved[1]
 

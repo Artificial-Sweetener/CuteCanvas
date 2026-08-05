@@ -118,6 +118,12 @@ class CanvasLifecycleMixin:
                         self._handle_composition_layers_changed
                     ),
                     pixel_selection_changed=self._handle_pixel_selection_changed,
+                    pixel_selection_modification_completed=(
+                        self.pixelSelectionModificationCompleted.emit
+                    ),
+                    layer_edge_modification_completed=(
+                        self.layerEdgeModificationCompleted.emit
+                    ),
                     transform_changed=self._publish_scene_layer_change,
                     transform_preview_changed=self._refresh_scene_transform_preview,
                     raster_structure_changed=self._handle_raster_structure_changed,
@@ -126,6 +132,7 @@ class CanvasLifecycleMixin:
                         self._handle_internal_scene_content_changed()
                     ),
                     resource_content_changed=self._handle_resource_content_changed,
+                    layer_pixels_changed=self._handle_layer_pixels_changed,
                     pixel_move_preview_changed=(
                         self._refresh_selected_pixel_move_preview
                     ),
@@ -195,6 +202,19 @@ class CanvasLifecycleMixin:
             lambda _obj=None, service=components.vector.conversions: service.shutdown()
         )
         self._pixel_selection = components.pixel_selection
+        self._pixel_selection_modifications = components.pixel_selection_modifications
+        self._layer_edge_targets = components.layer_edge_targets
+        self._layer_edge_modifications = components.layer_edge_modifications
+        self.destroyed.connect(
+            lambda _obj=None, coordinator=components.pixel_selection_modifications: (
+                coordinator.shutdown()
+            )
+        )
+        self.destroyed.connect(
+            lambda _obj=None, coordinator=components.layer_edge_modifications: (
+                coordinator.shutdown()
+            )
+        )
         self._layer_geometry = components.layer_geometry
         self._scene_rasterizer = components.scene_rasterizer
         self._painting = components.painting
@@ -258,6 +278,7 @@ class CanvasLifecycleMixin:
         self._editor_movement_interaction = components.editor_movement_interaction
         self._operation_resolver = components.operation_resolver
         self._paint_destination = components.paint_destination
+        self._active_raster_coordinates = components.active_raster_coordinates
         self._active_mask_coordinates = components.active_mask_coordinates
         self._active_mask_aperture = components.active_mask_aperture
         self._composition_scene_adapter = components.composition_scene_adapter
@@ -407,6 +428,11 @@ class CanvasLifecycleMixin:
             Registers coverage rendering, editing, and resource capabilities.
         """
         self._masks_controller.attachMaskService(service)
+        from cutecanvas.masks.edge_edits import MaskLayerEdgeEditOwner
+
+        if self._layer_edge_targets is None:
+            raise RuntimeError("layer edge target registry is unavailable")
+        self._layer_edge_targets.register(MaskLayerEdgeEditOwner(service))
         self.destroyed.connect(lambda _obj=None, attached=service: attached.shutdown())
         service.setStrokeConstraintProvider(
             self.activeMaskCanvasAperture().stroke_constraint

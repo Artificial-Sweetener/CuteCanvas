@@ -141,6 +141,36 @@ def test_usage_notification_during_trim_does_not_reenter_enforcement() -> None:
     assert trim_calls == 1
 
 
+def test_unchanged_usage_does_not_repeat_an_unproductive_trim() -> None:
+    """Repeated accounting notifications must not rerun unchanged cache pressure."""
+
+    coordinator = CacheCoordinator(active_budget_bytes=0)
+    usage = 0
+    trim_calls = 0
+
+    def trim_to(_target: int) -> None:
+        """Record an owner that cannot release its current working set."""
+
+        nonlocal trim_calls
+        trim_calls += 1
+
+    coordinator.register_consumer(
+        "cache",
+        priority=CachePriority.DERIVED_OVERLAYS,
+        callbacks=CacheConsumerCallbacks(
+            get_usage=lambda: usage,
+            set_budget=lambda _target: None,
+            trim_to=trim_to,
+        ),
+    )
+
+    usage = 10
+    coordinator.update_usage("cache", usage)
+    coordinator.update_usage("cache", usage)
+
+    assert trim_calls == 1
+
+
 def test_consumer_override_updates_budget():
     coordinator = CacheCoordinator(active_budget_bytes=200)
     consumer = FakeConsumer(usage=150)
@@ -403,6 +433,46 @@ def test_mask_overlay_consumer_uses_controller_callback():
     controller.renders.clear()
     snapshot_after = coordinator.snapshot()
     assert snapshot_after["consumers"]["mask_overlays"]["usage_bytes"] == 0
+    assert consumer is not None
+
+
+@pytest.mark.usefixtures("qapp")
+def test_active_mask_revision_updates_do_not_trigger_impossible_cache_trims(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Active working surfaces must stay outside repeated evictable-cache pressure."""
+
+    manager = MaskAssetStore(ProjectResourceStore())
+    controller = MaskController(
+        manager,
+        lambda point: point,
+        fixed_cache_config(),
+        mask_config=MaskConfigSlice(),
+        live_previews=MaskLivePreviewStore(),
+    )
+    coordinator = CacheCoordinator(active_budget_bytes=1)
+    consumer = EvictableCacheConsumer(
+        controller.renders,
+        coordinator,
+        consumer_id="mask_overlays",
+        priority=CachePriority.DERIVED_OVERLAYS,
+    )
+    mask_image = QImage(256, 256, QImage.Format_Grayscale8)
+    mask_image.fill(Qt.white)
+    mask_id = manager.create_mask(mask_image)
+    layer = manager.get_layer(mask_id)
+    assert layer is not None
+    controller.setActiveMaskID(mask_id, warm_cache=False)
+
+    with caplog.at_level(logging.WARNING):
+        assert controller.renders.get(layer) is not None
+        for _ in range(50):
+            controller.renders.promote_revision(mask_id)
+
+    snapshot = coordinator.snapshot()
+    assert controller.renders.cache_usage_bytes > 0
+    assert snapshot["consumers"]["mask_overlays"]["usage_bytes"] == 0
+    assert "failed to trim below target" not in caplog.text
     assert consumer is not None
 
 

@@ -30,15 +30,12 @@ from PySide6.QtGui import (
     QColor,
     QImage,
 )
-from qpane.sdk.raster import (
-    qimage_to_numpy_grayscale8,
-)
 from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.composition.public_policy import (
     internal_layer_policy,
 )
-from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
+from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.editor import (
     EditorOperation,
 )
@@ -55,8 +52,6 @@ from cutecanvas.types import (
     FloatingPixelSnapshot,
     LayerPolicy,
     PaintTargetSnapshot,
-    PixelSelectionMode,
-    PixelSelectionSnapshot,
     RasterExtentPolicy,
 )
 
@@ -237,14 +232,6 @@ class RasterApiMixin:
         return self.paintingCoordinator().select_layer(
             resolved_scene_id,
             layer_id,
-        )
-
-    def setPixelSelectionPaintTarget(self) -> bool:
-        """Select the active composition's pixel-selection coverage for painting."""
-        scene_id = self._active_resolved_scene_id()
-        return bool(
-            scene_id is not None
-            and self.paintingCoordinator().select_pixel_selection(scene_id)
         )
 
     def clearPaintTarget(self) -> bool:
@@ -542,128 +529,6 @@ class RasterApiMixin:
         if request_id is not None:
             self._raster_request_public_scenes[request_id] = scene_id
         return request_id
-
-    def pixelSelectionState(self) -> PixelSelectionSnapshot | None:
-        """Return the active composition's detached pixel-selection state."""
-        scene_id = self._active_resolved_scene_id()
-        if scene_id is None:
-            return None
-        return self._public_pixel_selection_state(
-            self.editorInteraction().pixel_selection_state(scene_id)
-        )
-
-    def setPixelSelection(
-        self,
-        coverage: QImage,
-        bounds: QRect,
-        mode: PixelSelectionMode = PixelSelectionMode.REPLACE,
-    ) -> bool:
-        """Combine grayscale coverage into the active composition selection.
-
-        Args:
-            coverage: Grayscale or color image interpreted as selection coverage.
-            bounds: Scene-coordinate bounds occupied by ``coverage``.
-            mode: Replacement, addition, subtraction, or intersection behavior.
-
-        Returns:
-            True when active selection state changed.
-
-        Raises:
-            TypeError: If inputs use unsupported public types.
-            ValueError: If coverage is null or dimensions do not match bounds.
-        """
-        if not isinstance(coverage, QImage):
-            raise TypeError("coverage must be a QImage")
-        if not isinstance(bounds, QRect):
-            raise TypeError("bounds must be a QRect")
-        if not isinstance(mode, PixelSelectionMode):
-            raise TypeError("mode must be PixelSelectionMode")
-        if coverage.isNull():
-            raise ValueError("coverage must not be null")
-        if (
-            coverage.size() != bounds.size()
-            or bounds.width() <= 0
-            or bounds.height() <= 0
-        ):
-            raise ValueError("coverage dimensions must match positive bounds")
-        scene_id = self._active_resolved_scene_id()
-        resolution = self.editorOperationResolver().resolve(
-            EditorOperation.SELECT_PIXELS
-        )
-        if (
-            scene_id is None
-            or not resolution.allowed
-            or not self._anchor_floating_pixels_before_edit()
-        ):
-            return False
-        return self.editorInteraction().commit_pixel_selection(
-            scene_id,
-            CoverageSnapshot(
-                bounds=RasterBounds.from_qrect(bounds),
-                extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
-                pixels=qimage_to_numpy_grayscale8(coverage),
-            ),
-            CoverageCombineMode(mode.value),
-        )
-
-    def clearPixelSelection(self) -> bool:
-        """Clear pixel selection in the active composition."""
-        scene_id = self._active_resolved_scene_id()
-        return bool(
-            scene_id is not None
-            and self._anchor_floating_pixels_before_edit()
-            and self.editorInteraction().clear_pixel_selection(scene_id)
-        )
-
-    def selectAllPixels(self) -> bool:
-        """Select every pixel inside the active scene's finite canvas bounds."""
-        scene_id = self._active_resolved_scene_id()
-        resolution = self.editorOperationResolver().resolve(
-            EditorOperation.SELECT_PIXELS
-        )
-        return bool(
-            scene_id is not None
-            and resolution.allowed
-            and self._anchor_floating_pixels_before_edit()
-            and self.editorInteraction().select_all_pixels(scene_id)
-        )
-
-    def invertPixelSelection(self) -> bool:
-        """Invert pixel selection inside the active scene's finite canvas bounds."""
-        scene_id = self._active_resolved_scene_id()
-        resolution = self.editorOperationResolver().resolve(
-            EditorOperation.SELECT_PIXELS
-        )
-        return bool(
-            scene_id is not None
-            and resolution.allowed
-            and self._anchor_floating_pixels_before_edit()
-            and self.editorInteraction().invert_pixel_selection(scene_id)
-        )
-
-    def selectLayerCoverage(
-        self,
-        scene_id: uuid.UUID,
-        layer_id: uuid.UUID,
-        mode: PixelSelectionMode = PixelSelectionMode.REPLACE,
-    ) -> bool:
-        """Use a coverage-producing layer as composition pixel selection."""
-        if not isinstance(scene_id, uuid.UUID):
-            raise TypeError("scene_id must be a UUID")
-        if not isinstance(layer_id, uuid.UUID):
-            raise TypeError("layer_id must be a UUID")
-        if not isinstance(mode, PixelSelectionMode):
-            raise TypeError("mode must be PixelSelectionMode")
-        resolution = self.editorOperationResolver().resolve(
-            EditorOperation.SELECT_PIXELS
-        )
-        if not resolution.allowed or not self._anchor_floating_pixels_before_edit():
-            return False
-        return self.editorInteraction().select_layer_coverage(
-            self._resolve_public_scene_id(scene_id),
-            layer_id,
-            CoverageCombineMode(mode.value),
-        )
 
     def deleteSelectedPixels(self) -> bool:
         """Clear selected coverage from the selected policy-enabled raster layer."""

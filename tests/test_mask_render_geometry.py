@@ -39,11 +39,10 @@ from cutecanvas.masks.source_resolver import MaskSourceCapabilities
 from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage
+from qpane import HybridPresentationStyle, HybridSource, LayerTransform
 from qpane.hybrid.evaluation import HybridDocumentEvaluator
 from qpane.raster.image_conversion import qimage_to_numpy_grayscale8
 from qpane.scene.raster import RasterBounds
-
-from qpane import HybridPresentationStyle, HybridSource, LayerTransform
 
 
 def test_preview_stride_defaults_to_visible_density_before_cache_warmup(qapp) -> None:

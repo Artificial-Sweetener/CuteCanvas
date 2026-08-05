@@ -25,6 +25,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor
 
 from ..core import CursorProvider
+from ..cursor import EditorCursorIntent, EditorCursorTheme
 from ..editor import EditorOperation
 from .cursor_feedback import ToolCursorStyle
 
@@ -46,6 +47,7 @@ class EditorCursorController:
         self._canvas = canvas
         self._cursor_suppressed = cursor_suppressed
         self._providers: dict[str, CursorProvider] = {}
+        self._theme: EditorCursorTheme | None = None
         self.custom_cursor: QCursor | None = None
         self.brush_size = max(1, int(canvas.settings.default_brush_size))
         self.alt_held = False
@@ -62,6 +64,12 @@ class EditorCursorController:
         if self._canvas._tools_manager.get_control_mode() == mode:
             self.update()
 
+    def set_theme(self, theme: EditorCursorTheme | None) -> None:
+        """Install optional host cursor artwork and refresh active feedback."""
+
+        self._theme = theme
+        self.update()
+
     def update(self) -> None:
         """Apply the highest-priority cursor for the current editor state."""
         canvas = self._canvas
@@ -72,6 +80,16 @@ class EditorCursorController:
             self._apply_cursor(QCursor(Qt.CursorShape.BlankCursor))
             return
         active_tool = canvas._tools_manager.get_active_tool()
+        intent_provider = getattr(active_tool, "cursor_intent", None)
+        if callable(intent_provider):
+            try:
+                intent = intent_provider()
+            except Exception:
+                logger.exception("Active tool failed to provide cursor intent")
+            else:
+                if isinstance(intent, EditorCursorIntent):
+                    self._apply_cursor(self._resolve_intent(intent))
+                    return
         if active_tool and hasattr(active_tool, "getCursor"):
             try:
                 cursor = active_tool.getCursor()
@@ -147,6 +165,36 @@ class EditorCursorController:
     def update_for_modifiers(self) -> None:
         """Refresh cursor feedback when mode-sensitive modifiers change."""
         self.update()
+
+    def _resolve_intent(self, intent: EditorCursorIntent) -> QCursor:
+        """Resolve host artwork before applying CuteCanvas's portable default."""
+
+        canvas = self._canvas
+        dpr = max(0.01, float(canvas.devicePixelRatioF()))
+        theme = self._theme
+        if theme is not None:
+            try:
+                cursor = theme.resolve_cursor(intent, device_pixel_ratio=dpr)
+            except Exception:
+                logger.exception("Host editor cursor theme failed")
+            else:
+                if cursor is not None:
+                    return cursor
+        if intent is EditorCursorIntent.FORBIDDEN:
+            return QCursor(Qt.CursorShape.ForbiddenCursor)
+        if intent is EditorCursorIntent.SELECTION_TRANSLATE:
+            return QCursor(Qt.CursorShape.SizeAllCursor)
+        if intent in (
+            EditorCursorIntent.PRECISE,
+            EditorCursorIntent.PRECISE_ADD,
+            EditorCursorIntent.PRECISE_SUBTRACT,
+        ):
+            return canvas.cursor_builder.create_precision_cursor(
+                erase_indicator=intent is EditorCursorIntent.PRECISE_SUBTRACT,
+                add_indicator=intent is EditorCursorIntent.PRECISE_ADD,
+                device_pixel_ratio=dpr,
+            )
+        return QCursor(Qt.CursorShape.ArrowCursor)
 
     def synchronize_window(self) -> None:
         """Apply the desired widget cursor to the active Qt window immediately."""

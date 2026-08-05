@@ -103,7 +103,7 @@ class MaskLayerDescriptorFactory:
             source=instance.source,
             placement=placement,
             visible=instance.visible,
-            opacity=instance.opacity,
+            opacity=instance.opacity * _tint_alpha(instance),
             blend_mode=BlendMode.NORMAL,
             clip=resolve_mask_presentation_clip(scene, instance.clip, placement),
             effects=instance.effects,
@@ -116,3 +116,8 @@ class MaskLayerDescriptorFactory:
             raster_bounds=raster_bounds,
             transform=instance.transform,
         )
+
+
+def _tint_alpha(instance: CompositionLayerInstance) -> float:
+    """Fold tint alpha into the final layer multiplier exactly once."""
+    return 1.0 if instance.tint is None else instance.tint.alphaF()

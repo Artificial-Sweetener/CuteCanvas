@@ -3,6 +3,7 @@ name: Publish package to PyPI
 on:
   push:
     tags:
+      - "ferrastra-v*"
       - "qpane-v*"
       - "cutecanvas-v*"
 
@@ -18,7 +19,7 @@ jobs:
   verify:
     uses: ./.github/workflows/verify.yml
 
-  build:
+  select:
     needs: verify
     runs-on: ubuntu-latest
     outputs:
@@ -35,11 +36,27 @@ jobs:
         shell: bash
         run: |
           case "$GITHUB_REF_NAME" in
+            ferrastra-v*) package="ferrastra" ;;
             qpane-v*) package="qpane" ;;
             cutecanvas-v*) package="cutecanvas" ;;
             *) echo "Unsupported release tag: $GITHUB_REF_NAME" >&2; exit 1 ;;
           esac
           echo "package=$package" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Ferrastra release version
+        if: startsWith(github.ref_name, 'ferrastra-v')
+        run: python tools/check_ferrastra_release_tag.py "${{ github.ref_name }}"
+
+  build-python:
+    needs: select
+    if: needs.select.outputs.package != 'ferrastra'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source and tags
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -49,26 +66,77 @@ jobs:
       - name: Build selected distribution
         run: |
           python -m pip install "pip==${{ env.PIP_VERSION }}" "build==${{ env.BUILD_VERSION }}"
-          python -m build "packages/${{ steps.product.outputs.package }}"
+          python -m build "packages/${{ needs.select.outputs.package }}"
 
       - name: Upload selected distribution
         uses: actions/upload-artifact@v6
         with:
-          name: dist-${{ steps.product.outputs.package }}-${{ github.ref_name }}
-          path: packages/${{ steps.product.outputs.package }}/dist/*
+          name: dist-${{ needs.select.outputs.package }}-${{ github.ref_name }}
+          path: packages/${{ needs.select.outputs.package }}/dist/*
+
+  build-ferrastra:
+    needs: select
+    if: needs.select.outputs.package == 'ferrastra'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: windows-2025
+            platform: windows-x64
+          - os: macos-15
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source and tags
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build abi3 native wheel
+        working-directory: packages/ferrastra
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}" maturin==1.14.1
+          python -m maturin build --release --out dist
+
+      - name: Build Ferrastra source distribution
+        if: runner.os == 'Linux'
+        working-directory: packages/ferrastra
+        run: python -m maturin sdist --out dist
+
+      - name: Upload platform wheel
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist-ferrastra-${{ matrix.platform }}-${{ github.ref_name }}
+          path: packages/ferrastra/dist/*
 
   publish:
-    needs: build
+    if: >-
+      always() &&
+      needs.select.result == 'success' &&
+      (needs.build-python.result == 'success' || needs.build-ferrastra.result == 'success')
+    needs:
+      - select
+      - build-python
+      - build-ferrastra
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/${{ needs.build.outputs.package }}/
+      url: https://pypi.org/project/${{ needs.select.outputs.package }}/
     steps:
       - name: Download distribution
         uses: actions/download-artifact@v7
         with:
-          name: dist-${{ needs.build.outputs.package }}-${{ github.ref_name }}
+          pattern: dist-${{ needs.select.outputs.package }}-*${{ github.ref_name }}
           path: dist/
+          merge-multiple: true
 
       - name: Publish selected package
         uses: pypa/gh-action-pypi-publish@release/v1

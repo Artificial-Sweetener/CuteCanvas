@@ -24,14 +24,14 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor, QMouseEvent, QPen, QWheelEvent
+from qpane import PointerInputPort
 from qpane.sdk.overlays import OverlayDrawFn, SceneOverlayDrawFn
 from qpane.sdk.ui import (
     apply_widget_defaults,
 )
 
-from qpane import PointerInputPort
-
 from ..core import CursorProvider
+from ..cursor import EditorCursorTheme
 from .activation_controller import EditorToolActivationController
 from .cursor_controller import EditorCursorController
 from .input import PointerInputController
@@ -240,6 +240,11 @@ class ToolInteractionDelegate:
     def unregisterCursorProvider(self, mode: str) -> None:
         """Remove the cursor provider tied to the supplied control mode."""
         self._cursor.unregister_provider(mode)
+
+    def setEditorCursorTheme(self, theme: EditorCursorTheme | None) -> None:
+        """Install host artwork for built-in semantic cursor feedback."""
+
+        self._cursor.set_theme(theme)
 
     def suspend_overlays_for_navigation(self) -> None:
         """Flag content overlays as hidden until navigation completes."""

@@ -1,8 +1,9 @@
 # Monorepo Engineering Standards
 
-This repository contains the independently published QPane and CuteCanvas
-packages. Every contribution must prioritize stability, consistency,
-performance, and polish.
+This repository contains the independently published Ferrastra, QPane, and
+CuteCanvas packages. Every contribution must prioritize stability,
+consistency, performance, and polish. `FERRASTRA_DESIGN.md` is the authoritative
+implementation charter for native graphics work.
 
 Read `CONTRIBUTING.md` before editing. The nearest package `AGENTS.md` adds
 product-specific ownership and verification rules without replacing this file.
@@ -22,21 +23,50 @@ product-specific ownership and verification rules without replacing this file.
 
 ## Package dependency direction
 
-The only allowed product dependency is:
+The only allowed product dependencies are:
 
 ```text
 CuteCanvas -> QPane
-QPane      x  CuteCanvas
+CuteCanvas -> Ferrastra
+QPane      -> Ferrastra
+
+Ferrastra x QPane
+Ferrastra x CuteCanvas
+QPane  x CuteCanvas
 ```
 
 QPane must never import CuteCanvas. CuteCanvas may use only QPane's supported
 public facade and rendering SDK, never private QPane modules or attributes.
-Cross-package changes are normal when the authoritative owner is in QPane, but
-they must preserve this dependency direction.
+QPane and CuteCanvas use Ferrastra only through focused package-owned adapters.
+Ferrastra never imports or links Qt, QPane, CuteCanvas, application, document,
+viewport, tool, history, or presentation concepts. Cross-package changes are
+normal when the authoritative owner changes, but they must preserve these
+dependency directions.
 
 Shared concepts have one representation and one behavior owner. Do not create
 parallel scene, vector, transform, cache, damage, scheduling, input, or render
 systems in CuteCanvas to work around a QPane limitation.
+
+## Ferrastra ownership
+
+Ferrastra is a CPU-first, Qt-neutral, document-neutral native graphics product
+engine. It owns typed native products, source stores, immutable evaluation
+graphs, spatial demand and damage, bounded evaluation, numerical operations,
+native edit sessions, and their explicit correctness and performance
+contracts. Every operation declares semantic identity, product types, demand,
+damage, numerical behavior, memory, cancellation, quality, conformance, and
+performance requirements before implementation begins.
+
+Create an Ferrastra crate only when it has executable code for its declared
+responsibility. Crate edges follow `ARCHITECTURE.md` and the checked-in
+architecture policy. Only `ferrastra-python` may depend on PyO3 or Python binding
+crates. Unsafe Rust is denied by default and requires an explicit safety owner,
+`SAFETY.md`, focused tests, fuzz coverage, and an active architecture waiver.
+
+Every production Rust module begins with `Responsibility:` and `Does not own:`
+module documentation. Production Python modules state their concern directly.
+The soft structural ceiling is 350 nonblank, noncomment lines and the hard gate
+is 500. Generic dumping-ground modules and mixed ownership are prohibited.
 
 The current package split intentionally permits breaking the old combined
 QPane editor API. Remove replaced APIs completely. Do not add deprecation

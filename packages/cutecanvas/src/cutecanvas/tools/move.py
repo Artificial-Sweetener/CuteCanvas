@@ -23,7 +23,6 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
-
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .base import BaseTool

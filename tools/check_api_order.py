@@ -105,6 +105,7 @@ def _contracts(root: Path) -> tuple[FacadeContract, ...]:
                     "ResourceApiMixin",
                     "VectorApiMixin",
                     "RasterApiMixin",
+                    "SelectionApiMixin",
                     "SnappingApiMixin",
                     "InteractionApiMixin",
                     "LayerApiMixin",

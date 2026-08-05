@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qpane import create_default_execution_runtime
 
 from examples.demo_settings import load_demo_settings, save_demo_window_settings
 from examples.demonstration import demo_text
@@ -68,7 +69,6 @@ from examples.demonstration.status_tutorial import StatusTutorialController
 from examples.demonstration.tool_mode_tutorial import ToolModeTutorialController
 from examples.demonstration.welcome_document import seed_welcome_document
 from examples.demonstration.workspace_tutorial import WorkspaceTutorialController
-from qpane import create_default_execution_runtime
 from tools.navigation_trace import NavigationTraceRecorder
 
 MASK_KEY_LOOKUP = {

@@ -91,7 +91,9 @@ def _initialized_attributes(runtime_class: Any) -> set[str]:
     """Return ``self`` attributes assigned by product-owned class implementations."""
     attributes: set[str] = set()
     for owner in runtime_class.__mro__:
-        if owner is object or not owner.__module__.startswith(("qpane", "cutecanvas")):
+        if owner is object or not owner.__module__.startswith(
+            ("ferrastra", "qpane", "cutecanvas")
+        ):
             continue
         try:
             tree = ast.parse(textwrap.dedent(inspect.getsource(owner)))

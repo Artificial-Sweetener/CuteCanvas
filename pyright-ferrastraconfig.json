@@ -1,0 +1,31 @@
+{
+  "include": [
+    "packages/ferrastra/src",
+    "packages/ferrastra/tests",
+    "tools/architecture",
+    "tools/check_ferrastra_architecture.py",
+    "tools/check_ferrastra_benchmarks.py",
+    "tools/check_ferrastra_operations.py",
+    "tools/check_ferrastra_ownership.py",
+    "tools/ferrastra_ownership.py",
+    "tools/verify_ferrastra_wheel.py",
+    "tests/test_ferrastra_architecture.py",
+    "tests/test_ferrastra_ownership.py"
+  ],
+  "exclude": [
+    "**/__pycache__"
+  ],
+  "extraPaths": [
+    ".",
+    "packages/ferrastra/src",
+    "tools"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.10",
+  "pythonPlatform": "All",
+  "typeCheckingMode": "strict",
+  "useLibraryCodeForTypes": true,
+  "reportMissingTypeStubs": "error",
+  "reportPrivateUsage": "error"
+}

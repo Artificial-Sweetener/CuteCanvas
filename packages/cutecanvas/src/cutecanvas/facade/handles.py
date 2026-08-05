@@ -23,7 +23,6 @@ from typing import Protocol
 
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QTransform
-
 from qpane import LayerPresentationEffect, LayerPresentationStyle
 
 from ..composition.geometry_policy import LayerGeometryPolicy
@@ -135,6 +134,15 @@ class EditorHandleHost(Protocol):
         visible: bool,
     ) -> bool:
         """Set one layer instance's composition-local visibility."""
+        ...
+
+    def setLayerOpacity(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        opacity: float,
+    ) -> bool:
+        """Set one layer instance's visual-only presentation multiplier."""
         ...
 
     def translateLayer(
@@ -423,6 +431,14 @@ class LayerHandle:
             self._scene_id(),
             self._layer_id,
             visible,
+        )
+
+    def set_opacity(self, opacity: float) -> bool:
+        """Set this layer's visual-only presentation multiplier."""
+        return self._host.setLayerOpacity(
+            self._scene_id(),
+            self._layer_id,
+            opacity,
         )
 
     def translate(self, offset: QPointF) -> bool:

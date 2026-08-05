@@ -154,6 +154,7 @@ class MaskController(QObject):
         if mask_id == self._active_mask_id:
             return False
         self._active_mask_id = mask_id
+        self._renders.active_mask_changed()
         if warm_cache:
             self.warm_mask(mask_id)
         if emit_signals:

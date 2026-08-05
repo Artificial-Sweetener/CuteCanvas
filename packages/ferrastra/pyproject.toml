@@ -1,0 +1,43 @@
+[build-system]
+requires = ["maturin==1.14.1"]
+build-backend = "maturin"
+
+[project]
+name = "ferrastra"
+dynamic = ["version"]
+description = "CPU-first typed native graphics product engine"
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [
+  { name = "Artificial Sweetener", email = "artificialsweetenerai@proton.me" }
+]
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10,<3.15"
+classifiers = [
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Rust",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://artificialsweetener.ai"
+Documentation = "https://github.com/Artificial-Sweetener/QPane/tree/main/packages/ferrastra/docs"
+Repository = "https://github.com/Artificial-Sweetener/QPane"
+Issues = "https://github.com/Artificial-Sweetener/QPane/issues"
+
+[tool.maturin]
+bindings = "pyo3"
+manifest-path = "../../crates/ferrastra-python/Cargo.toml"
+module-name = "ferrastra._native"
+python-source = "src"
+strip = false

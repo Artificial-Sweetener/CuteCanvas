@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 
 import numpy as np
 
@@ -33,27 +32,23 @@ class MaskGeneratedEditService:
     def __init__(
         self,
         *,
-        active_mask_id: Callable[[], uuid.UUID | None],
         projection: MaskCanvasProjectionService,
         edits: MaskEditService,
         renders: MaskRenderCache,
     ) -> None:
         """Bind generic generated pixels to authoritative mask edit owners."""
-        self._active_mask_id = active_mask_id
         self._projection = projection
         self._edits = edits
         self._renders = renders
 
     def apply(
         self,
+        mask_id: uuid.UUID,
         incoming_mask: np.ndarray | None,
         *,
         erase: bool,
     ) -> tuple[uuid.UUID, bool] | None:
-        """Map and commit generated canvas pixels for the active mask."""
-        mask_id = self._active_mask_id()
-        if mask_id is None:
-            return None
+        """Map and commit generated canvas pixels to one exact mask target."""
         if incoming_mask is None:
             self._renders.invalidate(mask_id)
             return mask_id, False

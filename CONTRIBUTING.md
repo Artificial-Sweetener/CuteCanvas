@@ -1,21 +1,25 @@
-# Contributing to QPane and CuteCanvas
+# Contributing to Ferrastra, QPane, and CuteCanvas
 
-This repository is a two-package monorepo:
+This repository is a three-package monorepo:
+
+- **Ferrastra** is the independently published, CPU-first, Qt-neutral native
+  graphics product engine.
 
 - **QPane** is the independently published PySide6 viewer, viewport, rendering
   engine, and declarative raster/vector SDK.
 - **CuteCanvas** is the independently published document editor built on
   QPane.
 
-Every contribution must preserve the one-way dependency
-`CuteCanvas -> QPane`. Read the root `AGENTS.md` and the nearest package
+Every contribution must preserve `CuteCanvas -> QPane`, `CuteCanvas -> Ferrastra`,
+and `QPane -> Ferrastra`; reverse and lateral edges are forbidden. Read
+`FERRASTRA_DESIGN.md`, the root `AGENTS.md`, and the nearest package
 `AGENTS.md` before editing; together they define the authoritative engineering
 and ownership rules.
 
 ## Development environment
 
 The supported local command environment is Windows PowerShell. Create the
-standard environment and install both packages in editable mode with:
+standard environment and install all three packages in editable mode with:
 
 ```powershell
 python tools\setup_dev.py
@@ -30,11 +34,25 @@ python -m venv .venv
 .venv\Scripts\python tools\setup_hooks.py
 ```
 
-`requirements-dev.txt` installs QPane and CuteCanvas from their independent
-package roots plus the shared repository tooling. Product-specific optional
-dependencies remain declared by the package that owns them.
+`requirements-dev.txt` installs Ferrastra, QPane, and CuteCanvas from their
+independent package roots plus the shared Python, Rust, packaging, and policy
+tooling. The pinned Rust toolchain is declared in `rust-toolchain.toml`.
 
 ## Product boundaries
+
+### Ferrastra
+
+Ferrastra owns typed native products, source stores, immutable evaluation graphs,
+spatial demand and damage, bounded evaluation, numerical operations, native
+edit sessions, and their correctness and performance contracts. It imports no
+Qt, QPane, CuteCanvas, application, document, viewport, tool, history, or
+presentation concepts. Only `ferrastra-python` may use PyO3.
+
+Stage 0 intentionally exposes package identity without graphics behavior. Add
+a crate only with executable code for its declared responsibility, and declare
+every operation contract before implementation. Crate and adapter edges are
+enforced by `ARCHITECTURE_POLICY.toml`; numerical migrations are activated in
+`FERRASTRA_OWNERSHIP.toml` when their canonical owner moves to Ferrastra.
 
 ### QPane
 
@@ -93,6 +111,12 @@ Heavy work never blocks the GUI thread. Caches are explicit and byte-bounded.
 Interactive changes must account for input storms, stale asynchronous results,
 teardown, redraw correctness, large images, and undo/redo chronology.
 
+Rust modules begin with `Responsibility:` and `Does not own:` documentation.
+Unsafe Rust is denied unless an explicit safety owner, focused proof, fuzz
+coverage, `SAFETY.md`, and an active architecture waiver exist. Use the pinned
+`rustfmt`, Clippy, and `cargo-deny` gates; global Rayon execution is forbidden
+because callers own execution and memory budgets.
+
 ## Public API Trinity
 
 A public change updates all four pillars for the affected package in the same
@@ -109,6 +133,7 @@ product directly and does not preserve removed architecture as an alternative.
 Run the examples from the repository root:
 
 ```powershell
+.venv\Scripts\python examples\ferrastra_demo.py
 .venv\Scripts\python examples\qpane_demo.py
 .venv\Scripts\python examples\cutecanvas_demo.py
 ```
@@ -131,13 +156,25 @@ inside `.venv`:
 .venv\Scripts\python tools\check_docstrings.py
 .venv\Scripts\python tools\check_api_order.py
 .venv\Scripts\python tools\check_consistency.py
+.venv\Scripts\python tools\check_ferrastra_architecture.py
+.venv\Scripts\python tools\check_ferrastra_operations.py
+.venv\Scripts\python tools\check_ferrastra_ownership.py
+.venv\Scripts\python tools\check_ferrastra_benchmarks.py
 .venv\Scripts\python tools\add_license_headers.py
+.venv\Scripts\python -m ruff check --config ruff-ferrastra.toml .
+.venv\Scripts\python -m pyright -p pyright-ferrastraconfig.json
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo deny check
 .venv\Scripts\python -m pytest -n auto
 git diff --check
 ```
 
-When packaging or public boundaries change, also build both distributions and
-verify them from isolated installs. QPane must install and run without
+When Ferrastra packaging or its public boundary changes, run
+`.venv\Scripts\python tools\verify_ferrastra_wheel.py`. When QPane or CuteCanvas
+packaging changes, build both distributions and verify them from isolated
+installs. QPane must install and run without
 CuteCanvas; CuteCanvas must run against the QPane version range declared in its
 metadata.
 
@@ -149,9 +186,10 @@ Commit only when requested. Commit subjects follow Conventional Commits:
 type(scope)!: subject
 ```
 
-Use `!` when the public change is breaking. QPane and CuteCanvas are released
+Use `!` when the public change is breaking. All packages are released
 independently:
 
+- `ferrastra-vX.Y.Z` builds and publishes Ferrastra;
 - `qpane-vX.Y.Z` builds and publishes QPane;
 - `cutecanvas-vX.Y.Z` builds and publishes CuteCanvas.
 

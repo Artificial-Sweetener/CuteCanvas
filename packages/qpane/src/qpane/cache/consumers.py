@@ -31,8 +31,8 @@ class EvictableCache(Protocol):
     """Byte-counted cache that can discard its oldest products."""
 
     @property
-    def cache_usage_bytes(self) -> int:
-        """Return current derived-raster cache usage."""
+    def evictable_cache_usage_bytes(self) -> int:
+        """Return bytes that oldest-first eviction can actually release."""
         ...
 
     def set_cache_usage_callback(self, callback: Callable[[], None] | None) -> None:
@@ -340,11 +340,11 @@ class EvictableCacheConsumer:
         self._notify()
 
     def _get_usage(self) -> int:
-        """Return cache usage in bytes."""
+        """Return bytes the controller can release through this consumer."""
         try:
             return _safe_int(
-                self._controller.cache_usage_bytes,
-                label=f"{self._consumer_id}_cache_usage_bytes",
+                self._controller.evictable_cache_usage_bytes,
+                label=f"{self._consumer_id}_evictable_cache_usage_bytes",
             )
         except Exception:  # pragma: no cover - defensive
             logger.exception("Evictable cache failed to report usage")

@@ -1,0 +1,131 @@
+schema_version = 1
+
+[structure]
+soft_lines = 350
+hard_lines = 500
+forbidden_names = [
+  "utils",
+  "helpers",
+  "common",
+  "misc",
+  "shared",
+  "manager",
+  "service",
+]
+
+[[python_products]]
+name = "ferrastra"
+root = "packages/ferrastra/src/ferrastra"
+
+[[python_products]]
+name = "qpane"
+root = "packages/qpane/src/qpane"
+
+[[python_products]]
+name = "cutecanvas"
+root = "packages/cutecanvas/src/cutecanvas"
+
+[[python_dependencies]]
+source = "qpane"
+target = "ferrastra"
+allowed_paths = [
+  "packages/qpane/src/qpane/__init__.py",
+  "packages/qpane/src/qpane/ferrastra/**",
+]
+allowed_modules = ["ferrastra"]
+
+[[python_dependencies]]
+source = "cutecanvas"
+target = "qpane"
+allowed_paths = ["packages/cutecanvas/src/cutecanvas/**"]
+allowed_modules = ["qpane", "qpane.sdk", "qpane.sdk.**"]
+
+[[python_dependencies]]
+source = "cutecanvas"
+target = "ferrastra"
+allowed_paths = [
+  "packages/cutecanvas/src/cutecanvas/__init__.py",
+  "packages/cutecanvas/src/cutecanvas/ferrastra/**",
+]
+allowed_modules = ["ferrastra"]
+
+[[python_protected_roots]]
+path = "packages/ferrastra/src/ferrastra"
+product = "ferrastra"
+require_responsibility = true
+detect_cycles = true
+forbidden_imports = ["PySide6", "qtpy", "qpane", "cutecanvas"]
+
+[[python_protected_roots]]
+path = "packages/qpane/src/qpane/ferrastra"
+product = "qpane"
+require_responsibility = true
+detect_cycles = true
+forbidden_imports = ["cutecanvas"]
+
+[[python_protected_roots]]
+path = "packages/cutecanvas/src/cutecanvas/ferrastra"
+product = "cutecanvas"
+require_responsibility = true
+detect_cycles = true
+forbidden_imports = []
+
+[[python_layers]]
+name = "ferrastra-public-boundary"
+module_prefix = "ferrastra"
+allowed_internal = ["ferrastra._native"]
+
+[[python_layers]]
+name = "qpane-ferrastra-adapter"
+module_prefix = "qpane.ferrastra"
+allowed_internal = ["qpane.ferrastra"]
+
+[[python_layers]]
+name = "cutecanvas-ferrastra-adapter"
+module_prefix = "cutecanvas.ferrastra"
+allowed_internal = ["cutecanvas.ferrastra"]
+
+[[rust_crates]]
+name = "ferrastra-core"
+allowed_internal = []
+
+[[rust_crates]]
+name = "ferrastra-store"
+allowed_internal = ["ferrastra-core"]
+
+[[rust_crates]]
+name = "ferrastra-graph"
+allowed_internal = ["ferrastra-core"]
+
+[[rust_crates]]
+name = "ferrastra-runtime"
+allowed_internal = ["ferrastra-core", "ferrastra-store", "ferrastra-graph"]
+
+[[rust_crates]]
+name = "ferrastra-raster"
+allowed_internal = ["ferrastra-core", "ferrastra-store"]
+
+[[rust_crates]]
+name = "ferrastra-vector"
+allowed_internal = ["ferrastra-core", "ferrastra-store"]
+
+[[rust_crates]]
+name = "ferrastra-paint"
+allowed_internal = ["ferrastra-core", "ferrastra-store", "ferrastra-raster"]
+
+[[rust_crates]]
+name = "ferrastra-engine"
+allowed_internal = [
+  "ferrastra-core",
+  "ferrastra-store",
+  "ferrastra-graph",
+  "ferrastra-runtime",
+  "ferrastra-raster",
+  "ferrastra-vector",
+  "ferrastra-paint",
+]
+
+[[rust_crates]]
+name = "ferrastra-python"
+allowed_internal = ["ferrastra-core", "ferrastra-store", "ferrastra-graph", "ferrastra-engine"]
+python_boundary = true

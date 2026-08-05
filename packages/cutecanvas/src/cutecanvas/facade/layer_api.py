@@ -18,11 +18,14 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QTransform
+
+from cutecanvas.types import LayerEdgeOperation
 
 
 class LayerApiMixin:
@@ -58,6 +61,133 @@ class LayerApiMixin:
                 resolved_scene_id,
                 replace(instance, visible=visible),
             )
+        )
+
+    def setLayerOpacity(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        opacity: float,
+    ) -> bool:
+        """Set one layer's final visual-only presentation multiplier.
+
+        The multiplier is applied after source coverage presentation. It does not
+        rewrite scalar coverage, brush hardness, or authored paint opacity.
+        """
+        _validate_layer_ids(scene_id, layer_id)
+        if isinstance(opacity, bool):
+            raise TypeError("opacity must be numeric")
+        try:
+            normalized = float(opacity)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("opacity must be numeric") from exc
+        if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
+            raise ValueError("opacity must be finite and between 0.0 and 1.0")
+        resolved = self._resolve_public_scene_id(scene_id)
+        result = self.sceneMutationCoordinator().set_opacity(
+            resolved,
+            layer_id,
+            normalized,
+        )
+        return bool(result.accepted and result.changed)
+
+    def beginLayerEdgePreview(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        """Begin a nonmodal edge preview from the layer's current revision."""
+        _validate_layer_ids(scene_id, layer_id)
+        return self.layerEdgeModificationCoordinator().begin(
+            self._resolve_public_scene_id(scene_id),
+            layer_id,
+        )
+
+    def updateLayerEdgePreview(
+        self,
+        session_id: uuid.UUID,
+        operation: LayerEdgeOperation,
+        radius: float,
+    ) -> uuid.UUID | None:
+        """Replace a preview session's pending value with the latest request."""
+        if not isinstance(session_id, uuid.UUID):
+            raise TypeError("session_id must be a UUID")
+        if not isinstance(operation, LayerEdgeOperation):
+            raise TypeError("operation must be LayerEdgeOperation")
+        return self.layerEdgeModificationCoordinator().update(
+            session_id,
+            operation,
+            radius,
+        )
+
+    def settleLayerEdgePreview(self, session_id: uuid.UUID) -> bool:
+        """Commit the latest preview once as soon as its product is ready."""
+        if not isinstance(session_id, uuid.UUID):
+            raise TypeError("session_id must be a UUID")
+        return self.layerEdgeModificationCoordinator().settle(session_id)
+
+    def cancelLayerEdgePreview(self, session_id: uuid.UUID) -> bool:
+        """Discard a preview session without changing authoritative content."""
+        if not isinstance(session_id, uuid.UUID):
+            raise TypeError("session_id must be a UUID")
+        return self.layerEdgeModificationCoordinator().cancel(session_id)
+
+    def expandLayerEdges(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixels: int,
+    ) -> uuid.UUID | None:
+        """Expand a supported layer as one asynchronous undoable edit."""
+        return self._request_layer_edge_operation(
+            scene_id,
+            layer_id,
+            LayerEdgeOperation.EXPAND,
+            _positive_whole_pixels(pixels),
+        )
+
+    def contractLayerEdges(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixels: int,
+    ) -> uuid.UUID | None:
+        """Contract a supported layer as one asynchronous undoable edit."""
+        return self._request_layer_edge_operation(
+            scene_id,
+            layer_id,
+            LayerEdgeOperation.CONTRACT,
+            _positive_whole_pixels(pixels),
+        )
+
+    def featherLayerEdges(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        radius: float,
+    ) -> uuid.UUID | None:
+        """Feather a supported layer as one asynchronous undoable edit."""
+        return self._request_layer_edge_operation(
+            scene_id,
+            layer_id,
+            LayerEdgeOperation.FEATHER,
+            radius,
+        )
+
+    def _request_layer_edge_operation(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        operation: LayerEdgeOperation,
+        radius: float,
+    ) -> uuid.UUID | None:
+        """Resolve public IDs and submit one generic layer edge operation."""
+        _validate_layer_ids(scene_id, layer_id)
+        return self.layerEdgeModificationCoordinator().request(
+            self._resolve_public_scene_id(scene_id),
+            layer_id,
+            operation,
+            radius,
         )
 
     def translateLayer(
@@ -156,3 +286,12 @@ def _validate_layer_ids(scene_id: uuid.UUID, layer_id: uuid.UUID) -> None:
     """Reject invalid public layer identifiers consistently."""
     if not isinstance(scene_id, uuid.UUID) or not isinstance(layer_id, uuid.UUID):
         raise TypeError("scene_id and layer_id must be UUIDs")
+
+
+def _positive_whole_pixels(pixels: int) -> float:
+    """Require a positive non-boolean whole-pixel distance."""
+    if isinstance(pixels, bool) or not isinstance(pixels, int):
+        raise TypeError("edge distance must be an integer")
+    if pixels <= 0:
+        raise ValueError("edge distance must be positive")
+    return float(pixels)

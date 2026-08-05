@@ -27,6 +27,8 @@ jobs:
             requirements-dev.txt
             packages/qpane/pyproject.toml
             packages/cutecanvas/pyproject.toml
+            packages/ferrastra/pyproject.toml
+            Cargo.lock
 
       - name: Install Linux Qt runtime dependencies
         run: |
@@ -40,33 +42,44 @@ jobs:
 
       - name: Run hook-equivalent quality checks
         run: |
-          python -m ruff check --fix .
-          python -m black .
-          python tools/fix_encoding.py
-          python tools/check_docstrings.py
+          python -m ruff check .
+          python -m black --check .
+          python tools/fix_encoding.py --check
+          python tools/check_docstrings.py --check
           python tools/check_api_order.py
           python tools/check_consistency.py
-          python tools/add_license_headers.py
+          python tools/check_ferrastra_architecture.py
+          python tools/check_ferrastra_operations.py
+          python tools/check_ferrastra_ownership.py
+          python tools/check_ferrastra_benchmarks.py
+          python tools/add_license_headers.py --check
+          python -m ruff check --config ruff-ferrastra.toml .
+          python -m pyright -p pyright-ferrastraconfig.json
 
       - name: Confirm generated files are current
         run: git diff --exit-code
 
   tests:
-    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    name: Tests (${{ matrix.platform }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
+            platform: linux-x64
             python: "3.10"
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
+            platform: linux-x64
             python: "3.11"
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
+            platform: linux-x64
             python: "3.12"
-          - os: windows-latest
+          - os: windows-2025
+            platform: windows-x64
             python: "3.12"
-          - os: macos-latest
+          - os: macos-15
+            platform: macos-arm64
             python: "3.12"
     env:
       QT_QPA_PLATFORM: offscreen
@@ -83,6 +96,8 @@ jobs:
             requirements-dev.txt
             packages/qpane/pyproject.toml
             packages/cutecanvas/pyproject.toml
+            packages/ferrastra/pyproject.toml
+            Cargo.lock
 
       - name: Install Linux Qt runtime dependencies
         if: runner.os == 'Linux'
@@ -109,18 +124,104 @@ jobs:
           path: qpane-abuse-artifacts
           if-no-files-found: ignore
 
+  rust:
+    name: Rust (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: windows-2025
+            platform: windows-x64
+          - os: macos-15
+            platform: macos-arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.93.1 --profile minimal --component rustfmt,clippy
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.20.2 --locked
+
+      - name: Run native quality and dependency gates
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
+          cargo deny check
+
+  ferrastra-wheel:
+    name: Ferrastra wheel (${{ matrix.platform }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+            python: "3.10"
+          - os: ubuntu-24.04
+            platform: linux-x64
+            python: "3.11"
+          - os: ubuntu-24.04
+            platform: linux-x64
+            python: "3.12"
+          - os: ubuntu-24.04
+            platform: linux-x64
+            python: "3.13"
+          - os: ubuntu-24.04
+            platform: linux-x64
+            python: "3.14"
+          - os: windows-2025
+            platform: windows-x64
+            python: "3.14"
+          - os: macos-15
+            platform: macos-arm64
+            python: "3.14"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            packages/ferrastra/pyproject.toml
+            Cargo.lock
+
+      - name: Install wheel verification tools
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          python -m pip install build==1.5.0
+
+      - name: Build and verify the independent wheel
+        run: python tools/verify_ferrastra_wheel.py
+
   gate:
     name: Gate
     if: always()
     needs:
       - quality
       - tests
+      - rust
+      - ferrastra-wheel
     runs-on: ubuntu-latest
     steps:
       - name: Require every verification job
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
           TEST_RESULT: ${{ needs.tests.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          FERRASTRA_WHEEL_RESULT: ${{ needs.ferrastra-wheel.result }}
         run: |
           test "$QUALITY_RESULT" = "success"
           test "$TEST_RESULT" = "success"
+          test "$RUST_RESULT" = "success"
+          test "$FERRASTRA_WHEEL_RESULT" = "success"

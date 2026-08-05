@@ -28,6 +28,8 @@ from .model import ProductContract
 
 def validate_configuration(product: ProductContract) -> list[str]:
     """Return errors when the configuration reference omits or changes defaults."""
+    if product.config_class is None:
+        return []
     path = product.docs / "configuration-reference.md"
     if not path.exists():
         return [f"{product.package}: configuration reference is missing: {path}"]

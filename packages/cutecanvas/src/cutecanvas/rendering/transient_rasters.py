@@ -30,11 +30,13 @@ from qpane.sdk.scene import (
 )
 
 from ..masks.live_preview_store import MaskLivePreviewStore
+from ..scene.layer_edge_preview import LayerEdgePreviewStore
 from ..scene.pixel_fragments import RasterPixelFormat
 from ..scene.pixel_move_preview import RasterPixelMovePreview
 from ..scene.pixel_transitions import RasterPixelTransition
 from ..scene.source_capabilities import EditorSourceCapabilities
 from .floating_pixels import FloatingPixelRenderCompiler
+from .layer_edge_preview import LayerEdgePreviewRenderCompiler
 from .raster_transitions import RasterTransitionRenderCompiler
 
 
@@ -126,10 +128,15 @@ class TransientRasterRenderCoordinator:
         self,
         capabilities: EditorSourceCapabilities,
         mask_previews: MaskLivePreviewStore,
+        layer_edge_previews: LayerEdgePreviewStore,
         current_scene: Callable[[], SceneDescriptor | None],
     ) -> None:
         """Create the single transient-raster presentation boundary."""
         self._floating = FloatingPixelRenderCompiler(capabilities.pixel_presentation)
+        self._layer_edges = LayerEdgePreviewRenderCompiler(
+            capabilities.pixel_presentation,
+            layer_edge_previews,
+        )
         self._masks = MaskLivePreviewRenderCompiler(
             capabilities,
             mask_previews,
@@ -142,7 +149,12 @@ class TransientRasterRenderCoordinator:
     ) -> tuple[uuid.UUID, uuid.UUID] | None:
         """Return the active pixel-move target or provisional mask target."""
         pixel_target = self._floating.target(pixel_preview)
-        return pixel_target if pixel_target is not None else self._masks.target()
+        if pixel_target is not None:
+            return pixel_target
+        layer_edge_target = self._layer_edges.target()
+        return (
+            layer_edge_target if layer_edge_target is not None else self._masks.target()
+        )
 
     def compile(
         self,
@@ -153,6 +165,9 @@ class TransientRasterRenderCoordinator:
         pixel_contribution = self._floating.compile(pixel_preview, render_items)
         if pixel_contribution is not None:
             return pixel_contribution
+        layer_edge_contribution = self._layer_edges.compile(render_items)
+        if layer_edge_contribution is not None:
+            return layer_edge_contribution
         return self._masks.compile(render_items)
 
 

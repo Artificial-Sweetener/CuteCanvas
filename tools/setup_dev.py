@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Bootstrap the QPane and CuteCanvas monorepo development environment."""
+"""Bootstrap the Ferrastra, QPane, and CuteCanvas development environment."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 PIP_VERSION = "26.1.2"
+CARGO_DENY_VERSION = "0.20.2"
 
 
 def _venv_python(venv_dir: Path) -> Path:
@@ -67,12 +68,48 @@ def _run_hook_setup(python_path: Path, script_path: Path) -> None:
     subprocess.run([str(python_path), str(script_path)], check=True)
 
 
+def _setup_rust_tools(repo_root: Path) -> None:
+    """Activate the pinned Rust components and install the supply-chain gate."""
+    try:
+        subprocess.run(
+            ["rustup", "show", "active-toolchain"], cwd=repo_root, check=True
+        )
+        subprocess.run(["cargo", "fmt", "--version"], cwd=repo_root, check=True)
+        subprocess.run(["cargo", "clippy", "--version"], cwd=repo_root, check=True)
+        version = subprocess.run(
+            ["cargo", "deny", "--version"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "Install rustup before bootstrapping Ferrastra development"
+        ) from exc
+    if version.returncode == 0 and f" {CARGO_DENY_VERSION}" in version.stdout:
+        return
+    subprocess.run(
+        [
+            "cargo",
+            "install",
+            "cargo-deny",
+            "--version",
+            CARGO_DENY_VERSION,
+            "--locked",
+        ],
+        cwd=repo_root,
+        check=True,
+    )
+
+
 def main() -> int:
     """Run the standard dev environment bootstrap steps."""
     repo_root = Path(__file__).resolve().parents[1]
     venv_dir = repo_root / ".venv"
     requirements_path = repo_root / "requirements-dev.txt"
     hooks_script = repo_root / "tools" / "setup_hooks.py"
+    _setup_rust_tools(repo_root)
     _create_venv(venv_dir)
     venv_python = _venv_python(venv_dir)
     if not venv_python.exists():

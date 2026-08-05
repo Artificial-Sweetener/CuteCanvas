@@ -30,14 +30,13 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from qpane import HybridPresentationStyle
 from qpane.sdk.configuration import CacheSettings
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
     numpy_to_qimage_grayscale8_at_size,
 )
 from qpane.sdk.scene import RasterBounds
-
-from qpane import HybridPresentationStyle
 
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
@@ -167,6 +166,22 @@ class MaskRenderCache:
         """Return bytes consumed by cached colorized masks."""
         return self._total_bytes
 
+    @property
+    def evictable_cache_usage_bytes(self) -> int:
+        """Return cached bytes excluding the active mask's required working set."""
+
+        active_id = self._active_mask_id()
+        return sum(
+            size for key, size in self._entry_bytes.items() if key.mask_id != active_id
+        )
+
+    def active_mask_changed(self) -> None:
+        """Reconcile cache eligibility after the protected active mask changes."""
+
+        active_id = self._active_mask_id()
+        self._evict_to_budget(set() if active_id is None else {active_id})
+        self._notify_usage()
+
     def apply_config(
         self, config: Config, mask_config: MaskConfigSlice | None = None
     ) -> None:
@@ -285,7 +300,8 @@ class MaskRenderCache:
 
     def hybrid_style(self, mask_id: uuid.UUID) -> HybridPresentationStyle:
         """Return immutable presentation values for QPane hybrid sampling."""
-        color = self._color_for_mask(mask_id)
+        color = QColor(self._color_for_mask(mask_id))
+        color.setAlpha(255)
         outline = color.darker(120) if self._mask_config.mask_border_enabled else None
         return HybridPresentationStyle(color, outline)
 

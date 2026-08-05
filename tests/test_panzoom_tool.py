@@ -22,7 +22,6 @@ import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
-
 from qpane import NavigationInteractionPort, PanZoomTool
 from qpane.rendering import ViewportZoomMode
 

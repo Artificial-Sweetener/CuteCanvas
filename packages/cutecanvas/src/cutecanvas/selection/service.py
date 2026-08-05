@@ -120,12 +120,14 @@ class PixelSelectionService:
         self,
         scene_id: uuid.UUID,
         document: CoverageDocument | None,
+        *,
+        coverage: CoverageSnapshot | None = None,
     ) -> bool:
-        """Restore authored history state without recording another command."""
+        """Restore authored state with an optional already-evaluated projection."""
         previous = self._documents_by_scene.get(scene_id)
         if previous == document:
             return False
-        self._set_document(scene_id, document)
+        self._set_document(scene_id, document, coverage=coverage)
         self._publish(scene_id)
         return True
 
@@ -142,13 +144,58 @@ class PixelSelectionService:
         )
         return self.restore_document(scene_id, document)
 
+    def replace_coverage(
+        self,
+        scene_id: uuid.UUID,
+        coverage: CoverageSnapshot | None,
+        *,
+        expected_revision: int,
+    ) -> bool:
+        """Commit one revision-guarded evaluated replacement with history."""
+        if self._revision_by_scene.get(scene_id, 0) != expected_revision:
+            return False
+        previous = self._documents_by_scene.get(scene_id)
+        previous_coverage = self._coverage_by_scene.get(scene_id)
+        if _coverage_equal(previous_coverage, coverage):
+            return False
+        replacement = (
+            None
+            if coverage is None
+            else CoverageDocument().add(RasterCoverageItem(uuid.uuid4(), coverage))
+        )
+        self._set_document(scene_id, replacement, coverage=coverage)
+        if self._record_edit is not None:
+            self._record_edit(PixelSelectionEdit(scene_id, previous, replacement))
+        self._publish(scene_id)
+        return True
+
     def preview_document(
         self,
         scene_id: uuid.UUID,
         document: CoverageDocument | None,
+        *,
+        coverage: CoverageSnapshot | None = None,
     ) -> bool:
         """Publish one unresolved authored preview without recording history."""
-        return self.restore_document(scene_id, document)
+        return self.restore_document(scene_id, document, coverage=coverage)
+
+    def preview_coverage(
+        self,
+        scene_id: uuid.UUID,
+        coverage: CoverageSnapshot | None,
+        *,
+        expected_revision: int,
+    ) -> bool:
+        """Replace one revision-guarded preview without recording history."""
+
+        if self._revision_by_scene.get(scene_id, 0) != expected_revision:
+            return False
+        replacement = (
+            None
+            if coverage is None
+            else CoverageDocument().add(RasterCoverageItem(uuid.uuid4(), coverage))
+        )
+        return self.preview_document(scene_id, replacement, coverage=coverage)
 
     def record_preview(
         self,

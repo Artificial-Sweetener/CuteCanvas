@@ -27,7 +27,9 @@ tiled, CPU-first treatment as images in the QPane viewer.
 * **Clone Stamp:** Retouch editable raster layers from one anchored layer, its
   visible backdrop, or the complete visible composition.
 * **Masks and soft selections:** Paint or draw mask shapes, reuse mask coverage
-  as a selection, and combine soft raster coverage with crisp retained shapes.
+  as a selection, expand or contract selected regions or complete coverage
+  layers, feather their edges, and combine soft raster coverage with crisp
+  retained shapes.
 * **Move and transform:** Move whole layers or selected pixels, then scale,
   rotate, skew, align, and snap content with direct manipulation.
 * **Linked and embedded images:** Place an image without changing its source,
@@ -37,6 +39,8 @@ tiled, CPU-first treatment as images in the QPane viewer.
   floating pixels follow one chronological undo and redo path.
 * **Host-controlled behavior:** Keep a background fixed, allow only mask
   editing, or expose the complete editor without changing the document model.
+* **Host-themed editor cursors:** Replace built-in cursor artwork by semantic
+  intent while retaining complete portable fallbacks for unhandled intents.
 * **Host-controlled drag-out:** Resolve a composition or layer into file URLs,
   companion files, text, or custom MIME data without hard-coding storage into
   the canvas.
@@ -208,6 +212,11 @@ fill them, move and transform them as layers, or create exact proportional
 regions from host code. Export produces an ordinary grayscale mask for the
 document canvas while editable document saves preserve off-canvas content and
 retained shapes.
+
+Every layer has a final visual-only opacity multiplier that leaves authored
+pixels and scalar coverage untouched. Whole-layer edge edits use a generic
+layer route; mask coverage supports transient latest-value previews and settles
+the chosen result as one reversible baked edit.
 
 The brush system is shared by mask and color painting. A `BrushPreset` controls
 size, hardness, opacity, flow, spacing, smoothing, pressure, tilt, texture, and

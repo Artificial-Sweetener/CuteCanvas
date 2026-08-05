@@ -32,13 +32,12 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import QVBoxLayout, QWidget
+from qpane import QPane
 from qpane.sdk.types import (
     ComparisonOrientation,
     LinkedGroup,
     SceneSnapshotOverlayState,
 )
-
-from qpane import QPane
 
 from ..document import CanvasComparison, CanvasDocument, CanvasViewSession
 from ..runtime.document_runtime import CanvasDocumentRuntime

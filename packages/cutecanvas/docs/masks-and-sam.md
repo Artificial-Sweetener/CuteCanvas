@@ -105,6 +105,63 @@ canvas.setMaskProperties(
 Changing the overlay color does not rewrite mask coverage. It updates the live
 presentation immediately.
 
+## Adjust Layer Presentation and Edges
+
+Every layer has a final visual-only opacity multiplier. Set it through the
+generic layer address without changing authored pixels, mask coverage, brush
+hardness, or paint opacity:
+
+```python
+canvas.setLayerOpacity(mask.scene_id, mask.layer_id, 0.5)
+```
+
+`CuteCanvas.setLayerOpacity` and the focused `LayerHandle.set_opacity` apply
+the multiplier once during composition, preserving the complete 8-bit coverage
+curve beneath it.
+
+Whole-layer edge commands use the same scene-and-layer address:
+
+```python
+canvas.expandLayerEdges(mask.scene_id, mask.layer_id, 12)
+canvas.contractLayerEdges(mask.scene_id, mask.layer_id, 8)
+canvas.featherLayerEdges(mask.scene_id, mask.layer_id, 6.5)
+```
+
+`CuteCanvas.expandLayerEdges`, `CuteCanvas.contractLayerEdges`, and
+`CuteCanvas.featherLayerEdges` route through the adapter for the addressed
+layer kind. Coverage masks are supported directly. The mask-resource
+conveniences are `CuteCanvas.expandMaskEdges`, `CuteCanvas.contractMaskEdges`,
+and `CuteCanvas.featherMaskEdges`.
+
+Interactive controls can keep one immutable base revision while values change:
+
+```python
+from cutecanvas import LayerEdgeOperation
+
+session_id = canvas.beginLayerEdgePreview(mask.scene_id, mask.layer_id)
+if session_id is not None:
+    canvas.updateLayerEdgePreview(session_id, LayerEdgeOperation.EXPAND, 4)
+    canvas.updateLayerEdgePreview(session_id, LayerEdgeOperation.EXPAND, 9)
+    canvas.settleLayerEdgePreview(session_id)
+```
+
+`CuteCanvas.beginLayerEdgePreview`, `CuteCanvas.updateLayerEdgePreview`, and
+`CuteCanvas.settleLayerEdgePreview` publish the latest transient result and
+commit it once. `CuteCanvas.cancelLayerEdgePreview` discards the session without
+history. `CuteCanvas.beginMaskEdgePreview` starts the same workflow from a mask
+resource ID.
+
+`CuteCanvas.layerEdgeModificationCompleted` emits a
+`LayerEdgeModificationResult`. Its
+`LayerEdgeModificationResult.request_id`,
+`LayerEdgeModificationResult.session_id`,
+`LayerEdgeModificationResult.scene_id`,
+`LayerEdgeModificationResult.layer_id`,
+`LayerEdgeModificationResult.operation`,
+`LayerEdgeModificationResult.succeeded`, and
+`LayerEdgeModificationResult.message` fields identify the terminal request and
+whether its one undoable baked edit was committed.
+
 ## Paint a Mask
 
 Make the mask active and choose Brush:
@@ -353,17 +410,28 @@ The debounce timer restarts after each edit. `maskSaved` reports the completed
 mask ID and path. `mask_autosave_on_creation` controls whether a blank file is
 written as soon as the layer is created.
 
-## Use Smart Select
+## Use Smart Mask
 
-Smart Select appears when the `sam` feature is active:
+Smart Mask appears when the `sam` feature is active:
 
 ```python
-canvas.setControlMode(canvas.CONTROL_MODE_SMART_SELECT)
+canvas.setControlMode(canvas.CONTROL_MODE_SMART_MASK)
 ```
 
 The user drags a box. CuteCanvas prepares the image embedding in the background,
 runs the prediction, and adds the result to the active mask through the same
 coverage history as brush and shape edits.
+
+Smart Select uses the same prompt interaction but commits the predicted
+coverage to the document's pixel selection:
+
+```python
+canvas.setControlMode(canvas.CONTROL_MODE_SMART_SELECT)
+```
+
+Shift adds to the selection and Alt subtracts from it. Smart Select does not
+require an active mask. Both tools use the selection crosshair; Smart Mask
+colors the dark phase of its marching boundary with the active mask color.
 
 The first request for an image may need to prepare an embedding. Later requests
 reuse a bounded cache keyed by image, device, and checkpoint.

@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF
-
 from qpane import NavigationInteractionPort, PanZoomTool
 from qpane.rendering import ViewportZoomMode
 

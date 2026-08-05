@@ -55,14 +55,23 @@ class EditorToolActivationController:
         """Return whether a registered mode can become selected now."""
         if mode not in self._canvas._tools_manager.available_modes():
             raise ValueError(f"Unknown control mode: {mode}")
-        return mode != Tools.CONTROL_MODE_SMART_SELECT or bool(
-            self._canvas.samFeatureAvailable()
-        )
+        smart_modes = {
+            Tools.CONTROL_MODE_SMART_SELECT,
+            Tools.CONTROL_MODE_SMART_MASK,
+        }
+        return mode not in smart_modes or bool(self._canvas.samFeatureAvailable())
 
     def activate(self, mode: str) -> bool:
         """Validate and activate one effective mode without owning selection."""
         canvas = self._canvas
-        if mode == Tools.CONTROL_MODE_SMART_SELECT and not canvas.samFeatureAvailable():
+        if (
+            mode
+            in {
+                Tools.CONTROL_MODE_SMART_SELECT,
+                Tools.CONTROL_MODE_SMART_MASK,
+            }
+            and not canvas.samFeatureAvailable()
+        ):
             canvas.featureFallbacks().get("sam", "setControlMode", default=None)
             return False
         if mode not in canvas._tools_manager.available_modes():

@@ -22,9 +22,9 @@ import statistics
 
 import numpy as np
 import pytest
-from cutecanvas import LayerPolicy
+from cutecanvas import EditorIntent, LayerPolicy
 from cutecanvas.editor.transform_interaction import TransformBoxPresentation
-from PySide6.QtCore import QLineF, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtCore import QLineF, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -459,6 +459,85 @@ def test_whole_layer_transform_is_cumulative_suspendable_atomic_and_fast(
         assert statistics.median(latencies) < _MEDIAN_UPDATE_BUDGET_MS
         if absolute_latency_assertions_are_isolated():
             assert max(latencies) < _ISOLATED_OUTLIER_BUDGET_MS
+    finally:
+        harness.close()
+
+
+def test_selection_transform_abuse_never_falls_back_to_mask_layer(
+    qapp: QApplication,
+) -> None:
+    """A selection without mask pixels must never create a whole-layer transform."""
+
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(256, 256),
+        widget_size=QSize(256, 256),
+        mask_count=1,
+        cache_budget_mb=96,
+    )
+    viewer = harness.viewer
+    mask_id = harness.mask_ids[0]
+    info = viewer.listMasksForComposition()[0]
+    try:
+        assert info.scene_id is not None and info.layer_id is not None
+        viewer.setLayerInteractionPolicy(
+            info.scene_id,
+            info.layer_id,
+            LayerPolicy(selectable=True, movable=True, pixel_editable=True),
+        )
+        viewer.setSelectedLayer(info.scene_id, info.layer_id)
+        assert viewer.selectedLayer().layer_id == info.layer_id
+        mask = viewer.mask_service.assets.get_layer(mask_id)
+        assert mask is not None
+
+        def paint_distant_content(pixels: np.ndarray, _image: QImage) -> None:
+            """Keep mask content far from the pixel selection."""
+
+            pixels.fill(0)
+            pixels[20:100, 20:100] = 255
+
+        mask.coverage.raster.mutate(paint_distant_content)
+        viewer.invalidateActiveMaskCache()
+        viewer.markDirty()
+        viewer.update()
+        assert harness.wait_for_mask_render_idle()
+        original_transform = viewer.layerTransform(info.scene_id, info.layer_id)
+        selection = QImage(24, 24, QImage.Format_Grayscale8)
+        selection.fill(255)
+        assert viewer.setPixelSelection(selection, QRect(180, 180, 24, 24))
+
+        state = viewer.editorOperationState(EditorIntent.TRANSFORM)
+        assert not state.allowed
+        assert state.denial == "no-selected-pixels"
+        assert viewer.setControlMode(viewer.CONTROL_MODE_TRANSFORM)
+        harness.drain_events()
+        assert viewer.sceneLayerTransformInteraction().presentation() is None
+
+        source = viewer.sceneToPanelRect(QRectF(40.0, 40.0, 1.0, 1.0))
+        assert source is not None
+        origin = source.topLeft().toPoint()
+        for index in range(160):
+            destination = origin + QPoint(
+                ((index * 37) % 91) - 45,
+                ((index * 53) % 77) - 38,
+            )
+            QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, origin)
+            QTest.mouseMove(viewer, destination, delay=0)
+            QTest.mouseRelease(viewer, Qt.LeftButton, Qt.NoModifier, destination)
+        harness.drain_events()
+
+        assert viewer.layerTransform(info.scene_id, info.layer_id) == original_transform
+        assert viewer.sceneLayerTransformInteraction().presentation() is None
+        viewer.setControlMode(viewer.CONTROL_MODE_DRAW_BRUSH)
+        viewer.setBrushSize(8)
+        paint_rect = viewer.sceneToPanelRect(QRectF(190.0, 190.0, 1.0, 1.0))
+        assert paint_rect is not None
+        QTest.mouseClick(viewer, Qt.LeftButton, pos=paint_rect.topLeft().toPoint())
+        assert harness.wait_for_mask_render_idle()
+        painted = viewer.exportMaskImage(mask_id)
+        assert painted is not None
+        assert painted.pixelColor(190, 190).value() == 255
+        assert viewer.layerTransform(info.scene_id, info.layer_id) == original_transform
     finally:
         harness.close()
 

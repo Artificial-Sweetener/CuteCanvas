@@ -16,7 +16,6 @@
 """Characterization for QPane-owned source-neutral interaction values."""
 
 from PySide6.QtCore import QPointF, Qt
-
 from qpane import (
     PointerDeviceKind,
     PointerPhase,

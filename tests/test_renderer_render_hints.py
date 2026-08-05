@@ -29,6 +29,7 @@ from PySide6.QtGui import (
     Qt,
     QTransform,
 )
+from qpane.rendering import Renderer
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.scene.model import LayerKind
 from qpane.scene.render_plan import (
@@ -37,7 +38,6 @@ from qpane.scene.render_plan import (
     SceneRenderPlan,
 )
 
-from qpane.rendering import Renderer
 from tests.helpers.render_plan import make_render_plan
 
 

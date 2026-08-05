@@ -102,7 +102,6 @@ def test_mask_coverage_can_select_and_delete_through_generic_layer_editing(
     )
     assert qpane.setSelectedLayer(info.scene_id, info.layer_id)
     assert qpane.selectLayerCoverage(info.scene_id, info.layer_id)
-
     assert qpane.deleteSelectedPixels()
     assert not layer.coverage.raster.snapshot_array().any()
 

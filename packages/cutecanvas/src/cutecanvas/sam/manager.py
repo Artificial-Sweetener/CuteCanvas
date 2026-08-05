@@ -110,7 +110,7 @@ class SamManager(QObject):
     predictorThrottled = Signal(uuid.UUID, int)
     predictorCacheCleared = Signal()
     predictorRemoved = Signal(uuid.UUID)
-    maskReady = Signal(object, np.ndarray, bool)
+    maskReady = Signal(object, np.ndarray, bool, object)
 
     def __init__(
         self,
@@ -148,6 +148,7 @@ class SamManager(QObject):
             uuid.UUID,
             ExecutionHandle[SamMaskProduct, object],
         ] = {}
+        self._inference_contexts: dict[uuid.UUID, object | None] = {}
         self._cache_handles: dict[
             uuid.UUID,
             ExecutionHandle[SamCacheMutationProduct, object],
@@ -278,18 +279,20 @@ class SamManager(QObject):
         image_id: uuid.UUID,
         bbox: np.ndarray,
         erase_mode: bool = False,
+        *,
+        context: object | None = None,
     ) -> bool:
-        """Submit valid box inference on the predictor's native affinity lane."""
+        """Submit box inference while retaining caller context until adoption."""
         normalized_bbox = np.asarray(bbox).copy()
         if normalized_bbox.shape not in {(4,), (1, 4)}:
             logger.warning(
                 "SAM inference requires four bounding-box coordinates; got %s",
                 normalized_bbox.shape,
             )
-            self.maskReady.emit(None, normalized_bbox, erase_mode)
+            self.maskReady.emit(None, normalized_bbox, erase_mode, context)
             return False
         if image_id not in self._references:
-            self.maskReady.emit(None, normalized_bbox, erase_mode)
+            self.maskReady.emit(None, normalized_bbox, erase_mode, context)
             return False
         request_id = uuid.uuid4()
         request = ExecutionRequest[SamMaskProduct, object](
@@ -312,9 +315,10 @@ class SamManager(QObject):
             )
         except ExecutionRejected as rejection:
             logger.warning("SAM inference rejected: %s", rejection)
-            self.maskReady.emit(None, normalized_bbox, erase_mode)
+            self.maskReady.emit(None, normalized_bbox, erase_mode, context)
             return False
         self._inference_handles[request_id] = handle
+        self._inference_contexts[request_id] = context
         handle.add_done_callback(
             lambda outcome: self._settle_mask(
                 request_id, normalized_bbox, erase_mode, outcome
@@ -385,6 +389,7 @@ class SamManager(QObject):
         for handle in tuple(self._cache_handles.values()):
             handle.cancel(reason="SAM manager shutdown")
         self._inference_handles.clear()
+        self._inference_contexts.clear()
         self._cache_handles.clear()
         if not self._session_may_own_native_resources:
             self._close_execution_scopes(reason="sam_shutdown_empty")
@@ -508,7 +513,8 @@ class SamManager(QObject):
         if request_id not in self._inference_handles:
             return
         self._inference_handles.pop(request_id, None)
-        self.maskReady.emit(product.mask, product.bbox, product.erase_mode)
+        context = self._inference_contexts.pop(request_id, None)
+        self.maskReady.emit(product.mask, product.bbox, product.erase_mode, context)
 
     def _settle_mask(
         self,
@@ -522,9 +528,10 @@ class SamManager(QObject):
             return
         if self._inference_handles.pop(request_id, None) is None:
             return
+        context = self._inference_contexts.pop(request_id, None)
         if outcome.state == ExecutionState.FAILED:
             logger.error("SAM inference failed: %s", outcome.error)
-            self.maskReady.emit(None, bbox, erase_mode)
+            self.maskReady.emit(None, bbox, erase_mode, context)
 
     def _submit_cache_mutation(
         self,

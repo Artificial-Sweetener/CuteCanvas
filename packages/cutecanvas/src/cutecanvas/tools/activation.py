@@ -21,14 +21,14 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPen
-from qpane.sdk.vector import VectorShapeKind
-
 from qpane import CursorInteractionPort, NavigationInteractionPort
+from qpane.sdk.vector import VectorShapeKind
 
 from ..coverage import CoverageCombineMode
 from ..coverage.canvas_aperture import CoverageCanvasAperture
 from ..editor import EditorOperation
 from ..painting.tools.clone_feedback import CloneStampFeedbackProjector
+from ..selection.translation_interaction import PixelSelectionTranslationInteraction
 from .ports import (
     AuthoringSnapPort,
     CloneStampInteractionPort,
@@ -36,7 +36,8 @@ from .ports import (
     PaintBucketInteractionPort,
     PaintingInteractionPort,
     PixelSelectionInteractionPort,
-    SmartSelectionInteractionPort,
+    SelectionTranslationPort,
+    SmartSegmentationInteractionPort,
     ToolActivationPorts,
     TransformInteractionPort,
     VectorInteractionPort,
@@ -135,6 +136,10 @@ def build_editor_tool_ports(
         target_to_panel=mask_coordinates.source_to_panel,
         target_aperture_path=mask_aperture.coverage_aperture_path,
     )
+    selection_translation = PixelSelectionTranslationInteraction(
+        active_scene=qpane.view().current_scene_descriptor,
+        selections=qpane.pixelSelectionService(),
+    )
     selection_port = PixelSelectionInteractionPort(
         panel_to_scene_point=qpane.view().panel_to_scene_point,
         can_select=lambda: (
@@ -142,6 +147,7 @@ def build_editor_tool_ports(
             .resolve(EditorOperation.SELECT_PIXELS)
             .allowed
         ),
+        clear_selected_pixels=qpane.deleteSelectedPixels,
         commit_pixel_selection=qpane.editorInteraction().commit_active_pixel_selection,
         commit_coverage_item=qpane.editorInteraction().commit_active_coverage_item,
         is_shift_held=is_shift_held,
@@ -152,6 +158,14 @@ def build_editor_tool_ports(
         constrain_coverage_item=canvas_aperture.constrain_item,
         coverage_item_to_panel_path=canvas_aperture.item_panel_path,
         snapping=authoring_snap_port,
+        translation=SelectionTranslationPort(
+            can_begin=selection_translation.can_begin,
+            begin=selection_translation.begin,
+            update=selection_translation.update,
+            finish=selection_translation.finish,
+            cancel=selection_translation.cancel,
+            suspend=selection_translation.suspend,
+        ),
     )
     coverage_shape_port = PixelSelectionInteractionPort(
         panel_to_scene_point=mask_coordinates.panel_to_source,
@@ -214,16 +228,17 @@ def build_editor_tool_ports(
         is_shift_held=is_shift_held,
         is_alt_held=is_alt_held,
     )
-    smart_selection_port = SmartSelectionInteractionPort(
+    smart_segmentation_port = SmartSegmentationInteractionPort(
         is_alt_held=is_alt_held,
-        get_dpr=qpane.devicePixelRatioF,
-        panel_to_content_point=viewport.panel_to_content_point,
-        image_to_panel_point=viewport.content_to_panel_point,
+        is_shift_held=is_shift_held,
+        resolve_prompt_projection=qpane.active_raster_coordinates().resolve,
         panel_to_active_mask_point=mask_coordinates.panel_to_source,
-        active_mask_to_panel_point=mask_coordinates.source_to_panel,
         get_min_selection_size=lambda: qpane.settings.smart_select_min_size,
         get_active_mask_color=lambda: (
             qpane.mask_service.getActiveMaskColor() if qpane.mask_service else None
+        ),
+        get_active_mask_id=lambda: (
+            qpane.mask_service.getActiveMaskId() if qpane.mask_service else None
         ),
     )
     vector = qpane._vector_interaction_controller()
@@ -266,7 +281,7 @@ def build_editor_tool_ports(
         painting=painting_port,
         clone_stamp=clone_stamp_port,
         paint_bucket=bucket_port,
-        smart_selection=smart_selection_port,
+        smart_segmentation=smart_segmentation_port,
         domain_ports={
             qpane.CONTROL_MODE_VECTOR_SHAPE: vector_port,
             qpane.CONTROL_MODE_VECTOR_PATH: vector_port,

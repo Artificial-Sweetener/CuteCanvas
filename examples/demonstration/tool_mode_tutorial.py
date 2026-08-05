@@ -167,9 +167,12 @@ class ToolModeTutorialController:
                     "Clone Stamp selected. Alt-click a source; painting creates "
                     "and selects a raster layer above this layer."
                 )
-        if mode == CuteCanvas.CONTROL_MODE_SMART_SELECT:
+        if mode == CuteCanvas.CONTROL_MODE_SMART_SELECT and not self._sam_available():
+            self._show_status("Enable SAM tools to use Smart Select.")
+            return
+        if mode == CuteCanvas.CONTROL_MODE_SMART_MASK:
             if not (self._masks_available() and self._sam_available()):
-                self._show_status("Enable SAM tools to use Smart Select.")
+                self._show_status("Enable mask and SAM tools to use Smart Mask.")
                 return
             if not self._ensure_active_mask():
                 return
@@ -210,6 +213,8 @@ class ToolModeTutorialController:
         ]
         if self._sam_available():
             preferred.append(CuteCanvas.CONTROL_MODE_SMART_SELECT)
+            if self._masks_available():
+                preferred.append(CuteCanvas.CONTROL_MODE_SMART_MASK)
         seen = set(preferred)
         preferred.extend(
             mode for mode in self._canvas.availableControlModes() if mode not in seen
@@ -220,6 +225,8 @@ class ToolModeTutorialController:
             if mode == CuteCanvas.CONTROL_MODE_PANZOOM:
                 return has_document
             if mode == CuteCanvas.CONTROL_MODE_SMART_SELECT:
+                return self._sam_available() and has_document
+            if mode == CuteCanvas.CONTROL_MODE_SMART_MASK:
                 return (
                     self._masks_available() and self._sam_available() and has_document
                 )
@@ -243,7 +250,7 @@ class ToolModeTutorialController:
                 CuteCanvas.CONTROL_MODE_TRANSFORM,
                 CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
                 CuteCanvas.CONTROL_MODE_CLONE_STAMP,
-                CuteCanvas.CONTROL_MODE_SMART_SELECT,
+                CuteCanvas.CONTROL_MODE_SMART_MASK,
             }:
                 self.set_mode(CuteCanvas.CONTROL_MODE_DRAW_BRUSH)
         elif kind in {"raster", "imported-raster", "linked-raster"} and current not in {
@@ -269,6 +276,10 @@ class ToolModeTutorialController:
         if self.mode_smart_action is not None:
             self.mode_smart_action.setChecked(
                 mode == CuteCanvas.CONTROL_MODE_SMART_SELECT
+            )
+        if self.mode_smart_mask_action is not None:
+            self.mode_smart_mask_action.setChecked(
+                mode == CuteCanvas.CONTROL_MODE_SMART_MASK
             )
         custom_action, lens_action = self._extension_actions()
         if custom_action is not None:
@@ -307,6 +318,10 @@ class ToolModeTutorialController:
         enable(self.mode_brush_action, has_document)
         enable(self.mode_clone_stamp_action, has_document)
         enable(self.mode_smart_action, sam_available and has_document)
+        enable(
+            self.mode_smart_mask_action,
+            sam_available and self._masks_available() and has_document,
+        )
         custom_action, lens_action = self._extension_actions()
         enable(custom_action, custom_action is not None and has_document)
         enable(lens_action, lens_action is not None and has_document)
@@ -328,6 +343,8 @@ class ToolModeTutorialController:
             allowed.add(CuteCanvas.CONTROL_MODE_PANZOOM)
         if sam_available and has_document:
             allowed.add(CuteCanvas.CONTROL_MODE_SMART_SELECT)
+            if self._masks_available():
+                allowed.add(CuteCanvas.CONTROL_MODE_SMART_MASK)
         if custom_action is not None and has_document:
             allowed.add(CUSTOM_TOOL_MODE)
         if lens_action is not None and has_document:
@@ -361,6 +378,7 @@ class ToolModeTutorialController:
             self.mode_clone_stamp_action,
             self.editor_controls.paint_bucket_action,
             self.mode_smart_action,
+            self.mode_smart_mask_action,
             custom_action,
             lens_action,
         ]
@@ -388,10 +406,15 @@ class ToolModeTutorialController:
             "Alt-click a rendered source, then paint onto the selected layer."
         )
         self.mode_smart_action: QAction | None = None
+        self.mode_smart_mask_action: QAction | None = None
         if self._sam_available():
             self.mode_smart_action = QAction(
                 "Smart Select", self._parent, checkable=True
             )
+            if self._masks_available():
+                self.mode_smart_mask_action = QAction(
+                    "Smart Mask", self._parent, checkable=True
+                )
         bindings = [
             (self.mode_pan_action, CuteCanvas.CONTROL_MODE_PANZOOM),
             (self.mode_cursor_action, CuteCanvas.CONTROL_MODE_CURSOR),
@@ -403,6 +426,7 @@ class ToolModeTutorialController:
                 CuteCanvas.CONTROL_MODE_CLONE_STAMP,
             ),
             (self.mode_smart_action, CuteCanvas.CONTROL_MODE_SMART_SELECT),
+            (self.mode_smart_mask_action, CuteCanvas.CONTROL_MODE_SMART_MASK),
         ]
         for action, mode in bindings:
             if action is not None:
@@ -447,6 +471,7 @@ class ToolModeTutorialController:
             CuteCanvas.CONTROL_MODE_DRAW_BRUSH: "Brush",
             CuteCanvas.CONTROL_MODE_CLONE_STAMP: "Clone Stamp",
             CuteCanvas.CONTROL_MODE_SMART_SELECT: "Smart Select (SAM)",
+            CuteCanvas.CONTROL_MODE_SMART_MASK: "Smart Mask (SAM)",
             CuteCanvas.CONTROL_MODE_VECTOR_SHAPE: "Vector Shape",
             CuteCanvas.CONTROL_MODE_VECTOR_PATH: "Vector Path",
             CuteCanvas.CONTROL_MODE_VECTOR_NODE: "Edit Vector Nodes",

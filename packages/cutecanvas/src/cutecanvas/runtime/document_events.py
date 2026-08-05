@@ -48,6 +48,7 @@ from cutecanvas.resources.rasterization import LayerRasterizationCompletion
 from cutecanvas.scene.layer_selection import (
     SceneLayerSelection,
 )
+from cutecanvas.scene.pixel_edits import LayerPixelContentChange
 from cutecanvas.scene.raster_mutations import (
     RasterBoundsCompletion,
 )
@@ -205,6 +206,8 @@ class DocumentEventsMixin:
         dirty_region: object | None = None,
     ) -> None:
         """Refresh source products and public state after a resource change."""
+        if isinstance(dirty_region, LayerPixelContentChange):
+            self._handle_layer_pixels_changed(dirty_region)
         if isinstance(dirty_region, MaskResourceChange):
             service = self.mask_service
             if (
@@ -233,6 +236,16 @@ class DocumentEventsMixin:
         self.view().invalidate_content_cache()
         self._handle_internal_scene_content_changed()
         self._emit_scene_changed()
+
+    def _handle_layer_pixels_changed(self, change: LayerPixelContentChange) -> None:
+        """Publish one source-neutral durable layer-pixel mutation."""
+        source = change.source
+        if isinstance(source, ProjectResourceReference):
+            self.layerPixelsChanged.emit(
+                change.scene_id,
+                change.layer_id,
+                source.resource_id,
+            )
 
     def _handle_placed_asset_completion(
         self, completion: PlacedAssetCompletion

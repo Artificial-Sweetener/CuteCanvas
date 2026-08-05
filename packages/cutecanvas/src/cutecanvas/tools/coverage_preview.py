@@ -19,16 +19,21 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 
 
-def draw_clipped_marching_ants(painter: QPainter, path: QPainterPath) -> None:
-    """Draw a two-tone cosmetic boundary entirely inside ``path``."""
+def draw_clipped_marching_ants(
+    painter: QPainter,
+    path: QPainterPath,
+    *,
+    dark_color: QColor | Qt.GlobalColor = Qt.GlobalColor.black,
+) -> None:
+    """Draw a two-tone cosmetic boundary with a configurable dark phase."""
     painter.save()
     try:
         painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        dark = QPen(Qt.GlobalColor.black, 2.0, Qt.PenStyle.SolidLine)
+        dark = QPen(QColor(dark_color), 2.0, Qt.PenStyle.SolidLine)
         dark.setCosmetic(True)
         painter.setPen(dark)
         painter.drawPath(path)

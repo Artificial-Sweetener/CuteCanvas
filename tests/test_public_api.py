@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import cutecanvas
 import pytest
+import qpane
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage
-
-import qpane
 
 
 def test_qpane_public_api_symbols() -> None:

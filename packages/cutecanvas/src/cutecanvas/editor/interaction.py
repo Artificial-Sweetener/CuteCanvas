@@ -25,6 +25,7 @@ from qpane.sdk.scene import RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageItem, CoverageSnapshot
 
+from ..scene.canvas_bounds import scene_raster_bounds
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_edits import LayerPixelMutationCoordinator
@@ -215,10 +216,4 @@ class EditorInteractionCoordinator:
         scene = self._active_scene()
         if scene is None or scene.scene_id != scene_id:
             return None
-        left = floor(scene.bounds.x)
-        top = floor(scene.bounds.y)
-        right = ceil(scene.bounds.x + scene.bounds.width)
-        bottom = ceil(scene.bounds.y + scene.bounds.height)
-        if right <= left or bottom <= top:
-            return None
-        return RasterBounds(left, top, right - left, bottom - top)
+        return scene_raster_bounds(scene)

@@ -64,4 +64,7 @@ def run(root: Path) -> None:
         for error in errors:
             print(f"  - {error}")
         raise SystemExit(1)
-    print("SUCCESS: QPane and CuteCanvas independently satisfy Public API Trinity.")
+    print(
+        "SUCCESS: Ferrastra, QPane, and CuteCanvas independently satisfy "
+        "Public API Trinity."
+    )

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -62,6 +63,15 @@ class RasterPixelEdit:
         return (self.source,)
 
 
+@dataclass(frozen=True, slots=True)
+class LayerPixelContentChange:
+    """Identify one durable layer-pixel mutation for host notification."""
+
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    source: LayerSourceReference
+
+
 class LayerPixelMutationCoordinator:
     """Authorize, project, record, and replay selection-constrained pixel edits."""
 
@@ -73,6 +83,7 @@ class LayerPixelMutationCoordinator:
         pixel_selection: PixelSelectionService,
         owners: LayerPixelOwnerRegistry,
         edit_controller: CompositionEditController,
+        changed: Callable[[LayerPixelContentChange], None],
     ) -> None:
         """Bind scene state and install one history handler for raster patches."""
         self._scene_mutations = scene_mutations
@@ -80,6 +91,7 @@ class LayerPixelMutationCoordinator:
         self._pixel_selection = pixel_selection
         self._owners = owners
         self._edit_controller = edit_controller
+        self._changed = changed
         self._projector = LayerCoverageProjector()
 
     def clear_selected_pixels(self) -> bool:
@@ -125,14 +137,16 @@ class LayerPixelMutationCoordinator:
         if after is None:
             owner.restore_patch(layer, local_coverage.bounds, before)
             return False
-        self._edit_controller.record_applied(
-            RasterPixelEdit(
-                scene_id=scene.scene_id,
-                layer_id=layer.layer_id,
-                source=layer.source,
-                bounds=local_coverage.bounds,
-                before=before,
-                after=after,
-            )
+        edit = RasterPixelEdit(
+            scene_id=scene.scene_id,
+            layer_id=layer.layer_id,
+            source=layer.source,
+            bounds=local_coverage.bounds,
+            before=before,
+            after=after,
+        )
+        self._edit_controller.record_applied(edit)
+        self._changed(
+            LayerPixelContentChange(edit.scene_id, edit.layer_id, edit.source)
         )
         return True

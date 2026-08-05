@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import math
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from PySide6.QtCore import QPointF
 from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
+from cutecanvas.coverage.containment import coverage_contains
 from cutecanvas.types import RasterExtentPolicy
 
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
@@ -193,15 +193,3 @@ class SelectedPixelMoveTargetResolver:
             and layer.raster_bounds is not None
             and transform.is_invertible
         )
-
-
-def coverage_contains(coverage: CoverageSnapshot, point: QPointF) -> bool:
-    """Return whether a scene point lies inside nonzero selection coverage."""
-    bounds = coverage.bounds
-    if bounds is None:
-        return False
-    x = math.floor(point.x())
-    y = math.floor(point.y())
-    if x < bounds.x or y < bounds.y or x >= bounds.right or y >= bounds.bottom:
-        return False
-    return bool(coverage.pixels[y - bounds.y, x - bounds.x])

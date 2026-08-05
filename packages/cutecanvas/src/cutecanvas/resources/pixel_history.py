@@ -29,7 +29,7 @@ from ..masks.mask import MaskAssetStore
 from ..masks.pixel_translation import MaskPixelTranslator
 from ..raster.assets import EditableRasterAssetStore
 from ..raster.pixel_translation import ColorPixelTranslator
-from ..scene.pixel_edits import RasterPixelEdit
+from ..scene.pixel_edits import LayerPixelContentChange, RasterPixelEdit
 from ..scene.pixel_transitions import RasterPixelTransition
 from .model import ProjectResourceKind, ProjectResourceReference
 from .store import ProjectResourceStore
@@ -44,7 +44,7 @@ class ResourcePixelHistoryOwner:
         resources: ProjectResourceStore,
         rasters: EditableRasterAssetStore,
         masks: MaskAssetStore,
-        changed: Callable[[uuid.UUID, RasterBounds], None],
+        changed: Callable[[uuid.UUID, object | None], None],
     ) -> None:
         """Bind resource identity, payload stores, and document invalidation."""
         self._resources = resources
@@ -105,7 +105,14 @@ class ResourcePixelHistoryOwner:
         else:
             return False
         if changed:
-            self._changed(resource_id, command.bounds)
+            self._changed(
+                resource_id,
+                LayerPixelContentChange(
+                    command.scene_id,
+                    command.layer_id,
+                    command.source,
+                ),
+            )
         return changed
 
 

@@ -33,7 +33,6 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QImage, QPaintEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-
 from qpane import QPane
 
 

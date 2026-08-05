@@ -27,7 +27,6 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QImage, QImageReader
-
 from qpane import (
     ExecutionOutcome,
     ExecutionRejected,

@@ -24,15 +24,18 @@ from pathlib import Path
 
 from .model import ProductContract
 
-_PRODUCT_PACKAGES = {"qpane", "cutecanvas"}
+_PRODUCT_PACKAGES = {"ferrastra", "qpane", "cutecanvas"}
+_ALLOWED_PRODUCT_IMPORTS = {
+    "ferrastra": {"ferrastra"},
+    "qpane": {"ferrastra", "qpane"},
+    "cutecanvas": {"ferrastra", "qpane", "cutecanvas"},
+}
 
 
 def validate_demo(product: ProductContract) -> list[str]:
     """Return private, cross-boundary, and unavailable tutorial import errors."""
     errors: list[str] = []
-    allowed_packages = {product.package}
-    if product.package == "cutecanvas":
-        allowed_packages.add("qpane")
+    allowed_packages = _ALLOWED_PRODUCT_IMPORTS[product.package]
     exports = {
         package: set(importlib.import_module(package).__all__)
         for package in allowed_packages

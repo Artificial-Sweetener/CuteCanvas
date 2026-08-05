@@ -51,6 +51,47 @@ def test_canvas_emits_public_control_mode_changes(qapp) -> None:
         canvas.deleteLater()
 
 
+def test_scene_rect_mapping_tracks_the_mounted_viewport(qapp) -> None:
+    """Host overlays should map scene geometry without reaching into QPane."""
+    canvas = CuteCanvas(features=())
+    canvas.resize(800, 600)
+    canvas.show()
+    try:
+        assert canvas.sceneToPanelRect(QRectF(0.0, 0.0, 10.0, 10.0)) is None
+        with pytest.raises(TypeError, match="QRectF"):
+            canvas.sceneToPanelRect(None)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="valid QRectF"):
+            canvas.sceneToPanelRect(QRectF())
+        canvas.editor.compositions.create(
+            QRectF(0.0, 0.0, 400.0, 300.0),
+            title="Mapped document",
+        )
+        image = QImage(400, 300, QImage.Format_ARGB32_Premultiplied)
+        image.fill(0xFF336699)
+        assert canvas.addEditableRasterLayer(image, label="Background") is not None
+        canvas.setZoomFit()
+        qapp.processEvents()
+
+        scene_rect = QRectF(120.0, 90.0, 80.0, 60.0)
+        panel_rect = canvas.sceneToPanelRect(scene_rect)
+        assert panel_rect is not None and panel_rect.isValid()
+        hit = canvas.sceneHitTest(panel_rect.center().toPoint())
+        assert hit is not None
+        assert hit.scene_point.x() == pytest.approx(scene_rect.center().x(), abs=0.6)
+        assert hit.scene_point.y() == pytest.approx(scene_rect.center().y(), abs=0.6)
+
+        canvas.applyZoom(canvas.currentZoom() * 1.25, panel_rect.center())
+        qapp.processEvents()
+        zoomed = canvas.sceneToPanelRect(scene_rect)
+        assert zoomed is not None
+        assert zoomed.width() > panel_rect.width()
+        assert zoomed.height() > panel_rect.height()
+    finally:
+        canvas.close()
+        canvas.deleteLater()
+        qapp.processEvents()
+
+
 def test_typed_handles_route_document_layer_tool_and_history_workflows(qapp) -> None:
     """Common editing should not require callers to pass scene/layer ID pairs."""
     canvas = CuteCanvas(features=())

@@ -90,6 +90,7 @@ class CursorBuilder:
     def create_precision_cursor(
         self,
         erase_indicator: bool = False,
+        add_indicator: bool = False,
         *,
         device_pixel_ratio: float = 1.0,
     ) -> QCursor:
@@ -97,6 +98,7 @@ class CursorBuilder:
 
         Args:
             erase_indicator: Draw the erase marker inside the crosshair when True.
+            add_indicator: Draw a compact addition marker when True.
             device_pixel_ratio: Physical pixels represented by one logical pixel.
 
         Returns:
@@ -116,6 +118,7 @@ class CursorBuilder:
             line_gap,
             outline_width,
             erase_indicator,
+            add_indicator,
             dpr,
         )
         cached_cursor = self._precision_cursor_cache.get(cache_key)
@@ -144,11 +147,26 @@ class CursorBuilder:
                 painter,
                 QRectF(0.0, 0.0, float(cursor_size), float(cursor_size)),
             )
+        elif add_indicator:
+            self._draw_add_indicator(painter, cursor_size)
         painter.end()
         cursor_pixmap = QPixmap.fromImage(cursor_image)
         cursor = QCursor(cursor_pixmap, hotspot, hotspot)
         self._precision_cursor_cache[cache_key] = cursor
         return cursor
+
+    @staticmethod
+    def _draw_add_indicator(painter: QPainter, cursor_size: int) -> None:
+        """Draw an outlined addition badge without obscuring the hotspot."""
+
+        center = QPointF(float(cursor_size - 5), float(cursor_size - 5))
+        for color, width in ((Qt.white, 4), (Qt.black, 2)):
+            pen = QPen(color)
+            pen.setWidth(width)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(center + QPointF(-3.0, 0.0), center + QPointF(3.0, 0.0))
+            painter.drawLine(center + QPointF(0.0, -3.0), center + QPointF(0.0, 3.0))
 
     def _ensure_brush_cursor_pair(
         self,

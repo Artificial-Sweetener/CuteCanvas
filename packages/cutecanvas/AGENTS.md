@@ -8,6 +8,11 @@ CuteCanvas is a performant embeddable raster/vector document editor built on
 QPane's public rendering SDK. Its facade should make document, layer, and tool
 workflows delightful without accumulating all behavior in one widget.
 
+CuteCanvas compiles authoring state into Ferrastra through `cutecanvas.ferrastra`
+adapters. It owns documents, commands, tools, history, operation availability,
+resource selection, and publication policy; Ferrastra owns the native products and
+computation requested by those adapters.
+
 ## Ownership
 
 CuteCanvas owns:
@@ -77,3 +82,11 @@ Focused proof uses mounted workflows and the abuse harness for rapid document
 switching, edit/undo chains, input suspension, stale work, source removal,
 cache pressure, 4K/8K and sparse content, redraw equality, persistence failure
 atomicity, teardown, and responsive interaction.
+
+## Ferrastra migration rule
+
+Do not pass CuteCanvas layer IDs, undo commands, tools, locks, dialogs, or file
+policy into Ferrastra. A migrated numerical responsibility is deleted from
+CuteCanvas in the same vertical slice and permanently banned by the canonical
+ownership checker. Stateful native sessions return immutable source revisions;
+CuteCanvas alone decides how those revisions enter document history.

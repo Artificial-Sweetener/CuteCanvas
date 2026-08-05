@@ -23,7 +23,6 @@ from typing import ClassVar
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
-    QCursor,
     QKeyEvent,
     QMouseEvent,
     QPainter,
@@ -31,6 +30,7 @@ from PySide6.QtGui import (
     QPen,
     QPolygonF,
 )
+from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from cutecanvas.coverage import (
     CoverageCombineMode,
@@ -38,14 +38,14 @@ from cutecanvas.coverage import (
     CoverageItem,
     VectorCoverageItem,
 )
-from qpane import PointerPhase, PointerSample, ToolInputProfile
+from cutecanvas.cursor import EditorCursorIntent
 
 from .base import BaseTool
 from .coverage_operation import resolve_coverage_operation
 from .coverage_preview import draw_clipped_marching_ants
 from .cursor_feedback import ToolCursorStyle
 from .modifier_snapshot import alt_is_active, shift_is_active
-from .ports import PixelSelectionInteractionPort
+from .ports import PixelSelectionInteractionPort, SelectionTranslationPort
 
 
 class SelectionShapeTool(BaseTool):
@@ -67,11 +67,14 @@ class SelectionShapeTool(BaseTool):
         self._panel_points: list[QPointF] = []
         self._gesture_combine_mode = CoverageCombineMode.REPLACE
         self._pointer_modifiers = Qt.KeyboardModifier.NoModifier
+        self._translation_active = False
+        self._translation_hovered = False
 
     def activate(self, dependencies: PixelSelectionInteractionPort) -> None:
         """Capture coordinate and selection collaborators."""
         self._panel_to_scene = dependencies.panel_to_scene_point
         self._can_select = dependencies.can_select
+        self._clear_selected_pixels = dependencies.clear_selected_pixels
         self._commit = dependencies.commit_coverage_item
         self._is_shift_held = dependencies.is_shift_held
         self._is_alt_held = dependencies.is_alt_held
@@ -80,9 +83,12 @@ class SelectionShapeTool(BaseTool):
         self._constrain_item = dependencies.constrain_coverage_item
         self._item_to_panel_path = dependencies.coverage_item_to_panel_path
         self._snapping = dependencies.snapping
+        self._translation = dependencies.translation
 
     def deactivate(self) -> None:
         """Discard transient geometry and release collaborators."""
+        if self._translation_active:
+            self._translation.suspend()
         self._clear_gesture()
         self._reset_dependencies()
 
@@ -91,16 +97,31 @@ class SelectionShapeTool(BaseTool):
         if event.button() != Qt.MouseButton.LeftButton:
             event.ignore()
             return
-        if self._begin(QPointF(event.position()), event.modifiers()):
+        panel_point = QPointF(event.position())
+        if self._begin_translation(panel_point, event.modifiers()) or self._begin(
+            panel_point,
+            event.modifiers(),
+        ):
             event.accept()
         else:
             event.ignore()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Update live geometry while the primary button remains held."""
+        if self._translation_active:
+            if event.buttons() & Qt.MouseButton.LeftButton:
+                self._update_translation(QPointF(event.position()))
+                event.accept()
+            else:
+                event.ignore()
+            return
         if self._begin_panel is None or not (
             event.buttons() & Qt.MouseButton.LeftButton
         ):
+            self._update_translation_hover(
+                QPointF(event.position()),
+                event.modifiers(),
+            )
             event.ignore()
             return
         self._update(QPointF(event.position()), event.modifiers())
@@ -108,6 +129,10 @@ class SelectionShapeTool(BaseTool):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         """Commit selection geometry on primary-button release."""
+        if event.button() == Qt.MouseButton.LeftButton and self._translation_active:
+            self._finish_translation(QPointF(event.position()))
+            event.accept()
+            return
         if event.button() != Qt.MouseButton.LeftButton or self._begin_panel is None:
             event.ignore()
             return
@@ -115,7 +140,20 @@ class SelectionShapeTool(BaseTool):
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Cancel transient geometry with Escape without clearing durable selection."""
+        """Handle selection-owned deletion and transient Escape cancellation."""
+        if event.key() == Qt.Key.Key_Delete:
+            if self._clear_selected_pixels():
+                event.accept()
+            else:
+                event.ignore()
+            return
+        if event.key() == Qt.Key.Key_Escape and self._translation_active:
+            self._translation.cancel()
+            self._translation_active = False
+            self.signals.repaint_overlay_requested.emit()
+            self.signals.cursor_update_requested.emit()
+            event.accept()
+            return
         if event.key() != Qt.Key.Key_Escape or self._begin_panel is None:
             event.ignore()
             return
@@ -126,7 +164,22 @@ class SelectionShapeTool(BaseTool):
     def handle_pointer_sample(self, sample: PointerSample) -> bool:
         """Route touch and tablet samples through the same gesture lifecycle."""
         if sample.phase is PointerPhase.BEGIN:
-            return self._begin(sample.position, sample.modifiers)
+            return self._begin_translation(
+                sample.position,
+                sample.modifiers,
+            ) or self._begin(sample.position, sample.modifiers)
+        if sample.phase is PointerPhase.UPDATE and self._translation_active:
+            self._update_translation(sample.position)
+            return True
+        if sample.phase is PointerPhase.END and self._translation_active:
+            self._finish_translation(sample.position)
+            return True
+        if sample.phase is PointerPhase.CANCEL and self._translation_active:
+            self._translation.cancel()
+            self._translation_active = False
+            self.signals.repaint_overlay_requested.emit()
+            self.signals.cursor_update_requested.emit()
+            return True
         if sample.phase is PointerPhase.UPDATE and self._begin_panel is not None:
             self._update(sample.position, sample.modifiers)
             return True
@@ -139,11 +192,20 @@ class SelectionShapeTool(BaseTool):
             return True
         return False
 
-    def getCursor(self) -> QCursor | None:
-        """Defer precise feedback while retaining unavailable-state ownership."""
-        if self._can_select():
-            return None
-        return QCursor(Qt.CursorShape.ForbiddenCursor)
+    def cursor_intent(self) -> EditorCursorIntent:
+        """Describe selection feedback without choosing host cursor artwork."""
+
+        if not self._can_select():
+            return EditorCursorIntent.FORBIDDEN
+        if self._translation_active or (
+            self._translation_hovered and not self._is_alt_held()
+        ):
+            return EditorCursorIntent.SELECTION_TRANSLATE
+        if self._is_alt_held():
+            return EditorCursorIntent.PRECISE_SUBTRACT
+        if self._is_shift_held():
+            return EditorCursorIntent.PRECISE_ADD
+        return EditorCursorIntent.PRECISE
 
     def draw_overlay(self, painter: QPainter) -> None:
         """Draw transient vector geometry without rasterizing selection coverage."""
@@ -178,6 +240,67 @@ class SelectionShapeTool(BaseTool):
         self._gesture_combine_mode = self._modifier_combine_mode()
         self.signals.repaint_overlay_requested.emit()
         return True
+
+    def _begin_translation(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> bool:
+        """Begin moving selection coverage when a non-subtractive press hits it."""
+        if not self._can_select() or self._alt_active(modifiers):
+            self._set_translation_hovered(False)
+            return False
+        scene_point = self._panel_to_scene(panel_point)
+        if scene_point is None or not self._translation.begin(scene_point):
+            self._set_translation_hovered(False)
+            return False
+        self._translation_active = True
+        self._set_translation_hovered(True)
+        self.signals.cursor_update_requested.emit()
+        return True
+
+    def _update_translation(self, panel_point: QPointF) -> None:
+        """Update the active selection-only translation preview."""
+        scene_point = self._panel_to_scene(panel_point)
+        if scene_point is not None and self._translation.update(scene_point):
+            self.signals.repaint_overlay_requested.emit()
+
+    def _finish_translation(self, panel_point: QPointF) -> None:
+        """Commit the active selection-only translation gesture."""
+        scene_point = self._panel_to_scene(panel_point)
+        if scene_point is None:
+            self._translation.cancel()
+        else:
+            self._translation.finish(scene_point)
+        self._translation_active = False
+        self.signals.repaint_overlay_requested.emit()
+        self.signals.cursor_update_requested.emit()
+
+    def _update_translation_hover(
+        self,
+        panel_point: QPointF,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
+        """Project selection containment into idle cursor feedback."""
+        scene_point = self._panel_to_scene(panel_point)
+        hovered = bool(
+            self._can_select()
+            and not self._alt_active(modifiers)
+            and scene_point is not None
+            and self._translation.can_begin(scene_point)
+        )
+        self._set_translation_hovered(hovered)
+
+    def _set_translation_hovered(self, hovered: bool) -> None:
+        """Publish cursor invalidation only when hover eligibility changes."""
+        if hovered == self._translation_hovered:
+            return
+        self._translation_hovered = hovered
+        self.signals.cursor_update_requested.emit()
+
+    def _alt_active(self, modifiers: Qt.KeyboardModifier) -> bool:
+        """Return reconciled persistent and pointer-event subtraction state."""
+        return alt_is_active(self._is_alt_held(), modifiers)
 
     def _update(
         self,
@@ -229,6 +352,8 @@ class SelectionShapeTool(BaseTool):
     def _clear_gesture(self) -> None:
         """Discard transient vector state."""
         self._snapping.clear()
+        self._translation_active = False
+        self._translation_hovered = False
         self._begin_panel = None
         self._current_panel = None
         self._scene_points.clear()
@@ -239,6 +364,7 @@ class SelectionShapeTool(BaseTool):
         """Install inert collaborators for safe deactivation."""
         self._panel_to_scene: Callable[[QPointF], QPointF | None] = lambda _point: None
         self._can_select: Callable[[], bool] = lambda: False
+        self._clear_selected_pixels: Callable[[], bool] = lambda: False
         self._commit: Callable[[CoverageItem], bool] = lambda _item: False
         self._is_shift_held: Callable[[], bool] = lambda: False
         self._is_alt_held: Callable[[], bool] = lambda: False
@@ -251,6 +377,7 @@ class SelectionShapeTool(BaseTool):
             Callable[[CoverageItem], QPainterPath | None] | None
         ) = None
         self._snapping = PixelSelectionInteractionPort().snapping
+        self._translation = SelectionTranslationPort()
 
     def _snap_begin(
         self,

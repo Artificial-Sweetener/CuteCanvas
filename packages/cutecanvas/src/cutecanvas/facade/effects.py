@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
-
 from qpane import LayerPresentationStyle
 
 from .handles import EditorHandleHost, LayerEffectHandle, LayerHandle

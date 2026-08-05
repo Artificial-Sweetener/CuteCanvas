@@ -246,6 +246,23 @@ def test_empty_selected_pixel_intersection_falls_through_to_whole_layer() -> Non
     assert resolution.layer_id == layer_id
 
 
+def test_transform_with_pixel_selection_never_falls_through_to_whole_layer() -> None:
+    """Selection-scoped transform must not silently target the complete layer."""
+
+    resolver, scene_id, layer_id = _resolver_fixture(
+        placed=False,
+        with_selection=True,
+    )
+
+    resolution = resolver.resolve(EditorOperation.TRANSFORM)
+
+    assert not resolution.allowed
+    assert resolution.target is None
+    assert resolution.denial is EditorOperationDenial.NO_SELECTED_PIXELS
+    assert resolution.scene_id == scene_id
+    assert resolution.layer_id == layer_id
+
+
 def test_global_policy_is_independent_from_intrinsic_layer_capability() -> None:
     """A supported layer must retain stable host-policy denial per operation."""
     resolver, _scene_id, _layer_id = _resolver_fixture(

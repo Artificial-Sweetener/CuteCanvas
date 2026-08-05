@@ -55,7 +55,7 @@ CuteCanvas includes:
 * **Paint Bucket** for selection-constrained flood fill.
 * **Rectangle, Ellipse, and Lasso Mask** for retained mask shapes.
 * **Vector Shape, Path, Nodes, and Text** for vector authoring.
-* **Smart Select** when the optional model feature is active.
+* **Smart Select and Smart Mask** when the optional model feature is active.
 
 The demo presents these as one restrained tool strip. Options appear only when
 the active tool needs them.

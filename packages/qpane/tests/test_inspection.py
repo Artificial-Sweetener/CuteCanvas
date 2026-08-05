@@ -22,7 +22,6 @@ from math import isclose
 
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSizeF
-
 from qpane import (
     InspectionRegion,
     InspectionStateStore,

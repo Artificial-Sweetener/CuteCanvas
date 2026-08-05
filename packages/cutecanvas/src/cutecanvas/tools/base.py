@@ -19,9 +19,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-import numpy as np
 from PySide6.QtCore import QPoint, Signal
-
 from qpane import CursorTool, PanZoomTool, ViewerTool, ViewerToolSignals
 
 from .cursor_feedback import ToolCursorStyle
@@ -34,7 +32,7 @@ class ToolSignals(ViewerToolSignals):
     stroke_completed = Signal()
     stroke_cancelled = Signal()
     brush_size_changed = Signal(int)
-    region_selected_for_masking = Signal(np.ndarray, bool)
+    smart_segmentation_requested = Signal(object)
     mask_component_adjustment_requested = Signal(QPoint, bool)
     undo_state_push_requested = Signal()
 

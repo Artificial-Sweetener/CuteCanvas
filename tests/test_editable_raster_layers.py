@@ -27,6 +27,7 @@ from cutecanvas import (
 )
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QSignalSpy, QTest
 from qpane.scene.raster import RasterBounds
 from qpane.scene.render_plan import SampledLayerRenderItem
 
@@ -102,22 +103,59 @@ def test_editable_raster_deletes_soft_selection_and_undoes_chronologically(
     coverage = QImage(4, 8, QImage.Format_Grayscale8)
     coverage.fill(128)
     assert qpane.setPixelSelection(coverage, QRect(0, 0, 4, 8))
-
+    pixel_changes = QSignalSpy(qpane.layerPixelsChanged)
     assert qpane.deleteSelectedPixels()
+    assert pixel_changes.count() == 1
+    assert pixel_changes.at(0) == [scene.scene_id, layer_id, public_layer.source_id]
     edited = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
     assert edited is not None
     assert 126 <= edited.pixelColor(1, 1).alpha() <= 128
     assert edited.pixelColor(6, 1).alpha() == 255
 
     assert qpane.undoSceneEdit()
+    assert pixel_changes.count() == 2
     restored = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
     assert restored is not None
     assert restored.pixelColor(1, 1).alpha() == 255
 
     assert qpane.redoSceneEdit()
+    assert pixel_changes.count() == 3
     redone = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
     assert redone is not None
     assert 126 <= redone.pixelColor(1, 1).alpha() <= 128
+
+
+def test_delete_key_clears_selection_in_selection_mode_but_not_brush_mode(
+    qpane_with_mask,
+) -> None:
+    """The active selection tool alone should own Delete pixel clearing."""
+    qpane, _manager, _image_id = qpane_with_mask
+    scene = qpane.currentScene()
+    assert scene is not None
+    layer_id = qpane.addEditableRasterLayer(
+        _opaque_image(8, 8),
+        placement=QRectF(0.0, 0.0, 8.0, 8.0),
+        label="Paint",
+    )
+    assert layer_id is not None
+    assert qpane.setSelectedLayer(scene.scene_id, layer_id)
+    selection = QImage(4, 8, QImage.Format_Grayscale8)
+    selection.fill(255)
+    assert qpane.setPixelSelection(selection, QRect(0, 0, 4, 8))
+
+    assert qpane.setControlMode(qpane.CONTROL_MODE_SELECT_RECTANGLE)
+    QTest.keyClick(qpane, Qt.Key_Delete)
+    cleared = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
+    assert cleared is not None
+    assert cleared.pixelColor(1, 1).alpha() == 0
+    assert cleared.pixelColor(6, 1).alpha() == 255
+
+    assert qpane.undoSceneEdit()
+    assert qpane.setControlMode(qpane.CONTROL_MODE_DRAW_BRUSH)
+    QTest.keyClick(qpane, Qt.Key_Delete)
+    retained = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
+    assert retained is not None
+    assert retained.pixelColor(1, 1).alpha() == 255
 
 
 def test_editable_raster_delete_projects_through_scaled_offset_bounds(

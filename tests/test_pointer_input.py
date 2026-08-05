@@ -34,13 +34,13 @@ from PySide6.QtGui import (
 )
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
-
 from qpane import (
     PointerDeviceKind,
     PointerPhase,
     ToolInputProfile,
     ViewerTool,
 )
+
 from tests.harness import PointerTransitionProbe
 
 

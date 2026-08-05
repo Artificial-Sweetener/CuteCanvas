@@ -22,19 +22,24 @@ from collections.abc import Callable
 
 from cutecanvas import (
     CuteCanvas,
+    EditorCursorIntent,
     EditorIntent,
+    LayerEdgeModificationResult,
     LayerPolicy,
+    PixelSelectionModificationResult,
     RasterExtentPolicy,
 )
-from PySide6.QtCore import QObject, QRect, QSize, Qt
+from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
+    QCursor,
     QKeySequence,
     QPalette,
 )
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -47,6 +52,24 @@ from PySide6.QtWidgets import (
 )
 
 from .layer_policy import DemoLayerPolicyController
+from .selection_modification_control import SelectionModificationDemoControl
+
+
+class _DemoEditorCursorTheme:
+    """Demonstrate host cursor artwork without owning editor interaction state."""
+
+    def resolve_cursor(
+        self,
+        intent: EditorCursorIntent,
+        *,
+        device_pixel_ratio: float,
+    ) -> QCursor | None:
+        """Theme selection translation and defer every other semantic intent."""
+
+        del device_pixel_ratio
+        if intent is EditorCursorIntent.SELECTION_TRANSLATE:
+            return QCursor(Qt.CursorShape.OpenHandCursor)
+        return None
 
 
 class _CenteredMenuToolButton(QToolButton):
@@ -107,6 +130,7 @@ class EditorControls(QObject):
         self._set_mode = set_mode
         self._show_status = show_status
         self._paint_layer_count = 0
+        self._qpane.setEditorCursorTheme(_DemoEditorCursorTheme())
         self.layer_policy = DemoLayerPolicyController(qpane, self)
         self._selection_actions = self._build_selection_actions()
         self._mask_shape_actions = self._build_mask_shape_actions()
@@ -140,6 +164,14 @@ class EditorControls(QObject):
             self._invert,
             QKeySequence("Ctrl+Shift+I"),
         )
+        self.selection_modification = SelectionModificationDemoControl(
+            qpane,
+            show_status,
+            self,
+        )
+        self.expand_selection_action = self.selection_modification.expand_action
+        self.contract_selection_action = self.selection_modification.contract_action
+        self.feather_selection_action = self.selection_modification.feather_action
         self.fill_selection_action = self._action(
             "Fill Selection",
             self._fill_selection,
@@ -148,6 +180,18 @@ class EditorControls(QObject):
         self.rasterize_mask_action = self._action(
             "Rasterize Mask Shapes",
             self._rasterize_mask,
+        )
+        self.expand_mask_action = self._action(
+            "Expand Complete Mask...", self._expand_mask
+        )
+        self.contract_mask_action = self._action(
+            "Contract Complete Mask...", self._contract_mask
+        )
+        self.feather_mask_action = self._action(
+            "Feather Complete Mask...", self._feather_mask
+        )
+        self.mask_opacity_action = self._action(
+            "Set Mask Visual Opacity...", self._set_mask_opacity
         )
         self.delete_pixels_action = self._action(
             "Clear Selected Pixels",
@@ -175,6 +219,13 @@ class EditorControls(QObject):
         self._floating_target_menu.aboutToShow.connect(self._populate_floating_targets)
         self._floating_toolbar: QToolBar | None = None
         qpane.pixelSelectionChanged.connect(self.refresh)
+        qpane.pixelSelectionModificationCompleted.connect(
+            self._selection_modification_completed
+        )
+        qpane.layerEdgeModificationCompleted.connect(
+            self._layer_edge_modification_completed
+        )
+        qpane.layerPixelsChanged.connect(self._layer_pixels_changed)
         qpane.floatingPixelEditChanged.connect(self.refresh)
         qpane.selectedLayerChanged.connect(self.refresh)
         qpane.editorPolicyChanged.connect(self.refresh)
@@ -226,6 +277,10 @@ class EditorControls(QObject):
         menu.addAction(self.select_all_action)
         menu.addAction(self.deselect_action)
         menu.addAction(self.invert_action)
+        modification_menu = menu.addMenu("Modify Selection")
+        modification_menu.addAction(self.expand_selection_action)
+        modification_menu.addAction(self.contract_selection_action)
+        modification_menu.addAction(self.feather_selection_action)
         menu.addAction(self.fill_selection_action)
         menu.addSeparator()
         menu.addAction(self.delete_pixels_action)
@@ -241,6 +296,10 @@ class EditorControls(QObject):
         """Add ordinary editable-layer creation to the demo's Layer menu."""
         menu.addAction(self.add_paint_layer_action)
         menu.addAction(self.rasterize_mask_action)
+        menu.addAction(self.expand_mask_action)
+        menu.addAction(self.contract_mask_action)
+        menu.addAction(self.feather_mask_action)
+        menu.addAction(self.mask_opacity_action)
 
     def add_floating_toolbar(self, window: QMainWindow) -> QToolBar:
         """Add a compact contextual bar shown only for unresolved pixels."""
@@ -276,6 +335,11 @@ class EditorControls(QObject):
         scene = self._qpane.currentScene()
         selection = self._qpane.pixelSelectionState()
         has_selection = selection is not None and selection.has_selection
+        panel_selection = (
+            None
+            if selection is None or selection.bounds is None
+            else self._qpane.sceneToPanelRect(QRectF(selection.bounds))
+        )
         selection_state = self._qpane.editorOperationState(EditorIntent.SELECT_PIXELS)
         delete_state = self._qpane.editorOperationState(EditorIntent.DELETE_PIXELS)
         floating = self._qpane.floatingPixelEditState()
@@ -283,7 +347,16 @@ class EditorControls(QObject):
         self.redo_action.setEnabled(self._qpane.sceneEditRedoAvailable())
         self.select_all_action.setEnabled(selection_state.allowed)
         self.deselect_action.setEnabled(has_selection)
+        self.deselect_action.setStatusTip(
+            "Clear the current pixel selection"
+            if panel_selection is None
+            else (
+                "Clear the pixel selection shown at "
+                f"({round(panel_selection.x())}, {round(panel_selection.y())})"
+            )
+        )
         self.invert_action.setEnabled(selection_state.allowed)
+        self.selection_modification.set_enabled(has_selection)
         self.fill_selection_action.setEnabled(has_selection)
         self.rasterize_mask_action.setEnabled(self._qpane.activeMaskID() is not None)
         self.delete_pixels_action.setEnabled(
@@ -398,6 +471,16 @@ class EditorControls(QObject):
         if self._qpane.invertPixelSelection():
             self._show_status("Selection inverted.")
 
+    def _selection_modification_completed(
+        self,
+        result: PixelSelectionModificationResult,
+    ) -> None:
+        """Present one terminal selection request without inferring completion."""
+        if result.succeeded:
+            self._show_status(f"Selection {result.operation.value} complete.")
+        elif result.message:
+            self._show_status(result.message)
+
     def _fill_selection(self) -> None:
         """Fill the active selection into the current editable target."""
         if self._qpane.fillSelection():
@@ -413,10 +496,70 @@ class EditorControls(QObject):
         else:
             self._show_status("The active mask has no retained shapes to rasterize.")
 
+    def _expand_mask(self) -> None:
+        """Expand complete active-mask coverage through generic layer routing."""
+        self._request_mask_edge("Expand Complete Mask", self._qpane.expandMaskEdges)
+
+    def _contract_mask(self) -> None:
+        """Contract complete active-mask coverage through generic layer routing."""
+        self._request_mask_edge(
+            "Contract Complete Mask",
+            self._qpane.contractMaskEdges,
+        )
+
+    def _feather_mask(self) -> None:
+        """Feather complete active-mask coverage through generic layer routing."""
+        self._request_mask_edge("Feather Complete Mask", self._qpane.featherMaskEdges)
+
+    def _request_mask_edge(
+        self,
+        title: str,
+        request: Callable[[uuid.UUID, int], uuid.UUID | None],
+    ) -> None:
+        """Prompt for one whole-mask edge radius and submit it asynchronously."""
+        mask_id = self._qpane.activeMaskID()
+        pixels, accepted = QInputDialog.getInt(
+            self._qpane,
+            title,
+            "Pixels:",
+            4,
+            1,
+            1000,
+        )
+        if mask_id is not None and accepted and request(mask_id, pixels) is not None:
+            self._show_status(f"{title} requested...")
+
+    def _set_mask_opacity(self) -> None:
+        """Change final mask presentation without editing scalar coverage."""
+        mask_id = self._qpane.activeMaskID()
+        percent, accepted = QInputDialog.getInt(
+            self._qpane,
+            "Mask Visual Opacity",
+            "Percent:",
+            50,
+            0,
+            100,
+        )
+        if (
+            mask_id is not None
+            and accepted
+            and self._qpane.setMaskProperties(mask_id, opacity=percent / 100.0)
+        ):
+            self._show_status("Mask visual opacity updated.")
+
+    def _layer_edge_modification_completed(
+        self,
+        result: LayerEdgeModificationResult,
+    ) -> None:
+        """Present terminal whole-layer work without guessing from request timing."""
+        if result.succeeded:
+            self._show_status(f"Layer {result.operation.value} complete.")
+        elif result.message:
+            self._show_status(result.message)
+
     def _delete_pixels(self) -> None:
         """Clear selected pixels from the selected editable layer."""
         if self._qpane.deleteSelectedPixels():
-            self._show_status("Cleared selected pixels from the active layer.")
             return
         state = self._qpane.editorOperationState(EditorIntent.DELETE_PIXELS)
         if "rasterize" in state.alternatives:
@@ -428,6 +571,15 @@ class EditorControls(QObject):
             self._show_status("The host editor policy disables pixel editing.")
         else:
             self._show_status("No editable selected pixels are available.")
+
+    def _layer_pixels_changed(
+        self,
+        _scene_id: uuid.UUID,
+        _layer_id: uuid.UUID,
+        _resource_id: uuid.UUID,
+    ) -> None:
+        """Present durable pixel edits from buttons, keys, undo, or redo."""
+        self._show_status("Cleared selected pixels from the active layer.")
 
     def _anchor_floating(self) -> None:
         """Resolve the transient payload into its source layer."""

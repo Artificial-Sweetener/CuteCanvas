@@ -24,7 +24,6 @@ from uuid import uuid4
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
-
 from qpane import (
     ComparisonOrientation,
     InspectionStateStore,
@@ -34,6 +33,7 @@ from qpane import (
     RenderScene,
     ViewerCatalogEntry,
 )
+
 from tests.harness.timing import INTERACTIVE_PERFORMANCE, average_interaction_latency_ms
 
 

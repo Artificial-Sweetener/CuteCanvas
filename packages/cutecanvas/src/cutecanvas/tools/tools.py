@@ -19,9 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-import numpy as np
 from PySide6.QtCore import QObject, QPoint, Signal
-
 from qpane import (
     CursorTool,
     PanZoomTool,
@@ -51,7 +49,7 @@ class ToolManagerSignals(ViewerToolManagerSignals):
     stroke_cancelled = Signal()
     brush_size_changed = Signal(int)
     undo_state_push_requested = Signal()
-    region_selected_for_masking = Signal(np.ndarray, bool)
+    smart_segmentation_requested = Signal(object)
     mask_component_adjustment_requested = Signal(QPoint, bool)
 
 
@@ -69,6 +67,7 @@ class Tools(ToolManager):
     CONTROL_MODE_CLONE_STAMP = "clone-stamp"
     CONTROL_MODE_PAINT_BUCKET = "paint-bucket"
     CONTROL_MODE_SMART_SELECT = "smart-select"
+    CONTROL_MODE_SMART_MASK = "smart-mask"
     CONTROL_MODE_SELECT_RECTANGLE = "select-rectangle"
     CONTROL_MODE_SELECT_ELLIPSE = "select-ellipse"
     CONTROL_MODE_SELECT_LASSO = "select-lasso"

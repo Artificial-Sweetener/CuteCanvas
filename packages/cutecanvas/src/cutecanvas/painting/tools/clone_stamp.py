@@ -22,10 +22,10 @@ from typing import ClassVar
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QWheelEvent
+from qpane import PointerPhase, PointerSample
 
 from cutecanvas.tools.cursor_feedback import ToolCursorStyle
 from cutecanvas.tools.ports import CloneStampInteractionPort
-from qpane import PointerPhase, PointerSample
 
 from .brush import BrushTool
 from .brush_preview import AffineBrushPreview, AffineBrushPreviewRenderer

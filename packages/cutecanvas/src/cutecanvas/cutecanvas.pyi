@@ -36,6 +36,24 @@ from PySide6.QtGui import (
     QTransform,
 )
 from PySide6.QtWidgets import QWidget
+from qpane import (
+    ComparisonOrientation as ComparisonOrientation,
+)
+from qpane import (
+    DiagnosticRecord as DiagnosticRecord,
+)
+from qpane import (
+    LayerPresentationEffect as LayerPresentationEffect,
+)
+from qpane import (
+    LayerPresentationEffectKind as LayerPresentationEffectKind,
+)
+from qpane import (
+    LayerPresentationStyle as LayerPresentationStyle,
+)
+from qpane import (
+    PanelHitTest,
+)
 from qpane.sdk.execution import BackendSubmission as BackendSubmission
 from qpane.sdk.execution import DefaultExecutionPolicy
 from qpane.sdk.execution import DiagnosticsSubscription as DiagnosticsSubscription
@@ -74,25 +92,6 @@ from qpane.sdk.ui import (
 )
 from typing_extensions import Self
 
-from qpane import (
-    ComparisonOrientation as ComparisonOrientation,
-)
-from qpane import (
-    DiagnosticRecord as DiagnosticRecord,
-)
-from qpane import (
-    LayerPresentationEffect as LayerPresentationEffect,
-)
-from qpane import (
-    LayerPresentationEffectKind as LayerPresentationEffectKind,
-)
-from qpane import (
-    LayerPresentationStyle as LayerPresentationStyle,
-)
-from qpane import (
-    PanelHitTest,
-)
-
 from .composition.geometry_policy import LayerGeometryMode as LayerGeometryMode
 from .composition.geometry_policy import LayerGeometryPolicy as LayerGeometryPolicy
 from .core import (
@@ -103,6 +102,8 @@ from .core import (
 )
 from .core import OverlayDrawFn as OverlayDrawFn
 from .coverage import CoverageShapeOptions as CoverageShapeOptions
+from .cursor import EditorCursorIntent as EditorCursorIntent
+from .cursor import EditorCursorTheme as EditorCursorTheme
 from .document import CanvasComparison as CanvasComparison
 from .document import CanvasContentKind as CanvasContentKind
 from .document import CanvasContentReference as CanvasContentReference
@@ -192,6 +193,7 @@ class ControlMode(str, Enum):
     DRAW_BRUSH = "draw-brush"
     CLONE_STAMP = "clone-stamp"
     SMART_SELECT = "smart-select"
+    SMART_MASK = "smart-mask"
     SELECT_RECTANGLE = "select-rectangle"
     SELECT_ELLIPSE = "select-ellipse"
     SELECT_LASSO = "select-lasso"
@@ -231,6 +233,11 @@ class PixelSelectionMode(str, Enum):
     ADD = "add"
     SUBTRACT = "subtract"
     INTERSECT = "intersect"
+
+class LayerEdgeOperation(str, Enum):
+    EXPAND = "expand"
+    CONTRACT = "contract"
+    FEATHER = "feather"
 
 class CoverageCoordinateSpace(str, Enum):
     TARGET = "target"
@@ -553,6 +560,24 @@ class PixelSelectionSnapshot:
     @property
     def has_selection(self) -> bool: ...
 
+@dataclass(frozen=True, slots=True)
+class PixelSelectionModificationResult:
+    request_id: uuid.UUID
+    scene_id: uuid.UUID
+    operation: LayerEdgeOperation
+    succeeded: bool
+    message: str = ...
+
+@dataclass(frozen=True, slots=True)
+class LayerEdgeModificationResult:
+    request_id: uuid.UUID
+    session_id: uuid.UUID
+    scene_id: uuid.UUID
+    layer_id: uuid.UUID
+    operation: LayerEdgeOperation
+    succeeded: bool
+    message: str = ...
+
 class FloatingPixelSnapshot:
     scene_id: uuid.UUID
     source_layer_id: uuid.UUID
@@ -645,6 +670,7 @@ class CuteCanvas(QWidget):
     CONTROL_MODE_CLONE_STAMP: str
     CONTROL_MODE_PAINT_BUCKET: str
     CONTROL_MODE_SMART_SELECT: str
+    CONTROL_MODE_SMART_MASK: str
     CONTROL_MODE_SELECT_RECTANGLE: str
     CONTROL_MODE_SELECT_ELLIPSE: str
     CONTROL_MODE_SELECT_LASSO: str
@@ -665,8 +691,11 @@ class CuteCanvas(QWidget):
     compositionChanged: Signal
     compositionSelectionChanged: Signal
     sceneChanged: Signal
+    layerPixelsChanged: Signal
     sceneEditHistoryChanged: Signal
     pixelSelectionChanged: Signal
+    pixelSelectionModificationCompleted: Signal
+    layerEdgeModificationCompleted: Signal
     paintTargetChanged: Signal
     brushPresetChanged: Signal
     paintColorChanged: Signal
@@ -762,6 +791,7 @@ class CuteCanvas(QWidget):
     def getControlMode(self) -> str: ...
     def currentZoom(self) -> float: ...
     def currentViewportRect(self) -> QRectF: ...
+    def sceneToPanelRect(self, scene_rect: QRectF) -> QRectF | None: ...
     def setZoomFit(self) -> None: ...
     def renderBrushTipPreview(
         self,
@@ -909,6 +939,43 @@ class CuteCanvas(QWidget):
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
     ) -> bool: ...
+    def setLayerOpacity(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        opacity: float,
+    ) -> bool: ...
+    def beginLayerEdgePreview(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+    ) -> uuid.UUID | None: ...
+    def updateLayerEdgePreview(
+        self,
+        session_id: uuid.UUID,
+        operation: LayerEdgeOperation,
+        radius: float,
+    ) -> uuid.UUID | None: ...
+    def settleLayerEdgePreview(self, session_id: uuid.UUID) -> bool: ...
+    def cancelLayerEdgePreview(self, session_id: uuid.UUID) -> bool: ...
+    def expandLayerEdges(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixels: int,
+    ) -> uuid.UUID | None: ...
+    def contractLayerEdges(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        pixels: int,
+    ) -> uuid.UUID | None: ...
+    def featherLayerEdges(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        radius: float,
+    ) -> uuid.UUID | None: ...
     def setSelectedLayers(
         self,
         scene_id: uuid.UUID,
@@ -1250,6 +1317,22 @@ class CuteCanvas(QWidget):
         layer_id: uuid.UUID,
         mode: PixelSelectionMode = ...,
     ) -> bool: ...
+    def expandPixelSelection(self, pixels: int) -> uuid.UUID | None: ...
+    def contractPixelSelection(self, pixels: int) -> uuid.UUID | None: ...
+    def featherPixelSelection(self, radius: float) -> uuid.UUID | None: ...
+    def beginPixelSelectionModificationPreview(self) -> uuid.UUID | None: ...
+    def updatePixelSelectionModificationPreview(
+        self,
+        session_id: uuid.UUID,
+        operation: LayerEdgeOperation,
+        radius: float,
+    ) -> uuid.UUID | None: ...
+    def settlePixelSelectionModificationPreview(
+        self, session_id: uuid.UUID
+    ) -> bool: ...
+    def cancelPixelSelectionModificationPreview(
+        self, session_id: uuid.UUID
+    ) -> bool: ...
     def deleteSelectedPixels(self) -> bool: ...
     def floatingPixelEditState(self) -> FloatingPixelSnapshot | None: ...
     def anchorFloatingPixels(
@@ -1298,6 +1381,7 @@ class CuteCanvas(QWidget):
     def maybeResumeOverlays(self) -> None: ...
     def registerCursorProvider(self, mode: str, provider: CursorProvider) -> None: ...
     def unregisterCursorProvider(self, mode: str) -> None: ...
+    def setEditorCursorTheme(self, theme: EditorCursorTheme | None) -> None: ...
     def registerTool(
         self,
         mode: str,
@@ -1327,6 +1411,14 @@ class CuteCanvas(QWidget):
         color: QColor | None = ...,
         opacity: float | None = ...,
     ) -> bool: ...
+    def beginMaskEdgePreview(self, mask_id: uuid.UUID) -> uuid.UUID | None: ...
+    def expandMaskEdges(self, mask_id: uuid.UUID, pixels: int) -> uuid.UUID | None: ...
+    def contractMaskEdges(
+        self, mask_id: uuid.UUID, pixels: int
+    ) -> uuid.UUID | None: ...
+    def featherMaskEdges(
+        self, mask_id: uuid.UUID, radius: float
+    ) -> uuid.UUID | None: ...
     def prefetchMaskOverlays(
         self, composition_id: uuid.UUID | None, *, reason: str = ...
     ) -> bool: ...

@@ -22,20 +22,28 @@ from pathlib import Path
 
 from .model import ProductContract
 
+try:
+    from tools.architecture.policy import load_policy
+    from tools.architecture.python_validation import validate_python
+except ModuleNotFoundError:  # Script execution places tools on sys.path.
+    from architecture.policy import load_policy
+    from architecture.python_validation import validate_python
+
 
 def validate_boundaries(
     root: Path,
     products: tuple[ProductContract, ...],
 ) -> list[str]:
-    """Return reverse dependency and public-demo inventory violations."""
-    qpane = next(product for product in products if product.package == "qpane")
-    cutecanvas = next(
-        product for product in products if product.package == "cutecanvas"
-    )
-    errors = _forbidden_imports(qpane.source, "cutecanvas")
-    errors.extend(_private_dependency_imports(cutecanvas.source, "qpane"))
+    """Return declarative product-boundary and public-demo violations."""
+    del products
+    policy = load_policy(root / "ARCHITECTURE_POLICY.toml")
+    errors = [
+        diagnostic.render()
+        for diagnostic in validate_python(root, policy)
+        if diagnostic.severity == "error"
+    ]
     demos = {path.name for path in (root / "examples").glob("*_demo.py")}
-    expected = {"qpane_demo.py", "cutecanvas_demo.py"}
+    expected = {"ferrastra_demo.py", "qpane_demo.py", "cutecanvas_demo.py"}
     if demos != expected:
         errors.append(
             f"examples: expected exactly {sorted(expected)}, found {sorted(demos)}"

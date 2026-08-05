@@ -154,6 +154,74 @@ def test_pixel_lasso_preview_and_commit_share_canvas_aperture(qapp) -> None:
         harness.close()
 
 
+def test_inside_selection_drag_moves_boundaries_without_moving_mask_content(
+    qapp,
+) -> None:
+    """Selection-tool translation must never enter the selected-pixel move path."""
+    harness = MountedQPaneHarness(qapp)
+    viewer = harness.viewer
+    try:
+        selection_start = viewer.view().scene_to_panel_point(QPointF(100.0, 100.0))
+        selection_end = viewer.view().scene_to_panel_point(QPointF(220.0, 220.0))
+        drag_start = viewer.view().scene_to_panel_point(QPointF(150.0, 150.0))
+        drag_end = viewer.view().scene_to_panel_point(QPointF(190.0, 175.0))
+        assert selection_start is not None and selection_end is not None
+        assert drag_start is not None and drag_end is not None
+
+        layer = viewer.mask_service.assets.get_layer(harness.mask_ids[0])
+        assert layer is not None
+        layer.coverage.raster.mutate(
+            lambda pixels, _image: pixels[140:160, 140:160].fill(255)
+        )
+        content_before = layer.coverage.raster.snapshot_array()
+        assert content_before.any()
+
+        viewer.setControlMode(viewer.CONTROL_MODE_SELECT_RECTANGLE)
+        QTest.mousePress(
+            viewer,
+            Qt.MouseButton.LeftButton,
+            pos=selection_start.toPoint(),
+        )
+        QTest.mouseMove(viewer, selection_end.toPoint(), delay=0)
+        QTest.mouseRelease(
+            viewer,
+            Qt.MouseButton.LeftButton,
+            pos=selection_end.toPoint(),
+        )
+        harness.drain_events()
+        before = viewer.pixelSelectionState()
+        assert before is not None and before.bounds is not None
+
+        QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=drag_start.toPoint())
+        QTest.mouseMove(viewer, drag_end.toPoint(), delay=0)
+        preview = viewer.pixelSelectionState()
+        assert preview is not None and preview.bounds is not None
+        assert preview.bounds != before.bounds
+        np.testing.assert_array_equal(
+            layer.coverage.raster.snapshot_array(),
+            content_before,
+        )
+        QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=drag_end.toPoint())
+        harness.drain_events()
+
+        moved = viewer.pixelSelectionState()
+        assert moved is not None and moved.bounds is not None
+        assert moved.bounds.x() - before.bounds.x() == 40
+        assert moved.bounds.y() - before.bounds.y() == 25
+        np.testing.assert_array_equal(
+            layer.coverage.raster.snapshot_array(),
+            content_before,
+        )
+        assert viewer.undoSceneEdit()
+        assert viewer.pixelSelectionState().bounds == before.bounds
+        np.testing.assert_array_equal(
+            layer.coverage.raster.snapshot_array(),
+            content_before,
+        )
+    finally:
+        harness.close()
+
+
 def test_out_of_bounds_selection_input_storm_stays_clipped_and_cancelable(
     qapp,
 ) -> None:

@@ -33,10 +33,9 @@ from cutecanvas.masks.mask_diagnostics import (
 from cutecanvas.masks.sam_feature import (
     _sam_summary_diagnostics_provider,
 )
+from qpane.cache import cache_detail_provider, cache_diagnostics_provider
 from qpane.sdk.execution import RetryCategorySnapshot, RetrySnapshot
 from qpane.types import DiagnosticRecord
-
-from qpane.cache import cache_detail_provider, cache_diagnostics_provider
 
 
 def test_diagnostics_cached_snapshot_reuses_provider(qapp):

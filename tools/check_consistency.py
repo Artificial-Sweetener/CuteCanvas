@@ -14,7 +14,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Run authoritative per-package Public API Trinity validation."""
+"""Run authoritative Public API Trinity validation for every product."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from trinity.checker import run
 
 
 def main() -> None:
-    """Validate QPane and CuteCanvas from the repository root."""
+    """Validate Ferrastra, QPane, and CuteCanvas from the repository root."""
     run(Path(__file__).resolve().parent.parent)
 
 

@@ -206,18 +206,25 @@ def test_inference_uses_same_affinity_session_and_publishes_uint8_mask(
     image_id = uuid.uuid4()
     manager.requestPredictor(_image(), image_id)
     backend.run_all()
-    masks: list[tuple[object, np.ndarray, bool]] = []
+    masks: list[tuple[object, np.ndarray, bool, object | None]] = []
     manager.maskReady.connect(lambda *args: masks.append(args))
     bbox = np.array([0, 0, 4, 3])
-    manager.generateMaskFromBox(image_id, bbox, erase_mode=True)
+    request_context = object()
+    manager.generateMaskFromBox(
+        image_id,
+        bbox,
+        erase_mode=True,
+        context=request_context,
+    )
     assert backend.pending_jobs()[0].operation == "editor.sam.infer_box"
     backend.run_all()
-    mask, published_bbox, erase_mode = masks[-1]
+    mask, published_bbox, erase_mode, context = masks[-1]
     assert mask.shape == (3, 4)
     assert mask.dtype == np.uint8
     assert np.all(mask == 255)
     assert np.array_equal(published_bbox, bbox)
     assert erase_mode is True
+    assert context is request_context
     runtime.shutdown()
 
 

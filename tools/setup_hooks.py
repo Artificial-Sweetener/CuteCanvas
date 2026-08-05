@@ -69,8 +69,6 @@ echo "Running pre-commit checks..."
 # Note: Git hooks run from the repo root
 VENV_SCRIPTS="./.venv/Scripts"
 PYTHON="$VENV_SCRIPTS/python.exe"
-RUFF="$VENV_SCRIPTS/ruff.exe"
-BLACK="$VENV_SCRIPTS/black.exe"
 
 if [ ! -f "$PYTHON" ]; then
     echo "Error: Virtual environment not found at $PYTHON"
@@ -78,34 +76,20 @@ if [ ! -f "$PYTHON" ]; then
     exit 1
 fi
 
-# 1. Run Ruff (Linting & Fixing)
-if [ -f "$RUFF" ]; then
-    echo "Auto-fixing lint issues with ruff..."
-    "$RUFF" check --fix .
-    # If ruff failed to fix everything (exit code != 0), we should probably abort
-    if [ $? -ne 0 ]; then
-        echo "Ruff could not fix all issues. Commit aborted."
-        exit 1
-    fi
-else
-    echo "Warning: ruff not found in venv. Skipping."
-fi
+# 1. Run check-only format and lint gates. Hooks never mutate the worktree.
+echo "Checking Ruff..."
+"$PYTHON" -m ruff check . || exit 1
 
-# 2. Run Black (Formatting)
-if [ -f "$BLACK" ]; then
-    echo "Auto-formatting with black..."
-    "$BLACK" .
-else
-    echo "Warning: black not found in venv. Skipping."
-fi
+echo "Checking Black formatting..."
+"$PYTHON" -m black --check . || exit 1
 
 # 3. Run Custom Tools
 echo "Running custom tools..."
 
-# fix_encoding.py (Auto-fix)
+# fix_encoding.py
 if [ -f "tools/fix_encoding.py" ]; then
     echo "Ensuring UTF-8 encoding..."
-    "$PYTHON" tools/fix_encoding.py
+    "$PYTHON" tools/fix_encoding.py --check
     if [ $? -ne 0 ]; then
         echo "Encoding check failed. Commit aborted."
         exit 1
@@ -115,7 +99,7 @@ fi
 # check_docstrings.py
 if [ -f "tools/check_docstrings.py" ]; then
     echo "Checking docstrings..."
-    "$PYTHON" tools/check_docstrings.py
+    "$PYTHON" tools/check_docstrings.py --check
     if [ $? -ne 0 ]; then
         echo "Docstring check failed. Commit aborted."
         exit 1
@@ -142,20 +126,35 @@ if [ -f "tools/check_consistency.py" ]; then
     fi
 fi
 
-# add_license_headers.py (Auto-fix)
+# Ferrastra architecture and ownership policy
+for CHECKER in check_ferrastra_architecture.py check_ferrastra_operations.py check_ferrastra_ownership.py check_ferrastra_benchmarks.py; do
+    echo "Running $CHECKER..."
+    "$PYTHON" "tools/$CHECKER"
+    if [ $? -ne 0 ]; then
+        echo "$CHECKER failed. Commit aborted."
+        exit 1
+    fi
+done
+
+# Strict Ferrastra Python lint and typing
+"$PYTHON" -m ruff check --config ruff-ferrastra.toml . || exit 1
+"$PYTHON" -m pyright -p pyright-ferrastraconfig.json || exit 1
+
+# Native formatting, lint, tests, and dependency policy
+cargo fmt --all --check || exit 1
+cargo clippy --workspace --all-targets --all-features -- -D warnings || exit 1
+cargo test --workspace --all-features || exit 1
+cargo deny check || exit 1
+
+# add_license_headers.py
 if [ -f "tools/add_license_headers.py" ]; then
     echo "Ensuring license headers..."
-    "$PYTHON" tools/add_license_headers.py
+    "$PYTHON" tools/add_license_headers.py --check
     if [ $? -ne 0 ]; then
         echo "License header check failed. Commit aborted."
         exit 1
     fi
 fi
-
-# 4. Stage the changes
-# We re-add all modified tracked files to ensure the formatting/fixes are included in the commit.
-echo "Staging fixes..."
-git add -u
 
 # --- Test Caching ---
 # If the staged content (tree) hasn't changed since the last successful test run, skip tests.

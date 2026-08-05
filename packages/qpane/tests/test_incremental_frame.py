@@ -18,9 +18,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QRect, QSize
+from qpane import QtOwnerDispatcher
 from qpane.rendering.incremental_frame import IncrementalFrameRefiner
 
-from qpane import QtOwnerDispatcher
 from tests.helpers.execution_backend import ControlledExecution
 from tests.helpers.render_plan import make_render_plan
 

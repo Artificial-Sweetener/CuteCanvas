@@ -23,8 +23,8 @@ import uuid
 
 import pytest
 from PySide6.QtGui import QImage, Qt
-
 from qpane.rendering import PyramidManager, PyramidStatus
+
 from tests.helpers.config import fixed_cache_config
 from tests.helpers.execution_backend import ControlledExecution
 from tests.helpers.render_plan import make_source_key

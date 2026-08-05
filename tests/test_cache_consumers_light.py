@@ -83,12 +83,15 @@ def test_safe_int_logs_once_for_invalid_values(caplog, monkeypatch) -> None:
     assert len(warnings) == 1
 
 
-def test_mask_overlay_consumer_delegates_protected_trim() -> None:
-    """Mask trims should let the cache owner protect active entries."""
+def test_mask_overlay_consumer_excludes_protected_working_set(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Protected active overlays must not be presented as evictable cache usage."""
 
     class _ControllerStub:
         def __init__(self) -> None:
             self.cache_usage_bytes = 10
+            self.evictable_cache_usage_bytes = 0
             self.drop_calls: list[str] = []
 
         def drop_oldest(self, *, reason: str) -> int:
@@ -109,8 +112,11 @@ def test_mask_overlay_consumer_delegates_protected_trim() -> None:
         consumer_id="mask_overlays",
         priority=CachePriority.DERIVED_OVERLAYS,
     )
-    consumer._trim_to(0)
-    assert controller.drop_calls == ["coordinator"]
+    with caplog.at_level("WARNING"):
+        consumer._trim_to(0)
+
+    assert controller.drop_calls == []
+    assert "failed to trim below target" not in caplog.text
 
 
 def test_sam_predictor_consumer_trims_and_updates_usage() -> None:

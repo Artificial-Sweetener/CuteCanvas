@@ -30,7 +30,7 @@ class ProductContract:
     root: Path
     stub_name: str
     demo_paths: tuple[Path, ...]
-    config_class: str
+    config_class: str | None
 
     @property
     def source(self) -> Path:
@@ -68,9 +68,17 @@ class ProductContract:
         return (self.readme, *docs)
 
 
-def repository_products(root: Path) -> tuple[ProductContract, ProductContract]:
-    """Return QPane and CuteCanvas contracts for the repository root."""
+def repository_products(root: Path) -> tuple[ProductContract, ...]:
+    """Return every independently published product contract."""
     return (
+        ProductContract(
+            package="ferrastra",
+            facade_class="Ferrastra",
+            root=root / "packages/ferrastra",
+            stub_name="ferrastra.pyi",
+            demo_paths=(root / "examples/ferrastra_demo.py",),
+            config_class=None,
+        ),
         ProductContract(
             package="qpane",
             facade_class="QPane",

@@ -27,7 +27,7 @@ from cutecanvas.tools.ports import (
     NavigationInteractionPort,
     PaintingInteractionPort,
     PixelSelectionInteractionPort,
-    SmartSelectionInteractionPort,
+    SmartSegmentationInteractionPort,
     ToolActivationPorts,
     TransformInteractionPort,
     tool_activation_ports,
@@ -36,7 +36,6 @@ from cutecanvas.tools.tools import Tools
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
-
 from qpane import CursorTool, PanZoomTool, ViewerTool
 
 pytestmark = [
@@ -153,7 +152,7 @@ def test_custom_tool_receives_frozen_dependency_mapping_projection(qapp) -> None
         transform=TransformInteractionPort(),
         pixel_selection=PixelSelectionInteractionPort(),
         painting=PaintingInteractionPort(get_brush_size=lambda: 31),
-        smart_selection=SmartSelectionInteractionPort(),
+        smart_segmentation=SmartSegmentationInteractionPort(),
     )
 
     manager.set_mode("inspect", ports)

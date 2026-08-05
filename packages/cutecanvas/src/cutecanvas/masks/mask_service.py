@@ -92,7 +92,6 @@ class MaskService:
             active_scene=qpane.sceneMutationCoordinator().active_scene,
         )
         self._generated_edits = MaskGeneratedEditService(
-            active_mask_id=mask_controller.get_active_mask_id,
             projection=self._projection,
             edits=mask_controller.edits,
             renders=mask_controller.renders,
@@ -573,7 +572,6 @@ class MaskService:
         erase_mode: bool,
     ) -> None:
         """Merge a generated mask array into the active layer or clear stale overlays."""
-        del bbox
         composition_id = self._qpane.currentCompositionID()
         if not self.ensureActiveMaskForComposition(composition_id):
             logger.info(
@@ -581,15 +579,35 @@ class MaskService:
                 composition_id,
             )
             return
+        mask_id = self.getActiveMaskId()
+        if mask_id is None:
+            return
+        self.handleGeneratedMaskFor(
+            mask_id,
+            mask_array_uint8,
+            bbox,
+            erase_mode,
+        )
+
+    def handleGeneratedMaskFor(
+        self,
+        mask_id: uuid.UUID,
+        mask_array_uint8: np.ndarray | None,
+        bbox: np.ndarray,
+        erase_mode: bool,
+    ) -> None:
+        """Merge generated coverage into the exact mask captured by a request."""
+        del bbox
         update = self._generated_edits.apply(
+            mask_id,
             mask_array_uint8,
             erase=erase_mode,
         )
         if update is None:
             return
-        mask_id, changed = update
+        updated_mask_id, changed = update
         if not changed:
-            self._mask_controller.mask_updated.emit(mask_id, QRect())
+            self._mask_controller.mask_updated.emit(updated_mask_id, QRect())
 
     def getColorizedMask(
         self, mask_layer: MaskLayer, *, scale: float | None = None

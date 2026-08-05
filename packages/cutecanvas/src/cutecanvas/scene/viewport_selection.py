@@ -31,6 +31,7 @@ from ..document import (
     CanvasViewportSpec,
 )
 from ..masks.coverage_preview_source import MaskCoverageSourceReference
+from ..resources import ProjectResourceKind, ProjectResourceReference
 from .layer_assembly import CompositionLayerSceneAssembler
 
 
@@ -68,10 +69,10 @@ class ViewportSceneSelection:
         composition_id = self.composition_id(spec)
         if document_scene.scene_id != composition_id:
             raise ValueError("document scene does not match viewport source")
-        selected = self.assembler.assemble_instances(
-            document_scene,
-            self._instances(spec, composition_id),
-        )
+        instances = self._instances(spec, composition_id)
+        if spec.render_variant is CanvasRenderVariant.MASK_COVERAGE:
+            self._validate_mask_coverage_instances(instances)
+        selected = self.assembler.assemble_instances(document_scene, instances)
         if spec.render_variant is CanvasRenderVariant.MASK_COVERAGE:
             return self._mask_coverage_scene(selected)
         return selected
@@ -123,6 +124,21 @@ class ViewportSceneSelection:
         if spec.source.document_id != self.document.document_id:
             raise ValueError("viewport source belongs to another document")
 
+    def _validate_mask_coverage_instances(
+        self,
+        instances: tuple[CompositionLayerInstance, ...],
+    ) -> None:
+        """Require a coverage resource even when its evaluated surface is empty."""
+        resources = self.document.resources.resources
+        for instance in instances:
+            source = instance.source
+            if not isinstance(source, ProjectResourceReference):
+                continue
+            resource = resources.resolve(source)
+            if resource is not None and resource.kind is ProjectResourceKind.COVERAGE:
+                return
+        raise ValueError("mask-coverage viewport requires at least one mask layer")
+
     @staticmethod
     def _mask_coverage_scene(scene: SceneDescriptor) -> SceneDescriptor:
         """Normalize selected mask layers for neutral coverage rendering."""
@@ -135,8 +151,6 @@ class ViewportSceneSelection:
             for layer in scene.layers
             if layer.kind is LayerKind.MASK
         )
-        if not layers:
-            raise ValueError("mask-coverage viewport requires at least one mask layer")
         return replace(scene, layers=layers)
 
 

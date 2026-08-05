@@ -30,6 +30,7 @@ from qpane.sdk.scene import (
     TransformOperation,
 )
 
+from cutecanvas.coverage.containment import coverage_contains
 from cutecanvas.scene.pixel_move_preview import RasterPixelMovePreview
 
 from ..scene.layer_selection import SceneLayerSelectionController
@@ -44,7 +45,6 @@ from .floating_session import FloatingPixelSession
 from .pixel_move_target import (
     SelectedPixelMoveTarget,
     SelectedPixelMoveTargetResolver,
-    coverage_contains,
 )
 from .selection_projection import LayerSelectionProjectionCache
 

@@ -80,7 +80,7 @@ config = {
     "touch_inertia_enabled": True,  # Continue translation briefly after touch release.
     "touch_inertia_deceleration": 4500.0,  # Kinetic deceleration in physical px/s².
     "mask_undo_limit": 20,  # Max undo steps retained per mask.
-    "smart_select_min_size": 5,  # Minimum selection size (px) for smart-select tool.
+    "smart_select_min_size": 5,  # Minimum prompt size (px) for Smart segmentation.
     "mask_border_enabled": False,  # Draw mask borders.
     "mask_prefetch_enabled": True,  # Allow background mask prefetch on navigation.
     "mask_autosave_enabled": False,  # Enable autosave for masks.

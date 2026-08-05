@@ -21,9 +21,9 @@ from pathlib import Path
 from types import ModuleType
 
 from tools.trinity.boundaries import _forbidden_imports, _private_dependency_imports
-from tools.trinity.configuration import _compare_mapping
+from tools.trinity.configuration import _compare_mapping, validate_configuration
 from tools.trinity.demo import validate_demo
-from tools.trinity.model import ProductContract
+from tools.trinity.model import ProductContract, repository_products
 from tools.trinity.provisioning import _compare_tier_extras
 from tools.trinity.sdk import _validate_module_contract
 from tools.trinity.stubs import StubContract, parse_stub_contract
@@ -141,6 +141,34 @@ def test_documented_configuration_value_mismatch_fails() -> None:
         "value mismatch at root.cache.mode: docs='hard', actual='auto'",
         "value mismatch at root.cache.budget_mb: docs=2048, actual=None",
     ]
+
+
+def test_repository_contracts_include_ferrastra() -> None:
+    """Every independently published package participates in Trinity."""
+    products = repository_products(Path("repository"))
+
+    assert tuple(product.package for product in products) == (
+        "ferrastra",
+        "qpane",
+        "cutecanvas",
+    )
+    assert products[0].config_class is None
+
+
+def test_configuration_validation_skips_products_without_configuration(
+    tmp_path: Path,
+) -> None:
+    """A product without configuration has no synthetic configuration pillar."""
+    product = ProductContract(
+        package="ferrastra",
+        facade_class="Ferrastra",
+        root=tmp_path,
+        stub_name="ferrastra.pyi",
+        demo_paths=(),
+        config_class=None,
+    )
+
+    assert validate_configuration(product) == []
 
 
 def test_demo_tiers_cannot_reference_removed_package_extras() -> None:

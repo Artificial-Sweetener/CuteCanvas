@@ -27,6 +27,7 @@ from PySide6.QtGui import QColor, QImage
 
 from cutecanvas.masks.export import MaskExportSnapshot, MaskImageExportService
 from cutecanvas.masks.workflow import MaskInfo
+from cutecanvas.types import LayerEdgeOperation
 
 if TYPE_CHECKING:
     from cutecanvas.composition.scene_adapter import CompositionSceneAdapter
@@ -58,6 +59,52 @@ class MaskApiMixin:
     def getActiveMaskImage(self) -> QImage | None:
         """Return the active mask clipped to the document canvas."""
         return self._masks_controller.get_active_mask_image()
+
+    def beginMaskEdgePreview(self, mask_id: uuid.UUID) -> uuid.UUID | None:
+        """Begin a nonmodal whole-mask edge preview through its layer adapter."""
+        scene_id, layer_id = self._mask_layer_address(mask_id)
+        if scene_id is None or layer_id is None:
+            return None
+        return self.beginLayerEdgePreview(scene_id, layer_id)
+
+    def expandMaskEdges(self, mask_id: uuid.UUID, pixels: int) -> uuid.UUID | None:
+        """Expand complete mask coverage as one asynchronous history edit."""
+        return self._request_mask_edge(mask_id, LayerEdgeOperation.EXPAND, pixels)
+
+    def contractMaskEdges(self, mask_id: uuid.UUID, pixels: int) -> uuid.UUID | None:
+        """Contract complete mask coverage as one asynchronous history edit."""
+        return self._request_mask_edge(mask_id, LayerEdgeOperation.CONTRACT, pixels)
+
+    def featherMaskEdges(self, mask_id: uuid.UUID, radius: float) -> uuid.UUID | None:
+        """Feather complete mask coverage as one asynchronous history edit."""
+        return self._request_mask_edge(mask_id, LayerEdgeOperation.FEATHER, radius)
+
+    def _request_mask_edge(
+        self,
+        mask_id: uuid.UUID,
+        operation: LayerEdgeOperation,
+        radius: float,
+    ) -> uuid.UUID | None:
+        """Resolve one mask instance and submit its generic layer operation."""
+        scene_id, layer_id = self._mask_layer_address(mask_id)
+        if scene_id is None or layer_id is None:
+            return None
+        return self._request_layer_edge_operation(
+            scene_id,
+            layer_id,
+            operation,
+            radius,
+        )
+
+    def _mask_layer_address(
+        self,
+        mask_id: uuid.UUID,
+    ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+        """Return the current composition instance address for one mask."""
+        if not isinstance(mask_id, uuid.UUID):
+            raise TypeError("mask_id must be a UUID")
+        info = self._masks_controller.maskInfo(mask_id)
+        return (None, None) if info is None else (info.scene_id, info.layer_id)
 
     def exportMaskImage(
         self,

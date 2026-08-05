@@ -21,12 +21,12 @@ from time import monotonic
 
 from cutecanvas import CuteCanvas
 from PySide6.QtGui import QColor, QImage
+from qpane import create_default_execution_runtime
 
 from examples.demonstration.document_saves import (
     DocumentSaveCoordinator,
     DocumentSaveResult,
 )
-from qpane import create_default_execution_runtime
 
 
 def test_document_save_coordinator_writes_detached_workspace_off_thread(

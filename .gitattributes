@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.bmp binary
+*.cutecanvas binary
+*.dll binary
+*.dylib binary
+*.gif binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.pdb binary
+*.pdf binary
+*.png binary
+*.pyd binary
+*.so binary
+*.webp binary
+*.whl binary

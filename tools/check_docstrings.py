@@ -22,6 +22,7 @@ and function has a docstring. Automatically fixes whitespace and formatting
 issues to match the project's contribution guidelines.
 """
 
+import argparse
 import ast
 import inspect
 import sys
@@ -31,6 +32,8 @@ from pathlib import Path
 TARGET_DIRS = [
     "packages/qpane/src/qpane",
     "packages/cutecanvas/src/cutecanvas",
+    "packages/ferrastra/src/ferrastra",
+    "tools/architecture",
     "examples",
 ]
 
@@ -318,6 +321,10 @@ def check_file(filepath: Path) -> list[tuple[int, str]]:
 
 
 def main() -> None:
+    """Check package docstrings and optionally normalize their formatting."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true")
+    arguments = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     qpane_errors = {}
     examples_errors = {}
@@ -338,7 +345,8 @@ def main() -> None:
             rel_path = filepath.relative_to(root)
             print(f"{rel_path} ", end="", flush=True)
             total_files += 1
-            fix_file(filepath)
+            if not arguments.check:
+                fix_file(filepath)
             errors = check_file(filepath)
             print()
             if errors:
