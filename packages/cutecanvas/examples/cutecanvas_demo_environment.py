@@ -74,13 +74,14 @@ class DemoEnvironmentError(RuntimeError):
 class DemoEnvironmentManager:
     """Provision tier environments and launch the demo inside them."""
 
-    _MARKER_NAME = ".qpane-install-fingerprint"
+    _MARKER_NAME = ".cutecanvas-install-fingerprint"
 
     def __init__(self, entry_point: Path) -> None:
         """Bind environment paths to the demo entry point."""
         self._entry_point = entry_point.resolve()
         self._environment_root = self._entry_point.parent
         self._project_root = self._environment_root.parent
+        self._qpane_root = self._project_root.parent / "qpane"
 
     def environment_dir(self, tier: str) -> Path:
         """Return the isolated environment directory for a tier."""
@@ -170,11 +171,20 @@ class DemoEnvironmentManager:
             cwd=self._project_root,
         )
         definition = self._tier(tier)
-        target = str(self._project_root)
+        cutecanvas_target = str(self._project_root)
         if definition.extra:
-            target = f"{target}[{definition.extra}]"
+            cutecanvas_target = f"{cutecanvas_target}[{definition.extra}]"
         subprocess.run(
-            [str(python_path), "-m", "pip", "install", "-e", target],
+            [
+                str(python_path),
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                str(self._qpane_root),
+                "-e",
+                cutecanvas_target,
+            ],
             check=True,
             cwd=self._project_root,
         )
@@ -199,6 +209,7 @@ class DemoEnvironmentManager:
     def _required_fingerprint(self, tier: str) -> str:
         """Hash install metadata that can change a tier's dependencies."""
         digest = hashlib.sha256()
+        digest.update((self._qpane_root / "pyproject.toml").read_bytes())
         digest.update((self._project_root / "pyproject.toml").read_bytes())
         digest.update(tier.encode("utf-8"))
         return digest.hexdigest()

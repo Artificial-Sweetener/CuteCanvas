@@ -17,9 +17,11 @@
 """Behavioral coverage for the self-bootstrapping demo entry point."""
 
 from argparse import Namespace
+from pathlib import Path
+from subprocess import CompletedProcess
 
 import cutecanvas_demo as demo
-from cutecanvas_demo_environment import DEMO_TIERS
+from cutecanvas_demo_environment import DEMO_TIERS, DemoEnvironmentManager
 
 
 class _DifferentTierEnvironment:
@@ -83,3 +85,42 @@ def test_main_bootstraps_before_importing_demo_window(monkeypatch) -> None:
         ("ensure", "cutecanvas"),
         ("launch", "cutecanvas"),
     ]
+
+
+def test_demo_environment_installs_local_qpane_with_cutecanvas(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Provision the demo from both editable packages in the source checkout."""
+    package_root = tmp_path / "packages" / "cutecanvas"
+    examples_root = package_root / "examples"
+    examples_root.mkdir(parents=True)
+    entry_point = examples_root / "cutecanvas_demo.py"
+    entry_point.touch()
+    manager = DemoEnvironmentManager(entry_point)
+    commands: list[tuple[list[str], Path]] = []
+
+    def record_command(command, *, check, cwd):
+        """Capture provisioning commands without creating an environment."""
+        assert check is True
+        commands.append((command, cwd))
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr(manager, "python_path", lambda _tier: Path("python.exe"))
+    monkeypatch.setattr(manager, "_write_fingerprint", lambda _tier: None)
+    monkeypatch.setattr("cutecanvas_demo_environment.subprocess.run", record_command)
+
+    manager._install("cutecanvas-sam")
+
+    assert commands[1] == (
+        [
+            "python.exe",
+            "-m",
+            "pip",
+            "install",
+            "-e",
+            str(tmp_path / "packages" / "qpane"),
+            "-e",
+            f"{package_root}[sam]",
+        ],
+        package_root,
+    )
