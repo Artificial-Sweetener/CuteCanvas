@@ -450,9 +450,14 @@ eligible layer. Movement and transform share `CuteCanvas.snapPolicy()`.
 `CuteCanvas.setSnapGuides()` supplies host guides, and
 `CuteCanvas.setSnapGrid()` supplies grid spacing and origin.
 
+Dragging inside a Transform frame uses the same snapping as Move. Scale handles
+snap to configured layer, canvas, selection, guide, and grid target lines while
+preserving proportional and about-center constraints. Hold Ctrl during the
+gesture to use the unsnapped floating-point transform temporarily.
+
 Snapping follows the geometry chosen by each layer policy. Hosts can therefore
 align visible content, intrinsic source bounds, or a fixed application-defined
-rectangle without changing the movement tools.
+rectangle without changing movement or transform tools.
 
 ## Add Effects, Overlays, and Tools
 

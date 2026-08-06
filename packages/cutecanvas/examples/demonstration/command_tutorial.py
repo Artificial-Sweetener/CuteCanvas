@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QToolBar
 
+from demonstration.canvas_geometry_dialog import CanvasGeometryDialog
 from demonstration.composition_tutorial import (
     CompositionTutorialController,
 )
@@ -67,6 +68,7 @@ class CommandTutorialController:
         self._show_presentations = show_presentations
         self._show_status = show_status
         self._refresh_mask_status = refresh_mask_status
+        self._canvas_geometry_dialog: CanvasGeometryDialog | None = None
         self._create_actions()
         self._create_menus()
         self.toolbar: QToolBar | None = None
@@ -214,6 +216,8 @@ class CommandTutorialController:
         self.clear_action.triggered.connect(self._workspace.close_all_compositions)
         self.presentations_action = QAction("Multi-view Inspection…", self._parent)
         self.presentations_action.triggered.connect(self._show_presentations)
+        self.canvas_geometry_action = QAction("Canvas Geometry…", self._parent)
+        self.canvas_geometry_action.triggered.connect(self._show_canvas_geometry)
         self.previous_composition_action = QAction("◀ Prev", self._parent)
         self.previous_composition_action.setShortcut(Qt.Key_Left)
         self.previous_composition_action.triggered.connect(
@@ -260,6 +264,7 @@ class CommandTutorialController:
             (self.place_composition_action, True),
             (self.place_embedded_action, True),
             (self.place_linked_action, True),
+            (self.canvas_geometry_action, True),
         ]
         self._composition_actions.extend(
             (action, True)
@@ -328,6 +333,8 @@ class CommandTutorialController:
         layer_menu = menu_bar.addMenu("&Layer")
         self._tools.editor_controls.populate_layer_menu(layer_menu)
         self._tools.vector_controls.populate_layer_menu(layer_menu)
+        canvas_menu = menu_bar.addMenu("&Canvas")
+        canvas_menu.addAction(self.canvas_geometry_action)
         view_menu = menu_bar.addMenu("&View")
         view_menu.addAction(self.presentations_action)
         view_menu.addSeparator()
@@ -344,6 +351,19 @@ class CommandTutorialController:
         hooks_menu.addAction(self.cursor_hook_action)
         hooks_menu.addAction(self.lens_hook_action)
         menu_bar.addAction(self.config_action)
+
+    def _show_canvas_geometry(self) -> None:
+        """Open the reusable public canvas geometry workflow dialog."""
+        if self._canvas_geometry_dialog is None:
+            self._canvas_geometry_dialog = CanvasGeometryDialog(
+                self._canvas,
+                show_status=self._show_status,
+                parent=self._parent,
+            )
+        self._canvas_geometry_dialog.refresh()
+        self._canvas_geometry_dialog.show()
+        self._canvas_geometry_dialog.raise_()
+        self._canvas_geometry_dialog.activateWindow()
 
     @staticmethod
     def _set_checked(action: QAction, checked: bool) -> None:

@@ -15,6 +15,8 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Headless document and detachable view-session public values."""
 
+from .canvas_geometry import CanvasAnchor
+from .canvas_resampling import CanvasResamplingMode
 from .document import CanvasDocument
 from .events import DocumentChange, DocumentChangeKind, DocumentEventHub
 from .references import (
@@ -38,6 +40,7 @@ from .viewport import (
 )
 
 __all__ = [
+    "CanvasAnchor",
     "CanvasComparison",
     "CanvasContentKind",
     "CanvasContentReference",
@@ -46,6 +49,7 @@ __all__ = [
     "CanvasPresentation",
     "CanvasPresentationKind",
     "CanvasRenderVariant",
+    "CanvasResamplingMode",
     "CanvasSessionSnapshot",
     "CanvasViewSession",
     "CanvasViewportInteraction",

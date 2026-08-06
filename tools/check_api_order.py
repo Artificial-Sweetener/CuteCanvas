@@ -113,6 +113,7 @@ def _contracts(root: Path) -> tuple[FacadeContract, ...]:
                     "ViewApiMixin",
                     "ViewportApiMixin",
                     "CanvasAccessorsMixin",
+                    "CanvasGeometryApiMixin",
                 }
             ),
         ),

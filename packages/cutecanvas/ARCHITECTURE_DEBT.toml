@@ -94,28 +94,28 @@ next_extraction = "Move SAM manager attachment, predictor reset, generated-mask 
 id = "CUTECANVAS-ARCH-007"
 owner = "CuteCanvas persistence"
 paths = ["packages/cutecanvas/src/cutecanvas/persistence/codec.py"]
-fingerprint = "sha256:df2a78ee79516e4ef72ef6fa1fcee1b7b008f6da00bcd84b6cfb8813466a2bd5"
+fingerprint = "sha256:9ae7ebff24ab809c21d5c3cb433b5ac1a664482b54e440f3a45eb49be0a8800b"
 issue = "chore:CUTECANVAS-ARCH-007"
 review_by = 2026-12-15
 responsibilities = [
   "archive container IO and version validation",
-  "composition and layer encoding",
+  "composition, layer, clip, and interaction encoding",
   "raster, coverage, placed, mask, and vector resource codecs",
   "legacy migration and cross-reference validation",
 ]
-next_extraction = "Extract resource-kind encoders and decoders behind typed resource codec owners, beginning with vector and placed resources."
+next_extraction = "Extract placed and raster resource encoders and decoders behind typed resource codec owners."
 
 [[debts]]
 id = "CUTECANVAS-ARCH-008"
 owner = "CuteCanvas document events"
 paths = ["packages/cutecanvas/src/cutecanvas/runtime/document_events.py"]
-fingerprint = "sha256:89c629620daf1bbc44cd0c189b7316fdeceb62f64eb103983a0e2df55d075515"
+fingerprint = "sha256:34503a3977d12f37006af3fdfad8e2b061a625c5b33314df29d5e79f2d93ff01"
 issue = "chore:CUTECANVAS-ARCH-008"
 review_by = 2026-12-15
 responsibilities = [
   "composition and scene publication",
   "resource completion and pixel-content change handling",
-  "selection, paint-target, and vector synchronization",
+  "selection, paint-target, vector, and interaction synchronization",
   "viewport and diagnostics propagation",
 ]
 next_extraction = "Extract vector selection, node selection, text edit, option, and content publication into a vector document-event owner."

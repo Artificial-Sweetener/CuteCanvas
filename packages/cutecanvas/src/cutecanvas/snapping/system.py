@@ -35,6 +35,7 @@ from .feedback import SnapGuideFeedback
 from .model import SnapGuide
 from .movement import MovementSnapCoordinator
 from .scale import scene_units_per_device_pixel
+from .transform import TransformSnapCoordinator
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,7 @@ class SnappingSubsystem:
     feedback: SnapGuideFeedback
     movement: MovementSnapCoordinator
     authoring: AuthoringSnapCoordinator
+    transform: TransformSnapCoordinator
 
     @classmethod
     def create(
@@ -88,7 +90,15 @@ class SnappingSubsystem:
             scene_units_per_device_pixel=scale,
             suppressed=suppressed,
         )
-        return cls(configuration, candidates, feedback, movement, authoring)
+        transform = TransformSnapCoordinator(
+            candidates=candidates,
+            configuration=configuration,
+            feedback=feedback,
+            movement=movement,
+            scene_units_per_device_pixel=scale,
+            suppressed=suppressed,
+        )
+        return cls(configuration, candidates, feedback, movement, authoring, transform)
 
     @property
     def guides(self) -> tuple[SnapGuide, ...]:
@@ -98,6 +108,13 @@ class SnappingSubsystem:
     def clear_authoring(self) -> bool:
         """Clear authoring state without disturbing an active Move operation."""
         return self.authoring.clear()
+
+    def clear_interactions(self) -> bool:
+        """Clear every gesture session and transient Smart Guide."""
+        transform_changed = self.transform.clear()
+        movement_changed = self.movement.clear()
+        authoring_changed = self.authoring.clear()
+        return transform_changed or movement_changed or authoring_changed
 
     def clear_feedback(self) -> bool:
         """Clear transient guide presentation after authoritative context changes."""

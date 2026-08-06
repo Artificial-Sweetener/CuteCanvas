@@ -25,6 +25,67 @@ Each composition keeps its own coordinate space and native dimensions. A
 smaller first pass is not enlarged merely because a later pass has more
 pixels.
 
+## Change Canvas Geometry
+
+Canvas geometry is exposed as three separate document workflows. Resize the
+bounds when the aperture should change without filtering pixels:
+
+```python
+from PySide6.QtCore import QSize
+from cutecanvas import CanvasAnchor
+
+composition = canvas.editor.compositions.current
+composition.resize_bounds(QSize(1600, 1200), anchor=CanvasAnchor.TOP_LEFT)
+```
+
+The selected point remains fixed. Expansion and contraction happen away from
+that point, every layer and selection moves together, and off-canvas content
+remains stored. `CanvasAnchor` names the nine supported fixed points so host
+controls do not need to reproduce alignment rules. The same workflow is
+available as `CuteCanvas.resizeCanvasBounds` when a host works with raw
+composition identifiers.
+
+Resample when the composition and every layer should acquire a new pixel scale:
+
+```python
+from cutecanvas import CanvasResamplingMode
+
+request_id = composition.resample(
+    QSize(800, 600),
+    mode=CanvasResamplingMode.SMOOTH,
+)
+```
+
+Resampling runs through the document runtime and emits
+`CuteCanvas.canvasResamplingCompleted`. `CanvasResamplingMode` maps `SMOOTH`
+and `FAST` to Qt's smooth and nearest transformation policies. Raster resources
+are replaced copy-on-write, semantic vector and nested-composition sources
+retain their authorship, and hybrid masks resample raster coverage while
+scaling their retained vector and stroke items. Linked raster layers become
+embedded resampled resources because the operation never mutates an external
+file. The complete result is adopted as one undoable edit only if the captured
+composition and resource revisions are still current.
+
+`CuteCanvas.requestCanvasResampling` returns the request UUID.
+`CuteCanvas.cancelCanvasResampling` cancels current work without publishing
+partial state. Each terminal `CanvasResamplingResult` reports a
+`CanvasResamplingStatus` of completed, cancelled, rejected, stale, or failed,
+so a host can settle progress UI from exactly one signal result. A completed
+result exposes `changed`; requesting the current dimensions completes without
+duplicating resources and reports `changed=False`.
+
+Cropping is explicit and independent from either resize operation:
+
+```python
+composition.crop_to_canvas()
+```
+
+The crop adds exact target-local semantic clip geometry to every layer. It does
+not flatten vector, mask, nested-composition, or raster sources. Undo restores
+the uncropped stack, and later canvas expansion does not reveal material removed
+by the crop boundary. `CuteCanvas.cropLayersToCanvas` exposes the same explicit
+operation for identifier-oriented hosts.
+
 Replace a host image that has been regenerated without removing and recreating
 its document:
 

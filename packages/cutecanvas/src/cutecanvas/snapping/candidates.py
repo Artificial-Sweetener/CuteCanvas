@@ -64,6 +64,7 @@ class SnapCandidateProvider:
         excluded_layer_id: uuid.UUID | None = None,
         excluded_bounds: QRectF | None = None,
         excluded_layer_ids: tuple[uuid.UUID, ...] = (),
+        exclude_selection: bool = False,
     ) -> SnapTargetSnapshot | None:
         """Return one immutable target set under the current policy."""
         scene = self._active_scene()
@@ -96,6 +97,7 @@ class SnapCandidateProvider:
             scene,
             policy,
             excluded_bounds,
+            exclude_selection,
         )
         if policy.guides:
             candidates.extend(self._configuration.guide_candidates(composition_bounds))
@@ -136,10 +138,16 @@ class SnapCandidateProvider:
         scene: SceneDescriptor,
         policy: SnapPolicy,
         excluded_bounds: QRectF | None,
+        exclude_selection: bool,
     ) -> None:
         """Append current pixel-selection bounds unless they are the moving source."""
         selection = self._pixel_selection.state(scene.scene_id).coverage
-        if not policy.selections or selection is None or selection.bounds is None:
+        if (
+            exclude_selection
+            or not policy.selections
+            or selection is None
+            or selection.bounds is None
+        ):
             return
         bounds = selection.bounds
         selection_bounds = QRectF(bounds.x, bounds.y, bounds.width, bounds.height)

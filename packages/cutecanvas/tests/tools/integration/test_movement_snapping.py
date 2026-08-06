@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from cutecanvas import (
     CuteCanvas,
@@ -25,8 +27,10 @@ from cutecanvas import (
     VectorStyle,
 )
 from cutecanvas.editor.movement import EditorMovementInteraction
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 
 def _opaque_image(width: int = 100, height: int = 100) -> QImage:
@@ -60,6 +64,34 @@ def _movement(canvas: CuteCanvas) -> EditorMovementInteraction:
     return movement
 
 
+def _wait_for_scene(qapp, canvas: CuteCanvas, *, layer_count: int) -> None:
+    """Wait until the mounted view publishes the expected snap-source scene."""
+    QTest.keyRelease(canvas, Qt.Key_Control)
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        scene = canvas.view().current_scene_descriptor()
+        control_released = not bool(
+            QApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier
+        )
+        if scene is not None and len(scene.layers) == layer_count and control_released:
+            return
+        QTest.qWait(1)
+    scene = canvas.view().current_scene_descriptor()
+    actual = None if scene is None else len(scene.layers)
+    raise AssertionError(
+        f"mounted scene did not publish {layer_count} layers; observed {actual}"
+    )
+
+
+def _dispose_canvas(qapp, canvas: CuteCanvas) -> None:
+    """Complete deferred Qt teardown before the next mounted workflow."""
+    canvas.close()
+    canvas.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+
 def test_move_hover_outline_uses_alpha_tight_layer_geometry(qapp) -> None:
     """Transparent storage padding must not enlarge Move-tool hover feedback."""
     canvas = CuteCanvas(features=())
@@ -76,7 +108,7 @@ def test_move_hover_outline_uses_alpha_tight_layer_geometry(qapp) -> None:
         )
         assert layer_id is not None
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=1)
         movement = _movement(canvas)
         content_point = _panel_point(canvas, QPointF(150.0, 270.0))
 
@@ -96,7 +128,7 @@ def test_move_hover_outline_uses_alpha_tight_layer_geometry(qapp) -> None:
             12.0,
         )
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)
 
 
 def test_mounted_move_centers_layer_on_both_canvas_axes(qapp) -> None:
@@ -111,7 +143,7 @@ def test_mounted_move_centers_layer_on_both_canvas_axes(qapp) -> None:
         layer_id = canvas.addEditableRasterLayer(_opaque_image(), label="Moving")
         assert layer_id is not None
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=1)
         movement = _movement(canvas)
         origin = _panel_point(canvas, QPointF(50.0, 50.0))
         near_center = _panel_point(canvas, QPointF(499.0, 499.0))
@@ -132,7 +164,7 @@ def test_mounted_move_centers_layer_on_both_canvas_axes(qapp) -> None:
         assert canvas.redoSceneEdit()
         assert committed.state.transform == QTransform.fromTranslate(450.0, 450.0)
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)
 
 
 def test_mounted_move_aligns_adjacent_layer_corners_on_both_axes(qapp) -> None:
@@ -152,7 +184,7 @@ def test_mounted_move_aligns_adjacent_layer_corners_on_both_axes(qapp) -> None:
             QTransform.fromTranslate(200.0, 200.0)
         )
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=2)
         movement = _movement(canvas)
         origin = _panel_point(canvas, QPointF(50.0, 50.0))
         near_adjacent_corner = _panel_point(canvas, QPointF(149.0, 249.0))
@@ -169,7 +201,7 @@ def test_mounted_move_aligns_adjacent_layer_corners_on_both_axes(qapp) -> None:
         assert committed is not None
         assert committed.state.transform == QTransform.fromTranslate(100.0, 200.0)
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)
 
 
 def test_mounted_asymmetric_edges_do_not_lock_to_shape_centers(qapp) -> None:
@@ -196,7 +228,7 @@ def test_mounted_asymmetric_edges_do_not_lock_to_shape_centers(qapp) -> None:
         assert moving is not None
         assert moving.set_transform(QTransform.fromTranslate(100.0, 0.0))
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=2)
         movement = _movement(canvas)
         origin = _panel_point(canvas, QPointF(250.0, 50.0))
 
@@ -220,7 +252,7 @@ def test_mounted_asymmetric_edges_do_not_lock_to_shape_centers(qapp) -> None:
         assert movement.finish(near_adjacent_edge)
         assert moving.state.transform == QTransform.fromTranslate(100.0, 160.0)
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)
 
 
 @pytest.mark.parametrize("source_kind", ("placed", "vector"))
@@ -269,7 +301,7 @@ def test_mounted_source_neutral_layers_share_adjacent_corner_snapping(
         expected_dx = 200.0 - moving_bounds.right()
         expected_dy = 300.0 - moving_bounds.bottom()
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=2)
         movement = _movement(canvas)
         origin = _panel_point(canvas, QPointF(50.0, 50.0))
         near_adjacent_corner = _panel_point(canvas, QPointF(149.0, 249.0))
@@ -287,7 +319,7 @@ def test_mounted_source_neutral_layers_share_adjacent_corner_snapping(
         assert moving.state.transform.dx() == pytest.approx(expected_dx)
         assert moving.state.transform.dy() == pytest.approx(expected_dy)
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)
 
 
 def test_fractional_rotated_vector_bounds_snap_without_quantization(qapp) -> None:
@@ -325,7 +357,7 @@ def test_fractional_rotated_vector_bounds_snap_without_quantization(qapp) -> Non
         expected_dx = mapped_target.left() - 40.0
         expected_dy = mapped_target.bottom() - 30.0
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=2)
         movement = _movement(canvas)
         origin = _panel_point(canvas, QPointF(20.0, 15.0))
         endpoint = _panel_point(
@@ -346,7 +378,7 @@ def test_fractional_rotated_vector_bounds_snap_without_quantization(qapp) -> Non
         assert committed.dx() + 40.0 == pytest.approx(mapped_target.left())
         assert committed.dy() + 30.0 == pytest.approx(mapped_target.bottom())
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)
 
 
 def test_mounted_floating_selection_uses_same_two_axis_layer_candidates(qapp) -> None:
@@ -371,7 +403,7 @@ def test_mounted_floating_selection_uses_same_two_axis_layer_candidates(qapp) ->
         selection.fill(255)
         assert canvas.setPixelSelection(selection, QRect(0, 0, 100, 100))
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=2)
         movement = _movement(canvas)
         origin = _panel_point(canvas, QPointF(50.0, 50.0))
         near_adjacent_corner = _panel_point(canvas, QPointF(249.0, 349.0))
@@ -393,7 +425,7 @@ def test_mounted_floating_selection_uses_same_two_axis_layer_candidates(qapp) ->
         assert canvas.undoSceneEdit()
         assert canvas.redoSceneEdit()
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)
 
 
 def test_scene_switch_clears_active_snap_session_and_guides(qapp) -> None:
@@ -412,7 +444,7 @@ def test_scene_switch_clears_active_snap_session_and_guides(qapp) -> None:
         assert target is not None
         assert target.set_transform(QTransform.fromTranslate(200.0, 200.0))
         canvas.setZoom1To1()
-        qapp.processEvents()
+        _wait_for_scene(qapp, canvas, layer_count=2)
         movement = _movement(canvas)
         origin = _panel_point(canvas, QPointF(50.0, 50.0))
         near_corner = _panel_point(canvas, QPointF(149.0, 249.0))
@@ -430,4 +462,4 @@ def test_scene_switch_clears_active_snap_session_and_guides(qapp) -> None:
         assert movement._active is None
         assert not movement.finish(near_corner)
     finally:
-        canvas.deleteLater()
+        _dispose_canvas(qapp, canvas)

@@ -25,7 +25,8 @@ from ..persistence import (
     CompositionArchiveSnapshot,
     CompositionPersistenceService,
 )
-from .handles import CompositionHandle, EditorHandleHost
+from .composition_handles import CompositionHandle
+from .handles import EditorHandleHost
 
 
 @dataclass(frozen=True, slots=True)

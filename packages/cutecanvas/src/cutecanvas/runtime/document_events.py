@@ -157,7 +157,7 @@ class DocumentEventsMixin:
         if self._editor_movement_interaction is not None:
             self._editor_movement_interaction.synchronize_context()
         if self._snapping is not None:
-            self._snapping.clear_authoring()
+            self._snapping.clear_interactions()
         resolved_scene = self.sceneMutationCoordinator().active_scene()
         if self._scene_movement is not None:
             self._scene_movement.synchronize_scene(resolved_scene)

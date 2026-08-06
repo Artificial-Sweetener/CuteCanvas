@@ -181,6 +181,36 @@ def test_complete_document_archive_round_trips_independent_roots(
         qapp.processEvents()
 
 
+def test_restored_mask_removal_is_atomic_and_undoable(qapp, tmp_path) -> None:
+    """Removing a restored mask must not detach it before history retains it."""
+    source = CuteCanvas(features=("mask",))
+    restored = CuteCanvas(features=("mask",))
+    try:
+        composition_id = source.createCompositionFromImage(_image("red"))
+        mask_id = source.createBlankMask(
+            QImage(64, 48, QImage.Format_Grayscale8).size()
+        )
+        assert mask_id is not None
+        path = tmp_path / "restored-mask-removal.cutecanvas"
+        source.editor.persistence.save_document(path)
+        restored.editor.persistence.load_document(path)
+
+        assert restored.removeMaskFromComposition(composition_id, mask_id)
+        assert restored.maskIDsForComposition(composition_id) == []
+        assert restored.document().masks.get_layer(mask_id) is not None
+
+        assert restored.editor.history.undo()
+        assert restored.maskIDsForComposition(composition_id) == [mask_id]
+        assert restored.editor.history.redo()
+        assert restored.maskIDsForComposition(composition_id) == []
+    finally:
+        source.close()
+        restored.close()
+        source.deleteLater()
+        restored.deleteLater()
+        qapp.processEvents()
+
+
 def test_document_snapshot_is_detached_for_background_persistence(
     qapp,
     tmp_path,

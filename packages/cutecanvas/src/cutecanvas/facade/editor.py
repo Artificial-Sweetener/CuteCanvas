@@ -33,8 +33,9 @@ from ..types import (
     PixelSelectionSnapshot,
 )
 from .clone_stamp import CloneStampFacade, CloneStampHost
+from .composition_handles import CompositionCollection
 from .effects import EffectsFacade
-from .handles import CompositionCollection, EditorHandleHost
+from .handles import EditorHandleHost
 from .persistence import CompositionPersistenceFacade
 
 if TYPE_CHECKING:

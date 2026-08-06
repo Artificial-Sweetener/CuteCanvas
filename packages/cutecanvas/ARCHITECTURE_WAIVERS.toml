@@ -10,7 +10,7 @@ path = "packages/cutecanvas/src/cutecanvas/canvas.py"
 kind = "structural"
 justification = "CuteCanvas is the single mounted-widget boundary that delegates Qt lifecycle and input events and paints the editor's interaction overlays."
 review_by = 2026-12-15
-max_lines = 610
+max_lines = 596
 
 [[waivers]]
 id = "CUTECANVAS-WAIVER-002"
@@ -43,7 +43,7 @@ path = "packages/cutecanvas/src/cutecanvas/editor/composition_root.py"
 kind = "structural"
 justification = "EditorCompositionRoot has one assembly responsibility: construct, wire, and return the complete authoritative editor component graph from explicit inputs."
 review_by = 2026-12-15
-max_lines = 730
+max_lines = 726
 
 [[waivers]]
 id = "CUTECANVAS-WAIVER-005"
@@ -176,7 +176,7 @@ path = "packages/cutecanvas/src/cutecanvas/persistence/codec.py"
 kind = "remediation"
 justification = "Archive IO, composition encoding, resource codecs, migration, and reference validation remain mixed pending typed resource codec extraction."
 review_by = 2026-12-15
-max_lines = 1280
+max_lines = 1234
 next_limit = 980
 debt = "CUTECANVAS-ARCH-007"
 

@@ -44,7 +44,7 @@ class SnappingApiMixin:
         threshold_device_pixels: float | None = None,
         release_device_pixels: float | None = None,
     ) -> bool:
-        """Replace supplied candidate domains and device-pixel thresholds."""
+        """Configure shared move, transform, and geometric-authoring snapping."""
         changes = {
             name: value
             for name, value in {

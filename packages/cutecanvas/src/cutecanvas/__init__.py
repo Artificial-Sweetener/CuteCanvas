@@ -107,6 +107,10 @@ __all__ = [
     "CloneStampState",
     "CloneStampTransform",
     "CanvasComparison",
+    "CanvasAnchor",
+    "CanvasResamplingMode",
+    "CanvasResamplingResult",
+    "CanvasResamplingStatus",
     "CanvasComparisonDivider",
     "CanvasComparisonOverlayDrawFn",
     "CanvasComparisonOverlayState",
@@ -179,6 +183,10 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "__version__": ("cutecanvas._version", "version"),
     "CuteCanvas": ("cutecanvas.canvas", "CuteCanvas"),
     "CanvasComparison": ("cutecanvas.document", "CanvasComparison"),
+    "CanvasAnchor": ("cutecanvas.document", "CanvasAnchor"),
+    "CanvasResamplingMode": ("cutecanvas.document", "CanvasResamplingMode"),
+    "CanvasResamplingResult": ("cutecanvas.runtime", "CanvasResamplingResult"),
+    "CanvasResamplingStatus": ("cutecanvas.runtime", "CanvasResamplingStatus"),
     "OverlayDrawFn": ("cutecanvas.core", "OverlayDrawFn"),
     "CanvasContentKind": ("cutecanvas.document", "CanvasContentKind"),
     "CanvasContentReference": (
@@ -249,8 +257,14 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "CanvasProjectionResult": ("cutecanvas.projection", "CanvasProjectionResult"),
     "CanvasProjectionStatus": ("cutecanvas.projection", "CanvasProjectionStatus"),
     "ResolvedCanvasContent": ("cutecanvas.document", "ResolvedCanvasContent"),
-    "CompositionCollection": ("cutecanvas.facade.handles", "CompositionCollection"),
-    "CompositionHandle": ("cutecanvas.facade.handles", "CompositionHandle"),
+    "CompositionCollection": (
+        "cutecanvas.facade.composition_handles",
+        "CompositionCollection",
+    ),
+    "CompositionHandle": (
+        "cutecanvas.facade.composition_handles",
+        "CompositionHandle",
+    ),
     "CompositionPersistenceFacade": (
         "cutecanvas.facade.persistence",
         "CompositionPersistenceFacade",
@@ -259,8 +273,11 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
         "cutecanvas.facade.persistence",
         "DocumentPersistenceSnapshot",
     ),
-    "LayerHandle": ("cutecanvas.facade.handles", "LayerHandle"),
-    "LayerEffectHandle": ("cutecanvas.facade.handles", "LayerEffectHandle"),
+    "LayerHandle": ("cutecanvas.facade.layer_handles", "LayerHandle"),
+    "LayerEffectHandle": (
+        "cutecanvas.facade.effect_handles",
+        "LayerEffectHandle",
+    ),
     "LayerGeometryMode": (
         "cutecanvas.composition.geometry_policy",
         "LayerGeometryMode",

@@ -28,7 +28,7 @@ from .model import SnapAxis, SnapCandidate, SnapFeatureKind, SnapGrid
 
 @dataclass(frozen=True, slots=True)
 class SnapPolicy:
-    """Choose candidate domains and device-pixel interaction thresholds."""
+    """Choose shared move, transform, and authoring snap behavior."""
 
     enabled: bool = True
     canvas: bool = True

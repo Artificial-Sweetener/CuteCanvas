@@ -57,7 +57,13 @@ class MovementSnapCoordinator:
         """Return smart guides for the latest resolved movement update."""
         return self._feedback.guides
 
-    def begin(self, box: LayerTransformBoxState | None, origin: QPointF) -> bool:
+    def begin(
+        self,
+        box: LayerTransformBoxState | None,
+        origin: QPointF,
+        *,
+        exclude_selection: bool = False,
+    ) -> bool:
         """Begin snapping for one layer or floating-pixel transform box."""
         policy = self._configuration.policy
         if box is None or not policy.enabled:
@@ -70,6 +76,7 @@ class MovementSnapCoordinator:
             excluded_layer_id=box.layer_id,
             excluded_bounds=source_bounds,
             excluded_layer_ids=box.excluded_layer_ids,
+            exclude_selection=exclude_selection,
         )
         if targets is None or targets.scene_id != box.scene_id:
             self.clear()

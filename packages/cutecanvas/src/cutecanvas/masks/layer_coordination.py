@@ -160,14 +160,15 @@ class MaskLayerCoordinator:
         )
 
     def remove(self, composition_id: uuid.UUID, mask_id: uuid.UUID) -> bool:
-        """Remove one mask instance and prune its asset only when orphaned."""
+        """Remove one mask instance through chronological layer ownership."""
         instance = self._layers.layer_for_source(
             composition_id,
             ProjectResourceReference(mask_id),
         )
-        return instance is not None and self._layers.remove_layer(
+        return instance is not None and self._layer_edits.remove(
             composition_id,
             instance.layer_id,
+            respect_layer_policy=False,
         )
 
     def reorder_mask_slot_in_composition(

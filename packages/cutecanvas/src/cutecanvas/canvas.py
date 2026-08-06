@@ -135,10 +135,7 @@ from .ui.editor_overlays import EditorOverlayPresenter
 from .vector.facade import VectorHostFacade
 from .vector.interaction import VectorInteractionController
 from .vector.node_edit import VectorNodeEditController
-from .vector.node_tool import VECTOR_NODE_MODE
 from .vector.text_edit import VectorTextEditController
-from .vector.text_tool import VECTOR_TEXT_MODE
-from .vector.tools import VECTOR_PATH_MODE, VECTOR_SHAPE_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +144,7 @@ __all__ = ["CuteCanvas"]
 
 from .document import CanvasDocument, CanvasViewSession
 from .document.inspection import SessionInspectionBinding
+from .facade.canvas_geometry_api import CanvasGeometryApiMixin
 from .facade.composition_api import CompositionApiMixin
 from .facade.configuration_api import ConfigurationApiMixin
 from .facade.context_api import ContentContextApiMixin
@@ -167,6 +165,7 @@ from .facade.raster_api import RasterApiMixin
 from .facade.resource_api import ResourceApiMixin
 from .facade.selection_api import SelectionApiMixin
 from .facade.snapping_api import SnappingApiMixin
+from .facade.tool_modes import CanvasToolModesMixin
 from .facade.transform_api import TransformApiMixin
 from .facade.vector_api import VectorApiMixin
 from .facade.view_api import ViewApiMixin
@@ -179,6 +178,7 @@ from .runtime.view_state import CanvasViewStateMixin
 
 class CuteCanvas(
     QWidget,
+    CanvasToolModesMixin,
     ViewApiMixin,
     ViewportApiMixin,
     ConfigurationApiMixin,
@@ -187,6 +187,7 @@ class CuteCanvas(
     ContentContextApiMixin,
     EditorPolicyApiMixin,
     MoveApiMixin,
+    CanvasGeometryApiMixin,
     CompositionApiMixin,
     EmbeddedImageExportApiMixin,
     MaskApiMixin,
@@ -212,26 +213,6 @@ class CuteCanvas(
     # ========================================================================
     # Public API
     # ========================================================================
-    CONTROL_MODE_PANZOOM = Tools.CONTROL_MODE_PANZOOM
-    CONTROL_MODE_CURSOR = Tools.CONTROL_MODE_CURSOR
-    CONTROL_MODE_MOVE = Tools.CONTROL_MODE_MOVE
-    CONTROL_MODE_TRANSFORM = Tools.CONTROL_MODE_TRANSFORM
-    CONTROL_MODE_DRAW_BRUSH = Tools.CONTROL_MODE_DRAW_BRUSH
-    CONTROL_MODE_ERASER = Tools.CONTROL_MODE_ERASER
-    CONTROL_MODE_CLONE_STAMP = Tools.CONTROL_MODE_CLONE_STAMP
-    CONTROL_MODE_PAINT_BUCKET = Tools.CONTROL_MODE_PAINT_BUCKET
-    CONTROL_MODE_SMART_SELECT = Tools.CONTROL_MODE_SMART_SELECT
-    CONTROL_MODE_SMART_MASK = Tools.CONTROL_MODE_SMART_MASK
-    CONTROL_MODE_SELECT_RECTANGLE = Tools.CONTROL_MODE_SELECT_RECTANGLE
-    CONTROL_MODE_SELECT_ELLIPSE = Tools.CONTROL_MODE_SELECT_ELLIPSE
-    CONTROL_MODE_SELECT_LASSO = Tools.CONTROL_MODE_SELECT_LASSO
-    CONTROL_MODE_MASK_RECTANGLE = Tools.CONTROL_MODE_MASK_RECTANGLE
-    CONTROL_MODE_MASK_ELLIPSE = Tools.CONTROL_MODE_MASK_ELLIPSE
-    CONTROL_MODE_MASK_LASSO = Tools.CONTROL_MODE_MASK_LASSO
-    CONTROL_MODE_VECTOR_SHAPE = VECTOR_SHAPE_MODE
-    CONTROL_MODE_VECTOR_PATH = VECTOR_PATH_MODE
-    CONTROL_MODE_VECTOR_NODE = VECTOR_NODE_MODE
-    CONTROL_MODE_VECTOR_TEXT = VECTOR_TEXT_MODE
     zoomChanged: Signal = Signal(float)
     """Emit the viewport zoom factor when view state changes."""
     viewportRectChanged: Signal = Signal(QRectF)
@@ -260,6 +241,8 @@ class CuteCanvas(
     """Emit one terminal asynchronous pixel-selection modification result."""
     layerEdgeModificationCompleted: Signal = Signal(object)
     """Emit one terminal whole-layer edge modification result."""
+    canvasResamplingCompleted: Signal = Signal(object)
+    """Emit one terminal whole-canvas resampling result."""
     paintTargetChanged: Signal = Signal(object)
     """Emit the active generalized paint target or ``None`` after it changes."""
     brushPresetChanged: Signal = Signal(object)
@@ -374,6 +357,9 @@ class CuteCanvas(
             self,
             document_runtime=resolved_document_runtime,
             close_document_runtime=owns_document_runtime,
+        )
+        resolved_document_runtime.canvasResamplingCompleted.connect(
+            self._canvas_resampling_finished
         )
         self._session = session or CanvasViewSession()
         self._state = CuteCanvasState(

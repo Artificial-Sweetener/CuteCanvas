@@ -71,19 +71,19 @@ from ..resources import (
     ProjectResourceRecord,
     ProjectResourceReference,
 )
-from ..vector.effects import VectorMaskEffect
 from .coverage_codec import (
     decode_coverage_document,
     encode_coverage_document,
     write_coverage_pixels,
 )
+from .effect_codec import decode_layer_effect, encode_layer_effect
 from .layer_geometry_codec import decode_layer_geometry, encode_layer_geometry
 from .model import CompositionArchiveSnapshot
 from .vector_object_codec import decode_vector_object, encode_vector_object
 
 _FORMAT = "qpane-composition"
-_VERSION = 12
-_MIGRATABLE_VERSIONS = frozenset({2, 3, 4, 5, 6, 7, 8, 9, 10, 11, _VERSION})
+_VERSION = 13
+_MIGRATABLE_VERSIONS = frozenset({2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, _VERSION})
 _MAX_RASTER_PIXELS = 268_435_456
 _MAX_COLOR_RASTER_BYTES = _MAX_RASTER_PIXELS * 4
 _MAX_VECTOR_OBJECTS = 100_000
@@ -278,7 +278,7 @@ class CompositionArchiveCodec:
             "label": layer.label,
             "clip": _encode_clip(layer.clip),
             "metadata": dict(layer.metadata),
-            "effects": [_encode_effect(effect) for effect in layer.effects],
+            "effects": [encode_layer_effect(effect) for effect in layer.effects],
             "geometry": encode_layer_geometry(layer.geometry),
         }
 
@@ -364,7 +364,7 @@ class CompositionArchiveCodec:
             label=None if item.get("label") is None else str(item["label"]),
             clip=_decode_clip(item.get("clip")),
             metadata=dict(metadata),
-            effects=tuple(_decode_effect(effect) for effect in effects),
+            effects=tuple(decode_layer_effect(effect) for effect in effects),
             geometry=decode_layer_geometry(item.get("geometry")),
         )
 
@@ -1299,54 +1299,4 @@ def _decode_clip(item: object) -> LayerClip | None:
         y=float(rect[1]),
         width=float(rect[2]),
         height=float(rect[3]),
-    )
-
-
-def _encode_effect(effect: object) -> dict[str, object]:
-    """Encode one known typed composition layer effect."""
-    if not isinstance(effect, VectorMaskEffect):
-        raise TypeError(f"unsupported layer effect: {type(effect)!r}")
-    transform = effect.transform
-    return {
-        "kind": effect.kind,
-        "source": {
-            "kind": effect.source.kind,
-            "resource_id": str(effect.source.resource_id),
-        },
-        "transform": [
-            transform.m11,
-            transform.m12,
-            transform.m21,
-            transform.m22,
-            transform.dx,
-            transform.dy,
-        ],
-        "object_ids": [str(object_id) for object_id in effect.object_ids],
-        "inverted": effect.inverted,
-    }
-
-
-def _decode_effect(item: object) -> VectorMaskEffect:
-    """Validate and decode one known typed composition layer effect."""
-    if not isinstance(item, dict):
-        raise TypeError("layer effects must be objects")
-    if item.get("kind") != "vector-mask":
-        raise ValueError(f"unsupported layer effect kind: {item.get('kind')}")
-    source = item.get("source")
-    transform = item.get("transform")
-    object_ids = item.get("object_ids", [])
-    if not isinstance(source, dict) or source.get("kind") not in {
-        "project-resource",
-        "vector",
-    }:
-        raise ValueError("vector masks require a vector source")
-    if not isinstance(transform, list) or len(transform) != 6:
-        raise ValueError("vector mask transforms must contain six values")
-    if not isinstance(object_ids, list):
-        raise TypeError("vector mask object IDs must be a list")
-    return VectorMaskEffect(
-        ProjectResourceReference(uuid.UUID(str(source["resource_id"]))),
-        LayerTransform(*(float(value) for value in transform)),
-        tuple(uuid.UUID(str(value)) for value in object_ids),
-        bool(item.get("inverted", False)),
     )

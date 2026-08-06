@@ -584,6 +584,15 @@ See also: [Scene Composition](scenes.md) and [Extensibility](extensibility.md).
 - CuteCanvas.layerRasterizationCompleted — Report the terminal result of each accepted generic rasterization request.
 - CuteCanvas.placeComposition — Place another composition as a live nested resource.
 - CuteCanvas.setCompositionPolicy — Replace host-controlled composition-removal permission.
+- CuteCanvas.resizeCanvasBounds — Resize canvas bounds and align all content to one of nine anchor points without resampling or cropping.
+- CuteCanvas.requestCanvasResampling — Begin source-aware whole-canvas resampling with `CanvasResamplingMode.FAST` or `CanvasResamplingMode.SMOOTH`.
+- CuteCanvas.cancelCanvasResampling — Cancel a pending whole-canvas resampling request by UUID.
+- CuteCanvas.canvasResamplingCompleted — Emit one terminal `CanvasResamplingResult` with completed, cancelled, rejected, stale, or failed status.
+- CuteCanvas.cropLayersToCanvas — Apply an exact semantic canvas clip to every layer as one undoable edit.
+- CanvasAnchor — Select the top, center, bottom, left, right, or corner point held fixed by a bounds resize.
+- CanvasResamplingMode — Choose Qt-backed fast nearest or smooth pixel filtering for whole-canvas resampling.
+- CanvasResamplingResult — Report one request identity, composition, target size, quality mode, terminal status, whether document state changed, and an actionable message.
+- CanvasResamplingStatus — Distinguish completed, cancelled, rejected, stale, and failed canvas resampling outcomes.
 - CuteCanvas.openComposition — Open an existing composition UUID.
 - CuteCanvas.currentCompositionID — Return the active composition UUID, or None.
 - CuteCanvas.compositionIDs — Return composition UUIDs in browser order.
@@ -604,6 +613,8 @@ independent resource. `LayerHandle.rasterize()` converts any supported
 renderable resource into editable pixels, and `LayerHandle.resource_id`
 reports its current resource identity. `CompositionHandle.place_composition()`
 places another composition as a live nested layer in the open destination.
+`CompositionHandle.resize_bounds()`, `resample()`, and `crop_to_canvas()` expose
+the canvas geometry workflows without raw composition identifiers.
 
 ## Presentations and Projection
 
@@ -950,8 +961,9 @@ See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and 
 - Move auto-selects the topmost eligible visible content by default. Shift-click adds to the layer set; dragging any selected member and keyboard nudging move all movable members through one preview, one durable publication, and one history edit. `MoveToolOptions.auto_select_layers=False` preserves the existing set, and Ctrl at gesture start temporarily inverts that option.
 - `cutecanvas.SnapPolicy` selects canvas, visible-layer, selection, guide, and grid candidates plus device-pixel acquire/release thresholds. Its default eight-pixel acquire tolerance is evaluated through QPane's physical viewport zoom, independently of display scaling.
 - Movement snapping admits center-to-center, matching-edge, opposing-adjacent-edge, and edge-to-center relationships. Authored guides and grid lines accept the nearest moving feature.
+- Transform-frame movement uses the same relationships as Move. Scale handles snap their actual scene-space point to configured target lines while preserving proportional and about-center constraints. Rotated side handles and constrained corners remain on their affine scale axis, and Smart Guides report only lines reached exactly.
 - Rectangle and ellipse mask tools, rectangle and ellipse pixel-selection tools, vector rectangle and ellipse tools, and explicit vector-path anchors snap both their anchor and active endpoint. An authored endpoint may align to any configured target edge or center. Preview and commit use the same resolved geometry.
-- `CuteCanvas.snapPolicy`, `CuteCanvas.configureSnapping`, `CuteCanvas.setSnapGuides`, and `CuteCanvas.setSnapGrid` configure the shared policy for movement and geometric authoring. Holding Ctrl temporarily suppresses snapping without changing durable policy. Freehand lasso, painting, fill, and SAM region gestures remain unsnapped.
+- `CuteCanvas.snapPolicy`, `CuteCanvas.configureSnapping`, `CuteCanvas.setSnapGuides`, and `CuteCanvas.setSnapGrid` configure the shared policy for movement, affine transforms, and geometric authoring. Holding Ctrl temporarily suppresses snapping without changing durable policy. Freehand lasso, painting, fill, and SAM region gestures remain unsnapped.
 
 ## Vector Documents
 

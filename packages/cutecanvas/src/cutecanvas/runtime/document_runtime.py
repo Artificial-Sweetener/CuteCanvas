@@ -17,9 +17,10 @@
 
 from __future__ import annotations
 
+import uuid
 from threading import Lock
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QSize, Signal
 from qpane.sdk.execution import (
     DefaultExecutionPolicy,
     ExecutionLeaseRelease,
@@ -33,12 +34,17 @@ from qpane.sdk.execution import (
 )
 
 from ..document import CanvasDocument
+from ..document.canvas_resampling import CanvasResamplingMode
 from ..masks.live_preview_store import MaskLivePreviewStore
+from .canvas_resampling import CanvasResamplingService
 from .latest_requests import DocumentLatestRequestRegistry
 
 
 class CanvasDocumentRuntime(QObject):
     """Own document-scoped work independently of any mounted canvas view."""
+
+    canvasResamplingCompleted: Signal = Signal(object)
+    """Emit one terminal whole-canvas resampling result."""
 
     def __init__(
         self,
@@ -75,6 +81,13 @@ class CanvasDocumentRuntime(QObject):
         )
         self.__latest_requests = DocumentLatestRequestRegistry()
         self.__mask_live_previews = MaskLivePreviewStore()
+        self.__canvas_resampling = CanvasResamplingService(
+            document._canvas_resampling_owner,
+            execution_scope=self._scope,
+            latest_requests=self.__latest_requests,
+            changed=document.events.layers_changed,
+            completed=self.canvasResamplingCompleted.emit,
+        )
         self._native_runtime: ExecutionRuntime | None = None
         self._native_scope: ExecutionScope | None = None
         self._native_lock = Lock()
@@ -114,6 +127,20 @@ class CanvasDocumentRuntime(QObject):
             dispatcher=QtOwnerDispatcher(owner),
         )
 
+    def request_canvas_resampling(
+        self,
+        composition_id: uuid.UUID,
+        size: QSize,
+        *,
+        mode: CanvasResamplingMode,
+    ) -> uuid.UUID:
+        """Begin replaceable whole-canvas resampling."""
+        return self.__canvas_resampling.request(composition_id, size, mode=mode)
+
+    def cancel_canvas_resampling(self, request_id: uuid.UUID) -> bool:
+        """Cancel a pending whole-canvas resampling request."""
+        return self.__canvas_resampling.cancel(request_id)
+
     def native_execution_scope(self) -> ExecutionScope:
         """Return document-owned execution for stable native-affinity requests."""
         requirements = ExecutionRequirements(
@@ -141,6 +168,7 @@ class CanvasDocumentRuntime(QObject):
         if self._closed:
             return
         self._closed = True
+        self.__canvas_resampling.close()
         self.__latest_requests.close()
         self.__mask_live_previews.clear()
         self._scope.close(reason="document_runtime_closed")

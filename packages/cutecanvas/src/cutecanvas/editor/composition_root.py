@@ -28,11 +28,7 @@ from qpane.sdk.cache import CacheRegistry, cache_detail_provider
 from qpane.sdk.diagnostics import Diagnostics
 from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.rendering import PyramidManager, SceneRegionRasterizer, View
-from qpane.sdk.scene import (
-    LayerEffectRenderRegistry,
-    LayerSourceCapabilities,
-    SceneProviderRegistry,
-)
+from qpane.sdk.scene import LayerSourceCapabilities, SceneProviderRegistry
 
 from ..composition import CompositionService
 from ..composition.scene_adapter import CompositionSceneAdapter
@@ -90,6 +86,7 @@ from ..resources.source_capabilities import ProjectResourceSourceCapabilities
 from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..scene.layer_assembly import CompositionLayerSceneAssembler
 from ..scene.layer_edge_preview import LayerEdgePreviewStore
+from ..scene.layer_effects import create_editor_layer_effects
 from ..scene.layer_geometry import LayerGeometryPolicy, LayerGeometryResolver
 from ..scene.layer_move import SceneLayerMoveController
 from ..scene.layer_selection import SceneLayerSelectionController
@@ -135,6 +132,7 @@ from .source_operations import (
     EditorSourceOperations,
 )
 from .transform_coordinator import EditorTransformCoordinator
+from .transform_install import create_editor_transform_interaction
 from .transform_interaction import SceneLayerTransformInteraction
 
 if TYPE_CHECKING:
@@ -271,7 +269,7 @@ class EditorCompositionRoot:
         scene_providers.register_post_processor(inputs.transform_preview)
         render_source_capabilities = LayerSourceCapabilities.create()
         editor_source_capabilities = EditorSourceCapabilities.create()
-        layer_effects = LayerEffectRenderRegistry()
+        layer_effects = create_editor_layer_effects()
         pyramid_manager = PyramidManager(
             config=inputs.settings,
             execution_scope=inputs.execution_scope,
@@ -574,20 +572,18 @@ class EditorCompositionRoot:
             capability_allowed=inputs.editor_policy.allows,
             scene_changed=callbacks.raster_structure_changed,
         )
-        scene_transform_interaction = EditorTransformCoordinator(
-            pixels=selected_pixel_movement,
-            layers=layer_transform_interaction,
-            operations=operation_resolver,
-            changed=callbacks.transform_state_changed,
-        )
-        snapping = SnappingSubsystem.create(
+        snapping, scene_transform_interaction = create_editor_transform_interaction(
             active_scene=view.current_scene_descriptor,
             geometry=layer_geometry,
             pixel_selection=pixel_selection,
             panel_to_scene=view.panel_to_scene_point,
             scene_to_panel=view.scene_to_panel_point,
             viewport_zoom=lambda: view.viewport.zoom,
-            changed=callbacks.pixel_move_preview_changed,
+            pixels=selected_pixel_movement,
+            layers=layer_transform_interaction,
+            operations=operation_resolver,
+            preview_changed=callbacks.pixel_move_preview_changed,
+            transform_changed=callbacks.transform_state_changed,
         )
         coverage_shape_configuration = CoverageShapeConfiguration(
             callbacks.pixel_move_preview_changed

@@ -104,6 +104,7 @@ from .core import OverlayDrawFn as OverlayDrawFn
 from .coverage import CoverageShapeOptions as CoverageShapeOptions
 from .cursor import EditorCursorIntent as EditorCursorIntent
 from .cursor import EditorCursorTheme as EditorCursorTheme
+from .document import CanvasAnchor as CanvasAnchor
 from .document import CanvasComparison as CanvasComparison
 from .document import CanvasContentKind as CanvasContentKind
 from .document import CanvasContentReference as CanvasContentReference
@@ -112,6 +113,7 @@ from .document import CanvasInspectionGroup as CanvasInspectionGroup
 from .document import CanvasPresentation as CanvasPresentation
 from .document import CanvasPresentationKind as CanvasPresentationKind
 from .document import CanvasRenderVariant as CanvasRenderVariant
+from .document import CanvasResamplingMode as CanvasResamplingMode
 from .document import CanvasSessionSnapshot as CanvasSessionSnapshot
 from .document import CanvasViewportInteraction as CanvasViewportInteraction
 from .document import CanvasViewportSource as CanvasViewportSource
@@ -120,6 +122,12 @@ from .document import CanvasViewSession as CanvasViewSession
 from .document import ResolvedCanvasContent as ResolvedCanvasContent
 from .editor.interaction_policy import CanvasInteractionMode as CanvasInteractionMode
 from .facade.clone_stamp import CloneStampFacade as CloneStampFacade
+from .facade.composition_handles import (
+    CompositionCollection as CompositionCollection,
+)
+from .facade.composition_handles import (
+    CompositionHandle as CompositionHandle,
+)
 from .facade.editor import (
     CoverageFacade as CoverageFacade,
 )
@@ -135,17 +143,11 @@ from .facade.editor import (
 from .facade.editor import (
     ToolFacade as ToolFacade,
 )
-from .facade.effects import EffectsFacade as EffectsFacade
-from .facade.handles import (
-    CompositionCollection as CompositionCollection,
-)
-from .facade.handles import (
-    CompositionHandle as CompositionHandle,
-)
-from .facade.handles import (
+from .facade.effect_handles import (
     LayerEffectHandle as LayerEffectHandle,
 )
-from .facade.handles import (
+from .facade.effects import EffectsFacade as EffectsFacade
+from .facade.layer_handles import (
     LayerHandle as LayerHandle,
 )
 from .facade.persistence import (
@@ -174,6 +176,8 @@ from .projection import CanvasProjectionResult as CanvasProjectionResult
 from .projection import CanvasProjectionStatus as CanvasProjectionStatus
 from .resources import EmbeddedImageExportSnapshot as EmbeddedImageExportSnapshot
 from .runtime import CanvasDocumentRuntime as CanvasDocumentRuntime
+from .runtime import CanvasResamplingResult as CanvasResamplingResult
+from .runtime import CanvasResamplingStatus as CanvasResamplingStatus
 from .snapping import SnapPolicy as SnapPolicy
 from .types import CompositionPolicy as CompositionPolicy
 from .types import LayerPolicy as LayerPolicy
@@ -721,6 +725,7 @@ class CuteCanvas(QWidget):
     pixelSelectionChanged: Signal
     pixelSelectionModificationCompleted: Signal
     layerEdgeModificationCompleted: Signal
+    canvasResamplingCompleted: Signal
     paintTargetChanged: Signal
     brushPresetChanged: Signal
     paintColorChanged: Signal
@@ -916,6 +921,22 @@ class CuteCanvas(QWidget):
         composition_id: uuid.UUID,
         policy: CompositionPolicy,
     ) -> bool: ...
+    def resizeCanvasBounds(
+        self,
+        composition_id: uuid.UUID,
+        size: QSize,
+        *,
+        anchor: CanvasAnchor = ...,
+    ) -> bool: ...
+    def requestCanvasResampling(
+        self,
+        composition_id: uuid.UUID,
+        size: QSize,
+        *,
+        mode: CanvasResamplingMode = ...,
+    ) -> uuid.UUID: ...
+    def cancelCanvasResampling(self, request_id: uuid.UUID) -> bool: ...
+    def cropLayersToCanvas(self, composition_id: uuid.UUID) -> bool: ...
     def currentScene(self) -> SceneSnapshot | None: ...
     def sceneHitTest(self, panel_pos: QPoint) -> LayerHit | None: ...
     def layerTransform(

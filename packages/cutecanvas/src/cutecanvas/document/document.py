@@ -45,6 +45,7 @@ from ..types import (
     LayerPolicy,
 )
 from ..vector.document_core import VectorDocumentCore
+from .canvas_geometry_api import CanvasDocumentGeometryMixin
 from .events import DocumentChange, DocumentChangeKind, DocumentEventHub
 from .references import (
     CanvasContentKind,
@@ -53,7 +54,7 @@ from .references import (
 )
 
 
-class CanvasDocument:
+class CanvasDocument(CanvasDocumentGeometryMixin):
     """Own editable content and history independently of any QWidget."""
 
     def __init__(self) -> None:
@@ -125,6 +126,7 @@ class CanvasDocument:
             pixel_selection=self._resources.pixel_selection,
             promotions=history_promotions,
         )
+        self._install_canvas_geometry()
         self._closed = False
 
     @property

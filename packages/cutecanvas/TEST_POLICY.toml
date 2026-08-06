@@ -16,7 +16,7 @@ sources = [
   "packages/cutecanvas/src/cutecanvas/persistence/**",
   "packages/cutecanvas/src/cutecanvas/resources/**",
 ]
-proofs = ["integration", "qt"]
+proofs = ["abuse", "integration", "performance", "qt"]
 
 [[areas]]
 name = "editor"

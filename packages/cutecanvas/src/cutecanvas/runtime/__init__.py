@@ -21,15 +21,32 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .canvas_resampling import CanvasResamplingResult, CanvasResamplingStatus
     from .document_runtime import CanvasDocumentRuntime
 
-__all__ = ["CanvasDocumentRuntime"]
+__all__ = [
+    "CanvasDocumentRuntime",
+    "CanvasResamplingResult",
+    "CanvasResamplingStatus",
+]
 
 
 def __getattr__(name: str):
     """Load the public document runtime without eager document imports."""
-    if name != "CanvasDocumentRuntime":
+    targets = {
+        "CanvasDocumentRuntime": (".document_runtime", "CanvasDocumentRuntime"),
+        "CanvasResamplingResult": (
+            ".canvas_resampling",
+            "CanvasResamplingResult",
+        ),
+        "CanvasResamplingStatus": (
+            ".canvas_resampling",
+            "CanvasResamplingStatus",
+        ),
+    }
+    target = targets.get(name)
+    if target is None:
         raise AttributeError(name)
-    value = import_module(".document_runtime", __name__).CanvasDocumentRuntime
+    value = getattr(import_module(target[0], __name__), target[1])
     globals()[name] = value
     return value

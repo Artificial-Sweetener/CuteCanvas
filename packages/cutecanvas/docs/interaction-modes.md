@@ -215,15 +215,19 @@ emits the current snapshot as live frame geometry or transaction state changes.
 Use `CuteCanvas.activateEditorTransform` to enter the shared session for an
 explicit target.
 
-The transform keeps floating-point geometry throughout the gesture. Snapping
-does not round the final layer position to integer scene coordinates.
+The transform keeps floating-point geometry throughout the gesture. Interior
+movement and scale handles snap without rounding the final layer transform to
+integer scene coordinates. Scale snapping preserves proportional and
+about-center constraints; a rotated side or constrained corner follows its
+actual affine scale axis and advertises only target lines it reaches exactly.
 
 ## Snapping
 
-Move, selection movement, retained mask-shape movement, and geometric authoring
-share one snapping policy. Geometric authoring includes rectangle and ellipse
-mask tools, rectangle and ellipse pixel-selection tools, vector rectangle and
-ellipse tools, and explicit vector-path anchors.
+Move, Transform movement and scaling, selection movement, retained mask-shape
+movement, and geometric authoring share one snapping policy. Geometric
+authoring includes rectangle and ellipse mask tools, rectangle and ellipse
+pixel-selection tools, vector rectangle and ellipse tools, and explicit
+vector-path anchors.
 
 By default, snapping follows visible content bounds. This means transparent
 padding around an image or mask does not create a surprising gap. A host may
@@ -246,6 +250,12 @@ Endpoints may align to any configured edge or center, so a gesture from a
 document side to its center resolves exactly to half the document. The overlay
 and committed edit use the same snapped coordinates. Shift-constrained squares
 and circles remain constrained when one axis acquires a snap.
+
+Transform captures stationary targets when each pointer gesture begins.
+Interior movement uses the same edge, center, canvas, guide, and grid
+relationships as Move. A scale handle snaps its actual scene-space point while
+preserving the active proportional and about-center constraints. Preview,
+Smart Guides, and the committed affine edit use the same resolved geometry.
 
 Once acquired, a snap remains stable until the pointer moves far enough to
 break away. Hold Ctrl during a gesture to suppress snapping temporarily.

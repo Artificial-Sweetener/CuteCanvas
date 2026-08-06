@@ -187,8 +187,9 @@ class CompositionLayerEditService:
         layer_id: uuid.UUID,
         *,
         history_scope_id: uuid.UUID | None = None,
+        respect_layer_policy: bool = True,
     ) -> bool:
-        """Remove one policy-enabled instance as an undoable transition."""
+        """Remove one instance as an undoable, optionally policy-gated transition."""
         layers = self._layers.layers_for_composition(composition_id)
         before_index = next(
             (index for index, layer in enumerate(layers) if layer.layer_id == layer_id),
@@ -197,7 +198,7 @@ class CompositionLayerEditService:
         if before_index < 0:
             return False
         before = layers[before_index]
-        if not before.interaction.removable:
+        if respect_layer_policy and not before.interaction.removable:
             return False
         return self._apply(
             CompositionLayerTransition(

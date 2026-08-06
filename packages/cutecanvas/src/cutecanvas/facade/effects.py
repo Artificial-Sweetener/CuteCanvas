@@ -21,7 +21,9 @@ from __future__ import annotations
 from PySide6.QtGui import QColor
 from qpane import LayerPresentationStyle
 
-from .handles import EditorHandleHost, LayerEffectHandle, LayerHandle
+from .effect_handles import LayerEffectHandle
+from .handles import EditorHandleHost
+from .layer_handles import LayerHandle
 
 
 class EffectsFacade:

@@ -29,6 +29,7 @@ from qpane.sdk.scene import (
     TransformOperation,
 )
 
+from cutecanvas.snapping.transform import TransformSnapCoordinator
 from cutecanvas.types import (
     EditorTransformCommand,
     EditorTransformSnapshot,
@@ -58,12 +59,14 @@ class EditorTransformCoordinator:
         pixels: SelectedPixelMovementController,
         layers: SceneLayerTransformInteraction,
         operations: EditorOperationResolver,
+        snapping: TransformSnapCoordinator,
         changed: Callable[[], None],
     ) -> None:
         """Bind focused target adapters to one target-neutral lifecycle."""
         self._pixels = pixels
         self._layers = layers
         self._operations = operations
+        self._snapping = snapping
         self._changed = changed
         self._requested_target: EditorTransformTarget | None = None
         self._active_target: EditorTransformTarget | None = None
@@ -137,12 +140,19 @@ class EditorTransformCoordinator:
         target = self.target
         if scene_point is None or target is None or not self._resolve(target).allowed:
             return False
+        box = self._box_state(target)
         started = (
             self._pixels.begin_transform(operation, scene_point)
             if target is EditorTransformTarget.SELECTION_CONTENT
             else self._layers.begin_scene(operation, scene_point)
         )
         if started:
+            self._snapping.begin(
+                box,
+                operation,
+                scene_point,
+                exclude_selection=target is EditorTransformTarget.SELECTION_CONTENT,
+            )
             self._active_target = target
             self._gesture_active = True
             self._changed()
@@ -153,6 +163,7 @@ class EditorTransformCoordinator:
         scene_point = self._layers.panel_to_scene(panel_point)
         if scene_point is None:
             return False
+        scene_point = self._snapping.resolve(scene_point, modifiers)
         if self._active_target is EditorTransformTarget.SELECTION_CONTENT:
             changed = self._pixels.update_transform(scene_point, modifiers)
         elif self._active_target is EditorTransformTarget.LAYER_CONTENT:
@@ -172,18 +183,21 @@ class EditorTransformCoordinator:
         scene_point = self._layers.panel_to_scene(panel_point)
         if scene_point is None:
             return self.suspend()
+        scene_point = self._snapping.resolve(scene_point, modifiers)
         if self._active_target is EditorTransformTarget.SELECTION_CONTENT:
             changed = self._pixels.finish_transform(scene_point, modifiers)
         elif self._active_target is EditorTransformTarget.LAYER_CONTENT:
             changed = self._layers.end_scene(scene_point, modifiers)
         else:
             return False
+        self._snapping.clear()
         self._gesture_active = False
         self._changed()
         return changed
 
     def apply_command(self, command: EditorTransformCommand) -> bool:
         """Apply one frame-relative command to the original session preview."""
+        self._snapping.clear()
         normalized = EditorTransformCommand(command)
         target = self.target
         state = None if target is None else self._box_state(target)
@@ -204,6 +218,7 @@ class EditorTransformCoordinator:
 
     def commit(self) -> bool:
         """Commit the cumulative target preview as one chronological edit."""
+        self._snapping.clear()
         target = self._active_target or self.target
         had_context = target is not None
         gesture_active = self._gesture_active
@@ -224,6 +239,7 @@ class EditorTransformCoordinator:
 
     def cancel(self) -> bool:
         """Discard the cumulative target preview and restore source state."""
+        self._snapping.clear()
         target = self._active_target or self.target
         had_context = target is not None
         changed = (
@@ -244,6 +260,7 @@ class EditorTransformCoordinator:
 
     def suspend(self) -> bool:
         """Release pointer ownership without resolving cumulative preview."""
+        self._snapping.clear()
         gesture_active = self._gesture_active
         self._gesture_active = False
         if self._active_target is EditorTransformTarget.SELECTION_CONTENT:

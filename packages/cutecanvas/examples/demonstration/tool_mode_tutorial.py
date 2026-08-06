@@ -424,14 +424,16 @@ class ToolModeTutorialController:
         )
         self.mode_transform_action.setShortcut(QKeySequence("Ctrl+T"))
         self.mode_transform_action.setStatusTip(
-            "Transform the selected layer's tight nontransparent content bounds."
+            "Move or resize the selected layer's tight content bounds with snapping; "
+            "hold Ctrl to suppress snaps."
         )
         self.mode_transform_selection_action = QAction(
             "Transform Selection", self._parent, checkable=True
         )
         self.mode_transform_selection_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
         self.mode_transform_selection_action.setStatusTip(
-            "Use the complete selection bounds while transforming selected-layer pixels."
+            "Move or resize selected-layer pixels with snapping against the complete "
+            "selection bounds."
         )
         self.mode_brush_action = QAction("Brush", self._parent, checkable=True)
         self.mode_eraser_action = QAction("Eraser", self._parent, checkable=True)
