@@ -17,21 +17,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, QSizeF, Qt
 from PySide6.QtGui import (
     QColor,
-    QImage,
     QPainter,
     QPainterPath,
     QPen,
-    QTransform,
 )
 
-from ..scene.affine import LayerTransform
-from ..scene.model import ClipCoordinateSpace
-from ..scene.raster import RasterBounds
 from ..scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
@@ -45,9 +38,12 @@ from ..scene.render_plan import (
     TransientSampledResolvedContribution,
     VectorLayerRenderItem,
 )
+from .layer_clip_projection import source_clip_path
+from .layer_isolation import LayerIsolationCompositor
 from .presentation_effect_compositor import LayerPresentationEffectCompositor
 from .raster_sampling import device_aligned_raster_transform
 from .tile_compositing import fallback_output_region, tile_output_rect
+from .transient_raster_compositor import TransientRasterCompositor
 
 
 class SceneItemCompositor:
@@ -55,8 +51,9 @@ class SceneItemCompositor:
 
     def __init__(self) -> None:
         """Initialize without a reusable transient isolation surface."""
-        self._isolation_buffer: QImage | None = None
+        self._isolation = LayerIsolationCompositor()
         self._presentation_effects = LayerPresentationEffectCompositor()
+        self._transient_rasters = TransientRasterCompositor(self._isolation)
 
     def draw_visible_items(
         self,
@@ -111,7 +108,14 @@ class SceneItemCompositor:
                 )
                 painter.save()
                 try:
-                    self._draw_transient_layer_group(painter, plan, group, preview)
+                    self._transient_rasters.draw_layer_group(
+                        painter,
+                        plan,
+                        group,
+                        preview,
+                        prepare_item=self._prepare_raster_item,
+                        draw_source=self.draw_raster_source,
+                    )
                 finally:
                     painter.restore()
                 index = group_end
@@ -172,18 +176,23 @@ class SceneItemCompositor:
             self._apply_layer_clip(painter, plan, item)
             self._apply_layer_effects(painter, item)
             painter.drawImage(
-                self._product_rect(item, preview.source_bounds),
+                self._transient_rasters.product_rect(item, preview.source_bounds),
                 preview.source_image,
                 QRectF(preview.source_image.rect()),
             )
             return
         if isinstance(preview, TransientRasterTransformContribution):
-            self._draw_isolated_transient_item(
+            self._transient_rasters.draw_isolated_item(
                 painter,
                 plan,
                 item,
                 preview,
-                lambda target: self.draw_raster_source(target, plan, item),
+                draw_source=lambda target: self.draw_raster_source(
+                    target,
+                    plan,
+                    item,
+                ),
+                prepare_item=self._prepare_raster_item,
             )
             return
         if item.render_hint_enabled:
@@ -312,14 +321,26 @@ class SceneItemCompositor:
         preview: TransientSampledResolvedContribution,
     ) -> None:
         """Draw a settled edit through the sampled source's native tile batch."""
-        if item.render_hint_enabled:
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        self.apply_raster_transform(painter, item)
-        self._apply_layer_clip(painter, plan, item)
-        self._apply_layer_effects(painter, item)
-        painter.setOpacity(item.descriptor.opacity)
-        for tile in preview.tiles:
-            self._draw_sampled_tile(painter, tile)
+
+        def paint_layer(layer_painter: QPainter) -> None:
+            """Replace overlapping sampled products on one transparent surface."""
+            if item.render_hint_enabled:
+                layer_painter.setRenderHint(
+                    QPainter.RenderHint.SmoothPixmapTransform,
+                    True,
+                )
+            self.apply_raster_transform(layer_painter, item)
+            self._apply_layer_clip(layer_painter, plan, item)
+            self._apply_layer_effects(layer_painter, item)
+            layer_painter.setCompositionMode(QPainter.CompositionMode_Source)
+            for tile in preview.tiles:
+                self._draw_sampled_tile(layer_painter, tile)
+
+        self._isolation.composite(
+            painter,
+            opacity=item.descriptor.opacity,
+            paint_layer=paint_layer,
+        )
 
     def _draw_resolved_sampled_item(
         self,
@@ -335,7 +356,10 @@ class SceneItemCompositor:
         self._apply_layer_clip(painter, plan, item)
         self._apply_layer_effects(painter, item)
         painter.setOpacity(item.descriptor.opacity)
-        replacement_rect = self._product_rect(item, preview.source_bounds)
+        replacement_rect = self._transient_rasters.product_rect(
+            item,
+            preview.source_bounds,
+        )
         source_rect = QRectF(
             0.0,
             0.0,
@@ -366,12 +390,9 @@ class SceneItemCompositor:
         preview: TransientRasterContribution,
     ) -> None:
         """Apply a raster edit over sampled source products as one layer."""
-        buffer = self._prepare_isolation_buffer(painter)
-        layer_painter = QPainter(buffer)
-        try:
-            layer_painter.setWorldTransform(painter.worldTransform())
-            if painter.hasClipping():
-                layer_painter.setClipRegion(painter.clipRegion())
+
+        def paint_layer(layer_painter: QPainter) -> None:
+            """Render the sampled source and active edit on an isolated surface."""
             if item.render_hint_enabled:
                 layer_painter.setRenderHint(
                     QPainter.RenderHint.SmoothPixmapTransform,
@@ -384,26 +405,28 @@ class SceneItemCompositor:
             if isinstance(preview, TransientRasterTransformContribution):
                 if preview.extent_clip_bounds is not None:
                     layer_painter.setClipRect(
-                        self._product_rect(item, preview.extent_clip_bounds),
+                        self._transient_rasters.product_rect(
+                            item,
+                            preview.extent_clip_bounds,
+                        ),
                         Qt.ClipOperation.IntersectClip,
                     )
-                self._apply_transient_products(layer_painter, item, preview)
+                self._transient_rasters.apply(layer_painter, item, preview)
             else:
                 layer_painter.setCompositionMode(QPainter.CompositionMode_Source)
                 layer_painter.drawImage(
-                    self._product_rect(item, preview.source_bounds),
+                    self._transient_rasters.product_rect(
+                        item,
+                        preview.source_bounds,
+                    ),
                     preview.source_image,
                 )
-        finally:
-            layer_painter.end()
-        painter.save()
-        try:
-            painter.resetTransform()
-            painter.setOpacity(item.descriptor.opacity)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.drawImage(QPointF(), buffer)
-        finally:
-            painter.restore()
+
+        self._isolation.composite(
+            painter,
+            opacity=item.descriptor.opacity,
+            paint_layer=paint_layer,
+        )
 
     @staticmethod
     def apply_raster_transform(
@@ -419,6 +442,19 @@ class SceneItemCompositor:
             ),
             False,
         )
+
+    def _prepare_raster_item(
+        self,
+        painter: QPainter,
+        plan: SceneRenderPlan,
+        item: RasterLayerRenderItem | SampledLayerRenderItem,
+    ) -> None:
+        """Apply shared raster sampling, geometry, clipping, and effects."""
+        if item.render_hint_enabled:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.apply_raster_transform(painter, item)
+        self._apply_layer_clip(painter, plan, item)
+        self._apply_layer_effects(painter, item)
 
     def draw_raster_source(
         self,
@@ -482,218 +518,6 @@ class SceneItemCompositor:
             return item.source_size.width(), item.source_size.height()
         return item.source_size.width(), item.source_size.height()
 
-    def _draw_isolated_transient_item(
-        self,
-        painter: QPainter,
-        plan: SceneRenderPlan,
-        item: RasterLayerRenderItem,
-        preview: TransientRasterTransformContribution,
-        draw_source: Callable[[QPainter], None],
-    ) -> None:
-        """Composite one edited layer independently from the accumulated backdrop."""
-        buffer = self._prepare_isolation_buffer(painter)
-        layer_painter = QPainter(buffer)
-        try:
-            layer_painter.setWorldTransform(painter.worldTransform())
-            if painter.hasClipping():
-                layer_painter.setClipRegion(painter.clipRegion())
-            if item.render_hint_enabled:
-                layer_painter.setRenderHint(
-                    QPainter.RenderHint.SmoothPixmapTransform,
-                    True,
-                )
-            self.apply_raster_transform(layer_painter, item)
-            self._apply_layer_clip(layer_painter, plan, item)
-            self._apply_layer_effects(layer_painter, item)
-            if preview.extent_clip_bounds is not None:
-                layer_painter.setClipRect(
-                    self._product_rect(item, preview.extent_clip_bounds),
-                    Qt.ClipOperation.IntersectClip,
-                )
-            draw_source(layer_painter)
-            self._apply_transient_products(layer_painter, item, preview)
-        finally:
-            layer_painter.end()
-        painter.save()
-        try:
-            painter.resetTransform()
-            painter.setOpacity(item.descriptor.opacity)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.drawImage(QPointF(0.0, 0.0), buffer)
-        finally:
-            painter.restore()
-
-    def _draw_transient_layer_group(
-        self,
-        painter: QPainter,
-        plan: SceneRenderPlan,
-        items: tuple[RasterLayerRenderItem, ...],
-        preview: TransientRasterContribution,
-    ) -> None:
-        """Composite every sparse product for one edited layer as one surface."""
-        if not items:
-            return
-        buffer = self._prepare_isolation_buffer(painter)
-        layer_painter = QPainter(buffer)
-        try:
-            layer_painter.setWorldTransform(painter.worldTransform())
-            if painter.hasClipping():
-                layer_painter.setClipRegion(painter.clipRegion())
-            for item in items:
-                layer_painter.save()
-                try:
-                    if item.render_hint_enabled:
-                        layer_painter.setRenderHint(
-                            QPainter.RenderHint.SmoothPixmapTransform,
-                            True,
-                        )
-                    self.apply_raster_transform(layer_painter, item)
-                    self._apply_layer_clip(layer_painter, plan, item)
-                    self._apply_layer_effects(layer_painter, item)
-                    self.draw_raster_source(layer_painter, plan, item)
-                finally:
-                    layer_painter.restore()
-            reference = items[0]
-            layer_painter.save()
-            try:
-                if reference.render_hint_enabled:
-                    layer_painter.setRenderHint(
-                        QPainter.RenderHint.SmoothPixmapTransform,
-                        True,
-                    )
-                self.apply_raster_transform(layer_painter, reference)
-                self._apply_layer_clip(layer_painter, plan, reference)
-                self._apply_layer_effects(layer_painter, reference)
-                if isinstance(preview, TransientRasterTransformContribution):
-                    if preview.extent_clip_bounds is not None:
-                        layer_painter.setClipRect(
-                            self._product_rect(
-                                reference,
-                                preview.extent_clip_bounds,
-                            ),
-                            Qt.ClipOperation.IntersectClip,
-                        )
-                    self._apply_transient_products(
-                        layer_painter,
-                        reference,
-                        preview,
-                    )
-                else:
-                    layer_painter.setCompositionMode(QPainter.CompositionMode_Source)
-                    layer_painter.drawImage(
-                        self._product_rect(reference, preview.source_bounds),
-                        preview.source_image,
-                    )
-            finally:
-                layer_painter.restore()
-        finally:
-            layer_painter.end()
-        painter.save()
-        try:
-            painter.resetTransform()
-            painter.setOpacity(items[0].descriptor.opacity)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.drawImage(QPointF(0.0, 0.0), buffer)
-        finally:
-            painter.restore()
-
-    def _prepare_isolation_buffer(self, painter: QPainter) -> QImage:
-        """Return a reusable transparent surface matching the frame buffer."""
-        device = painter.device()
-        size = QSize(device.width(), device.height())
-        dpr = float(device.devicePixelRatioF())
-        buffer = self._isolation_buffer
-        if (
-            buffer is None
-            or buffer.size() != size
-            or abs(buffer.devicePixelRatioF() - dpr) > 1e-6
-        ):
-            buffer = QImage(size, QImage.Format_ARGB32_Premultiplied)
-            buffer.setDevicePixelRatio(dpr)
-            self._isolation_buffer = buffer
-            buffer.fill(Qt.transparent)
-        elif painter.hasClipping():
-            clear = QPainter(buffer)
-            try:
-                clear.setWorldTransform(painter.worldTransform())
-                clear.setClipRegion(painter.clipRegion())
-                clear.setCompositionMode(QPainter.CompositionMode_Source)
-                clear.fillRect(painter.clipBoundingRect(), Qt.transparent)
-            finally:
-                clear.end()
-        else:
-            buffer.fill(Qt.transparent)
-        return buffer
-
-    def _apply_transient_products(
-        self,
-        painter: QPainter,
-        item: RasterLayerRenderItem | SampledLayerRenderItem,
-        preview: TransientRasterTransformContribution,
-    ) -> None:
-        """Apply stable source and fragment products at current local geometry."""
-        if preview.source_patch is not None:
-            painter.setCompositionMode(QPainter.CompositionMode_Source)
-            painter.drawImage(
-                self._product_rect(item, preview.source_bounds),
-                preview.source_patch,
-            )
-        source_rect = self._product_rect(item, preview.fragment_bounds)
-        painter.save()
-        try:
-            painter.setTransform(
-                self._product_transform(item, preview.fragment_transform),
-                True,
-            )
-            if preview.clear_destination:
-                painter.setCompositionMode(QPainter.CompositionMode_DestinationOut)
-                painter.drawImage(source_rect, preview.selection_mask)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.drawImage(source_rect, preview.fragment_image)
-        finally:
-            painter.restore()
-
-    @staticmethod
-    def _product_transform(
-        item: RasterLayerRenderItem | SampledLayerRenderItem,
-        transform: LayerTransform,
-    ) -> QTransform:
-        """Conjugate one local affine transform into display-product coordinates."""
-        bounds = item.descriptor.raster_bounds
-        if bounds is None:
-            return QTransform()
-        source_width, source_height = SceneItemCompositor.item_source_size(item)
-        scale_x = source_width / bounds.width
-        scale_y = source_height / bounds.height
-        product_to_local = QTransform()
-        product_to_local.translate(float(bounds.x), float(bounds.y))
-        product_to_local.scale(1.0 / scale_x, 1.0 / scale_y)
-        local_to_product = product_to_local.inverted()[0]
-        return product_to_local * transform.to_qtransform() * local_to_product
-
-    @staticmethod
-    def _product_rect(
-        item: RasterLayerRenderItem | SampledLayerRenderItem,
-        bounds: RasterBounds,
-    ) -> QRectF:
-        """Map authoritative local bounds into one item's current source product."""
-        raster_bounds = item.descriptor.raster_bounds
-        if (
-            raster_bounds is None
-            or raster_bounds.width <= 0
-            or raster_bounds.height <= 0
-        ):
-            return QRectF()
-        source_width, source_height = SceneItemCompositor.item_source_size(item)
-        scale_x = source_width / raster_bounds.width
-        scale_y = source_height / raster_bounds.height
-        return QRectF(
-            (bounds.x - raster_bounds.x) * scale_x,
-            (bounds.y - raster_bounds.y) * scale_y,
-            bounds.width * scale_x,
-            bounds.height * scale_y,
-        )
-
     @staticmethod
     def _transient_raster_contribution(
         plan: SceneRenderPlan,
@@ -716,51 +540,9 @@ class SceneItemCompositor:
         item: SceneRenderItem,
     ) -> None:
         """Intersect one layer clip without broadening ambient frame damage."""
-        clip = item.clip
-        if clip is None:
-            return
-        source_width, source_height = self.item_source_size(item)
-        if clip.coordinate_space == ClipCoordinateSpace.NORMALIZED_SCENE:
-            scene_clip = QRectF(
-                plan.scene_bounds.x + clip.x * plan.scene_bounds.width,
-                plan.scene_bounds.y + clip.y * plan.scene_bounds.height,
-                clip.width * plan.scene_bounds.width,
-                clip.height * plan.scene_bounds.height,
-            )
-        elif clip.coordinate_space == ClipCoordinateSpace.SCENE:
-            scene_clip = QRectF(clip.x, clip.y, clip.width, clip.height)
-        elif clip.coordinate_space == ClipCoordinateSpace.NORMALIZED_VIEWPORT:
-            viewport_clip = QRectF(
-                plan.qpane_rect.x() + clip.x * plan.qpane_rect.width(),
-                plan.qpane_rect.y() + clip.y * plan.qpane_rect.height(),
-                clip.width * plan.qpane_rect.width(),
-                clip.height * plan.qpane_rect.height(),
-            )
-            painter.setClipRect(
-                self._viewport_clip_to_source(item, viewport_clip),
-                Qt.ClipOperation.IntersectClip,
-            )
-            return
-        elif clip.coordinate_space == ClipCoordinateSpace.VIEWPORT:
-            painter.setClipRect(
-                self._viewport_clip_to_source(
-                    item,
-                    QRectF(clip.x, clip.y, clip.width, clip.height),
-                ),
-                Qt.ClipOperation.IntersectClip,
-            )
-            return
-        else:
-            return
-        painter.setClipRect(
-            self._scene_clip_to_source(
-                item,
-                scene_clip,
-                source_width=source_width,
-                source_height=source_height,
-            ),
-            Qt.ClipOperation.IntersectClip,
-        )
+        path = source_clip_path(plan, item)
+        if path is not None:
+            painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
 
     @staticmethod
     def _apply_layer_effects(painter: QPainter, item: SceneRenderItem) -> None:
@@ -770,34 +552,6 @@ class SceneItemCompositor:
                 item.effect_clip_path,
                 Qt.ClipOperation.IntersectClip,
             )
-
-    @staticmethod
-    def _scene_clip_to_source(
-        item: SceneRenderItem,
-        scene_clip: QRectF,
-        *,
-        source_width: int,
-        source_height: int,
-    ) -> QRectF:
-        """Convert a scene-space clip into primitive source coordinates."""
-        placement = item.placement
-        if placement.width <= 0.0 or placement.height <= 0.0:
-            return QRectF()
-        return QRectF(
-            (scene_clip.x() - placement.x) * source_width / placement.width,
-            (scene_clip.y() - placement.y) * source_height / placement.height,
-            scene_clip.width() * source_width / placement.width,
-            scene_clip.height() * source_height / placement.height,
-        )
-
-    @staticmethod
-    def _viewport_clip_to_source(
-        item: SceneRenderItem,
-        viewport_clip: QRectF,
-    ) -> QRectF:
-        """Convert a viewport-space clip into primitive source coordinates."""
-        inverse, invertible = item.transform.inverted()
-        return inverse.mapRect(viewport_clip) if invertible else QRectF()
 
     def _draw_tiled_view(
         self,

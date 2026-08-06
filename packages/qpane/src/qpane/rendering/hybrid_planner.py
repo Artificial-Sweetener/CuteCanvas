@@ -18,14 +18,17 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QImage, QTransform
 
 from ..hybrid.model import HybridRasterPrimitive
 from ..hybrid.tile_source import HybridRenderTileSource
 from ..scene.identity import source_render_asset_key
 from ..scene.model import LayerDescriptor, LayerKind
+from ..scene.raster import RasterBounds
 from ..scene.render_plan import SampledLayerRenderItem, SampledTileRenderData
 from .compiled_scene import CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
@@ -35,6 +38,7 @@ from .raster_sampling import (
     raster_sample_scale_limit,
     smooth_raster_sampling_enabled,
 )
+from .render_tile_geometry import scale_bucket
 from .render_tile_types import RenderTileBatchSource
 from .render_tiles import RenderTileWorkCoordinator
 from .sampled_atlas import compact_native_sampled_tiles
@@ -72,8 +76,11 @@ class HybridRenderPlanner:
         self,
         compiled: CompiledRenderScene,
         frame: RenderFrameGeometry,
+        *,
+        transient_support_bounds: Mapping[uuid.UUID, RasterBounds] | None = None,
     ) -> SampledFramePlan:
         """Return sampled primitives for every compiled hybrid layer."""
+        support_bounds_by_layer = transient_support_bounds or {}
         items: list[SampledLayerRenderItem] = []
         pending_layer_ids: set[uuid.UUID] = set()
         for compiled_layer in compiled.hybrid_layers:
@@ -94,6 +101,17 @@ class HybridRenderPlanner:
                 frame.device_pixel_ratio,
             )
             if not document.primitives:
+                if layer.layer_id in support_bounds_by_layer:
+                    support = self._transient_support_item(
+                        layer,
+                        source_size,
+                        layer_to_panel,
+                        render_hint_enabled,
+                        support_bounds_by_layer[layer.layer_id],
+                        frame.device_pixel_ratio,
+                    )
+                    if support is not None:
+                        items.append(support)
                 continue
             raster_only = all(
                 isinstance(primitive, HybridRasterPrimitive)
@@ -162,6 +180,22 @@ class HybridRenderPlanner:
                     if atlas is not None:
                         tiles = (atlas,)
                         source_bounds = atlas.source_rect
+            support_bounds = support_bounds_by_layer.get(layer.layer_id)
+            if support_bounds is not None:
+                support_scale_x, support_scale_y = _support_sample_scale(
+                    tiles,
+                    layer_to_panel,
+                    frame.device_pixel_ratio,
+                )
+                support_tile = self._transient_support_tile(
+                    layer,
+                    source_size,
+                    support_bounds,
+                    support_scale_x,
+                    support_scale_y,
+                )
+                if support_tile is not None:
+                    tiles = (*tiles, support_tile)
             items.append(
                 SampledLayerRenderItem(
                     descriptor=layer,
@@ -186,6 +220,75 @@ class HybridRenderPlanner:
             if item is not None:
                 items.append(item)
         return SampledFramePlan(tuple(items), frozenset(pending_layer_ids))
+
+    @staticmethod
+    def _transient_support_item(
+        layer: LayerDescriptor,
+        source_size: QSize,
+        layer_to_panel: QTransform,
+        render_hint_enabled: bool,
+        support_bounds: RasterBounds,
+        device_pixel_ratio: float,
+    ) -> SampledLayerRenderItem | None:
+        """Build a bounded empty source lattice for one active transient edit."""
+        support_scale = min(
+            1.0,
+            scale_bucket(layer_to_panel, device_pixel_ratio),
+        )
+        tile = HybridRenderPlanner._transient_support_tile(
+            layer,
+            source_size,
+            support_bounds,
+            support_scale,
+            support_scale,
+        )
+        if tile is None:
+            return None
+        return SampledLayerRenderItem(
+            descriptor=layer,
+            transform=layer_to_panel,
+            placement=layer.placement,
+            clip=layer.clip,
+            source_size=source_size,
+            render_hint_enabled=render_hint_enabled,
+            tiles=(tile,),
+            source_bounds=tile.source_rect,
+        )
+
+    @staticmethod
+    def _transient_support_tile(
+        layer: LayerDescriptor,
+        source_size: QSize,
+        support_bounds: RasterBounds,
+        scale_x: float,
+        scale_y: float,
+    ) -> SampledTileRenderData | None:
+        """Build transparent sampled support for provisional local coverage."""
+        if scale_x <= 0.0 or scale_y <= 0.0:
+            raise ValueError("transient support sample scales must be positive")
+        local_bounds = layer.raster_bounds or RasterBounds.from_size(source_size)
+        clipped_bounds = support_bounds.intersection(local_bounds)
+        if clipped_bounds is None:
+            return None
+        local_to_source_x = source_size.width() / local_bounds.width
+        local_to_source_y = source_size.height() / local_bounds.height
+        source_rect = QRectF(
+            (clipped_bounds.x - local_bounds.x) * local_to_source_x,
+            (clipped_bounds.y - local_bounds.y) * local_to_source_y,
+            clipped_bounds.width * local_to_source_x,
+            clipped_bounds.height * local_to_source_y,
+        )
+        image = QImage(
+            max(1, round(source_rect.width() * scale_x)),
+            max(1, round(source_rect.height() * scale_y)),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+        return SampledTileRenderData(
+            image,
+            source_rect,
+            QRectF(image.rect()),
+        )
 
     def _sampled_item(
         self,
@@ -238,3 +341,19 @@ class HybridRenderPlanner:
             ),
             refinement.pending,
         )
+
+
+def _support_sample_scale(
+    tiles: tuple[SampledTileRenderData, ...],
+    layer_to_panel: QTransform,
+    device_pixel_ratio: float,
+) -> tuple[float, float]:
+    """Return the sampled density shared by durable and support products."""
+    for tile in tiles:
+        if tile.source_rect.width() > 0.0 and tile.source_rect.height() > 0.0:
+            return (
+                tile.image_source_rect.width() / tile.source_rect.width(),
+                tile.image_source_rect.height() / tile.source_rect.height(),
+            )
+    scale = min(1.0, scale_bucket(layer_to_panel, device_pixel_ratio))
+    return scale, scale

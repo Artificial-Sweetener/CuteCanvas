@@ -23,16 +23,17 @@ from typing import Literal, Protocol
 
 from PySide6.QtCore import QPointF
 
+from cutecanvas.cursor import EditorCursorIntent
 from cutecanvas.snapping.model import SnapGuide
 
 from ..scene.layer_selection import SceneLayerSelection
 from ..scene.movement_interaction import SceneLayerMovementInteraction
 from .move_configuration import MoveToolConfiguration
-from .operation_resolution import (
+from .operation_contracts import (
     EditorOperation,
-    EditorOperationResolver,
     EditorOperationTarget,
 )
+from .operation_resolution import EditorOperationResolver
 from .pixel_movement import SelectedPixelMovementController
 
 
@@ -111,6 +112,13 @@ class EditorMovementInteraction:
             )
         )
 
+    @property
+    def cursor_intent(self) -> EditorCursorIntent:
+        """Describe whether Move will lift selected pixels at the pointer."""
+        if self._active is None and self._selection_hover_valid:
+            return EditorCursorIntent.MOVE_CUT
+        return EditorCursorIntent.MOVE
+
     def update_hover(self, panel_point: QPointF) -> bool:
         """Refresh target feedback without changing durable selection state."""
         scene_point = self._panel_to_scene(panel_point)
@@ -123,6 +131,7 @@ class EditorMovementInteraction:
             EditorOperationTarget.FLOATING_PIXELS,
             EditorOperationTarget.SELECTED_PIXELS,
         }
+        selection_will_cut = resolution.target is EditorOperationTarget.SELECTED_PIXELS
         candidate = None
         if not pixel_target and self._configuration.options.auto_select_layers:
             candidate = self._layers.candidate_at(panel_point)
@@ -133,7 +142,7 @@ class EditorMovementInteraction:
                     None if candidate is None else candidate.hit.layer_id
                 ),
             )
-        valid = resolution.allowed and pixel_target
+        valid = resolution.allowed and selection_will_cut
         changed = valid != self._selection_hover_valid
         self._selection_hover_valid = valid
         layer_changed = self._layers.set_hover(

@@ -90,6 +90,7 @@ class TransformTool(BaseTool):
             return
         self._active = True
         self._operation = operation
+        self._rotation_angle = self._rotation_tangent_angle(QPointF(event.position()))
         self.signals.cursor_update_requested.emit()
         event.accept()
 
@@ -105,10 +106,16 @@ class TransformTool(BaseTool):
             event.accept()
             return
         operation = self._operation_at(point, event.modifiers())
+        rotation_angle = self._rotation_tangent_angle(point)
         handle = None if operation is None else operation.handle
-        if operation != self._hover_operation or handle != self._hover_handle:
+        if (
+            operation != self._hover_operation
+            or handle != self._hover_handle
+            or abs(rotation_angle - self._rotation_angle) >= 1.0
+        ):
             self._hover_operation = operation
             self._hover_handle = handle
+            self._rotation_angle = rotation_angle
             self.signals.repaint_overlay_requested.emit()
             self.signals.cursor_update_requested.emit()
         event.ignore()
@@ -216,7 +223,7 @@ class TransformTool(BaseTool):
         if operation.kind is TransformOperationKind.MOVE:
             return QCursor(Qt.CursorShape.SizeAllCursor)
         if operation.kind is TransformOperationKind.ROTATE:
-            return self._cursors.rotate()
+            return self._cursors.rotate(self._rotation_angle)
         if operation.kind is TransformOperationKind.SKEW:
             return self._cursors.skew(self._handle_tangent_angle(operation.handle))
         return self._cursors.resize(self._handle_axis_angle(operation.handle))
@@ -294,6 +301,18 @@ class TransformTool(BaseTool):
         delta = end - start
         return math.degrees(math.atan2(delta.y(), delta.x()))
 
+    def _rotation_tangent_angle(self, point: QPointF) -> float:
+        """Return the tangent of the nearest authoritative frame corner."""
+        state = self._presentation()
+        if state is None:
+            return 0.0
+        corner = min(
+            state.corners,
+            key=lambda candidate: QLineF(point, candidate).length(),
+        )
+        radial = corner - state.center
+        return math.degrees(math.atan2(radial.y(), radial.x())) + 90.0
+
     def _commit_and_repaint(self) -> bool:
         """Commit unresolved geometry and refresh tool feedback."""
         if not self._commit():
@@ -308,6 +327,7 @@ class TransformTool(BaseTool):
         self._operation: TransformOperation | None = None
         self._hover_operation: TransformOperation | None = None
         self._hover_handle: TransformHandle | None = None
+        self._rotation_angle = 0.0
         self._presentation: Callable[[], TransformBoxPresentation | None] = lambda: None
         self._begin: Callable[[TransformOperation, QPointF], bool] = (
             lambda _operation, _point: False

@@ -206,7 +206,7 @@ def _validate_protected_file(
 ) -> list[Diagnostic]:
     """Validate one protected Python source or stub."""
     relative_path = path.relative_to(root).as_posix()
-    diagnostics = _structure_diagnostics(root, path, policy)
+    diagnostics = _protected_name_diagnostics(root, path, policy)
     module = _module_name(protected.product, path.relative_to(root / protected.path))
     if (
         path.suffix == ".py"
@@ -243,12 +243,12 @@ def _validate_protected_file(
     return diagnostics
 
 
-def _structure_diagnostics(
+def _protected_name_diagnostics(
     root: Path,
     path: Path,
     policy: ArchitecturePolicy,
 ) -> list[Diagnostic]:
-    """Return dumping-ground and line-count diagnostics for one source file."""
+    """Reject generic ownership names within explicitly protected roots."""
     relative_path = path.relative_to(root).as_posix()
     diagnostics: list[Diagnostic] = []
     protected_parts = {part.lower() for part in path.with_suffix("").parts}
@@ -259,24 +259,6 @@ def _structure_diagnostics(
                 "STRUCT001",
                 relative_path,
                 f"generic ownership name is forbidden: {min(forbidden)}",
-            )
-        )
-    lines = _production_line_count(path)
-    if lines > policy.structure.hard_lines:
-        diagnostics.append(
-            Diagnostic(
-                "STRUCT003",
-                relative_path,
-                f"{lines} production lines exceed hard gate {policy.structure.hard_lines}",
-            )
-        )
-    elif lines > policy.structure.soft_lines:
-        diagnostics.append(
-            Diagnostic(
-                "STRUCT002",
-                relative_path,
-                f"{lines} production lines exceed soft ceiling {policy.structure.soft_lines}",
-                severity="warning",
             )
         )
     return diagnostics
@@ -419,12 +401,3 @@ def _call_name(node: ast.expr) -> str:
         owner = _call_name(node.value)
         return f"{owner}.{node.attr}" if owner else node.attr
     return ""
-
-
-def _production_line_count(path: Path) -> int:
-    """Count nonblank, noncomment physical production lines."""
-    return sum(
-        1
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    )

@@ -94,7 +94,6 @@ class BrushTool(BaseTool):
         self._is_shift_held: Callable[[], bool] = lambda: False
         self._can_paint: Callable[[], bool] = lambda: True
         self._prepare_paint: Callable[[], bool] = lambda: True
-        self._gesture_start_allowed: Callable[[QPointF], bool] = lambda _point: True
         self._get_brush_size: Callable[[], int] = lambda: 20
         self._get_preview_pens: Callable[[], tuple[QPen, QPen]] = (
             self._default_preview_pens
@@ -104,7 +103,7 @@ class BrushTool(BaseTool):
             Callable[[QPointF], PanelHitTest | None] | None
         ) = None
         self._panel_to_content_point: Callable[[QPoint], QPoint | None] = (
-            lambda point: None
+            lambda point: (None)
         )
         self._image_to_panel_point: Callable[[QPoint | QPointF], QPointF | None] = (
             lambda point: None
@@ -129,8 +128,8 @@ class BrushTool(BaseTool):
         self._get_zoom: Callable[[], float] = lambda: 1.0
         self._get_dpr: Callable[[], float] = lambda: 1.0
         self._get_preview_color: Callable[[], QColor | None] = lambda: None
-        self._request_overlay_update: Callable[[QRect], None] = (
-            lambda _rect: self.signals.repaint_overlay_requested.emit()
+        self._request_overlay_update: Callable[[QRect], None] = lambda _rect: (
+            self.signals.repaint_overlay_requested.emit()
         )
 
     def activate(self, dependencies: PaintingInteractionPort) -> None:
@@ -150,7 +149,6 @@ class BrushTool(BaseTool):
         self._is_shift_held = dependencies.is_shift_held
         self._can_paint = dependencies.can_paint
         self._prepare_paint = dependencies.prepare_paint
-        self._gesture_start_allowed = dependencies.gesture_start_allowed
         self._get_brush_size = dependencies.get_brush_size
         self._get_preview_pens = (
             dependencies.get_preview_pens or self._default_preview_pens
@@ -194,8 +192,6 @@ class BrushTool(BaseTool):
         """Begin a brush stroke or execute a straight-line stroke when shift is held."""
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        if not self._gesture_start_allowed(event.position()):
-            return
         if not self._can_paint() or not self._prepare_paint():
             return
         panel_point = event.position().toPoint()
@@ -204,7 +200,7 @@ class BrushTool(BaseTool):
             return
         self._pending_undo_push = True
         self._stroke_has_content = False
-        erase_mode = alt_is_active(self._is_alt_held(), event.modifiers())
+        erase_mode = self._erase_mode(event.modifiers())
         shift_held = shift_is_active(self._is_shift_held(), event.modifiers())
         if shift_held and self.last_paint_anchor_point is not None:
             self._pending_undo_push = True
@@ -245,7 +241,7 @@ class BrushTool(BaseTool):
             event.accept()
             return
         if self.is_drawing and self.last_draw_point is not None:
-            erase_mode = alt_is_active(self._is_alt_held(), event.modifiers())
+            erase_mode = self._erase_mode(event.modifiers())
             stroke_point = self._emit_stroke(
                 self.last_draw_point,
                 stroke_point,
@@ -315,9 +311,7 @@ class BrushTool(BaseTool):
             preview_cleared = self.clear_pointer_preview()
             return stroke_cancelled or preview_cleared
         if sample.phase is PointerPhase.BEGIN and (
-            not self._gesture_start_allowed(sample.position)
-            or not self._can_paint()
-            or not self._prepare_paint()
+            not self._can_paint() or not self._prepare_paint()
         ):
             self.clear_pointer_preview()
             return False
@@ -326,9 +320,9 @@ class BrushTool(BaseTool):
             self.clear_pointer_preview()
             return self._pointer_stroke.active
         diameter = self._pointer_diameter(sample)
-        erase = sample.device is PointerDeviceKind.ERASER or alt_is_active(
-            self._is_alt_held(),
+        erase = self._erase_mode(
             sample.modifiers,
+            eraser_device=sample.device is PointerDeviceKind.ERASER,
         )
         self._set_pointer_preview(
             sample,
@@ -403,9 +397,9 @@ class BrushTool(BaseTool):
         if stroke_point is None:
             self.clear_pointer_preview()
             return False
-        erase = sample.device is PointerDeviceKind.ERASER or alt_is_active(
-            self._is_alt_held(),
+        erase = self._erase_mode(
             sample.modifiers,
+            eraser_device=sample.device is PointerDeviceKind.ERASER,
         )
         diameter = (
             float(self._get_brush_size())
@@ -428,6 +422,16 @@ class BrushTool(BaseTool):
         self._pointer_preview = None
         self._request_overlay_update(self._preview_bounds(previous))
         return True
+
+    def _erase_mode(
+        self,
+        modifiers: Qt.KeyboardModifier,
+        *,
+        eraser_device: bool = False,
+    ) -> bool:
+        """Resolve ordinary brush erasure from pen identity or transient Alt."""
+
+        return eraser_device or alt_is_active(self._is_alt_held(), modifiers)
 
     def cancel_pointer_stroke(self) -> bool:
         """Release direct-pointer capture and discard provisional mask content."""
@@ -572,10 +576,10 @@ class BrushTool(BaseTool):
         if not self._is_point_in_widget(logical_point.toPoint()):
             return None
         if self._panel_to_target_point is not None:
-            source_point = self._panel_to_target_point(logical_point)
-            if source_point is None:
+            target_point = self._panel_to_target_point(logical_point)
+            if target_point is None:
                 return None
-            return self._stroke_point_from_source(source_point)
+            return self._stroke_point_from_target(target_point)
         if self._panel_hit_test_precise is not None:
             hit = self._panel_hit_test_precise(logical_point)
             if hit is None:
@@ -588,7 +592,7 @@ class BrushTool(BaseTool):
             return self._stroke_point_from_hit(hit)
         return self._fallback_stroke_point(logical_point.toPoint())
 
-    def _stroke_point_from_source(self, raw_point: QPointF) -> _StrokePoint | None:
+    def _stroke_point_from_target(self, raw_point: QPointF) -> _StrokePoint | None:
         """Keep the unbounded layer-local point accepted by canvas mapping."""
         return _StrokePoint(
             raw=QPointF(raw_point),

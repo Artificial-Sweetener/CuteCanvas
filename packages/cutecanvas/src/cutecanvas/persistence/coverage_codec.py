@@ -191,6 +191,8 @@ def _encode_segment(segment: BrushStrokeSegment) -> dict[str, object]:
         value = getattr(segment, definition.name)
         if isinstance(value, BrushOperation):
             result[definition.name] = value.value
+        elif isinstance(value, LayerTransform):
+            result[definition.name] = _encode_transform(value)
         elif isinstance(value, tuple):
             result[definition.name] = list(value)
         else:
@@ -203,12 +205,15 @@ def _decode_segment(value: object) -> BrushStrokeSegment:
     if not isinstance(value, dict):
         raise TypeError("coverage stroke segments must be objects")
     allowed = {definition.name for definition in fields(BrushStrokeSegment)}
-    if set(value) != allowed:
+    supplied = set(value)
+    if supplied not in (allowed, allowed - {"tip_transform"}):
         raise ValueError("coverage stroke fields do not match the current format")
     decoded = dict(value)
     decoded["start"] = tuple(float(item) for item in decoded["start"])
     decoded["end"] = tuple(float(item) for item in decoded["end"])
     decoded["operation"] = BrushOperation(str(decoded["operation"]))
+    if "tip_transform" in decoded:
+        decoded["tip_transform"] = _decode_transform(decoded["tip_transform"])
     return BrushStrokeSegment(**decoded)
 
 

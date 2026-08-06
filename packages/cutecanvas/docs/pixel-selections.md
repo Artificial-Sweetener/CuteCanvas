@@ -156,10 +156,10 @@ not five pixels beyond the first preview. `apply_modification()` records the
 latest product once after its background work finishes.
 `cancel_modification()` restores the captured original without adding history.
 The equivalent top-level methods are
-`CuteCanvas.beginPixelSelectionModificationPreview()`,
-`CuteCanvas.updatePixelSelectionModificationPreview()`,
-`CuteCanvas.settlePixelSelectionModificationPreview()`, and
-`CuteCanvas.cancelPixelSelectionModificationPreview()`.
+`CuteCanvas.beginPixelSelectionModificationPreview`,
+`CuteCanvas.updatePixelSelectionModificationPreview`,
+`CuteCanvas.settlePixelSelectionModificationPreview`, and
+`CuteCanvas.cancelPixelSelectionModificationPreview`.
 
 ## Supply Coverage from Host Code
 
@@ -261,7 +261,10 @@ canvas.setControlMode(canvas.CONTROL_MODE_MOVE)
 
 Begin the drag on selected, nontransparent content. CuteCanvas lifts only the
 meaningful payload, not every transparent pixel inside the selection's bounding
-rectangle.
+rectangle. Transparent holes remain noncontributing through translation,
+rotation, scaling, preview, and commit, so they never clear content already at
+the destination. Delete and explicit erase operations remain the ways to clear
+destination pixels.
 
 The lifted pixels remain temporary after release. `floatingPixelEditState()`
 reports their source, cut/copy mode, offset, and current bounds.

@@ -1,0 +1,136 @@
+schema_version = 1
+product = "cutecanvas"
+
+[[debts]]
+id = "CUTECANVAS-ARCH-001"
+owner = "CuteCanvas raster facade"
+paths = ["packages/cutecanvas/src/cutecanvas/facade/raster_api.py"]
+fingerprint = "sha256:920c09d4a1291d713ab794818b5b18d860fe1012334557b75f8244c235a4cc4e"
+issue = "chore:CUTECANVAS-ARCH-001"
+review_by = 2026-12-15
+responsibilities = [
+  "editable raster layer and extent APIs",
+  "painting, brush, clone, and fill APIs",
+  "floating pixel and scene edit history APIs",
+]
+next_extraction = "Extract brush, clone, fill, color, and paint-target workflows into a focused painting facade mixin."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-002"
+owner = "CuteCanvas mask editing"
+paths = ["packages/cutecanvas/src/cutecanvas/masks/edit_service.py"]
+fingerprint = "sha256:e84b70b2f2316e2f9144c0a8d50b29309a2b3888f4aa805fff827f504d319856"
+issue = "chore:CUTECANVAS-ARCH-002"
+review_by = 2026-12-15
+responsibilities = [
+  "mask epoch and cancellation state",
+  "stroke preparation and patch commit",
+  "history presentation, undo, and redo coordination",
+  "coverage, image, and surface application",
+]
+next_extraction = "Move direct stroke sessions, coverage application, and rasterization behind focused mutation owners and leave this service coordinating their transactions."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-003"
+owner = "CuteCanvas mask integration"
+paths = ["packages/cutecanvas/src/cutecanvas/masks/mask_service.py"]
+fingerprint = "sha256:b7c390022582be565940b170a2247ac7c45dc486cabd373438594ff57fce7bed"
+issue = "chore:CUTECANVAS-ARCH-003"
+review_by = 2026-12-15
+responsibilities = [
+  "stroke pipeline orchestration",
+  "mask asset, layer, activation, and edit workflows",
+  "render cache, prefetch, and invalidation",
+  "autosave, configuration, status, and diagnostics integration",
+]
+next_extraction = "Extract stroke preparation, pending-stroke lifecycle, commit, cancellation, and stroke diagnostics into a mask stroke service."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-004"
+owner = "CuteCanvas mask presentation cache"
+paths = ["packages/cutecanvas/src/cutecanvas/masks/render_cache.py"]
+fingerprint = "sha256:e3ab8ec629287eaf9797d81c3eefbea67fe714d7cb0c149fa0d0ed334635178d"
+issue = "chore:CUTECANVAS-ARCH-004"
+review_by = 2026-12-15
+responsibilities = [
+  "render product cache admission and eviction",
+  "live-preview raster, patch, and geometry presentation",
+  "asynchronous prefetch and native product adoption",
+  "regional and history-driven presentation metrics",
+]
+next_extraction = "Extract live-preview raster storage, stride policy, composition, invalidation, and settlement into a dedicated live-preview cache owner."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-005"
+owner = "CuteCanvas mask render work"
+paths = ["packages/cutecanvas/src/cutecanvas/masks/render_coordination.py"]
+fingerprint = "sha256:97dde6f1dd53c0bd154083022515034b74cf5fb8617f462f19b9a7b79a4e727e"
+issue = "chore:CUTECANVAS-ARCH-005"
+review_by = 2026-12-15
+responsibilities = [
+  "overlay prefetch scheduling",
+  "regional snippet work",
+  "asynchronous colorization requests",
+  "deferred publication and diagnostics",
+]
+next_extraction = "Extract scale resolution, prefetch request batching, cancellation, completion adoption, and prefetch statistics into a prefetch coordinator."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-006"
+owner = "CuteCanvas mask workflow"
+paths = ["packages/cutecanvas/src/cutecanvas/masks/workflow.py"]
+fingerprint = "sha256:e8f25b7ff92a3705c9ac9f4c9b1abccad99a2fba401a76007b0f39b0c7313885"
+issue = "chore:CUTECANVAS-ARCH-006"
+review_by = 2026-12-15
+responsibilities = [
+  "mask facade and feature lifecycle",
+  "undo and edit API delegation",
+  "SAM workflow integration",
+  "activation, configuration, and diagnostics assembly",
+]
+next_extraction = "Move SAM manager attachment, predictor reset, generated-mask application, and availability delegation into a SAM-owned workflow module."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-007"
+owner = "CuteCanvas persistence"
+paths = ["packages/cutecanvas/src/cutecanvas/persistence/codec.py"]
+fingerprint = "sha256:df2a78ee79516e4ef72ef6fa1fcee1b7b008f6da00bcd84b6cfb8813466a2bd5"
+issue = "chore:CUTECANVAS-ARCH-007"
+review_by = 2026-12-15
+responsibilities = [
+  "archive container IO and version validation",
+  "composition and layer encoding",
+  "raster, coverage, placed, mask, and vector resource codecs",
+  "legacy migration and cross-reference validation",
+]
+next_extraction = "Extract resource-kind encoders and decoders behind typed resource codec owners, beginning with vector and placed resources."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-008"
+owner = "CuteCanvas document events"
+paths = ["packages/cutecanvas/src/cutecanvas/runtime/document_events.py"]
+fingerprint = "sha256:89c629620daf1bbc44cd0c189b7316fdeceb62f64eb103983a0e2df55d075515"
+issue = "chore:CUTECANVAS-ARCH-008"
+review_by = 2026-12-15
+responsibilities = [
+  "composition and scene publication",
+  "resource completion and pixel-content change handling",
+  "selection, paint-target, and vector synchronization",
+  "viewport and diagnostics propagation",
+]
+next_extraction = "Extract vector selection, node selection, text edit, option, and content publication into a vector document-event owner."
+
+[[debts]]
+id = "CUTECANVAS-ARCH-009"
+owner = "CuteCanvas runtime lifecycle"
+paths = ["packages/cutecanvas/src/cutecanvas/runtime/lifecycle.py"]
+fingerprint = "sha256:c900308dedd836e5bb1f87033aebfd8ada09b03be00473aa4f552dd3b329ffad"
+issue = "chore:CUTECANVAS-ARCH-009"
+review_by = 2026-12-15
+responsibilities = [
+  "core component construction and signal wiring",
+  "mask, SAM, and autosave manager attachment",
+  "viewport, navigation, and rendering facade delegation",
+  "cursor, diagnostics, and cache lifecycle",
+]
+next_extraction = "Extract mask, SAM, and autosave attachment, detachment, shutdown, and feature reconciliation into a feature lifecycle owner."

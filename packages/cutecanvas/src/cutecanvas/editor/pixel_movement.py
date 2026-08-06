@@ -190,7 +190,7 @@ class SelectedPixelMovementController:
         session = self._session
         if session is None:
             target = self._targets.resolve_selected()
-            bounds = None if target is None else target.local_coverage.bounds
+            bounds = None if target is None else target.local_selection.bounds
             transform = None if target is None else target.layer.transform
             if target is None or bounds is None or transform is None:
                 return None
@@ -208,7 +208,9 @@ class SelectedPixelMovementController:
             )
         if session.layer.transform is None:
             return None
-        bounds = session.lift.fragment.bounds
+        bounds = session.transform_frame_coverage.bounds
+        if bounds is None:
+            return None
         return LayerTransformBoxState(
             session.scene_id,
             session.layer_id,
@@ -228,7 +230,7 @@ class SelectedPixelMovementController:
         scene_point: QPointF,
     ) -> bool:
         """Begin one affine gesture against selected floating pixels."""
-        if self._session is None and not self._begin_selected_session():
+        if self._session is None and not self._begin_selected_transform_session():
             return False
         state = self.transform_box_state()
         if state is None:
@@ -264,6 +266,21 @@ class SelectedPixelMovementController:
         changed = session.set_fragment_transform(
             scene_transform.followed_by(layer_inverse)
         )
+        if changed:
+            self._preview_changed()
+        return changed
+
+    def preview_scene_transform(self, transform: LayerTransform) -> bool:
+        """Publish one cumulative scene-space affine preview for selected pixels."""
+        if self._session is None and not self._begin_selected_transform_session():
+            return False
+        session = self._session
+        layer_transform = None if session is None else session.layer.transform
+        layer_inverse = None if layer_transform is None else layer_transform.inverted()
+        if session is None or layer_inverse is None:
+            return False
+        self._transform_gesture = None
+        changed = session.set_fragment_transform(transform.followed_by(layer_inverse))
         if changed:
             self._preview_changed()
         return changed
@@ -321,13 +338,13 @@ class SelectedPixelMovementController:
             return True
         resolved_target = target or self._targets.resolve_at(scene_point)
         if resolved_target is None or not coverage_contains(
-            resolved_target.scene_coverage,
+            resolved_target.scene_contribution,
             scene_point,
         ):
             return False
         lift = resolved_target.owner.lift_coverage(
             resolved_target.layer,
-            resolved_target.local_coverage,
+            resolved_target.local_contribution,
         )
         selected = self._targets.selected_layer
         if lift is None or selected is None:
@@ -337,6 +354,7 @@ class SelectedPixelMovementController:
             lift,
             selected,
             copy=copy,
+            transform_frame_coverage=resolved_target.local_contribution,
         )
         self._session.begin_drag(scene_point)
         self._changed()
@@ -367,7 +385,7 @@ class SelectedPixelMovementController:
         """Displace floating pixels without resolving their destination."""
         if delta_x == 0 and delta_y == 0:
             return False
-        if self._session is None and not self._begin_selected_session():
+        if self._session is None and not self._begin_selected_transform_session():
             return False
         self._session.nudge(delta_x, delta_y)
         self._settle_preview_transition()
@@ -415,10 +433,25 @@ class SelectedPixelMovementController:
 
     def _begin_selected_session(self) -> bool:
         """Lift the selected editable content for keyboard movement."""
+        return self._begin_selected_session_with_frame(use_complete_selection=False)
+
+    def _begin_selected_transform_session(self) -> bool:
+        """Lift selected pixels while retaining complete selection-frame geometry."""
+        return self._begin_selected_session_with_frame(use_complete_selection=True)
+
+    def _begin_selected_session_with_frame(
+        self,
+        *,
+        use_complete_selection: bool,
+    ) -> bool:
+        """Lift selected content with one explicitly chosen selection-frame owner."""
         target = self._targets.resolve_selected()
         if target is None:
             return False
-        lift = target.owner.lift_coverage(target.layer, target.local_coverage)
+        lift = target.owner.lift_coverage(
+            target.layer,
+            target.local_contribution,
+        )
         selected = self._targets.selected_layer
         if lift is None or selected is None:
             return False
@@ -427,6 +460,11 @@ class SelectedPixelMovementController:
             lift,
             selected,
             copy=False,
+            transform_frame_coverage=(
+                target.local_selection
+                if use_complete_selection
+                else target.local_contribution
+            ),
         )
         return True
 

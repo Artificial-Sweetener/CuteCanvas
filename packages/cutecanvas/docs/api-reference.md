@@ -317,6 +317,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- ControlMode.PANZOOM — Pan/zoom mode (`panzoom`).
 	- ControlMode.MOVE — Direct layer movement mode (`move`).
 	- ControlMode.DRAW_BRUSH — Mask painting mode (`draw-brush`).
+	- ControlMode.ERASER — Explicit transparent-paint mode (`eraser`).
 	- ControlMode.CLONE_STAMP — Clone Stamp retouching mode (`clone-stamp`).
 	- ControlMode.SMART_SELECT — SAM-based selection mode (`smart-select`).
 	- ControlMode.SMART_MASK — SAM-based mask-authoring mode (`smart-mask`).
@@ -661,6 +662,7 @@ See also: [Diagnostics](diagnostics.md).
 - CuteCanvas.undoMaskEdit — Undo the last mask edit when a mask is active.
 - CuteCanvas.redoMaskEdit — Redo the last reverted mask edit when a mask is active.
 - CuteCanvas.CONTROL_MODE_DRAW_BRUSH — Built-in brush mode for mask painting.
+- CuteCanvas.CONTROL_MODE_ERASER — Built-in eraser mode using the active brush preset without Alt inversion.
 
 CuteCanvas receives touch and tablet input automatically. Pan/zoom mode supports direct one-finger pan, centroid-anchored two-finger pan/pinch, double tap, and optional translation inertia. Brush mode supports fixed-size touch painting plus pressure-sensitive active pens and eraser tips. These behaviors are configured through `Config`; see [Touch and Pen Input](touch-and-pen.md).
 
@@ -734,6 +736,7 @@ See also: [Documents and Layers](scenes.md) and [Interaction Modes](interaction-
 - CuteCanvas.sceneEditHistoryChanged — Two booleans reporting active-scene chronological editor undo and redo availability.
 - CuteCanvas.pixelSelectionChanged — `PixelSelectionSnapshot` payload emitted when the active composition selection changes.
 - CuteCanvas.floatingPixelEditChanged — `FloatingPixelSnapshot` or `None` emitted when unresolved fragment state changes.
+- CuteCanvas.editorTransformChanged — `EditorTransformSnapshot` emitted when the explicit target, live frame, or unresolved affine preview changes.
 - CuteCanvas.selectedLayerChanged — `LayerSelectionSnapshot` or `None` emitted when selected layer identity changes.
 - CuteCanvas.selectedLayersChanged — Ordered `LayerSelectionSnapshot` tuple emitted when layer selection changes.
 - CuteCanvas.moveToolOptionsChanged — `MoveToolOptions` emitted after direct-layer movement configuration changes.
@@ -757,6 +760,30 @@ See also: [Documents and Layers](scenes.md) and [Interaction Modes](interaction-
 	- FloatingPixelSnapshot.mode — Whether resolution cuts or copies source pixels.
 	- FloatingPixelSnapshot.offset — Integer source-local movement from the lift origin.
 	- FloatingPixelSnapshot.bounds — Current scene-coordinate content-selection bounds.
+	- FloatingPixelSnapshot.dragging — Whether a direct selected-pixel pointer drag currently owns the floating edit.
+- cutecanvas.EditorTransformTarget — Select either complete selection bounds with selected-layer pixel payload or tight nontransparent layer-content bounds.
+	- EditorTransformTarget.SELECTION_CONTENT — Use the complete pixel-selection bounds as the frame and selected-layer pixels as the payload.
+	- EditorTransformTarget.LAYER_CONTENT — Use the selected layer's tight nontransparent content bounds as both frame and payload source.
+- cutecanvas.EditorTransformCommand — Apply a frame-relative command to the current cumulative preview.
+	- EditorTransformCommand.ROTATE_LEFT_90 — Rotate the preview 90 degrees counterclockwise around its current center.
+	- EditorTransformCommand.ROTATE_RIGHT_90 — Rotate the preview 90 degrees clockwise around its current center.
+	- EditorTransformCommand.FLIP_HORIZONTAL — Mirror the preview across its current vertical center axis.
+	- EditorTransformCommand.FLIP_VERTICAL — Mirror the preview across its current horizontal center axis.
+- cutecanvas.EditorTransformSnapshot — Detached state for one explicit transform target.
+	- EditorTransformSnapshot.target — Target whose availability and geometry were resolved.
+	- EditorTransformSnapshot.allowed — Whether the target can enter the shared transform session.
+	- EditorTransformSnapshot.denial — Stable denial reason when activation is unavailable, including `nothing-to-transform` for empty layer content.
+	- EditorTransformSnapshot.scene_id — Scene that owns the target, when resolved.
+	- EditorTransformSnapshot.layer_id — Layer that supplies the transformed pixels, when resolved.
+	- EditorTransformSnapshot.corners — Four scene-space frame corners in stable order, when resolved.
+	- EditorTransformSnapshot.center — Scene-space center of the live frame, when resolved.
+	- EditorTransformSnapshot.unresolved — Whether the active session contains an unapplied preview.
+	- EditorTransformSnapshot.gesture_active — Whether a direct pointer gesture currently owns the affine session.
+- CuteCanvas.editorTransformState — Inspect one explicit target without changing editor state.
+- CuteCanvas.activateEditorTransform — Activate the built-in transform tool against one explicit target.
+- CuteCanvas.applyEditorTransformCommand — Replace the current cumulative preview with one frame-relative discrete command.
+- CuteCanvas.applyEditorTransform — Commit the complete preview as one chronological edit.
+- CuteCanvas.cancelEditorTransform — Restore the exact original target state without history.
 
 ### View State
 - CuteCanvas.zoomChanged — Float payload emitted when viewport zoom changes; seeds once during initialization so listeners can prime UI without peeking at the viewport.

@@ -32,7 +32,6 @@ from ..painting import (
     BrushDabEngine,
     BrushDabRegionPlanner,
     BrushPreset,
-    BrushSourceCoordinateSession,
     BrushStrokeCompiler,
     BrushStrokeSegment,
     FloodFillSource,
@@ -109,12 +108,6 @@ class EditableRasterPaintTargetOwner:
             asset.surface.bounds,
             constraint,
             constrained,
-            BrushSourceCoordinateSession(
-                (
-                    float(asset.surface.bounds.x),
-                    float(asset.surface.bounds.y),
-                )
-            ),
         )
         self._presentation_state.begin(source.resource_id)
         return True
@@ -136,13 +129,7 @@ class EditableRasterPaintTargetOwner:
         if session is None or asset is None:
             return False
         surface = asset.surface
-        local_segment = self._compiler.compile(
-            session.coordinates.layer_segment(
-                segment,
-                (float(surface.bounds.x), float(surface.bounds.y)),
-            ),
-            preset,
-        )
+        local_segment = self._compiler.compile(segment, preset)
         dabs = self._dabs.segment_dabs(local_segment)
         requested = self._regions.bounds(dabs)
         if requested is None:

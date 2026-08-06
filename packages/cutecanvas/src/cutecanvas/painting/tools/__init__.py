@@ -18,10 +18,12 @@
 from .brush import BrushTool
 from .brush_signals import connect_brush_signals, disconnect_brush_signals
 from .clone_stamp import CloneStampTool
+from .eraser import EraserTool
 
 __all__ = (
     "BrushTool",
     "CloneStampTool",
+    "EraserTool",
     "connect_brush_signals",
     "disconnect_brush_signals",
 )

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
+    LayerTransform,
     TransformHandle,
     TransformModifiers,
     TransformOperation,
@@ -33,12 +34,6 @@ from ..scene.transform_session import (
     LayerTransformBoxState,
     SceneLayerTransformController,
 )
-from .operation_resolution import (
-    EditorOperation,
-    EditorOperationResolver,
-    EditorOperationTarget,
-)
-from .pixel_movement import SelectedPixelMovementController
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,111 +145,12 @@ class SceneLayerTransformInteraction:
         """Release a gesture without changing unresolved preview geometry."""
         return self._transforms.suspend()
 
-
-class EditorTransformInteraction:
-    """Give selected pixels priority over whole-layer affine transforms."""
-
-    def __init__(
-        self,
-        *,
-        pixels: SelectedPixelMovementController,
-        layers: SceneLayerTransformInteraction,
-        operations: EditorOperationResolver,
-    ) -> None:
-        """Bind the two authoritative transform targets without duplicating state."""
-        self._pixels = pixels
-        self._layers = layers
-        self._operations = operations
-        self._active: str | None = None
-
-    def presentation(self) -> TransformBoxPresentation | None:
-        """Return selected-pixel geometry first, or selected-layer geometry."""
-        resolution = self._operations.resolve(EditorOperation.TRANSFORM)
-        if not resolution.allowed:
-            return None
-        if resolution.target in {
-            EditorOperationTarget.FLOATING_PIXELS,
-            EditorOperationTarget.SELECTED_PIXELS,
-        }:
-            return self._layers.project_presentation(self._pixels.transform_box_state())
-        return self._layers.presentation()
-
-    def begin(self, operation: TransformOperation, panel_point: QPointF) -> bool:
-        """Begin the selection-priority affine branch."""
-        scene_point = self._layers.panel_to_scene(panel_point)
-        if scene_point is None:
+    def preview_scene_transform(self, transform: LayerTransform) -> bool:
+        """Publish one cumulative transform through the layer session owner."""
+        if not self._transforms.preview_selected_transform(transform):
             return False
-        resolution = self._operations.resolve(
-            EditorOperation.TRANSFORM,
-            scene_point=scene_point,
-        )
-        if not resolution.allowed:
-            return False
-        if resolution.target in {
-            EditorOperationTarget.FLOATING_PIXELS,
-            EditorOperationTarget.SELECTED_PIXELS,
-        }:
-            if not self._pixels.begin_transform(operation, scene_point):
-                return False
-            self._active = "pixels"
-            return True
-        if (
-            resolution.target is not EditorOperationTarget.LAYER
-            or not self._layers.begin_scene(operation, scene_point)
-        ):
-            return False
-        self._active = "layer"
+        self._refresh_preview()
         return True
-
-    def update(self, panel_point: QPointF, modifiers: TransformModifiers) -> bool:
-        """Update the affine branch that owns pointer input."""
-        scene_point = self._layers.panel_to_scene(panel_point)
-        if scene_point is None:
-            return False
-        if self._active == "pixels":
-            return self._pixels.update_transform(scene_point, modifiers)
-        if self._active == "layer":
-            return self._layers.update_scene(scene_point, modifiers)
-        return False
-
-    def end_gesture(
-        self,
-        panel_point: QPointF,
-        modifiers: TransformModifiers,
-    ) -> bool:
-        """Release pointer ownership without resolving cumulative geometry."""
-        scene_point = self._layers.panel_to_scene(panel_point)
-        if scene_point is None:
-            return self.suspend()
-        if self._active == "pixels":
-            return self._pixels.finish_transform(scene_point, modifiers)
-        if self._active == "layer":
-            return self._layers.end_scene(scene_point, modifiers)
-        return False
-
-    def commit(self) -> bool:
-        """Commit the unresolved target through its authoritative owner."""
-        active = self._active
-        self._active = None
-        if active == "pixels" or self._pixels.transforming:
-            return self._pixels.commit_transform()
-        return self._layers.commit()
-
-    def cancel(self) -> bool:
-        """Cancel the unresolved target through its authoritative owner."""
-        active = self._active
-        self._active = None
-        if active == "pixels" or self._pixels.transforming:
-            return self._pixels.cancel()
-        return self._layers.cancel()
-
-    def suspend(self) -> bool:
-        """Release pointer ownership while preserving unresolved geometry."""
-        if self._active == "pixels":
-            return self._pixels.suspend_transform()
-        if self._active == "layer":
-            return self._layers.suspend()
-        return False
 
 
 def _project_presentation(

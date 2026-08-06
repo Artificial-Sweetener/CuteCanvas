@@ -32,7 +32,12 @@ class BrushDabEngine:
         end_x, end_y = map(float, segment.end)
         delta_x = end_x - start_x
         delta_y = end_y - start_y
-        distance = math.hypot(delta_x, delta_y)
+        forward = segment.tip_transform.inverted()
+        if forward is None:
+            return ()
+        scene_delta_x = forward.m11 * delta_x + forward.m21 * delta_y
+        scene_delta_y = forward.m12 * delta_x + forward.m22 * delta_y
+        distance = math.hypot(scene_delta_x, scene_delta_y)
         minimum_diameter = max(
             1.0,
             min(float(segment.start_diameter), float(segment.end_diameter)),
@@ -72,9 +77,18 @@ class BrushDabEngine:
         jitter_radius = max(0.0, diameter * float(segment.position_jitter))
         jitter_angle = randomizer.random() * math.tau
         jitter_distance = math.sqrt(randomizer.random()) * jitter_radius
+        jitter_x = math.cos(jitter_angle) * jitter_distance
+        jitter_y = math.sin(jitter_angle) * jitter_distance
+        tip_transform = segment.tip_transform
         center = (
-            start_x + delta_x * fraction + math.cos(jitter_angle) * jitter_distance,
-            start_y + delta_y * fraction + math.sin(jitter_angle) * jitter_distance,
+            start_x
+            + delta_x * fraction
+            + tip_transform.m11 * jitter_x
+            + tip_transform.m21 * jitter_y,
+            start_y
+            + delta_y * fraction
+            + tip_transform.m12 * jitter_x
+            + tip_transform.m22 * jitter_y,
         )
         rotation = _interpolate(
             segment.start_rotation,
@@ -123,6 +137,7 @@ class BrushDabEngine:
             texture_strength=float(segment.texture_strength),
             texture_scale=float(segment.texture_scale),
             texture_seed=int(segment.texture_seed) ^ int(segment.sequence),
+            tip_transform=segment.tip_transform,
         )
 
 

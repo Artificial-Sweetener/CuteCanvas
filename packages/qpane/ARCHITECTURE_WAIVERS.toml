@@ -1,0 +1,174 @@
+schema_version = 1
+product = "qpane"
+
+[[waivers]]
+id = "QPANE-WAIVER-001"
+issue = "chore:QPANE-WAIVER-001"
+owner = "QPane cache coordination"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/cache/coordinator.py"
+kind = "structural"
+justification = "CacheCoordinator is the single authoritative allocator for consumer registration, entitlement, admission, trimming, and aggregate cache-budget state."
+review_by = 2026-12-15
+max_lines = 508
+
+[[waivers]]
+id = "QPANE-WAIVER-002"
+issue = "chore:QPANE-WAIVER-002"
+owner = "QPane configuration"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/core/config.py"
+kind = "remediation"
+justification = "Existing configuration ownership remains mixed while the cache-owned configuration slice is extracted."
+review_by = 2026-12-15
+max_lines = 845
+next_limit = 610
+debt = "QPANE-ARCH-001"
+
+[[waivers]]
+id = "QPANE-WAIVER-003"
+issue = "chore:QPANE-WAIVER-003"
+owner = "QPane pointer input"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/interaction/pointer_controller.py"
+kind = "structural"
+justification = "PointerInputController is the sole pointer-modality and active-sequence router across mouse, touch, tablet, preview, cancellation, and navigation handoff."
+review_by = 2026-12-15
+max_lines = 597
+
+[[waivers]]
+id = "QPANE-WAIVER-004"
+issue = "chore:QPANE-WAIVER-004"
+owner = "QPane responsive layout"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/layout/grid.py"
+kind = "structural"
+justification = "The file owns one responsive-grid contract: its immutable policy and snapshot values plus the deterministic arrangement and geometry algorithm that produces them."
+review_by = 2026-12-15
+max_lines = 753
+
+[[waivers]]
+id = "QPANE-WAIVER-005"
+issue = "chore:QPANE-WAIVER-005"
+owner = "QPane scene composition"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/item_compositor.py"
+kind = "remediation"
+justification = "General scene dispatch still mixes sampled-source resolution, settled sampled replacement, transient isolation coordination, clipping, effects, and debug presentation."
+review_by = 2026-12-15
+max_lines = 580
+next_limit = 500
+debt = "QPANE-ARCH-002"
+
+[[waivers]]
+id = "QPANE-WAIVER-006"
+issue = "chore:QPANE-WAIVER-006"
+owner = "QPane presentation"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/presenter.py"
+kind = "remediation"
+justification = "The presenter retains mixed coordinate, buffer, refinement, effect, and paint responsibilities pending complete owner extraction."
+review_by = 2026-12-15
+max_lines = 1504
+next_limit = 1150
+debt = "QPANE-ARCH-003"
+
+[[waivers]]
+id = "QPANE-WAIVER-007"
+issue = "chore:QPANE-WAIVER-007"
+owner = "QPane pyramid rendering"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/pyramid.py"
+kind = "remediation"
+justification = "Pyramid product, cache, and asynchronous retry lifecycles remain colocated until the work coordinator is extracted."
+review_by = 2026-12-15
+max_lines = 653
+next_limit = 480
+debt = "QPANE-ARCH-004"
+
+[[waivers]]
+id = "QPANE-WAIVER-008"
+issue = "chore:QPANE-WAIVER-008"
+owner = "QPane raster planning"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/raster_planner.py"
+kind = "structural"
+justification = "RasterRenderPlanner is the single deterministic owner that lowers visible layer geometry and available products into raster frame items and tile plans."
+review_by = 2026-12-15
+max_lines = 1009
+
+[[waivers]]
+id = "QPANE-WAIVER-009"
+issue = "chore:QPANE-WAIVER-009"
+owner = "QPane buffered rendering"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/render.py"
+kind = "remediation"
+justification = "Buffered painting, reuse, and navigation refinement retain separate lifecycles pending refinement extraction."
+review_by = 2026-12-15
+max_lines = 970
+next_limit = 760
+debt = "QPANE-ARCH-005"
+
+[[waivers]]
+id = "QPANE-WAIVER-010"
+issue = "chore:QPANE-WAIVER-010"
+owner = "QPane tile work coordination"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/render_tiles.py"
+kind = "structural"
+justification = "RenderTileWorkCoordinator is the sole request-lifecycle owner for immediate, deferred, overview, detail, and prefetch tile work."
+review_by = 2026-12-15
+max_lines = 639
+
+[[waivers]]
+id = "QPANE-WAIVER-011"
+issue = "chore:QPANE-WAIVER-011"
+owner = "QPane tile rendering"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/tiles.py"
+kind = "remediation"
+justification = "Tile value generation, cache ownership, and asynchronous work lifecycles remain mixed pending complete work-coordinator extraction."
+review_by = 2026-12-15
+max_lines = 820
+next_limit = 540
+debt = "QPANE-ARCH-006"
+
+[[waivers]]
+id = "QPANE-WAIVER-012"
+issue = "chore:QPANE-WAIVER-012"
+owner = "QPane viewport"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/rendering/viewport.py"
+kind = "remediation"
+justification = "Canonical viewport state remains mixed with animation, inertia, timing, and diagnostics until the animation owner is extracted."
+review_by = 2026-12-15
+max_lines = 874
+next_limit = 610
+debt = "QPANE-ARCH-007"
+
+[[waivers]]
+id = "QPANE-WAIVER-013"
+issue = "chore:QPANE-WAIVER-013"
+owner = "QPane semantic text"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/vector/text_layout.py"
+kind = "remediation"
+justification = "Text shaping and presentation remain mixed with cache budget and eviction ownership pending cache extraction."
+review_by = 2026-12-15
+max_lines = 568
+next_limit = 455
+debt = "QPANE-ARCH-008"
+
+[[waivers]]
+id = "QPANE-WAIVER-014"
+issue = "chore:QPANE-WAIVER-014"
+owner = "QPane viewer integration"
+rule = "STRUCT003"
+path = "packages/qpane/src/qpane/viewer.py"
+kind = "remediation"
+justification = "The viewer facade remains mixed with catalog, comparison, diagnostics, overlay, and Qt event workflows pending subfacade extraction."
+review_by = 2026-12-15
+max_lines = 719
+next_limit = 520
+debt = "QPANE-ARCH-009"

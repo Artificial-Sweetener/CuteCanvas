@@ -46,6 +46,10 @@ from .live_preview_store import MaskLivePreviewStore
 from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
 from .rasterizer import MaskRasterizer
+from .render_product_geometry import (
+    scaled_source_rect,
+    storage_damage_destination,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +132,7 @@ class MaskRenderCache:
         self._requested_scales: dict[uuid.UUID, float] = {}
         self._live_previews: dict[uuid.UUID, LiveMaskPreviewRaster] = {}
         self._live_preview_products: dict[uuid.UUID, QPixmap] = {}
+        self._preview_geometry_revisions: dict[uuid.UUID, int] = {}
         self._prefetched_images: OrderedDict[uuid.UUID, QImage] = OrderedDict()
         self._prefetched_scaled: OrderedDict[uuid.UUID, OrderedDict[float, QImage]] = (
             OrderedDict()
@@ -136,7 +141,6 @@ class MaskRenderCache:
         self._async_handler: Callable[[uuid.UUID, MaskLayer], bool] | None = None
         self._async_pending: dict[uuid.UUID, int] = {}
         self._async_threshold_px = 512 * 512
-        self._reframe_threshold_px = 256 * 256
         self._usage_callback: Callable[[], None] | None = None
         self._usage_batch_depth = 0
         self._usage_notification_pending = False
@@ -208,16 +212,31 @@ class MaskRenderCache:
         )
         appearance = int(self._color_for_mask(mask_id).rgba())
         border_enabled = int(bool(self._mask_config.mask_border_enabled))
+        preview_geometry_revision = self._preview_geometry_revisions.get(mask_id, 0)
         return (
             surface_generation
             | (retained_revision << 32)
             | (max(0, self._async_epoch(mask_id)) << 64)
             | (appearance << 96)
             | (border_enabled << 128)
+            | (preview_geometry_revision << 129)
         )
+
+    def effective_source_bounds(self, mask_id: uuid.UUID) -> RasterBounds | None:
+        """Return durable geometry united with separately composed preview pixels."""
+        layer = self._assets.get_layer(mask_id)
+        durable = None if layer is None else layer.coverage.source_bounds()
+        preview = self._shared_live_previews.preview(mask_id)
+        return durable if preview is None else preview.presentation_bounds(durable)
 
     def preview_stride(self, mask_id: uuid.UUID, viewport_zoom: float) -> int:
         """Return a preview stride satisfying the active render resolution."""
+        layer = self._assets.get_layer(mask_id)
+        if layer is not None:
+            storage_bounds = layer.coverage.raster.bounds
+            source_bounds = layer.coverage.source_bounds()
+            if storage_bounds is not None and storage_bounds != source_bounds:
+                return 1
         viewport_scale = max(1e-6, float(viewport_zoom))
         viewport_density = min(
             1.0,
@@ -257,14 +276,25 @@ class MaskRenderCache:
             return
         self._emit_dirty_rect(mask_id, storage_rect)
 
+    def advance_preview_geometry(self, mask_id: uuid.UUID) -> None:
+        """Advance source identity after the provisional envelope changes."""
+        self._preview_geometry_revisions[mask_id] = (
+            self._preview_geometry_revisions.get(mask_id, 0) + 1
+        )
+
     def discard_live_preview(self, mask_id: uuid.UUID) -> None:
         """Release every provisional product owned for one mask."""
         self._discard_live_preview(mask_id)
+
+    def prepare_live_preview_settlement(self, mask_id: uuid.UUID) -> bool:
+        """Promote shared provisional pixels into durable handoff state."""
+        return self._shared_live_previews.prepare_settlement(mask_id)
 
     def discard_source(self, mask_id: uuid.UUID) -> None:
         """Forget render state associated with a deleted source."""
         self.cancel_async(mask_id)
         self._requested_scales.pop(mask_id, None)
+        self._preview_geometry_revisions.pop(mask_id, None)
         self._discard_local_live_preview(mask_id)
         self._shared_live_previews.discard(mask_id)
         self.invalidate(mask_id)
@@ -447,7 +477,13 @@ class MaskRenderCache:
         image: QImage,
     ) -> None:
         """Admit one completed native presentation and publish its availability."""
-        if layer is None or image.isNull() or image.size() != layer.mask_image.size():
+        bounds = None if layer is None else layer.coverage.source_bounds()
+        if (
+            layer is None
+            or bounds is None
+            or image.isNull()
+            or image.size() != QSize(bounds.width, bounds.height)
+        ):
             return
         key = self._key(mask_id, None)
         if key not in self._cache:
@@ -482,54 +518,6 @@ class MaskRenderCache:
         """Invalidate the layer's derived rasters."""
         if layer is not None:
             self.invalidate(layer.mask_id)
-
-    def reframe_layer(
-        self,
-        layer: MaskLayer,
-        *,
-        before: RasterBounds | None,
-        after: RasterBounds | None,
-    ) -> None:
-        """Carry cached pixels into new storage geometry without recolorizing them."""
-        if before is None or after is None:
-            self.invalidate_layer(layer)
-            return
-        latest = self._latest_entries(layer.mask_id)
-        reframed: list[tuple[float | None, QPixmap]] = []
-        for scale_key, (_key, pixmap, _size) in latest.items():
-            scale = 1.0 if scale_key is None else scale_key
-            target_size = self.target_scaled_size(
-                QSize(after.width, after.height),
-                scale,
-            )
-            large_source = before.width * before.height > self._async_threshold_px
-            if (
-                large_source
-                and target_size.width() * target_size.height()
-                > self._reframe_threshold_px
-            ):
-                continue
-            target = QPixmap(target_size)
-            target.fill(QColor(0, 0, 0, 0))
-            painter = QPainter(target)
-            painter.setCompositionMode(QPainter.CompositionMode_Source)
-            painter.drawPixmap(
-                QPoint(
-                    round((before.x - after.x) * scale),
-                    round((before.y - after.y) * scale),
-                ),
-                pixmap,
-            )
-            painter.end()
-            reframed.append((scale_key, target))
-        with self._batch_usage_notifications():
-            self.invalidate(layer.mask_id, reason="surface_reframe")
-            for scale_key, pixmap in reframed:
-                self._insert(
-                    self._key(layer.mask_id, scale_key),
-                    pixmap,
-                    mask_id=layer.mask_id,
-                )
 
     def warm(self, mask_id: uuid.UUID | None, *, scale: float | None = None) -> None:
         """Generate the currently useful cached raster for a source when present."""
@@ -707,7 +695,14 @@ class MaskRenderCache:
         if base_pixmap is not None and not base_pixmap.isNull():
             painter = QPainter(base_pixmap)
             painter.setCompositionMode(QPainter.CompositionMode_Source)
-            painter.drawPixmap(dirty_rect.topLeft(), snippet)
+            destination = storage_damage_destination(
+                layer.coverage.raster.bounds,
+                layer.coverage.source_bounds(),
+                dirty_rect,
+                1.0,
+            )
+            if destination is not None:
+                painter.drawPixmap(destination.topLeft(), snippet)
             painter.end()
         preview_scale = (
             None if not preview_stride or preview_stride <= 1 else 1 / preview_stride
@@ -722,13 +717,14 @@ class MaskRenderCache:
             cached = self._cache.get(key)
             if cached is None or cached.isNull():
                 continue
-            destination = QRect(
-                QPoint(
-                    round(dirty_rect.left() * scale_key),
-                    round(dirty_rect.top() * scale_key),
-                ),
-                self.target_scaled_size(dirty_rect.size(), scale_key),
+            destination = storage_damage_destination(
+                layer.coverage.raster.bounds,
+                layer.coverage.source_bounds(),
+                dirty_rect,
+                scale_key,
             )
+            if destination is None:
+                continue
             painter = QPainter(cached)
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             painter.setCompositionMode(QPainter.CompositionMode_Source)
@@ -779,18 +775,27 @@ class MaskRenderCache:
                 painter = QPainter(cached)
                 painter.setCompositionMode(QPainter.CompositionMode_Source)
                 if scale_key is None:
-                    painter.drawPixmap(rect.topLeft(), snippet)
+                    destination = storage_damage_destination(
+                        layer.coverage.raster.bounds,
+                        layer.coverage.source_bounds(),
+                        rect,
+                        1.0,
+                    )
+                    if destination is not None:
+                        painter.drawPixmap(destination.topLeft(), snippet)
                 else:
                     painter.setRenderHint(
                         QPainter.RenderHint.SmoothPixmapTransform, True
                     )
-                    destination = QRect(
-                        QPoint(
-                            round(rect.left() * scale_key),
-                            round(rect.top() * scale_key),
-                        ),
-                        self.target_scaled_size(rect.size(), scale_key),
+                    destination = storage_damage_destination(
+                        layer.coverage.raster.bounds,
+                        layer.coverage.source_bounds(),
+                        rect,
+                        scale_key,
                     )
+                    if destination is None:
+                        painter.end()
+                        continue
                     painter.drawPixmap(
                         destination, snippet, QRect(QPoint(0, 0), snippet.size())
                     )
@@ -993,7 +998,7 @@ class MaskRenderCache:
             self._misses += 1
             self._insert(key, result, mask_id=mask_id)
             return result
-        image = layer.mask_image
+        image = layer.coverage.snapshot_qimage()
         if image.isNull():
             return None
         if scale_key is None:
@@ -1114,7 +1119,7 @@ class MaskRenderCache:
         painter = QPainter(target)
         target_scale = 1.0 if preview_scale is None else preview_scale
         source_rect = preview.source_rect(update.destination)
-        destination = self._scaled_source_rect(source_rect, target_scale)
+        destination = scaled_source_rect(source_rect, target_scale)
         painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.drawImage(destination.topLeft(), colorized)
         painter.end()
@@ -1132,15 +1137,6 @@ class MaskRenderCache:
         """Release view-specific decimated products without changing shared state."""
         self._live_previews.pop(mask_id, None)
         self._live_preview_products.pop(mask_id, None)
-
-    @staticmethod
-    def _scaled_source_rect(source_rect: QRect, scale: float) -> QRect:
-        """Project source endpoints onto one shared scaled-pixel lattice."""
-        left = round(source_rect.left() * scale)
-        top = round(source_rect.top() * scale)
-        right = round((source_rect.right() + 1) * scale)
-        bottom = round((source_rect.bottom() + 1) * scale)
-        return QRect(left, top, max(1, right - left), max(1, bottom - top))
 
     def _scaled_surface_pixmap(
         self,

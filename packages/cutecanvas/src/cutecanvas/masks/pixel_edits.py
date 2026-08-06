@@ -196,6 +196,7 @@ class MaskLayerPixelMutationOwner:
         mask = self._mask_layer(layer)
         if mask is None:
             return False
+        mask.coverage.raster.ensure_writable(bounds)
         storage = mask.coverage.raster.storage_rect(bounds)
         if storage is None or pixels.shape != (storage.height, storage.width):
             return False
@@ -209,28 +210,20 @@ class MaskLayerPixelMutationOwner:
         self._changed(mask.mask_id, bounds)
         return True
 
-    def move_coverage(
-        self,
-        layer: LayerDescriptor,
-        coverage: CoverageSnapshot,
-        delta_x: int,
-        delta_y: int,
-    ) -> RasterPixelTransition | None:
-        """Move selected scalar coverage through the mask-domain translator."""
+    def finalize_patch_edit(self, layer: LayerDescriptor) -> None:
+        """Fit expandable mask allocation after the edit's patch is captured."""
         mask = self._mask_layer(layer)
-        if mask is None:
-            return None
-        transition = self._translator.move(mask, coverage, delta_x, delta_y)
-        if transition is not None:
-            self._publish_transition(mask.mask_id, transition)
-        return transition
+        if mask is not None and mask.coverage.compact_raster_storage():
+            self._assets.touch(mask.mask_id)
+            if self._structure_changed is not None:
+                self._structure_changed()
 
     def lift_coverage(
         self,
         layer: LayerDescriptor,
         coverage: CoverageSnapshot,
     ) -> RasterPixelLift | None:
-        """Capture exact mask values and cleared source without mutating storage."""
+        """Capture contributing mask values and source clearing without mutation."""
         mask = self._mask_layer(layer)
         bounds = coverage.bounds
         surface_bounds = None if mask is None else mask.coverage.raster.bounds
@@ -268,9 +261,9 @@ class MaskLayerPixelMutationOwner:
             or lift.fragment.pixel_format is not RasterPixelFormat.COVERAGE8
         ):
             return None
-        return self._translator.preview_move(
+        return self._translator.preview_fragment_move(
             mask,
-            lift.fragment.coverage,
+            lift.fragment,
             delta_x,
             delta_y,
             cut_source=cut_source,

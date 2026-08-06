@@ -33,6 +33,8 @@ class EditorCursorIntent(str, Enum):
     PRECISE_ADD = "precise_add"
     PRECISE_SUBTRACT = "precise_subtract"
     SELECTION_TRANSLATE = "selection_translate"
+    MOVE = "move"
+    MOVE_CUT = "move_cut"
 
 
 class EditorCursorTheme(Protocol):

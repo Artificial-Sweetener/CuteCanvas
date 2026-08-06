@@ -85,7 +85,7 @@ class EditableRasterFloatingLayerOwner:
         layer_id = editable_raster_layer_id(scene.scene_id, raster_id)
         snapshot = ColorRasterSnapshot(
             fragment.bounds,
-            fragment.coverage.extent_policy,
+            fragment.contribution_coverage.extent_policy,
             fragment.materialized_pixels(),
         )
         instance = CompositionLayerInstance(

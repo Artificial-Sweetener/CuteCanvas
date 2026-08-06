@@ -22,9 +22,13 @@ from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtCore import QRect
+from qpane.sdk.scene import LayerTransform, RasterBounds
 
 from .model import BrushDab
 from .tip_cache import BrushTipCache
+from .tip_geometry import brush_dab_bounds
+
+_IDENTITY_TRANSFORM = LayerTransform()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +71,8 @@ class BrushTipProjector:
             angle=dab.angle,
             opacity=opacity,
         )
+        if dab.tip_transform != _IDENTITY_TRANSFORM:
+            return _project_affine_tip(dab, patch_bounds, tip)
         left = math.floor(dab.center[0] - (tip.shape[1] - 1) / 2.0)
         top = math.floor(dab.center[1] - (tip.shape[0] - 1) / 2.0)
         right = left + tip.shape[1]
@@ -91,3 +97,64 @@ class BrushTipProjector:
                 clip_left - left : clip_right - left,
             ],
         )
+
+
+def _project_affine_tip(
+    dab: BrushDab,
+    patch_bounds: QRect,
+    tip: np.ndarray,
+) -> ProjectedBrushTip | None:
+    """Inverse-sample one canonical tip into its target-local affine footprint."""
+
+    destination = brush_dab_bounds(dab).intersection(
+        RasterBounds.from_qrect(patch_bounds)
+    )
+    inverse = dab.tip_transform.inverted()
+    if destination is None or inverse is None:
+        return None
+    x = np.arange(destination.x, destination.right, dtype=np.float32)
+    y = np.arange(destination.y, destination.bottom, dtype=np.float32)
+    y_grid, x_grid = np.meshgrid(y, x, indexing="ij")
+    local_x = x_grid - float(dab.center[0])
+    local_y = y_grid - float(dab.center[1])
+    canonical_x = inverse.m11 * local_x + inverse.m21 * local_y
+    canonical_y = inverse.m12 * local_x + inverse.m22 * local_y
+    source_x = canonical_x + (tip.shape[1] - 1) / 2.0
+    source_y = canonical_y + (tip.shape[0] - 1) / 2.0
+    alpha = _bilinear_sample(tip, source_x, source_y)
+    return ProjectedBrushTip(
+        rows=slice(
+            destination.y - patch_bounds.top(),
+            destination.bottom - patch_bounds.top(),
+        ),
+        columns=slice(
+            destination.x - patch_bounds.left(),
+            destination.right - patch_bounds.left(),
+        ),
+        alpha=alpha,
+    )
+
+
+def _bilinear_sample(
+    source: np.ndarray,
+    source_x: np.ndarray,
+    source_y: np.ndarray,
+) -> np.ndarray:
+    """Return zero-bordered bilinear uint8 samples at floating coordinates."""
+
+    padded = np.pad(source, 1, mode="constant")
+    x = source_x + 1.0
+    y = source_y + 1.0
+    x0 = np.floor(x).astype(np.int64)
+    y0 = np.floor(y).astype(np.int64)
+    x1 = x0 + 1
+    y1 = y0 + 1
+    x0 = np.clip(x0, 0, padded.shape[1] - 1)
+    x1 = np.clip(x1, 0, padded.shape[1] - 1)
+    y0 = np.clip(y0, 0, padded.shape[0] - 1)
+    y1 = np.clip(y1, 0, padded.shape[0] - 1)
+    weight_x = x - np.floor(x)
+    weight_y = y - np.floor(y)
+    top = padded[y0, x0] * (1.0 - weight_x) + padded[y0, x1] * weight_x
+    bottom = padded[y1, x0] * (1.0 - weight_x) + padded[y1, x1] * weight_x
+    return np.rint(top * (1.0 - weight_y) + bottom * weight_y).astype(np.uint8)

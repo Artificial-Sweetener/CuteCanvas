@@ -29,6 +29,7 @@ from qpane.sdk.raster import (
     qimage_to_numpy_grayscale8,
 )
 from qpane.sdk.scene import (
+    RasterBounds,
     RasterLayerRenderItem,
     SampledLayerRenderItem,
     SceneLayerAssetKey,
@@ -60,7 +61,7 @@ class _FloatingPixelProducts:
     source_asset_key: SceneLayerAssetKey
     source_patch: QImage | None
     fragment_image: QImage
-    selection_mask: QImage
+    destination_attenuation_mask: QImage | None
     product_size: QSize
 
 
@@ -134,20 +135,28 @@ class FloatingPixelRenderCompiler:
             source_bounds=preview.lift.source_transition.patch_bounds,
             fragment_image=products.fragment_image,
             fragment_bounds=fragment.bounds,
-            selection_mask=products.selection_mask,
+            destination_attenuation_mask=(products.destination_attenuation_mask),
             fragment_transform=preview.fragment_transform,
-            clear_destination=(fragment.pixel_format is RasterPixelFormat.COVERAGE8),
             extent_clip_bounds=preview.extent_clip_bounds,
         )
 
     @staticmethod
     def target(
         preview: RasterPixelMovePreview | None,
-    ) -> tuple[uuid.UUID, uuid.UUID] | None:
-        """Return the scene and layer requiring raster edit presentation."""
+    ) -> tuple[uuid.UUID, uuid.UUID, RasterBounds] | None:
+        """Return the target and local bounds requiring raster presentation."""
         if preview is None:
             return None
-        return preview.scene_id, preview.layer_id
+        support_bounds = (
+            preview.lift.source_transition.patch_bounds
+            if preview.settled_transition is None
+            else preview.settled_transition.patch_bounds
+        )
+        return (
+            preview.scene_id,
+            preview.layer_id,
+            support_bounds,
+        )
 
     def _compile_resolved(
         self,
@@ -227,13 +236,20 @@ class FloatingPixelRenderCompiler:
         )
         if fragment_image is None or fragment_image.isNull():
             return None
-        selection_mask = _alpha_mask(fragment.coverage.pixels, product_size)
+        destination_attenuation_mask = (
+            _alpha_mask(
+                fragment.contribution_coverage.pixels,
+                product_size,
+            )
+            if fragment.pixel_format is RasterPixelFormat.COVERAGE8
+            else None
+        )
         return _FloatingPixelProducts(
             session_id=preview.session_id,
             source_asset_key=asset_key,
             source_patch=source_patch,
             fragment_image=fragment_image,
-            selection_mask=selection_mask,
+            destination_attenuation_mask=destination_attenuation_mask,
             product_size=QSize(product_size),
         )
 

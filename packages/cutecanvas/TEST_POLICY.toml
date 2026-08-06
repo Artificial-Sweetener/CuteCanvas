@@ -1,0 +1,103 @@
+schema = 1
+product = "cutecanvas"
+test_root = "packages/cutecanvas/tests"
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+
+[[areas]]
+name = "demos"
+sources = ["packages/cutecanvas/examples/**"]
+proofs = ["contract", "integration", "qt"]
+
+[[areas]]
+name = "documents"
+sources = [
+  "packages/cutecanvas/src/cutecanvas/composition/**",
+  "packages/cutecanvas/src/cutecanvas/document/**",
+  "packages/cutecanvas/src/cutecanvas/persistence/**",
+  "packages/cutecanvas/src/cutecanvas/resources/**",
+]
+proofs = ["integration", "qt"]
+
+[[areas]]
+name = "editor"
+sources = [
+  "packages/cutecanvas/src/cutecanvas/*.py",
+  "packages/cutecanvas/src/cutecanvas/*.pyi",
+  "packages/cutecanvas/pyproject.toml",
+  "packages/cutecanvas/src/cutecanvas/core/**",
+  "packages/cutecanvas/src/cutecanvas/editor/**",
+  "packages/cutecanvas/src/cutecanvas/facade/**",
+  "packages/cutecanvas/src/cutecanvas/runtime/**",
+  "packages/cutecanvas/src/cutecanvas/ui/**",
+]
+proofs = ["abuse", "contract", "integration", "packaging", "qt"]
+
+[[areas]]
+name = "masks"
+sources = [
+  "packages/cutecanvas/src/cutecanvas/coverage/**",
+  "packages/cutecanvas/src/cutecanvas/masks/**",
+]
+proofs = ["abuse", "integration", "qt"]
+
+[[areas]]
+name = "painting"
+sources = [
+  "packages/cutecanvas/src/cutecanvas/fill/**",
+  "packages/cutecanvas/src/cutecanvas/painting/**",
+  "packages/cutecanvas/src/cutecanvas/raster/**",
+]
+proofs = ["abuse", "integration", "performance", "qt"]
+
+[[areas]]
+name = "rendering"
+sources = [
+  "packages/cutecanvas/src/cutecanvas/presentation/**",
+  "packages/cutecanvas/src/cutecanvas/rendering/**",
+  "packages/cutecanvas/src/cutecanvas/scene/**",
+]
+proofs = ["abuse", "contract", "integration", "qt"]
+
+[[areas]]
+name = "sam"
+sources = ["packages/cutecanvas/src/cutecanvas/sam/**"]
+proofs = ["contract", "integration"]
+
+[[areas]]
+name = "selection"
+sources = ["packages/cutecanvas/src/cutecanvas/selection/**"]
+proofs = ["integration"]
+
+[[areas]]
+name = "tools"
+sources = [
+  "packages/cutecanvas/src/cutecanvas/placed/**",
+  "packages/cutecanvas/src/cutecanvas/snapping/**",
+  "packages/cutecanvas/src/cutecanvas/tools/**",
+  "packages/cutecanvas/src/cutecanvas/vector/**",
+]
+proofs = ["abuse", "integration", "qt"]
+
+[[boundaries]]
+name = "api"
+area = "editor"
+
+[[subscriptions]]
+owner = "qpane"
+boundary = "api"
+groups = ["editor/contract"]
+
+[[subscriptions]]
+owner = "qpane"
+boundary = "interaction"
+groups = ["tools/qt"]
+
+[[subscriptions]]
+owner = "qpane"
+boundary = "rendering"
+groups = ["rendering/contract", "rendering/integration"]
+
+[[subscriptions]]
+owner = "ferrastra"
+boundary = "bindings"
+groups = ["rendering/contract"]

@@ -20,12 +20,18 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+from cutecanvas import CuteCanvas
+from cutecanvas.core import config
+from cutecanvas_test_support.harness.process_lock import (
+    interactive_performance_isolation,
+)
+from cutecanvas_test_support.harness.qt_lifetime import flush_deferred_qt_lifetime
+from cutecanvas_test_support.mask_workflow import provision_canvas_with_mask
 from PySide6.QtWidgets import QApplication
-
-from tests.harness.process_lock import interactive_performance_isolation
-from tests.harness.qt_lifetime import flush_deferred_qt_lifetime
+from qpane import QPane
 
 
 @pytest.fixture(autouse=True)
@@ -50,3 +56,50 @@ def _flush_deferred_qt_deletions(qapp: QApplication) -> Iterator[None]:
     """Deliver deferred Qt deletions after each package test."""
     yield
     flush_deferred_qt_lifetime(qapp)
+
+
+@pytest.fixture
+def canvas_core(qapp: QApplication) -> Iterator[CuteCanvas]:
+    """Provide a bare CuteCanvas editor and dispose it after the test."""
+    del qapp
+    canvas = CuteCanvas(features=())
+    try:
+        yield canvas
+    finally:
+        canvas.deleteLater()
+
+
+@pytest.fixture
+def qpane_core(qapp: QApplication) -> Iterator[QPane]:
+    """Provide QPane's public facade for downstream input-contract tests."""
+    del qapp
+    pane = QPane()
+    try:
+        yield pane
+    finally:
+        pane.deleteLater()
+
+
+@pytest.fixture
+def qpane_with_mask(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[CuteCanvas, object, object]]:
+    """Provide the package-owned deterministic mask workflow fixture."""
+    yield from provision_canvas_with_mask(qapp, monkeypatch)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _redirect_mask_autosave_paths(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Keep mask autosave output inside the test session directory."""
+    autosave_dir = tmp_path_factory.mktemp("mask-autosave")
+    template = str(Path(autosave_dir) / "{image_name}-{mask_id}.png")
+    defaults = config._EDITOR_DEFAULTS
+    original_default = defaults["mask_autosave_path_template"]
+    defaults["mask_autosave_path_template"] = template
+    try:
+        yield
+    finally:
+        defaults["mask_autosave_path_template"] = original_default

@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from ..scene.identity import SceneLayerAssetKey
 from ..scene.render_plan import (
@@ -30,6 +30,47 @@ from ..scene.render_plan import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _SampledViewKey:
+    """Identify presentation geometry that can reuse one sampled contribution."""
+
+    zoom: float
+    pan: tuple[float, float]
+    viewport: tuple[float, float, float, float]
+    item_transform: tuple[float, float, float, float, float, float, float, float, float]
+
+    @classmethod
+    def from_plan(
+        cls,
+        plan: SceneRenderPlan,
+        item: SampledLayerRenderItem,
+    ) -> _SampledViewKey:
+        """Return exact view and layer geometry for one sampled presentation."""
+        viewport = plan.physical_viewport_rect
+        transform = item.transform
+        return cls(
+            zoom=plan.zoom,
+            pan=(plan.current_pan.x(), plan.current_pan.y()),
+            viewport=(
+                viewport.x(),
+                viewport.y(),
+                viewport.width(),
+                viewport.height(),
+            ),
+            item_transform=(
+                transform.m11(),
+                transform.m12(),
+                transform.m13(),
+                transform.m21(),
+                transform.m22(),
+                transform.m23(),
+                transform.m31(),
+                transform.m32(),
+                transform.m33(),
+            ),
+        )
+
+
 class TransientRasterHandoff:
     """Keep a generic transient raster visible until its durable revision appears."""
 
@@ -37,11 +78,24 @@ class TransientRasterHandoff:
         """Initialize without a contribution awaiting durable presentation."""
         self._pending: TransientRasterContribution | None = None
         self._durable_asset_key: SceneLayerAssetKey | None = None
+        self._sampled_view_key: _SampledViewKey | None = None
 
     def settled_plan(self, plan: SceneRenderPlan) -> tuple[SceneRenderPlan, bool]:
         """Return a plan that cannot flash before a newer durable revision arrives."""
-        if plan.transient_raster is not None:
-            self._pending = plan.transient_raster
+        active = plan.transient_raster
+        if active is not None:
+            if isinstance(active, TransientSampledResolvedContribution):
+                item = self._matching_item(plan, active)
+                if (
+                    not isinstance(item, SampledLayerRenderItem)
+                    or item.sample_geometry_key != active.sample_geometry_key
+                ):
+                    self._clear()
+                    return replace(plan, transient_raster=None), True
+                self._sampled_view_key = _SampledViewKey.from_plan(plan, item)
+            else:
+                self._sampled_view_key = None
+            self._pending = active
             self._durable_asset_key = None
             return plan, False
         pending = self._pending
@@ -53,15 +107,7 @@ class TransientRasterHandoff:
         if isinstance(pending, TransientRasterTransformContribution):
             self._clear()
             return plan, True
-        item = next(
-            (
-                candidate
-                for candidate in plan.render_items
-                if candidate.descriptor.scene_id == pending.scene_id
-                and candidate.descriptor.layer_id == pending.layer_id
-            ),
-            None,
-        )
+        item = self._matching_item(plan, pending)
         if isinstance(pending, TransientSampledResolvedContribution):
             return self._settled_sampled_plan(plan, item, pending)
         if not isinstance(item, RasterLayerRenderItem):
@@ -89,6 +135,19 @@ class TransientRasterHandoff:
         if not isinstance(item, SampledLayerRenderItem):
             self._clear()
             return plan, True
+        if (
+            (
+                pending.sampled_raster_bounds is not None
+                and item.descriptor.raster_bounds != pending.sampled_raster_bounds
+            )
+            or (
+                pending.sampled_source_size is not None
+                and item.source_size != pending.sampled_source_size
+            )
+            or self._sampled_view_key != _SampledViewKey.from_plan(plan, item)
+        ):
+            self._clear()
+            return plan, True
         descriptor = item.descriptor
         asset_key = SceneLayerAssetKey(
             scene_id=descriptor.scene_id,
@@ -99,9 +158,6 @@ class TransientRasterHandoff:
         )
         if asset_key == pending.source_asset_key:
             return replace(plan, transient_raster=pending), False
-        if item.tiles == pending.tiles:
-            self._clear()
-            return plan, False
         if self._durable_asset_key is None:
             self._durable_asset_key = asset_key
         elif asset_key != self._durable_asset_key:
@@ -109,7 +165,24 @@ class TransientRasterHandoff:
             return plan, True
         return replace(plan, transient_raster=pending), False
 
+    @staticmethod
+    def _matching_item(
+        plan: SceneRenderPlan,
+        pending: TransientRasterContribution,
+    ) -> object:
+        """Return the current render item targeted by one contribution."""
+        return next(
+            (
+                candidate
+                for candidate in plan.render_items
+                if candidate.descriptor.scene_id == pending.scene_id
+                and candidate.descriptor.layer_id == pending.layer_id
+            ),
+            None,
+        )
+
     def _clear(self) -> None:
         """Release retained transient products and revision identity."""
         self._pending = None
         self._durable_asset_key = None
+        self._sampled_view_key = None

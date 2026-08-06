@@ -664,12 +664,6 @@ class MaskStrokePipeline:
                 active_mask_id,
             )
             return
-        if mask_layer.coverage.raster.is_null():
-            logger.warning(
-                "Brush stroke skipped: mask %s image is null.",
-                active_mask_id,
-            )
-            return
         controller = self._controller
         existing_state = self._preview_states.get(active_mask_id)
         constraint = (
@@ -800,6 +794,7 @@ class MaskStrokePipeline:
                 mask_id,
             )
             return
+        controller.renders.prepare_live_preview_settlement(mask_id)
         queued = state.flush_to_mask(
             controller=controller,
             submit_job=self._submit_stroke_job,

@@ -39,7 +39,14 @@ input policy rather than editor-specific state.
 `SceneRenderItem`, `RasterLayerRenderItem`, and `SampledLayerRenderItem` are
 detached products for presentation and hit testing. A sampled layer carries
 immutable `SampledTileRenderData` values, so a renderer can reuse refined
-regions without granting the frame access to mutable source state.
+regions without granting the frame access to mutable source state. Each tile's
+`product_key` combines Qt's constant-time immutable image identity with its
+complete draw and clipping geometry. `SampledLayerRenderItem.sample_batch_key`
+identifies the exact current product batch, while `sample_geometry_key`
+identifies its demand geometry independently of pixel revisions.
+Active sampled edits are accepted only for that demand geometry. After commit,
+QPane keeps the detached edit pixels for the unchanged view and releases them
+when view geometry changes or a later durable asset supersedes the handoff.
 `SceneLayerHitTestResult` reports the matching detached item and source-local
 point without exposing a live scene owner.
 `SceneLayerAssetKey` separates reusable source identity from a placed layer
@@ -60,15 +67,24 @@ invalidation, or stale-result rules.
 and `RasterSourcePatch` communicates bounded revision damage without flushing
 unrelated tiles.
 
-Interactive hosts publish a `TransientRasterContribution` while pixels are
-being edited. `TransientRasterResolvedContribution` carries already resolved
-content, while `TransientRasterTransformContribution` moves an existing
-product without resampling it on every pointer event. These values let the
-normal compositor preserve clip, ordering, and damage rules during previews.
+Interactive hosts publish a `TransientRasterContribution` while a bounded
+raster product is changing. `TransientRasterResolvedContribution` carries
+already resolved content, while `TransientRasterTransformContribution` moves
+an existing product without resampling it on every pointer event. Its optional
+`destination_attenuation_mask` removes only the destination contribution
+authorized by the host; QPane then adds the premultiplied fragment without a
+second attenuation. Omitting the mask uses ordinary source-over composition.
+These values let the normal compositor preserve clip, ordering, damage, and
+transparent no-op behavior during previews.
 `TransientSampledResolvedContribution` provides the same preview contract for
 tile-backed sampled content, including the layer clip and source geometry
-needed for a stable temporary edit. Resolved contributions retain their last
-frame until the corresponding durable source revision arrives by default.
+needed for a stable temporary edit. QPane accepts its replacement tiles only
+when their sampling geometry matches the current sampled item. A retained
+sampled contribution remains valid only for the unchanged view and is released
+when view geometry changes or a later durable asset supersedes the handoff.
+This validation uses immutable product and geometry identities without reading
+image pixels. Resolved contributions retain their last frame until durable
+presentation catches up by default.
 Set `retain_until_durable=False` for cancellable in-flight feedback whose
 disappearance is authoritative and must immediately repair the underlying
 durable frame.

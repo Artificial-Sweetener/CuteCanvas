@@ -73,7 +73,7 @@ from .editor import (
     SelectedPixelMovementController,
 )
 from .editor.move_configuration import MoveToolConfiguration
-from .editor.transform_interaction import EditorTransformInteraction
+from .editor.transform_coordinator import EditorTransformCoordinator
 from .fill import PaintBucketCoordinator, SelectionFillCoordinator
 from .masks.canvas_aperture import ActiveMaskCanvasAperture
 from .masks.coordinates import ActiveMaskLayerCoordinates
@@ -167,6 +167,7 @@ from .facade.raster_api import RasterApiMixin
 from .facade.resource_api import ResourceApiMixin
 from .facade.selection_api import SelectionApiMixin
 from .facade.snapping_api import SnappingApiMixin
+from .facade.transform_api import TransformApiMixin
 from .facade.vector_api import VectorApiMixin
 from .facade.view_api import ViewApiMixin
 from .facade.viewport_api import ViewportApiMixin
@@ -199,6 +200,7 @@ class CuteCanvas(
     CoverageApiMixin,
     EffectApiMixin,
     SnappingApiMixin,
+    TransformApiMixin,
     InteractionApiMixin,
     CanvasAccessorsMixin,
     CanvasLifecycleMixin,
@@ -215,6 +217,7 @@ class CuteCanvas(
     CONTROL_MODE_MOVE = Tools.CONTROL_MODE_MOVE
     CONTROL_MODE_TRANSFORM = Tools.CONTROL_MODE_TRANSFORM
     CONTROL_MODE_DRAW_BRUSH = Tools.CONTROL_MODE_DRAW_BRUSH
+    CONTROL_MODE_ERASER = Tools.CONTROL_MODE_ERASER
     CONTROL_MODE_CLONE_STAMP = Tools.CONTROL_MODE_CLONE_STAMP
     CONTROL_MODE_PAINT_BUCKET = Tools.CONTROL_MODE_PAINT_BUCKET
     CONTROL_MODE_SMART_SELECT = Tools.CONTROL_MODE_SMART_SELECT
@@ -276,6 +279,7 @@ class CuteCanvas(
     vectorRequestCompleted: Signal = Signal(uuid.UUID, object, object, str, bool, str)
     """Emit request, scene, layer, conversion kind, success, and message."""
     floatingPixelEditChanged: Signal = Signal(object)
+    editorTransformChanged: Signal = Signal(object)
     """Emit unresolved floating-pixel state or ``None`` after it changes."""
     selectedLayerChanged: Signal = Signal(object)
     """Emit selected scene-layer identity or ``None`` after it changes."""
@@ -457,7 +461,7 @@ class CuteCanvas(
         self._scene_movement: SceneLayerMoveController | None = None
         self._scene_transform: SceneLayerTransformController | None = None
         self._scene_movement_interaction: SceneLayerMovementInteraction | None = None
-        self._scene_transform_interaction: EditorTransformInteraction | None = None
+        self._scene_transform_interaction: EditorTransformCoordinator | None = None
         self._active_mask_coordinates: ActiveMaskLayerCoordinates | None = None
         self._active_mask_aperture: ActiveMaskCanvasAperture | None = None
         self._scene_provider_registry: SceneProviderRegistry | None = None

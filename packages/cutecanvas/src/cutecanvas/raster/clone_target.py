@@ -34,7 +34,6 @@ from ..painting import (
     BrushDabEngine,
     BrushDabRegionPlanner,
     BrushPreset,
-    BrushSourceCoordinateSession,
     BrushStrokeCompiler,
     BrushStrokeSegment,
     PaintTargetContext,
@@ -124,12 +123,6 @@ class EditableRasterCloneTarget:
             asset.surface.bounds,
             constraint,
             constrained,
-            BrushSourceCoordinateSession(
-                (
-                    float(asset.surface.bounds.x),
-                    float(asset.surface.bounds.y),
-                )
-            ),
         )
         self._session = _CloneRasterSession(
             stroke,
@@ -163,13 +156,7 @@ class EditableRasterCloneTarget:
             self._restore_session(asset.surface, session.stroke)
             return False
         surface = asset.surface
-        local_segment = self._compiler.compile(
-            session.stroke.coordinates.layer_segment(
-                segment,
-                (float(surface.bounds.x), float(surface.bounds.y)),
-            ),
-            preset,
-        )
+        local_segment = self._compiler.compile(segment, preset)
         dabs = self._dabs.segment_dabs(local_segment)
         requested = self._regions.bounds(dabs)
         if requested is None:

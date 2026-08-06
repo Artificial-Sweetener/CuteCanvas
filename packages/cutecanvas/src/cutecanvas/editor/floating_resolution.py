@@ -105,17 +105,21 @@ class FloatingPixelResolutionOwner:
         if not owner.restore_transition(layer, transition, use_after=True):
             return False
         local_after = translated_coverage_within(
-            session.local_coverage,
+            session.local_contribution,
             delta_x,
             delta_y,
             transition.after_surface_bounds,
         )
+        selection_after = session.preview_selection
+        if selection_after is None:
+            owner.restore_transition(layer, transition, use_after=False)
+            return False
         return self._finalize(
             session=session,
             transitions=(
                 LayerPixelTransition(session.scene_id, session.layer_id, transition),
             ),
-            selection_after=session.movement_selection.translated(*session.scene_delta),
+            selection_after=selection_after,
             selected_after=session.selected_layer,
             local_after=local_after,
             target_transform=layer.transform,
@@ -150,12 +154,12 @@ class FloatingPixelResolutionOwner:
             self._restore_source_cut(session, layer, owner, applied_source)
             return False
         local_after = translated_coverage_within(
-            projected.coverage,
+            projected.contribution_coverage,
             0,
             0,
             placed.after_surface_bounds,
         )
-        selection_after = self._coverage_projector.project(local_after, transform)
+        selection_after = session.preview_selection
         if selection_after is None:
             owner.restore_transition(layer, placed, use_after=False)
             self._restore_source_cut(session, layer, owner, applied_source)
@@ -178,12 +182,17 @@ class FloatingPixelResolutionOwner:
         ) + (
             (layer, owner, placed),
         )
+        selection_local_after = self._coverage_projector.project_to_layer(
+            selection_after,
+            transform,
+            placed.after_surface_bounds,
+        )
         return self._finalize(
             session=session,
             transitions=transitions,
             selection_after=selection_after,
             selected_after=session.selected_layer,
-            local_after=local_after,
+            local_after=selection_local_after or local_after,
             target_transform=transform,
             rollback=rollback,
         )
@@ -241,7 +250,7 @@ class FloatingPixelResolutionOwner:
             )
             return False
         local_after = translated_coverage_within(
-            placed.coverage,
+            placed.contribution_coverage,
             0,
             0,
             target_transition.after_surface_bounds,
@@ -312,7 +321,7 @@ class FloatingPixelResolutionOwner:
             )
             return None
         selection_after = self._coverage_projector.project(
-            session.lift.fragment.coverage,
+            session.lift.fragment.contribution_coverage,
             promotion.transform,
         )
         if selection_after is None:
@@ -345,7 +354,7 @@ class FloatingPixelResolutionOwner:
             transitions=transitions,
             selection_after=selection_after,
             selected_after=SceneLayerSelection(session.scene_id, promotion.layer_id),
-            local_after=session.lift.fragment.coverage,
+            local_after=session.lift.fragment.contribution_coverage,
             target_transform=promotion.transform,
             rollback=rollback,
             promotion=promotion,
@@ -393,7 +402,7 @@ class FloatingPixelResolutionOwner:
                 selection_after=selection_after,
                 selected_before=session.selected_layer,
                 selected_after=selected_after,
-                local_before=session.local_coverage,
+                local_before=session.transform_frame_coverage,
                 local_after=local_after,
                 source_transform=session.layer.transform,
                 target_transform=target_transform,

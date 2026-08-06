@@ -1,92 +1,102 @@
 # CuteCanvas Package Guidance
 
-The root `AGENTS.md` applies. This file adds CuteCanvas-specific ownership.
+The root `AGENTS.md` applies. This file defines CuteCanvas's local ownership and
+proof requirements.
 
 ## Product identity
 
-CuteCanvas is a performant embeddable raster/vector document editor built on
-QPane's public rendering SDK. Its facade should make document, layer, and tool
-workflows delightful without accumulating all behavior in one widget.
-
-CuteCanvas compiles authoring state into Ferrastra through `cutecanvas.ferrastra`
-adapters. It owns documents, commands, tools, history, operation availability,
-resource selection, and publication policy; Ferrastra owns the native products and
-computation requested by those adapters.
+CuteCanvas is a performant embeddable raster/vector document editor. Its public
+facade makes document, layer, and tool workflows coherent without concentrating
+behavior in one widget or service graph.
 
 ## Ownership
 
 CuteCanvas owns:
 
-- independent document identity, canvas, metadata, and persistence;
-- ordered generic editable layer instances and resource lifetimes;
+- independent document identity, canvas, metadata, persistence, and export;
+- ordered editable layer instances, resource identity, sharing, and lifetimes;
 - host capability policy, durable user locks, and one operation resolver;
 - unified chronological undo/redo and atomic edit transactions;
 - editable raster and coverage storage, masks, selections, and painting;
-- placed/smart-asset provenance, conversion, and rasterization workflows;
-- vector revision authoring around QPane's immutable vector values;
-- layer/pixel movement, floating edits, free transform, tools, and overlays;
-- document export/autosave and SAM integration.
+- placed- and smart-asset provenance, conversion, rasterization, and publication
+  workflows;
+- vector revision authoring around immutable semantic vector values;
+- authored-effect resources, source/graph persistence, model interaction,
+  package trust and resolution, generated controls, preview admission,
+  diagnostics, and undoable effect revisions;
+- layer and pixel movement, floating edits, free transforms, authoring tools,
+  options, overlays, and transient feedback; and
+- autosave, failure recovery, and SAM integration.
 
-Tools translate input and UI presents state. Neither owns durable document,
-selection, geometry, pixel, history, permission, or rendering state. Every
-durable edit uses the one document history. Host policy and user locks remain
-separate inputs to the one operation resolver.
+## Internal ownership boundaries
 
-Snapping follows explicit ownership boundaries. `SnapConfiguration` owns durable
-policy, guides, and grid settings; `SnapCandidateProvider` captures stationary
-scene targets once per gesture; movement and geometric authoring use separate
-session resolvers; and `SnapGuideFeedback` owns transient Smart Guide
-presentation. `SnappingSubsystem` constructs and groups those collaborators at
-the editor lifecycle boundary. Shape and path tools own gesture lifecycle and
-delegate coordinates through their authoring port. Freehand tools, painting,
-fills, and SAM do not receive that port.
+Tools translate input into commands and UI objects present state. Neither owns
+durable document, selection, geometry, pixel, history, permission, or rendering
+state. Every durable edit uses the document's single history. Host policy and
+user locks remain separate inputs to the one operation resolver.
+
+`SnapConfiguration` owns durable policy, guides, and grid settings.
+`SnapCandidateProvider` captures stationary scene targets once per gesture.
+Movement and geometric authoring use separate session resolvers.
+`SnapGuideFeedback` owns transient guide presentation. `SnappingSubsystem`
+constructs these collaborators at the editor lifecycle boundary. Shape and path
+tools own their gesture lifecycle and delegate coordinates through their
+authoring port; freehand tools, painting, fills, and intelligent selection do
+not receive that port.
 
 Retained pixel-selection and mask shapes delegate canvas clipping and preview
-projection to `CoverageCanvasAperture`. Mask-specific aperture geometry remains
-owned by `ActiveMaskCanvasAperture`; tools never reproduce either concern.
+projection to `CoverageCanvasAperture`. `ActiveMaskCanvasAperture` owns
+mask-specific aperture geometry. Tools do not reproduce either concern.
 
-Layer selection is an ordered set owned by `SceneLayerSelectionController`,
-with its active member last. `SceneLayerMoveController` owns translation-only
-layer-set sessions, while `SceneLayerTransformController` owns single-layer
-affine transforms. `SceneLayerTransformPreview` presents either workflow as one
-coherent transient set, and `LayerMovementMutationOwner` commits Move-tool sets
-through one layer-store publication and one history edit.
+`SceneLayerSelectionController` owns an ordered selection with the active member
+last. `SceneLayerMoveController` owns translation-only layer-set sessions.
+`SceneLayerTransformController` owns single-layer affine transforms.
+`SceneLayerTransformPreview` presents either workflow as one coherent transient
+set. `LayerMovementMutationOwner` commits Move-tool sets through one layer-store
+publication and one history edit.
 
-## Cross-package performance work
+## Facade and public surface
 
-CuteCanvas changes may and should modify QPane when profiling or ownership
-analysis shows that the correct owner is the shared renderer, viewport, cache,
-input system, vector representation, or public SDK. Do not build CuteCanvas-
-local render workarounds, duplicate product caches, parallel damage logic, or
-operation-specific fast paths when a source-neutral QPane improvement solves
-the problem for every consumer.
+The editor facade is the obvious starting point for integration. Common document,
+layer, and tool workflows require no construction of internal controllers or
+knowledge of storage, rendering, history, or scheduling internals. Expose typed
+document and layer handles with focused document, layer, tool, selection,
+history, and export subfacades. Avoid routine raw identifier pairs, private
+collaborator access, service locators, and a god widget. Programmer errors fail
+clearly; unavailable operations return stable reasons and available alternatives.
 
-QPane improvements must remain editor-agnostic, preserve the one-way dependency,
-update QPane's own Trinity when public, and pass QPane-focused plus cross-package
-tests. Truly document- or operation-specific optimizations remain CuteCanvas.
+`src/cutecanvas/cutecanvas.pyi` is CuteCanvas's authoritative typed contract.
+Public changes update it, the implementation, CuteCanvas documentation, and
+`packages/cutecanvas/examples/cutecanvas_demo.py` together. The demo is a coherent layered editor
+with an intentional canvas, tools and options, layer tree, selections,
+transforms, painting, masks, raster/vector/placed layers, undo/redo, and
+persistence rather than a collection of test panels.
 
-## Facade and demo
+## Test organization and proof
 
-Expose typed document and layer handles plus focused document, layer, tool,
-selection, history, and export subfacades. Avoid routine raw identifier pairs,
-private QPane access, service-locator APIs, and a god widget. Programmer errors
-fail clearly; unavailable operations return stable reasons and alternatives.
+Organize CuteCanvas tests by the behavior owners for facade and public contracts,
+documents and resources, history and transactions, layers and groups, selections
+and masks, raster and vector authoring, painting, movement and transforms, tools
+and policy, authored effects, persistence and recovery, mounted editor workflows,
+and packaging.
 
-Public changes update the CuteCanvas contract, implementation, docs, and its
-single demo together. The demo is a coherent layered image editor with an
-intentional canvas, tools/options, layer tree, selections, transforms, painting,
-masks, raster/vector/placed layers, undo/redo, and persistence. It must not look
-or behave like a collection of test panels.
+`packages/cutecanvas/TEST_POLICY.toml` maps every CuteCanvas production area and
+public boundary to its required test areas. Changes to durable state, mutation,
+history, policy, authoring, persistence, recovery, facade, or workflow contracts
+update that map in the same work.
 
-Focused proof uses mounted workflows and the abuse harness for rapid document
-switching, edit/undo chains, input suspension, stale work, source removal,
-cache pressure, 4K/8K and sparse content, redraw equality, persistence failure
-atomicity, teardown, and responsive interaction.
+Every durable mutation proves success, rejection atomicity, chronological undo,
+redo, and restored observable state. Persistence proof covers canonical round
+trips, unavailable resources, interrupted writes, recovery, and preservation of
+valid prior state. Authored-effect proof covers source and graph coordination,
+package and capability admission, generated controls, diagnostics, preview,
+transactional patches, undo, and retention of unavailable operations.
 
-## Ferrastra migration rule
-
-Do not pass CuteCanvas layer IDs, undo commands, tools, locks, dialogs, or file
-policy into Ferrastra. A migrated numerical responsibility is deleted from
-CuteCanvas in the same vertical slice and permanently banned by the canonical
-ownership checker. Stateful native sessions return immutable source revisions;
-CuteCanvas alone decides how those revisions enter document history.
+Mounted workflow proof uses real editor widgets for input routing, tool
+lifecycle, overlays, repaint, focus, publication, and teardown. Abuse proof
+covers rapid document switching, edit/undo chains, input storms, stale work,
+source removal, cache pressure, large and sparse content, persistence failure,
+and redraw equality. Performance proof covers interactive latency, bounded
+memory, invalidation scope, painting, transforms, history, and large-document
+workflows. Packaging proof installs the product with only declared dependencies
+and exercises its supported facade.

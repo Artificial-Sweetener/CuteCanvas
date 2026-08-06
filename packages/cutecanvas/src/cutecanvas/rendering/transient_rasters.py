@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 import numpy as np
 from qpane.sdk.scene import (
+    RasterBounds,
     RasterLayerRenderItem,
     SampledLayerRenderItem,
     SceneDescriptor,
@@ -57,17 +58,18 @@ class MaskLivePreviewRenderCompiler:
             capabilities.pixel_presentation
         )
 
-    def target(self) -> tuple[uuid.UUID, uuid.UUID] | None:
-        """Return the visible scene layer carrying a provisional mask."""
+    def target(self) -> tuple[uuid.UUID, uuid.UUID, RasterBounds] | None:
+        """Return the visible layer and local bounds carrying a mask preview."""
         scene = self._current_scene()
         if scene is None:
             return None
         for layer in scene.layers:
             resource_id = getattr(layer.source, "resource_id", None)
-            if isinstance(resource_id, uuid.UUID) and self._previews.contains(
-                resource_id
-            ):
-                return scene.scene_id, layer.layer_id
+            if not isinstance(resource_id, uuid.UUID):
+                continue
+            preview = self._previews.preview(resource_id)
+            if preview is not None and preview.content_bounds is not None:
+                return scene.scene_id, layer.layer_id, preview.content_bounds
         return None
 
     def compile(
@@ -114,9 +116,9 @@ class MaskLivePreviewRenderCompiler:
                 layer_id=descriptor.layer_id,
                 pixel_format=RasterPixelFormat.COVERAGE8,
                 transition=transition,
-                generation=preview.revision,
+                generation=(preview.revision, preview.retain_until_durable),
                 item=candidate,
-                retain_until_durable=False,
+                retain_until_durable=preview.retain_until_durable,
             )
         return None
 
@@ -146,8 +148,8 @@ class TransientRasterRenderCoordinator:
     def target(
         self,
         pixel_preview: RasterPixelMovePreview | None,
-    ) -> tuple[uuid.UUID, uuid.UUID] | None:
-        """Return the active pixel-move target or provisional mask target."""
+    ) -> tuple[uuid.UUID, uuid.UUID, RasterBounds] | None:
+        """Return the active transient target and its local support bounds."""
         pixel_target = self._floating.target(pixel_preview)
         if pixel_target is not None:
             return pixel_target

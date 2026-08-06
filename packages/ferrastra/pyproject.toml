@@ -41,3 +41,8 @@ manifest-path = "../../crates/ferrastra-python/Cargo.toml"
 module-name = "ferrastra._native"
 python-source = "src"
 strip = false
+
+[tool.pytest.ini_options]
+addopts = ["--basetemp=.pytest-tmp"]
+pythonpath = ["src", "tests", "examples"]
+testpaths = ["tests"]

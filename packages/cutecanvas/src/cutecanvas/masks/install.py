@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from ..core.config_features import require_mask_config
 from .autosave_coordination import should_enable_mask_autosave
+from .live_preview_geometry import MaskPreviewSceneGeometryTracker
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
 from .mask_service import MaskService
@@ -79,7 +80,7 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
     service.configureStrokeDiagnostics(qpane.settings)
     controller = service.controller
     live_source_modes: dict[uuid.UUID, bool] = {}
-    shared_source_modes: dict[uuid.UUID, bool] = {}
+    preview_geometry = MaskPreviewSceneGeometryTracker(mask_manager, live_previews)
 
     def _handle_render_dirty(mask_id, rect=None):
         """Apply presentation damage that is already in panel coordinates."""
@@ -115,10 +116,9 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
 
     def _handle_shared_preview_changed(mask_id, rect):
         """Damage one view after its document-shared transient mask changes."""
-        shared_live = live_previews.contains(mask_id)
-        if shared_source_modes.get(mask_id, False) != shared_live:
-            shared_source_modes[mask_id] = shared_live
-            qpane._handle_scene_source_changed()
+        if preview_geometry.changed(mask_id):
+            controller.renders.advance_preview_geometry(mask_id)
+            qpane._handle_raster_structure_changed()
         controller.renders.notify_live_preview_changed(mask_id, rect)
 
     controller.render_dirty.connect(_handle_render_dirty)

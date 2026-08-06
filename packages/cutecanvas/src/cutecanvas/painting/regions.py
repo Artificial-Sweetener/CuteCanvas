@@ -17,11 +17,10 @@
 
 from __future__ import annotations
 
-import math
-
 from qpane.sdk.scene import RasterBounds
 
 from .model import BrushDab
+from .tip_geometry import brush_dab_bounds
 
 
 class BrushDabRegionPlanner:
@@ -31,10 +30,7 @@ class BrushDabRegionPlanner:
         """Return antialias-safe local bounds for ``dabs``."""
         if not dabs:
             return None
-        left = min(math.floor(dab.center[0] - dab.diameter / 2.0 - 1.0) for dab in dabs)
-        top = min(math.floor(dab.center[1] - dab.diameter / 2.0 - 1.0) for dab in dabs)
-        right = max(math.ceil(dab.center[0] + dab.diameter / 2.0 + 1.0) for dab in dabs)
-        bottom = max(
-            math.ceil(dab.center[1] + dab.diameter / 2.0 + 1.0) for dab in dabs
-        )
-        return RasterBounds(left, top, right - left, bottom - top)
+        bounds = brush_dab_bounds(dabs[0])
+        for dab in dabs[1:]:
+            bounds = bounds.united(brush_dab_bounds(dab))
+        return bounds

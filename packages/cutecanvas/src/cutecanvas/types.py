@@ -44,6 +44,9 @@ __all__ = [
     "EditorIntent",
     "EditorOperationState",
     "EditorPolicy",
+    "EditorTransformCommand",
+    "EditorTransformSnapshot",
+    "EditorTransformTarget",
     "FloatingPixelMode",
     "FloatingPixelSnapshot",
     "LayerEdgeModificationResult",
@@ -90,6 +93,7 @@ class ControlMode(str, Enum):
     MOVE = "move"
     TRANSFORM = "transform"
     DRAW_BRUSH = "draw-brush"
+    ERASER = "eraser"
     CLONE_STAMP = "clone-stamp"
     SMART_SELECT = "smart-select"
     SMART_MASK = "smart-mask"
@@ -123,6 +127,22 @@ class EditorIntent(str, Enum):
     PAINT = "paint"
     MOVE = "move"
     TRANSFORM = "transform"
+
+
+class EditorTransformTarget(str, Enum):
+    """Identify the content authority used to establish an affine frame."""
+
+    SELECTION_CONTENT = "selection-content"
+    LAYER_CONTENT = "layer-content"
+
+
+class EditorTransformCommand(str, Enum):
+    """Identify one frame-relative discrete affine preview command."""
+
+    ROTATE_LEFT_90 = "rotate-left-90"
+    ROTATE_RIGHT_90 = "rotate-right-90"
+    FLIP_HORIZONTAL = "flip-horizontal"
+    FLIP_VERTICAL = "flip-vertical"
 
 
 class PixelSelectionMode(str, Enum):
@@ -274,6 +294,32 @@ class EditorOperationState:
 
 
 @dataclass(frozen=True, slots=True)
+class EditorTransformSnapshot:
+    """Describe the current affine target and its detached scene-space frame."""
+
+    target: EditorTransformTarget
+    allowed: bool
+    denial: str | None
+    scene_id: uuid.UUID | None
+    layer_id: uuid.UUID | None
+    corners: tuple[QPointF, QPointF, QPointF, QPointF] | None = None
+    center: QPointF | None = None
+    unresolved: bool = False
+    gesture_active: bool = False
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt points from editor-owned transform geometry."""
+        if self.corners is not None:
+            object.__setattr__(
+                self,
+                "corners",
+                tuple(QPointF(point) for point in self.corners),
+            )
+        if self.center is not None:
+            object.__setattr__(self, "center", QPointF(self.center))
+
+
+@dataclass(frozen=True, slots=True)
 class CompositionLayerEntry:
     """Detached browser metadata for one ordered composition layer."""
 
@@ -379,6 +425,7 @@ class FloatingPixelSnapshot:
     mode: FloatingPixelMode
     offset: QPoint
     bounds: QRect | None
+    dragging: bool = False
 
     def __post_init__(self) -> None:
         """Detach mutable Qt geometry from editor-owned state."""

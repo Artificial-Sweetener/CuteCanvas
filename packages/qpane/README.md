@@ -131,7 +131,7 @@ The source repository includes a comprehensive QPane demo that teaches the viewe
 
 ```bash
 # From the repository root
-python examples/qpane_demo.py
+python packages/qpane/examples/qpane_demo.py
 ```
 
 ## Usage

@@ -63,10 +63,10 @@ class MaskDelegate:
             return False
         mask_ready = service.ensureActiveMaskForComposition(composition_id)
         tools = self._qpane._tools_manager
-        if (
-            not mask_ready
-            and tools.get_control_mode() == self._qpane.CONTROL_MODE_DRAW_BRUSH
-        ):
+        if not mask_ready and tools.get_control_mode() in {
+            self._qpane.CONTROL_MODE_DRAW_BRUSH,
+            self._qpane.CONTROL_MODE_ERASER,
+        }:
             logger.info(
                 "Switching to pan/zoom because document %s has no active mask.",
                 composition_id,

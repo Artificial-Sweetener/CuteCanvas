@@ -130,18 +130,28 @@ class LayerPixelMutationCoordinator:
         owner = self._owners.owner_for(scene, layer)
         if owner is None:
             return False
-        before = owner.capture_patch(layer, local_coverage.bounds)
-        if before is None or not owner.clear_coverage(layer, local_coverage):
+        content_bounds = owner.content_bounds(layer)
+        editable_coverage = (
+            None
+            if content_bounds is None
+            else local_coverage.clipped_to(content_bounds)
+        )
+        if editable_coverage is None or editable_coverage.bounds is None:
             return False
-        after = owner.capture_patch(layer, local_coverage.bounds)
+        edit_bounds = editable_coverage.bounds
+        before = owner.capture_patch(layer, edit_bounds)
+        if before is None or not owner.clear_coverage(layer, editable_coverage):
+            return False
+        after = owner.capture_patch(layer, edit_bounds)
         if after is None:
-            owner.restore_patch(layer, local_coverage.bounds, before)
+            owner.restore_patch(layer, edit_bounds, before)
             return False
+        owner.finalize_patch_edit(layer)
         edit = RasterPixelEdit(
             scene_id=scene.scene_id,
             layer_id=layer.layer_id,
             source=layer.source,
-            bounds=local_coverage.bounds,
+            bounds=edit_bounds,
             before=before,
             after=after,
         )

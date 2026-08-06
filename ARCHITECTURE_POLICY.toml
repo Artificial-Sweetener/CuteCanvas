@@ -1,4 +1,4 @@
-schema_version = 1
+schema_version = 2
 
 [structure]
 soft_lines = 350
@@ -16,14 +16,32 @@ forbidden_names = [
 [[python_products]]
 name = "ferrastra"
 root = "packages/ferrastra/src/ferrastra"
+debt_registry = "packages/ferrastra/ARCHITECTURE_DEBT.toml"
+waiver_registry = "packages/ferrastra/ARCHITECTURE_WAIVERS.toml"
 
 [[python_products]]
 name = "qpane"
 root = "packages/qpane/src/qpane"
+debt_registry = "packages/qpane/ARCHITECTURE_DEBT.toml"
+waiver_registry = "packages/qpane/ARCHITECTURE_WAIVERS.toml"
 
 [[python_products]]
 name = "cutecanvas"
 root = "packages/cutecanvas/src/cutecanvas"
+debt_registry = "packages/cutecanvas/ARCHITECTURE_DEBT.toml"
+waiver_registry = "packages/cutecanvas/ARCHITECTURE_WAIVERS.toml"
+
+[[structure_categories]]
+name = "authoritative-public-contract"
+product = "qpane"
+path = "packages/qpane/src/qpane/qpane.pyi"
+justification = "The complete generated-facing typed public contract is reviewed as one API surface rather than an implementation module."
+
+[[structure_categories]]
+name = "authoritative-public-contract"
+product = "cutecanvas"
+path = "packages/cutecanvas/src/cutecanvas/cutecanvas.pyi"
+justification = "The complete generated-facing typed public contract is reviewed as one API surface rather than an implementation module."
 
 [[python_dependencies]]
 source = "qpane"
@@ -87,34 +105,47 @@ allowed_internal = ["cutecanvas.ferrastra"]
 
 [[rust_crates]]
 name = "ferrastra-core"
+product = "ferrastra"
 allowed_internal = []
 
 [[rust_crates]]
 name = "ferrastra-store"
+product = "ferrastra"
 allowed_internal = ["ferrastra-core"]
 
 [[rust_crates]]
 name = "ferrastra-graph"
+product = "ferrastra"
 allowed_internal = ["ferrastra-core"]
 
 [[rust_crates]]
+name = "ferrastra-rcandy"
+product = "ferrastra"
+allowed_internal = ["ferrastra-core", "ferrastra-graph"]
+
+[[rust_crates]]
 name = "ferrastra-runtime"
+product = "ferrastra"
 allowed_internal = ["ferrastra-core", "ferrastra-store", "ferrastra-graph"]
 
 [[rust_crates]]
 name = "ferrastra-raster"
+product = "ferrastra"
 allowed_internal = ["ferrastra-core", "ferrastra-store"]
 
 [[rust_crates]]
 name = "ferrastra-vector"
+product = "ferrastra"
 allowed_internal = ["ferrastra-core", "ferrastra-store"]
 
 [[rust_crates]]
 name = "ferrastra-paint"
+product = "ferrastra"
 allowed_internal = ["ferrastra-core", "ferrastra-store", "ferrastra-raster"]
 
 [[rust_crates]]
 name = "ferrastra-engine"
+product = "ferrastra"
 allowed_internal = [
   "ferrastra-core",
   "ferrastra-store",
@@ -127,5 +158,6 @@ allowed_internal = [
 
 [[rust_crates]]
 name = "ferrastra-python"
-allowed_internal = ["ferrastra-core", "ferrastra-store", "ferrastra-graph", "ferrastra-engine"]
+product = "ferrastra"
+allowed_internal = ["ferrastra-core", "ferrastra-store", "ferrastra-graph", "ferrastra-engine", "ferrastra-rcandy"]
 python_boundary = true

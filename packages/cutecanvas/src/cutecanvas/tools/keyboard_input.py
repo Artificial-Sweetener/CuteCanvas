@@ -25,6 +25,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import QApplication, QWidget
 
+from .selection_shortcuts import EditorSelectionShortcuts
 from .shortcuts import EditorHistoryShortcuts
 from .transient_input import TransientToolInput
 
@@ -43,12 +44,14 @@ class EditorKeyboardInputController:
         *,
         transient: TransientToolInput,
         history: EditorHistoryShortcuts,
+        selection: EditorSelectionShortcuts,
         forward_widget_press: Callable[[QKeyEvent], None],
     ) -> None:
         """Bind one canvas and its keyboard-domain collaborators."""
         self._canvas = canvas
         self._transient = transient
         self._history = history
+        self._selection = selection
         self._forward_widget_press = forward_widget_press
         self._shutdown = False
         QApplication.instance().focusChanged.connect(self._handle_focus_changed)
@@ -67,6 +70,8 @@ class EditorKeyboardInputController:
                 self._forward_widget_press(event)
             return event.isAccepted()
         if self._history.handle(event):
+            return True
+        if self._selection.handle(event):
             return True
         if event.key() == Qt.Key.Key_Shift:
             self._transient.press_shift(auto_repeat=event.isAutoRepeat())

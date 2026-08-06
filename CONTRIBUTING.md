@@ -13,8 +13,9 @@ This repository is a three-package monorepo:
 Every contribution must preserve `CuteCanvas -> QPane`, `CuteCanvas -> Ferrastra`,
 and `QPane -> Ferrastra`; reverse and lateral edges are forbidden. Read
 `FERRASTRA_DESIGN.md`, the root `AGENTS.md`, and the nearest package
-`AGENTS.md` before editing; together they define the authoritative engineering
-and ownership rules.
+`AGENTS.md` before editing. Read `RCANDY_DESIGN.md` for graph, operation,
+structured-authoring, language, or generated-effect work. Together these files
+define the authoritative engineering and ownership rules.
 
 ## Development environment
 
@@ -44,15 +45,20 @@ tooling. The pinned Rust toolchain is declared in `rust-toolchain.toml`.
 
 Ferrastra owns typed native products, source stores, immutable evaluation graphs,
 spatial demand and damage, bounded evaluation, numerical operations, native
-edit sessions, and their correctness and performance contracts. It imports no
-Qt, QPane, CuteCanvas, application, document, viewport, tool, history, or
-presentation concepts. Only `ferrastra-python` may use PyO3.
+edit sessions, R-Candy declarative authoring, and their correctness and
+performance contracts. R-Candy lowers to the canonical graph and has no runtime,
+host-policy, or document authority. Ferrastra imports no Qt, QPane, CuteCanvas,
+application, document, viewport, tool, history, or presentation concepts. Only
+`ferrastra-python` may use PyO3.
 
-Stage 0 intentionally exposes package identity without graphics behavior. Add
-a crate only with executable code for its declared responsibility, and declare
-every operation contract before implementation. Crate and adapter edges are
-enforced by `ARCHITECTURE_POLICY.toml`; numerical migrations are activated in
-`FERRASTRA_OWNERSHIP.toml` when their canonical owner moves to Ferrastra.
+Stage 0 intentionally exposes package identity without graphics or language
+behavior. It may contain non-production schemas and fixtures that prove planned
+contracts, but no parser, placeholder graph API, mock production operation, or
+empty language crate. Add a crate only with executable code for its declared
+responsibility, and declare every operation contract before implementation.
+Crate and adapter edges are enforced by `ARCHITECTURE_POLICY.toml`; numerical
+migrations are activated in `FERRASTRA_OWNERSHIP.toml` when their canonical owner
+moves to Ferrastra.
 
 ### QPane
 
@@ -70,7 +76,7 @@ every consumer benefits.
 The supported public surface is defined by
 `packages/qpane/src/qpane/qpane.pyi`. Its documentation is under
 `packages/qpane/docs`, and its single public example is
-`examples/qpane_demo.py`.
+`packages/qpane/examples/qpane_demo.py`.
 
 ### CuteCanvas
 
@@ -87,7 +93,7 @@ QPane in the same change and validate both packages.
 The supported public surface is defined by
 `packages/cutecanvas/src/cutecanvas/cutecanvas.pyi`. Its documentation is under
 `packages/cutecanvas/docs`, and its single public example is
-`examples/cutecanvas_demo.py`.
+`packages/cutecanvas/examples/cutecanvas_demo.py`.
 
 ## Architecture and implementation
 
@@ -133,21 +139,47 @@ product directly and does not preserve removed architecture as an alternative.
 Run the examples from the repository root:
 
 ```powershell
-.venv\Scripts\python examples\ferrastra_demo.py
-.venv\Scripts\python examples\qpane_demo.py
-.venv\Scripts\python examples\cutecanvas_demo.py
+.venv\Scripts\python packages\ferrastra\examples\ferrastra_demo.py
+.venv\Scripts\python packages\qpane\examples\qpane_demo.py
+.venv\Scripts\python packages\cutecanvas\examples\cutecanvas_demo.py
 ```
 
 ## Verification
 
-Run focused tests after each meaningful slice. Use mounted Qt tests and the
-established abuse harness for lifecycle, input, repaint, undo/redo, cache,
-concurrency, and performance-sensitive work. The harness's shared timing helper
-uses wall time in isolation and contention-safe timing under xdist; do not
-weaken a budget to hide a regression.
+End each work turn with the smallest focused tests and checks that directly cover
+the changed behavior, policy, or artifact. Use mounted Qt tests and the abuse
+harness for lifecycle, input, repaint, undo/redo, cache, concurrency, and
+performance-sensitive work. The shared timing helper uses wall time in isolation
+and contention-safe timing under xdist; do not weaken a budget to hide a
+regression.
 
-Before reporting completion, run the hook-equivalent checks and complete suite
-inside `.venv`:
+Run `.venv\Scripts\python tools\test.py changed` for the policy-required focused
+proof. Use `.venv\Scripts\python tools\test.py list` to discover product, behavior
+area, and proof-kind targets, or `tools\test.py explain <path>` to inspect why a
+path selects its groups. Product tests live under their owning package as
+`tests/<behavioral-area>/<proof-kind>/test_*.py`; repository-policy tests live
+beside the tools they protect.
+
+Complete suites are commit gates rather than turn-completion gates. Select the
+gate from the staged diff:
+
+```powershell
+.venv\Scripts\python tools\test.py staged --commit
+```
+
+- Production/runtime Python changes or Python test changes run the complete
+  Python gate and suite.
+- Rust production changes or Rust test changes run the complete Rust gate and
+  workspace suite.
+- Changes spanning both runtimes run both gates.
+- Documentation-only `docs` commits and other staged diffs that change neither
+  production/runtime source nor tests run only focused validation for the changed
+  artifacts.
+- Packaging, dependencies, native bindings, hooks, CI, and build configuration
+  run their dedicated validation even when a complete runtime suite is not
+  required.
+
+The complete Python and Rust gates inside `.venv` are:
 
 ```powershell
 .venv\Scripts\python -m ruff check --fix .
@@ -156,7 +188,7 @@ inside `.venv`:
 .venv\Scripts\python tools\check_docstrings.py
 .venv\Scripts\python tools\check_api_order.py
 .venv\Scripts\python tools\check_consistency.py
-.venv\Scripts\python tools\check_ferrastra_architecture.py
+.venv\Scripts\python tools\check_architecture.py
 .venv\Scripts\python tools\check_ferrastra_operations.py
 .venv\Scripts\python tools\check_ferrastra_ownership.py
 .venv\Scripts\python tools\check_ferrastra_benchmarks.py
@@ -173,21 +205,27 @@ git diff --check
 
 When Ferrastra packaging or its public boundary changes, run
 `.venv\Scripts\python tools\verify_ferrastra_wheel.py`. When QPane or CuteCanvas
-packaging changes, build both distributions and verify them from isolated
-installs. QPane must install and run without
-CuteCanvas; CuteCanvas must run against the QPane version range declared in its
-metadata.
+packaging changes, run `.venv\Scripts\python tools\verify_python_wheels.py`.
+The verifier installs QPane without CuteCanvas, then installs CuteCanvas against
+the exact QPane wheel and version range declared in its metadata.
 
 ## Commits and releases
 
-Commit only when requested. Commit subjects follow Conventional Commits:
+Commit only when requested. Each commit delivers one coherent user- or
+integrator-meaningful outcome. Subjects feed generated changelogs and follow
+Conventional Commits:
 
 ```text
 type(scope)!: subject
 ```
 
-Use `!` when the public change is breaking. All packages are released
-independently:
+Use a changelog-ready outcome rather than implementation mechanics in the
+subject. Use `!` when the public change is breaking and explain compatibility
+impact and migration in the body. Keep supporting tests, documentation, cleanup,
+and refactoring with the outcome they support; do not create WIP, checkpoint,
+miscellaneous, or file-movement diary commits.
+
+All packages are released independently:
 
 - `ferrastra-vX.Y.Z` builds and publishes Ferrastra;
 - `qpane-vX.Y.Z` builds and publishes QPane;

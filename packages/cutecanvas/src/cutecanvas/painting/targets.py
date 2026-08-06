@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QPoint, QPointF
 from PySide6.QtGui import QColor
 from qpane.sdk.rendering import (
-    LayerSourcePoint,
+    LayerLocalPoint,
     PanelPoint,
     SceneCoordinateSystem,
     ScenePoint,
@@ -247,7 +247,12 @@ class PaintingCoordinator:
         operation = self._transaction_operation
         return bool(
             operation is not None
-            and operation.apply(target, segment, self._preset, self._color)
+            and operation.apply(
+                target,
+                segment,
+                self._preset,
+                self._color,
+            )
         )
 
     def commit(self) -> bool:
@@ -274,7 +279,7 @@ class PaintingCoordinator:
         return self._cancel_open_transaction()
 
     def panel_to_target(self, point: QPoint | QPointF) -> QPointF | None:
-        """Map panel geometry into the selected target's source coordinates."""
+        """Map panel geometry into stable target-local coordinates."""
         identity = self._resolved_identity()
         if identity is None:
             return None
@@ -284,12 +289,12 @@ class PaintingCoordinator:
             return None if scene_point is None else scene_point.to_qt()
         if identity.layer_id is None:
             return None
-        source_point = self._coordinates.panel_to_layer_source(
+        local_point = self._coordinates.panel_to_layer_local(
             identity.scene_id,
             identity.layer_id,
             panel_point,
         )
-        return None if source_point is None else source_point.to_qt()
+        return None if local_point is None else local_point.to_qt()
 
     def target_to_panel(self, point: QPoint | QPointF) -> QPointF | None:
         """Map selected target source geometry into panel coordinates."""
@@ -303,8 +308,8 @@ class PaintingCoordinator:
             return None if panel_point is None else panel_point.to_qt()
         if identity.layer_id is None:
             return None
-        panel_point = self._coordinates.layer_source_to_panel(
-            LayerSourcePoint.from_qt(
+        panel_point = self._coordinates.layer_local_to_panel(
+            LayerLocalPoint.from_qt(
                 identity.scene_id,
                 identity.layer_id,
                 point,

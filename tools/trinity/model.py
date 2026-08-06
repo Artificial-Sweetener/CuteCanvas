@@ -76,7 +76,7 @@ def repository_products(root: Path) -> tuple[ProductContract, ...]:
             facade_class="Ferrastra",
             root=root / "packages/ferrastra",
             stub_name="ferrastra.pyi",
-            demo_paths=(root / "examples/ferrastra_demo.py",),
+            demo_paths=(root / "packages/ferrastra/examples/ferrastra_demo.py",),
             config_class=None,
         ),
         ProductContract(
@@ -85,8 +85,8 @@ def repository_products(root: Path) -> tuple[ProductContract, ...]:
             root=root / "packages/qpane",
             stub_name="qpane.pyi",
             demo_paths=(
-                root / "examples/qpane_demo.py",
-                root / "examples/qpane_demonstration",
+                root / "packages/qpane/examples/qpane_demo.py",
+                root / "packages/qpane/examples/qpane_demonstration",
             ),
             config_class="Config",
         ),
@@ -96,8 +96,8 @@ def repository_products(root: Path) -> tuple[ProductContract, ...]:
             root=root / "packages/cutecanvas",
             stub_name="cutecanvas.pyi",
             demo_paths=(
-                root / "examples/cutecanvas_demo.py",
-                root / "examples/demonstration",
+                root / "packages/cutecanvas/examples/cutecanvas_demo.py",
+                root / "packages/cutecanvas/examples/demonstration",
             ),
             config_class="Config",
         ),

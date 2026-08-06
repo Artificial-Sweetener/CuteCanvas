@@ -191,6 +191,7 @@ class ControlMode(str, Enum):
     MOVE = "move"
     TRANSFORM = "transform"
     DRAW_BRUSH = "draw-brush"
+    ERASER = "eraser"
     CLONE_STAMP = "clone-stamp"
     SMART_SELECT = "smart-select"
     SMART_MASK = "smart-mask"
@@ -227,6 +228,16 @@ class EditorIntent(str, Enum):
     PAINT = "paint"
     MOVE = "move"
     TRANSFORM = "transform"
+
+class EditorTransformTarget(str, Enum):
+    SELECTION_CONTENT = "selection-content"
+    LAYER_CONTENT = "layer-content"
+
+class EditorTransformCommand(str, Enum):
+    ROTATE_LEFT_90 = "rotate-left-90"
+    ROTATE_RIGHT_90 = "rotate-right-90"
+    FLIP_HORIZONTAL = "flip-horizontal"
+    FLIP_VERTICAL = "flip-vertical"
 
 class PixelSelectionMode(str, Enum):
     REPLACE = "replace"
@@ -507,6 +518,18 @@ class EditorOperationState:
     scene_id: uuid.UUID | None
     layer_id: uuid.UUID | None
 
+@dataclass(frozen=True, slots=True)
+class EditorTransformSnapshot:
+    target: EditorTransformTarget
+    allowed: bool
+    denial: str | None
+    scene_id: uuid.UUID | None
+    layer_id: uuid.UUID | None
+    corners: tuple[QPointF, QPointF, QPointF, QPointF] | None = ...
+    center: QPointF | None = ...
+    unresolved: bool = ...
+    gesture_active: bool = ...
+
 class CompositionLayerEntry:
     layer_id: uuid.UUID
     source_kind: str
@@ -584,6 +607,7 @@ class FloatingPixelSnapshot:
     mode: FloatingPixelMode
     offset: QPoint
     bounds: QRect | None
+    dragging: bool = ...
 
 class LayerSnapshot:
     layer_id: uuid.UUID
@@ -667,6 +691,7 @@ class CuteCanvas(QWidget):
     CONTROL_MODE_MOVE: str
     CONTROL_MODE_TRANSFORM: str
     CONTROL_MODE_DRAW_BRUSH: str
+    CONTROL_MODE_ERASER: str
     CONTROL_MODE_CLONE_STAMP: str
     CONTROL_MODE_PAINT_BUCKET: str
     CONTROL_MODE_SMART_SELECT: str
@@ -706,6 +731,7 @@ class CuteCanvas(QWidget):
     vectorTextEditChanged: Signal
     vectorRequestCompleted: Signal
     floatingPixelEditChanged: Signal
+    editorTransformChanged: Signal
     selectedLayerChanged: Signal
     selectedLayersChanged: Signal
     moveToolOptionsChanged: Signal
@@ -843,6 +869,13 @@ class CuteCanvas(QWidget):
         intent: EditorIntent,
         panel_pos: QPoint | QPointF | None = ...,
     ) -> EditorOperationState: ...
+    def editorTransformState(
+        self, target: EditorTransformTarget
+    ) -> EditorTransformSnapshot: ...
+    def activateEditorTransform(self, target: EditorTransformTarget) -> bool: ...
+    def applyEditorTransformCommand(self, command: EditorTransformCommand) -> bool: ...
+    def applyEditorTransform(self) -> bool: ...
+    def cancelEditorTransform(self) -> bool: ...
     def setDiagnosticsOverlayEnabled(self, enabled: bool) -> None: ...
     def setDiagnosticsDomainEnabled(
         self, domain: str | DiagnosticsDomain, enabled: bool

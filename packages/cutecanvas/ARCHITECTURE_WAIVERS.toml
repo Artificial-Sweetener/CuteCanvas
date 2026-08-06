@@ -1,0 +1,262 @@
+schema_version = 1
+product = "cutecanvas"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-001"
+issue = "chore:CUTECANVAS-WAIVER-001"
+owner = "CuteCanvas widget boundary"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/canvas.py"
+kind = "structural"
+justification = "CuteCanvas is the single mounted-widget boundary that delegates Qt lifecycle and input events and paints the editor's interaction overlays."
+review_by = 2026-12-15
+max_lines = 610
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-002"
+issue = "chore:CUTECANVAS-WAIVER-002"
+owner = "CuteCanvas composition layers"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/composition/layers.py"
+kind = "structural"
+justification = "CompositionLayerStore is the authoritative owner for layer instance state, ordering, indexes, revisions, validation, and change publication."
+review_by = 2026-12-15
+max_lines = 523
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-003"
+issue = "chore:CUTECANVAS-WAIVER-003"
+owner = "CuteCanvas coverage storage"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/coverage/surface.py"
+kind = "structural"
+justification = "CoverageSurface is the authoritative state owner for mutable coverage storage, bounds, revisions, snapshots, writable regions, and representation conversion."
+review_by = 2026-12-15
+max_lines = 637
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-004"
+issue = "chore:CUTECANVAS-WAIVER-004"
+owner = "CuteCanvas editor composition"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/editor/composition_root.py"
+kind = "structural"
+justification = "EditorCompositionRoot has one assembly responsibility: construct, wire, and return the complete authoritative editor component graph from explicit inputs."
+review_by = 2026-12-15
+max_lines = 730
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-005"
+issue = "chore:CUTECANVAS-WAIVER-005"
+owner = "CuteCanvas composition facade"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/facade/composition_api.py"
+kind = "structural"
+justification = "CompositionApiMixin is the single public task-oriented facade for composition state, layer placement, selection, scene inspection, and composition lifecycle."
+review_by = 2026-12-15
+max_lines = 547
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-006"
+issue = "chore:CUTECANVAS-WAIVER-006"
+owner = "CuteCanvas raster facade"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/facade/raster_api.py"
+kind = "remediation"
+justification = "Raster layer, painting, floating-pixel, and edit-history APIs remain mixed pending painting facade extraction."
+review_by = 2026-12-15
+max_lines = 599
+next_limit = 390
+debt = "CUTECANVAS-ARCH-001"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-007"
+issue = "chore:CUTECANVAS-WAIVER-007"
+owner = "CuteCanvas mask autosave"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/masks/autosave.py"
+kind = "structural"
+justification = "AutosaveManager is the sole lifecycle owner for mask save coalescing, scheduling, request identity, encoding outcomes, retries, cancellation, and save diagnostics."
+review_by = 2026-12-15
+max_lines = 517
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-008"
+issue = "chore:CUTECANVAS-WAIVER-008"
+owner = "CuteCanvas mask editing"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/masks/edit_service.py"
+kind = "remediation"
+justification = "Stroke mutation, epoch, history, and coverage responsibilities remain mixed until history behavior is fully extracted."
+review_by = 2026-12-15
+max_lines = 655
+next_limit = 480
+debt = "CUTECANVAS-ARCH-002"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-009"
+issue = "chore:CUTECANVAS-WAIVER-009"
+owner = "CuteCanvas mask integration"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/masks/mask_service.py"
+kind = "remediation"
+justification = "Mask integration retains stroke, asset, activation, rendering, autosave, and diagnostics ownership pending stroke-service extraction."
+review_by = 2026-12-15
+max_lines = 755
+next_limit = 600
+debt = "CUTECANVAS-ARCH-003"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-010"
+issue = "chore:CUTECANVAS-WAIVER-010"
+owner = "CuteCanvas mask presentation cache"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/masks/render_cache.py"
+kind = "remediation"
+justification = "Cache, live-preview, background colorization, and regional presentation state remain mixed pending live-preview extraction."
+review_by = 2026-12-15
+max_lines = 1253
+next_limit = 980
+debt = "CUTECANVAS-ARCH-004"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-011"
+issue = "chore:CUTECANVAS-WAIVER-011"
+owner = "CuteCanvas mask render work"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/masks/render_coordination.py"
+kind = "remediation"
+justification = "Prefetch, snippet, colorize, deferred publication, and diagnostics lifecycles remain mixed pending prefetch extraction."
+review_by = 2026-12-15
+max_lines = 781
+next_limit = 560
+debt = "CUTECANVAS-ARCH-005"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-012"
+issue = "chore:CUTECANVAS-WAIVER-012"
+owner = "CuteCanvas mask strokes"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/masks/strokes.py"
+kind = "structural"
+justification = "MaskStrokePipeline is the sole state and lifecycle owner for segment submission, constraints, previews, job identity, result settlement, commit, cancellation, and stroke diagnostics."
+review_by = 2026-12-15
+max_lines = 795
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-013"
+issue = "chore:CUTECANVAS-WAIVER-013"
+owner = "CuteCanvas mask workflow"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/masks/workflow.py"
+kind = "remediation"
+justification = "Mask facade, feature lifecycle, undo, SAM, activation, and diagnostics responsibilities remain mixed pending SAM workflow extraction."
+review_by = 2026-12-15
+max_lines = 710
+next_limit = 610
+debt = "CUTECANVAS-ARCH-006"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-014"
+issue = "chore:CUTECANVAS-WAIVER-014"
+owner = "CuteCanvas brush interaction"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/painting/tools/brush.py"
+kind = "structural"
+justification = "BrushTool is the single interaction owner for pointer samples, stroke smoothing, previews, cursor and overlay feedback, emission, cancellation, and undo admission."
+review_by = 2026-12-15
+max_lines = 631
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-015"
+issue = "chore:CUTECANVAS-WAIVER-015"
+owner = "CuteCanvas persistence"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/persistence/codec.py"
+kind = "remediation"
+justification = "Archive IO, composition encoding, resource codecs, migration, and reference validation remain mixed pending typed resource codec extraction."
+review_by = 2026-12-15
+max_lines = 1280
+next_limit = 980
+debt = "CUTECANVAS-ARCH-007"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-016"
+issue = "chore:CUTECANVAS-WAIVER-016"
+owner = "CuteCanvas placed assets"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/placed/workflow.py"
+kind = "structural"
+justification = "PlacedAssetWorkflow is the authoritative request lifecycle for embedded, linked, duplicate, reload, relink, embed, cancellation, decode adoption, and failure publication."
+review_by = 2026-12-15
+max_lines = 578
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-017"
+issue = "chore:CUTECANVAS-WAIVER-017"
+owner = "CuteCanvas workspace presentation"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/presentation/workspace.py"
+kind = "structural"
+justification = "CanvasWorkspace is the authoritative mounted-presentation lifecycle for document session layouts, target canvases, comparison surfaces, activation, reconciliation, and teardown."
+review_by = 2026-12-15
+max_lines = 642
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-018"
+issue = "chore:CUTECANVAS-WAIVER-018"
+owner = "CuteCanvas document events"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/runtime/document_events.py"
+kind = "remediation"
+justification = "Document, resource, selection, vector, viewport, and diagnostics event propagation remain mixed pending vector event extraction."
+review_by = 2026-12-15
+max_lines = 600
+next_limit = 440
+debt = "CUTECANVAS-ARCH-008"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-019"
+issue = "chore:CUTECANVAS-WAIVER-019"
+owner = "CuteCanvas runtime lifecycle"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/runtime/lifecycle.py"
+kind = "remediation"
+justification = "Component construction, feature-manager attachment, viewport delegation, cursor, diagnostics, and cache lifecycles remain mixed pending feature lifecycle extraction."
+review_by = 2026-12-15
+max_lines = 745
+next_limit = 540
+debt = "CUTECANVAS-ARCH-009"
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-020"
+issue = "chore:CUTECANVAS-WAIVER-020"
+owner = "CuteCanvas SAM execution"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/sam/manager.py"
+kind = "structural"
+justification = "SamManager is the sole SAM session owner for predictor preparation, cache limits, native execution requests, cancellation, adoption, mutation, metrics, and shutdown."
+review_by = 2026-12-15
+max_lines = 575
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-021"
+issue = "chore:CUTECANVAS-WAIVER-021"
+owner = "CuteCanvas vector conversion"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/vector/conversion.py"
+kind = "structural"
+justification = "VectorConversionService is the sole request lifecycle for selection conversion, rasterization, text-path conversion, execution admission, adoption, cancellation, and publication."
+review_by = 2026-12-15
+max_lines = 514
+
+[[waivers]]
+id = "CUTECANVAS-WAIVER-022"
+issue = "chore:CUTECANVAS-WAIVER-022"
+owner = "CuteCanvas vector facade"
+rule = "STRUCT003"
+path = "packages/cutecanvas/src/cutecanvas/vector/facade.py"
+kind = "structural"
+justification = "VectorHostFacade is the single public task-oriented boundary for vector document mutation, text editing, selection, masks, conversion, and synchronized publication."
+review_by = 2026-12-15
+max_lines = 545

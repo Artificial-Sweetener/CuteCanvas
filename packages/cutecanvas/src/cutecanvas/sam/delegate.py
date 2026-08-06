@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:  # pragma: no cover
-
     from qpane.sdk.cache import CacheRegistry
 
     from ..canvas import CuteCanvas

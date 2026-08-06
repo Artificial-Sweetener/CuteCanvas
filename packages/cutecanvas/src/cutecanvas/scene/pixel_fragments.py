@@ -36,12 +36,12 @@ class RasterPixelFormat(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class RasterPixelFragment:
-    """Retain source samples and selection coverage independently of placement."""
+    """Retain source samples and content-filtered contribution coverage."""
 
     bounds: RasterBounds
     pixel_format: RasterPixelFormat
     pixels: np.ndarray
-    coverage: CoverageSnapshot
+    contribution_coverage: CoverageSnapshot
 
     def __post_init__(self) -> None:
         """Detach arrays and validate source-local geometry."""
@@ -54,10 +54,10 @@ class RasterPixelFragment:
         if pixels.dtype != np.uint8 or not valid_shape:
             raise ValueError("fragment pixels do not match their raster format")
         if (
-            self.coverage.bounds != self.bounds
-            or self.coverage.pixels.shape != expected
+            self.contribution_coverage.bounds != self.bounds
+            or self.contribution_coverage.pixels.shape != expected
         ):
-            raise ValueError("fragment coverage must match fragment bounds")
+            raise ValueError("fragment contribution coverage must match its bounds")
         pixels.flags.writeable = False
         object.__setattr__(self, "pixels", pixels)
 
@@ -67,7 +67,7 @@ class RasterPixelFragment:
         bounds: RasterBounds,
         pixel_format: RasterPixelFormat,
         pixels: np.ndarray,
-        coverage: CoverageSnapshot,
+        contribution_coverage: CoverageSnapshot,
     ) -> RasterPixelFragment:
         """Adopt validated immutable source samples without another full copy."""
         expected = (bounds.height, bounds.width)
@@ -80,7 +80,7 @@ class RasterPixelFragment:
             pixels.dtype != np.uint8
             or not pixels.flags.c_contiguous
             or not valid_shape
-            or coverage.bounds != bounds
+            or contribution_coverage.bounds != bounds
         ):
             raise ValueError("adopted fragment storage is invalid")
         pixels.flags.writeable = False
@@ -88,19 +88,23 @@ class RasterPixelFragment:
         object.__setattr__(fragment, "bounds", bounds)
         object.__setattr__(fragment, "pixel_format", pixel_format)
         object.__setattr__(fragment, "pixels", pixels)
-        object.__setattr__(fragment, "coverage", coverage)
+        object.__setattr__(
+            fragment,
+            "contribution_coverage",
+            contribution_coverage,
+        )
         return fragment
 
     @property
     def retained_bytes(self) -> int:
         """Return immutable pixel and coverage storage retained by the fragment."""
-        return int(self.pixels.nbytes + self.coverage.pixels.nbytes)
+        return int(self.pixels.nbytes + self.contribution_coverage.pixels.nbytes)
 
     def materialized_pixels(self) -> np.ndarray:
         """Return selected source contribution over an empty destination."""
-        if bool(np.all(self.coverage.pixels == 255)):
+        if bool(np.all(self.contribution_coverage.pixels == 255)):
             return self.pixels
-        selection = self.coverage.pixels.astype(np.uint16)
+        selection = self.contribution_coverage.pixels.astype(np.uint16)
         if self.pixels.ndim == 3:
             selection = selection[:, :, np.newaxis]
         return np.ascontiguousarray(
@@ -119,5 +123,6 @@ class RasterPixelLift:
     def retained_bytes(self) -> int:
         """Return bytes retained for payload and exact source restoration."""
         return int(
-            self.source_transition.retained_bytes + self.fragment.coverage.pixels.nbytes
+            self.source_transition.retained_bytes
+            + self.fragment.contribution_coverage.pixels.nbytes
         )

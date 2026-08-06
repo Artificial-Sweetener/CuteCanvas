@@ -125,19 +125,17 @@ from .layer_edge_modification import LayerEdgeModificationCoordinator
 from .layer_edge_targets import LayerEdgeEditRegistry
 from .move_configuration import MoveToolConfiguration
 from .movement import EditorMovementInteraction
-from .operation_resolution import (
-    EditorOperationResolver,
-    EditorSourceOperationRegistry,
-    EditorSourceOperations,
-)
+from .operation_resolution import EditorOperationResolver
 from .paint_destination import InteractivePaintDestinationCoordinator
 from .pixel_movement import SelectedPixelMovementController
 from .policy import EditorPolicyController
 from .selection_projection import LayerSelectionProjectionCache
-from .transform_interaction import (
-    EditorTransformInteraction,
-    SceneLayerTransformInteraction,
+from .source_operations import (
+    EditorSourceOperationRegistry,
+    EditorSourceOperations,
 )
+from .transform_coordinator import EditorTransformCoordinator
+from .transform_interaction import SceneLayerTransformInteraction
 
 if TYPE_CHECKING:
     from ..canvas import CuteCanvas
@@ -157,6 +155,7 @@ class EditorRootCallbacks:
     layer_edge_modification_completed: Callable[[LayerEdgeModificationResult], None]
     transform_changed: Callable[[], None]
     transform_preview_changed: Callable[[], None]
+    transform_state_changed: Callable[[], None]
     raster_structure_changed: Callable[[], None]
     raster_bounds_completed: Callable[[RasterBoundsCompletion], None]
     scene_content_changed: Callable[[QRect | QRectF | None], None]
@@ -245,7 +244,7 @@ class EditorRootComponents:
     scene_movement: SceneLayerMoveController
     scene_transform: SceneLayerTransformController
     scene_movement_interaction: SceneLayerMovementInteraction
-    scene_transform_interaction: EditorTransformInteraction
+    scene_transform_interaction: EditorTransformCoordinator
     raster_mutations: RasterLayerMutationCoordinator
     pixel_owners: LayerPixelOwnerRegistry
     pixel_mutations: LayerPixelMutationCoordinator
@@ -561,6 +560,7 @@ class EditorCompositionRoot:
             default_paint_target_available=callbacks.default_paint_target_available,
             paint_target_supported=painting.supports_context,
             pixel_owners=pixel_owners,
+            layer_geometry=layer_geometry,
             source_operations=source_operations,
             capability_allowed=inputs.editor_policy.allows,
         )
@@ -574,10 +574,11 @@ class EditorCompositionRoot:
             capability_allowed=inputs.editor_policy.allows,
             scene_changed=callbacks.raster_structure_changed,
         )
-        scene_transform_interaction = EditorTransformInteraction(
+        scene_transform_interaction = EditorTransformCoordinator(
             pixels=selected_pixel_movement,
             layers=layer_transform_interaction,
             operations=operation_resolver,
+            changed=callbacks.transform_state_changed,
         )
         snapping = SnappingSubsystem.create(
             active_scene=view.current_scene_descriptor,

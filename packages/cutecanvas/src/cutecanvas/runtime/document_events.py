@@ -426,6 +426,8 @@ class DocumentEventsMixin:
             return
         self._editor_overlays.set_selection(state)
         self.pixelSelectionChanged.emit(self._public_pixel_selection_state(state))
+        self._publish_editor_transform_state()
+        self.refreshCursor()
 
     def _handle_composition_edit_history_changed(
         self,
@@ -475,6 +477,8 @@ class DocumentEventsMixin:
                 painting.clear()
         self.selectedLayerChanged.emit(self.selectedLayer())
         self.selectedLayersChanged.emit(self.selectedLayers())
+        self._publish_editor_transform_state()
+        self.refreshCursor()
         self.update()
 
     def _handle_paint_target_changed(

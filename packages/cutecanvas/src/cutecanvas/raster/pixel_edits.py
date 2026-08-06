@@ -142,33 +142,15 @@ class EditableRasterPixelMutationOwner:
         self._changed(bounds)
         return True
 
-    def move_coverage(
-        self,
-        layer: LayerDescriptor,
-        coverage: CoverageSnapshot,
-        delta_x: int,
-        delta_y: int,
-    ) -> RasterPixelTransition | None:
-        """Move selected premultiplied pixels through the color translator."""
-        asset = self._asset(layer)
-        if asset is None:
-            return None
-        transition = self._translator.move(
-            asset.surface,
-            coverage,
-            delta_x,
-            delta_y,
-        )
-        if transition is not None:
-            self._publish_transition(transition)
-        return transition
+    def finalize_patch_edit(self, layer: LayerDescriptor) -> None:
+        """Keep color-raster storage governed by its existing surface policy."""
 
     def lift_coverage(
         self,
         layer: LayerDescriptor,
         coverage: CoverageSnapshot,
     ) -> RasterPixelLift | None:
-        """Capture exact color samples and cleared source without mutating storage."""
+        """Capture contributing color samples and source clearing without mutation."""
         asset = self._asset(layer)
         bounds = coverage.bounds
         if asset is None or bounds is None or not asset.surface.bounds.contains(bounds):
@@ -199,9 +181,9 @@ class EditableRasterPixelMutationOwner:
             or lift.fragment.pixel_format is not RasterPixelFormat.PREMULTIPLIED_ARGB32
         ):
             return None
-        return self._translator.preview_move(
+        return self._translator.preview_fragment_move(
             asset.surface,
-            lift.fragment.coverage,
+            lift.fragment,
             delta_x,
             delta_y,
             cut_source=cut_source,

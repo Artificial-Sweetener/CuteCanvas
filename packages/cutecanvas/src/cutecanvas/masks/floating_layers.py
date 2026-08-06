@@ -95,7 +95,7 @@ class MaskFloatingLayerOwner:
         layer_id = mask_layer_id(scene.scene_id, mask_id)
         snapshot = CoverageSnapshot(
             fragment.bounds,
-            fragment.coverage.extent_policy,
+            fragment.contribution_coverage.extent_policy,
             fragment.materialized_pixels(),
         )
         instance = CompositionLayerInstance(

@@ -18,14 +18,14 @@
 from .floating_layers import FloatingLayerPromotionRegistry
 from .interaction import EditorInteractionCoordinator
 from .movement import EditorMovementInteraction
-from .operation_resolution import (
+from .operation_contracts import (
     EditorOperation,
     EditorOperationAlternative,
     EditorOperationDenial,
     EditorOperationResolution,
-    EditorOperationResolver,
     EditorOperationTarget,
 )
+from .operation_resolution import EditorOperationResolver
 from .paint_destination import InteractivePaintDestinationCoordinator
 from .pixel_movement import SelectedPixelMovementController
 from .policy import EditorPolicyController

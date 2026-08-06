@@ -126,8 +126,13 @@ if [ -f "tools/check_consistency.py" ]; then
     fi
 fi
 
-# Ferrastra architecture and ownership policy
-for CHECKER in check_ferrastra_architecture.py check_ferrastra_operations.py check_ferrastra_ownership.py check_ferrastra_benchmarks.py; do
+# Repository architecture uses the exact staged tree so debt changes cannot
+# bypass registry reconciliation through unstaged worktree content.
+echo "Running check_architecture.py against staged content..."
+"$PYTHON" tools/check_architecture.py --staged || exit 1
+
+# Ferrastra operation, ownership, and benchmark policy
+for CHECKER in check_ferrastra_operations.py check_ferrastra_ownership.py check_ferrastra_benchmarks.py; do
     echo "Running $CHECKER..."
     "$PYTHON" "tools/$CHECKER"
     if [ $? -ne 0 ]; then

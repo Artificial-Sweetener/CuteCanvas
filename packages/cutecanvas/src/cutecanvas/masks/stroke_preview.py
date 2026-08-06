@@ -272,6 +272,7 @@ class DecimatedStrokePreview:
                     texture_strength=dab.texture_strength,
                     texture_scale=max(0.25, dab.texture_scale / stride),
                     texture_seed=dab.texture_seed,
+                    tip_transform=dab.tip_transform,
                 )
                 for dab in engine.segment_dabs(segment)
             )

@@ -23,8 +23,9 @@ from collections.abc import Callable
 from PySide6.QtCore import QRect
 
 from .coverage_history import MaskCoverageCommand
-from .mask import MaskAssetStore
+from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange, MaskImageCommand
+from .raster_structure_history import MaskRasterStructureCommand
 from .render_cache import MaskRenderCache
 from .surface_history import MaskSurfaceCommand
 
@@ -52,7 +53,7 @@ class MaskHistoryPresenter:
         """Present ``change`` once and return whether it changed source geometry."""
         mask_id = change.mask_id
         layer = self._assets.get_layer(mask_id)
-        structure_changed = _changes_structure(change)
+        structure_changed = _changes_structure(change, layer)
         applied_delta = bool(
             layer is not None
             and change.has_snippets
@@ -75,11 +76,25 @@ class MaskHistoryPresenter:
         return structure_changed
 
 
-def _changes_structure(change: MaskHistoryChange) -> bool:
-    """Return whether history replay changes the resource's storage bounds."""
+def _changes_structure(change: MaskHistoryChange, layer: MaskLayer | None) -> bool:
+    """Return whether history replay changes presentation geometry."""
     command = change.command
     if isinstance(command, MaskSurfaceCommand):
-        return command.before.bounds != command.after.bounds
+        if layer is None:
+            return True
+        previous = command.after if change.direction == "undo" else command.before
+        return (
+            layer.coverage.source_bounds()
+            != layer.coverage.source_bounds_for_raster_state(previous)
+        )
+    if isinstance(command, MaskRasterStructureCommand):
+        if layer is None:
+            return True
+        previous = command.after if change.direction == "undo" else command.before
+        return (
+            layer.coverage.source_bounds()
+            != layer.coverage.source_bounds_for_structure_state(previous)
+        )
     if isinstance(command, MaskImageCommand):
         return command.before.size() != command.after.size()
     return isinstance(command, MaskCoverageCommand)

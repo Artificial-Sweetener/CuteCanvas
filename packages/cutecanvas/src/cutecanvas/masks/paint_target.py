@@ -31,7 +31,6 @@ from cutecanvas.coverage import (
 from ..fill.sources import HybridCoverageFillPixelSource
 from ..painting import (
     BrushPreset,
-    BrushSourceCoordinateSession,
     BrushStrokeCompiler,
     BrushStrokeSegment,
     FloodFillSource,
@@ -49,7 +48,6 @@ class MaskCoveragePaintTargetOwner:
         self._service = service
         self._compiler = BrushStrokeCompiler()
         self._active_mask_id: uuid.UUID | None = None
-        self._coordinates: BrushSourceCoordinateSession | None = None
 
     def supports(self, target: PaintTargetContext) -> bool:
         """Return whether ``target`` references mask coverage."""
@@ -74,14 +72,6 @@ class MaskCoveragePaintTargetOwner:
         self._service.activateMask(source.resource_id)
         self._service.pushActiveMaskState()
         self._active_mask_id = source.resource_id
-        mask = self._service.assets.get_layer(source.resource_id)
-        bounds = None if mask is None else mask.coverage.raster.bounds
-        if bounds is None:
-            self._active_mask_id = None
-            return False
-        self._coordinates = BrushSourceCoordinateSession(
-            (float(bounds.x), float(bounds.y))
-        )
         return True
 
     def apply(
@@ -100,19 +90,9 @@ class MaskCoveragePaintTargetOwner:
         ):
             return False
         mask = self._service.assets.get_layer(source.resource_id)
-        coordinates = self._coordinates
-        if mask is None or coordinates is None:
+        if mask is None:
             return False
-        bounds = mask.coverage.raster.bounds
-        if bounds is None:
-            return False
-        configured = self._compiler.compile(
-            coordinates.layer_segment(
-                segment,
-                (float(bounds.x), float(bounds.y)),
-            ),
-            preset,
-        )
+        configured = self._compiler.compile(segment, preset)
         self._service.applyStrokeSegment(configured)
         return True
 
@@ -126,7 +106,6 @@ class MaskCoveragePaintTargetOwner:
             return False
         self._service.commitStroke()
         self._active_mask_id = None
-        self._coordinates = None
         return True
 
     def cancel(self, target: PaintTargetContext) -> bool:
@@ -137,7 +116,6 @@ class MaskCoveragePaintTargetOwner:
         self._service.resetStrokePipeline(mask_id)
         self._service.controller.edits.cancel_stroke(mask_id)
         self._active_mask_id = None
-        self._coordinates = None
         return True
 
     def preview_color(self, target: PaintTargetContext, fallback: QColor) -> QColor:

@@ -33,7 +33,9 @@ from .content_bounds import occupied_coverage_bounds
 from .document import CoverageDocument, CoverageItem, VectorCoverageItem
 from .evaluation import CoverageDocumentEvaluator
 from .operations import CoverageCombineMode, combine_coverage
-from .surface import CoverageSnapshot, CoverageSurface
+from .raster_structure import CoverageRasterStructureState
+from .state_bounds import coverage_state_content_bounds
+from .surface import CoverageSnapshot, CoverageStateSnapshot, CoverageSurface
 
 _EVALUATION_TILE_SIZE = 512
 
@@ -44,6 +46,7 @@ class CoverageAssetSnapshot:
 
     raster: SparseRasterSnapshot
     retained: CoverageDocument
+    authored_bounds: RasterBounds | None = None
 
     def __post_init__(self) -> None:
         """Validate the two authoritative coverage components."""
@@ -51,6 +54,10 @@ class CoverageAssetSnapshot:
             raise TypeError("coverage asset raster must be a sparse snapshot")
         if not isinstance(self.retained, CoverageDocument):
             raise TypeError("coverage asset retained value must be a document")
+        if self.authored_bounds is not None and not isinstance(
+            self.authored_bounds, RasterBounds
+        ):
+            raise TypeError("coverage asset authored bounds must be raster bounds")
 
 
 class CoverageAsset:
@@ -62,12 +69,16 @@ class CoverageAsset:
         raster: CoverageSurface,
         *,
         retained: CoverageDocument | None = None,
+        authored_bounds: RasterBounds | None = None,
         evaluator: CoverageDocumentEvaluator | None = None,
     ) -> None:
         """Bind sparse raster paint and immutable retained authorship."""
         self.asset_id = asset_id
         self.raster = raster
         self.retained = retained or CoverageDocument(document_id=asset_id)
+        self._authored_bounds = (
+            raster.bounds if authored_bounds is None else authored_bounds
+        )
         self._evaluator = evaluator or CoverageDocumentEvaluator(
             tile_size=_EVALUATION_TILE_SIZE
         )
@@ -145,7 +156,11 @@ class CoverageAsset:
 
     def state_snapshot(self) -> CoverageAssetSnapshot:
         """Return the complete durable hybrid asset state without rasterization."""
-        return CoverageAssetSnapshot(self.raster.sparse_snapshot(), self.retained)
+        return CoverageAssetSnapshot(
+            self.raster.sparse_snapshot(),
+            self.retained,
+            self._authored_bounds,
+        )
 
     @classmethod
     def from_snapshot(
@@ -160,7 +175,48 @@ class CoverageAsset:
             asset_id,
             CoverageSurface.from_sparse_snapshot(snapshot.raster),
             retained=snapshot.retained,
+            authored_bounds=(
+                snapshot.raster.bounds
+                if snapshot.authored_bounds is None
+                else snapshot.authored_bounds
+            ),
         )
+
+    @property
+    def authored_bounds(self) -> RasterBounds | None:
+        """Return the stable finite extent established when the asset was authored."""
+        return self._authored_bounds
+
+    def set_authored_bounds(self, bounds: RasterBounds | None) -> bool:
+        """Replace explicit presentation extent without exposing raster allocation."""
+        if bounds == self._authored_bounds:
+            return False
+        self._authored_bounds = bounds
+        self._invalidate_bounds()
+        return True
+
+    def raster_structure_state(self) -> CoverageRasterStructureState:
+        """Capture storage and explicit authored extent as one structural state."""
+        return CoverageRasterStructureState(
+            self.raster.state_snapshot(),
+            self._authored_bounds,
+        )
+
+    def restore_raster_structure(
+        self,
+        state: CoverageRasterStructureState,
+    ) -> None:
+        """Restore storage and authored extent atomically for history replay."""
+        self.raster.replace_with_state_snapshot(state.raster)
+        self._authored_bounds = state.authored_bounds
+        self._invalidate_bounds()
+
+    def compact_raster_storage(self) -> bool:
+        """Shrink expandable raster allocation without changing authored extent."""
+        changed = self.raster.compact_storage()
+        if changed:
+            self._invalidate_bounds()
+        return changed
 
     def content_bounds(self) -> RasterBounds | None:
         """Return exact nonzero bounds independent of raster storage allocation."""
@@ -224,19 +280,55 @@ class CoverageAsset:
         return None if bounds is None else QRectF(bounds)
 
     def source_bounds(self) -> RasterBounds | None:
-        """Return finite authored storage encompassing raster and retained items."""
+        """Return the presentation extent spanning authored and visible coverage."""
         revision = self.revision
         if revision == self._source_bounds_revision:
             return self._source_bounds
-        current = self.raster.bounds
+        result = self._source_bounds_for_content(
+            self.raster.content_bounds(),
+            self._authored_bounds,
+        )
+        self._source_bounds_revision = revision
+        self._source_bounds = result
+        return result
+
+    def source_bounds_for_raster_state(
+        self,
+        state: CoverageStateSnapshot,
+    ) -> RasterBounds | None:
+        """Return presentation bounds for one alternate detached raster state."""
+        return self._source_bounds_for_content(
+            coverage_state_content_bounds(state),
+            self._authored_bounds,
+        )
+
+    def source_bounds_for_structure_state(
+        self,
+        state: CoverageRasterStructureState,
+    ) -> RasterBounds | None:
+        """Return presentation bounds for one complete alternate structure."""
+        return self._source_bounds_for_content(
+            coverage_state_content_bounds(state.raster),
+            state.authored_bounds,
+        )
+
+    def _source_bounds_for_content(
+        self,
+        raster_content: RasterBounds | None,
+        authored_bounds: RasterBounds | None,
+    ) -> RasterBounds | None:
+        """Combine stable authorship with visible raster and retained coverage."""
+        current = authored_bounds
+        if raster_content is not None:
+            current = (
+                raster_content if current is None else current.united(raster_content)
+            )
         retained = self._evaluator.candidate_bounds(self.retained)
         result = (
             current
             if retained is None
             else retained if current is None else current.united(retained)
         )
-        self._source_bounds_revision = revision
-        self._source_bounds = result
         return result
 
     def coverage_value(self, x: int, y: int) -> int:

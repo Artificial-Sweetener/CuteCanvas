@@ -82,8 +82,8 @@ from .model import CompositionArchiveSnapshot
 from .vector_object_codec import decode_vector_object, encode_vector_object
 
 _FORMAT = "qpane-composition"
-_VERSION = 11
-_MIGRATABLE_VERSIONS = frozenset({2, 3, 4, 5, 6, 7, 8, 9, 10, _VERSION})
+_VERSION = 12
+_MIGRATABLE_VERSIONS = frozenset({2, 3, 4, 5, 6, 7, 8, 9, 10, 11, _VERSION})
 _MAX_RASTER_PIXELS = 268_435_456
 _MAX_COLOR_RASTER_BYTES = _MAX_RASTER_PIXELS * 4
 _MAX_VECTOR_OBJECTS = 100_000
@@ -494,6 +494,7 @@ class CompositionArchiveCodec:
                     str(resource_id),
                     payload,
                     retained=version >= 9,
+                    authored=version >= 12,
                 )
                 project_resources[resource_id] = _decode_project_resource(
                     item,
@@ -782,19 +783,32 @@ class CompositionArchiveCodec:
         item: object,
         *,
         retained: bool = False,
+        authored: bool = False,
     ) -> CoverageAssetSnapshot:
         """Validate and reconstruct one complete hybrid mask entry."""
         if not isinstance(item, dict):
             raise TypeError("mask entries must be objects")
         if item.get("storage") == "sparse-tiles":
-            raster = CompositionArchiveCodec._decode_sparse_tiles(
-                container,
-                "masks",
-                mask_id,
-                item,
-                channels=1,
-                byte_limit=_MAX_RASTER_PIXELS,
-            )
+            if item.get("bounds") is None:
+                tiles = item.get("tiles")
+                if tiles != []:
+                    raise ValueError("null mask storage cannot contain sparse tiles")
+                raster = SparseRasterSnapshot(
+                    None,
+                    RasterExtentPolicy(item["extent_policy"]),
+                    1,
+                    int(item["tile_size"]),
+                    (),
+                )
+            else:
+                raster = CompositionArchiveCodec._decode_sparse_tiles(
+                    container,
+                    "masks",
+                    mask_id,
+                    item,
+                    channels=1,
+                    byte_limit=_MAX_RASTER_PIXELS,
+                )
         else:
             bounds_values = item["bounds"]
             if not isinstance(bounds_values, list) or len(bounds_values) != 4:
@@ -833,7 +847,12 @@ class CompositionArchiveCodec:
             if retained
             else CoverageDocument(document_id=resource_id)
         )
-        return CoverageAssetSnapshot(raster, document)
+        authored_bounds = (
+            _decode_optional_bounds(item.get("authored_bounds"))
+            if authored
+            else raster.bounds
+        )
+        return CoverageAssetSnapshot(raster, document, authored_bounds)
 
     @staticmethod
     def _decode_raster(
@@ -1128,15 +1147,9 @@ def _coverage_manifest(
 ) -> dict[str, object]:
     """Return one mask resource payload manifest."""
     raster = snapshot.raster
-    if raster.bounds is None:
-        raise ValueError("archived mask resources require non-null bounds")
     return {
-        "bounds": [
-            raster.bounds.x,
-            raster.bounds.y,
-            raster.bounds.width,
-            raster.bounds.height,
-        ],
+        "bounds": _encode_optional_bounds(raster.bounds),
+        "authored_bounds": _encode_optional_bounds(snapshot.authored_bounds),
         "extent_policy": raster.extent_policy.value,
         "storage": "sparse-tiles",
         "channels": raster.channels,
@@ -1155,6 +1168,20 @@ def _coverage_manifest(
         ],
         "retained": encode_coverage_document(mask_id, snapshot.retained),
     }
+
+
+def _encode_optional_bounds(bounds: RasterBounds | None) -> list[int] | None:
+    """Encode nullable raster geometry without inventing transparent storage."""
+    return None if bounds is None else [bounds.x, bounds.y, bounds.width, bounds.height]
+
+
+def _decode_optional_bounds(value: object) -> RasterBounds | None:
+    """Decode nullable raster geometry from a validated four-integer sequence."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) != 4:
+        raise ValueError("optional raster bounds must contain four integers")
+    return RasterBounds(*(int(component) for component in value))
 
 
 def _raster_manifest(

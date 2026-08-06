@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 
 from qpane.sdk.scene import (
+    RasterBounds,
     RasterLayerRenderItem,
     SampledLayerRenderItem,
     SceneRenderItem,
@@ -44,10 +45,12 @@ class LayerEdgePreviewRenderCompiler:
         self._previews = previews
         self._transitions = RasterTransitionRenderCompiler(presentations)
 
-    def target(self) -> tuple[uuid.UUID, uuid.UUID] | None:
-        """Return the layer currently carrying a whole-layer preview."""
+    def target(self) -> tuple[uuid.UUID, uuid.UUID, RasterBounds] | None:
+        """Return the layer and local bounds carrying a whole-layer preview."""
         preview = self._previews.current
-        return None if preview is None else (preview.scene_id, preview.layer_id)
+        if preview is None:
+            return None
+        return preview.scene_id, preview.layer_id, preview.transition.patch_bounds
 
     def compile(
         self,

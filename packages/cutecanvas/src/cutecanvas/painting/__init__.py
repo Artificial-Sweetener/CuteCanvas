@@ -27,7 +27,6 @@ from .clone_model import (
 )
 from .compositor import BrushCompositor
 from .configuration import BrushStrokeCompiler
-from .coordinates import BrushSourceCoordinateSession
 from .dab_engine import BrushDabEngine
 from .model import (
     BrushDab,
@@ -69,7 +68,6 @@ __all__ = (
     "BrushOperation",
     "BrushPreset",
     "BrushSample",
-    "BrushSourceCoordinateSession",
     "BrushStrokeCompiler",
     "BrushStrokeOperation",
     "BrushStrokeSegment",

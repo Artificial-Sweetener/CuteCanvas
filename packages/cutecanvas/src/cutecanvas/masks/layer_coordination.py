@@ -136,11 +136,7 @@ class MaskLayerCoordinator:
     ) -> bool:
         """Create a mask instance in an explicit composition document."""
         asset = self._assets.get_layer(mask_id)
-        if (
-            asset is None
-            or asset.mask_image.isNull()
-            or asset.coverage.raster.bounds is None
-        ):
+        if asset is None or asset.coverage.source_bounds() is None:
             return False
         instance = CompositionLayerInstance(
             layer_id=uuid.uuid4(),
@@ -354,7 +350,9 @@ class MaskLayerCoordinator:
         if self._scene_mutations is None:
             return None
         return self._scene_mutations.find_layer(
-            lambda layer: isinstance(layer.source, ProjectResourceReference)
-            and layer.source.resource_id == mask_id
-            and self._assets.get_layer(mask_id) is not None
+            lambda layer: (
+                isinstance(layer.source, ProjectResourceReference)
+                and layer.source.resource_id == mask_id
+                and self._assets.get_layer(mask_id) is not None
+            )
         )

@@ -132,12 +132,40 @@ class SceneLayerTransformController:
         scene, layer = resolved
         return self._begin_layer(scene, layer, operation, scene_point)
 
+    def preview_selected_transform(self, transform: LayerTransform) -> bool:
+        """Publish one cumulative selected-layer transform without a gesture."""
+        resolved = self._selected_layer()
+        if resolved is None:
+            return False
+        scene, layer = resolved
+        if layer.transform is None:
+            return False
+        bounds = self._bounds_for_layer(scene, layer)
+        if bounds is None:
+            return False
+        session = self._session
+        if (
+            session is None
+            or session.scene_id != layer.scene_id
+            or session.layer_id != layer.layer_id
+        ):
+            self.cancel()
+            self._session = LayerTransformSession(
+                layer.scene_id,
+                layer.layer_id,
+                bounds,
+                layer.transform,
+            )
+        self._gesture = None
+        return self._preview.set(layer.scene_id, layer.layer_id, transform)
+
     def begin_move(self, hit: SceneLayerHitTestResult, scene_point: QPointF) -> bool:
         """Select one hit layer and begin a translation gesture."""
         self._selection.select_hit(hit)
         resolved = self._mutations.find_layer(
-            lambda layer: layer.scene_id == hit.scene_id
-            and layer.layer_id == hit.layer_id
+            lambda layer: (
+                layer.scene_id == hit.scene_id and layer.layer_id == hit.layer_id
+            )
         )
         if resolved is None:
             return False
@@ -309,8 +337,10 @@ class SceneLayerTransformController:
         if selected is None:
             return None
         resolved = self._mutations.find_layer(
-            lambda layer: layer.scene_id == selected.scene_id
-            and layer.layer_id == selected.layer_id
+            lambda layer: (
+                layer.scene_id == selected.scene_id
+                and layer.layer_id == selected.layer_id
+            )
         )
         if resolved is None:
             return None

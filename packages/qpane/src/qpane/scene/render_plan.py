@@ -143,6 +143,52 @@ class SampledTileRenderData:
                 QRectF(self.source_clip_rect),
             )
 
+    @property
+    def product_key(self) -> SampledTileProductKey:
+        """Return cheap immutable identity for this exact sampled product."""
+        return SampledTileProductKey(
+            image_cache_key=self.image.cacheKey(),
+            geometry=self.geometry_key,
+        )
+
+    @property
+    def geometry_key(self) -> SampledTileGeometryKey:
+        """Return the source-local sampling geometry without reading pixels."""
+        return SampledTileGeometryKey(
+            image_size=(self.image.width(), self.image.height()),
+            source_rect=_rect_key(self.source_rect),
+            image_source_rect=_rect_key(self.image_source_rect),
+            source_clip_rect=(
+                None
+                if self.source_clip_rect is None
+                else _rect_key(self.source_clip_rect)
+            ),
+            integer_origin_sampling=self.integer_origin_sampling,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SampledTileGeometryKey:
+    """Identify one sampled tile's complete draw and clipping geometry."""
+
+    image_size: tuple[int, int]
+    source_rect: tuple[float, float, float, float]
+    image_source_rect: tuple[float, float, float, float]
+    source_clip_rect: tuple[float, float, float, float] | None
+    integer_origin_sampling: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SampledTileProductKey:
+    """Identify one immutable sampled image and the geometry interpreting it."""
+
+    image_cache_key: int
+    geometry: SampledTileGeometryKey
+
+
+SampledTileBatchKey: TypeAlias = tuple[SampledTileProductKey, ...]
+SampledTileGeometryBatchKey: TypeAlias = tuple[SampledTileGeometryKey, ...]
+
 
 @dataclass(frozen=True, slots=True)
 class VectorLayerRenderItem:
@@ -210,6 +256,16 @@ class SampledLayerRenderItem:
                 QPainterPath(self.effect_clip_path),
             )
 
+    @property
+    def sample_batch_key(self) -> SampledTileBatchKey:
+        """Return identity for the exact immutable sampled product batch."""
+        return tuple(tile.product_key for tile in self.tiles)
+
+    @property
+    def sample_geometry_key(self) -> SampledTileGeometryBatchKey:
+        """Return current sampled demand geometry independently of tile pixels."""
+        return tuple(tile.geometry_key for tile in self.tiles)
+
 
 SceneRenderItem: TypeAlias = (
     RasterLayerRenderItem | VectorLayerRenderItem | SampledLayerRenderItem
@@ -218,7 +274,7 @@ SceneRenderItem: TypeAlias = (
 
 @dataclass(frozen=True, slots=True)
 class TransientRasterTransformContribution:
-    """Carry stable raster products plus transient source-local geometry."""
+    """Carry stable contribution products plus transient source-local geometry."""
 
     session_id: uuid.UUID
     scene_id: uuid.UUID
@@ -228,9 +284,8 @@ class TransientRasterTransformContribution:
     source_bounds: RasterBounds
     fragment_image: QImage
     fragment_bounds: RasterBounds
-    selection_mask: QImage
+    destination_attenuation_mask: QImage | None
     fragment_transform: LayerTransform
-    clear_destination: bool
     extent_clip_bounds: RasterBounds | None
 
     def __post_init__(self) -> None:
@@ -238,7 +293,12 @@ class TransientRasterTransformContribution:
         if self.source_patch is not None:
             object.__setattr__(self, "source_patch", QImage(self.source_patch))
         object.__setattr__(self, "fragment_image", QImage(self.fragment_image))
-        object.__setattr__(self, "selection_mask", QImage(self.selection_mask))
+        if self.destination_attenuation_mask is not None:
+            object.__setattr__(
+                self,
+                "destination_attenuation_mask",
+                QImage(self.destination_attenuation_mask),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,10 +329,23 @@ class TransientSampledResolvedContribution:
     source_bounds: RasterBounds
     tiles: tuple[SampledTileRenderData, ...]
     retain_until_durable: bool = True
+    sampled_raster_bounds: RasterBounds | None = None
+    sampled_source_size: QSize | None = None
 
     def __post_init__(self) -> None:
         """Detach the immutable sampled tile batch."""
         object.__setattr__(self, "tiles", tuple(self.tiles))
+        if self.sampled_source_size is not None:
+            object.__setattr__(
+                self,
+                "sampled_source_size",
+                QSize(self.sampled_source_size),
+            )
+
+    @property
+    def sample_geometry_key(self) -> SampledTileGeometryBatchKey:
+        """Return the sampled demand geometry this replacement can cover."""
+        return tuple(tile.geometry_key for tile in self.tiles)
 
 
 TransientRasterContribution: TypeAlias = (
@@ -350,3 +423,8 @@ class SceneRenderPlan:
             if isinstance(item, RasterLayerRenderItem) and item.is_base_raster:
                 return item
         return None
+
+
+def _rect_key(rect: QRectF) -> tuple[float, float, float, float]:
+    """Return an immutable exact key for detached Qt rectangle geometry."""
+    return rect.x(), rect.y(), rect.width(), rect.height()

@@ -16,6 +16,8 @@
 
 """Build DPR-aware base cursors with shared modifier decoration."""
 
+import math
+
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QCursor, QImage, QPainter, QPen, QPixmap
 
@@ -110,7 +112,7 @@ class CursorBuilder:
         line_gap = 5
         outline_width = 4
         inset = outline_width / 2  # Keep the stroke inside the cursor image
-        dpr = self._normalized_dpr(device_pixel_ratio)
+        dpr = self.normalize_device_pixel_ratio(device_pixel_ratio)
         cache_key = (
             "smart_select_crosshair_inset",
             cursor_size,
@@ -176,7 +178,7 @@ class CursorBuilder:
     ) -> tuple[QCursor, QCursor]:
         """Cache and return the paint/erase cursors for the requested size and color."""
         size = max(3, int(size))
-        dpr = self._normalized_dpr(device_pixel_ratio)
+        dpr = self.normalize_device_pixel_ratio(device_pixel_ratio)
         cache_key = ("brush", size, color.rgb(), dpr)
         cached = self._brush_cursor_cache.get(cache_key)
         if cached is not None:
@@ -259,9 +261,13 @@ class CursorBuilder:
         painter.drawLine(right_start, right_end)
 
     @staticmethod
-    def _normalized_dpr(device_pixel_ratio: float) -> float:
-        """Return a stable positive device ratio suitable for raster caching."""
-        return round(max(0.01, float(device_pixel_ratio)), 6)
+    def normalize_device_pixel_ratio(device_pixel_ratio: float) -> float:
+        """Return a renderable Qt cursor scale suitable for raster caching."""
+
+        ratio = float(device_pixel_ratio)
+        if not math.isfinite(ratio) or ratio <= 0.0:
+            return 1.0
+        return round(max(0.025, ratio), 6)
 
     @staticmethod
     def _cursor_image(width: int, height: int, dpr: float) -> QImage:

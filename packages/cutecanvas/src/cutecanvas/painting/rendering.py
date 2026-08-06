@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QRadialGradient
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QRadialGradient, QTransform
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     numpy_to_qimage_grayscale8,
@@ -121,17 +121,21 @@ def paint_coverage_segment(
         )
         radius = max(0.5, (dab.diameter / 2.0) / stride_value)
         dab_color = QColor(255, 255, 255, alpha)
+        painter.save()
+        painter.translate(center)
+        _concatenate_tip_transform(painter, dab)
         if dab.hardness >= 1.0:
             painter.setBrush(QBrush(dab_color))
         else:
-            gradient = QRadialGradient(center, radius)
+            gradient = QRadialGradient(QPointF(), radius)
             gradient.setColorAt(0.0, dab_color)
             gradient.setColorAt(max(0.0, min(1.0, dab.hardness)), dab_color)
             edge = QColor(dab_color)
             edge.setAlpha(0)
             gradient.setColorAt(1.0, edge)
             painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(center, radius, radius)
+        painter.drawEllipse(QPointF(), radius, radius)
+        painter.restore()
 
 
 def render_color_stroke(
@@ -233,17 +237,37 @@ def _paint_color_dabs(
         dab_color = QColor(255, 255, 255, alpha) if erasing else QColor(color)
         if not erasing:
             dab_color.setAlpha(round(dab_color.alpha() * alpha / 255.0))
+        painter.save()
+        painter.translate(center)
+        _concatenate_tip_transform(painter, dab)
         if dab.hardness >= 1.0:
             painter.setBrush(QBrush(dab_color))
         else:
-            gradient = QRadialGradient(center, radius)
+            gradient = QRadialGradient(QPointF(), radius)
             gradient.setColorAt(0.0, dab_color)
             gradient.setColorAt(max(0.0, min(1.0, dab.hardness)), dab_color)
             edge = QColor(dab_color)
             edge.setAlpha(0)
             gradient.setColorAt(1.0, edge)
             painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(center, radius, radius)
+        painter.drawEllipse(QPointF(), radius, radius)
+        painter.restore()
+
+
+def _concatenate_tip_transform(painter: QPainter, dab: BrushDab) -> None:
+    """Apply one target-local brush-tip affine without moving its center."""
+    transform = dab.tip_transform
+    painter.setTransform(
+        QTransform(
+            transform.m11,
+            transform.m12,
+            transform.m21,
+            transform.m22,
+            0.0,
+            0.0,
+        ),
+        True,
+    )
 
 
 def _paint_segments(

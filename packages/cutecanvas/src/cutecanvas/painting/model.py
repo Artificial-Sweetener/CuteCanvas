@@ -18,10 +18,11 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from PySide6.QtCore import QPointF
+from qpane.sdk.scene import LayerTransform
 
 
 class BrushOperation(str, Enum):
@@ -182,6 +183,7 @@ class BrushStrokeSegment:
     texture_scale: float = 8.0
     texture_seed: int = 0
     size_dynamics_applied: bool = False
+    tip_transform: LayerTransform = field(default_factory=LayerTransform)
 
     @classmethod
     def fixed(
@@ -250,6 +252,7 @@ class BrushStrokeSegment:
             texture_scale=self.texture_scale,
             texture_seed=self.texture_seed,
             size_dynamics_applied=self.size_dynamics_applied,
+            tip_transform=self.tip_transform,
         )
 
 
@@ -265,3 +268,4 @@ class BrushDab:
     texture_strength: float = 0.0
     texture_scale: float = 8.0
     texture_seed: int = 0
+    tip_transform: LayerTransform = field(default_factory=LayerTransform)

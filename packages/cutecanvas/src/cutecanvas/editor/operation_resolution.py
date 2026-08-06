@@ -19,11 +19,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
-from enum import Enum
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerDescriptor, LayerSourceReference, SceneDescriptor
+from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 from cutecanvas.coverage.containment import coverage_contains
 
@@ -31,116 +29,24 @@ from ..painting.targets import (
     PaintTargetContext,
     PaintTargetIdentity,
 )
+from ..scene.layer_geometry import LayerGeometryResolver
 from ..scene.layer_selection import SceneLayerSelectionController
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_owners import LayerPixelOwnerRegistry
 from ..selection import PixelSelectionService
 from ..types import EditorCapability, PaintTargetKind
+from .operation_contracts import (
+    EditorOperation,
+    EditorOperationAlternative,
+    EditorOperationDenial,
+    EditorOperationResolution,
+    EditorOperationTarget,
+)
 from .pixel_move_target import (
     SelectedPixelMoveTarget,
     SelectedPixelMoveTargetResolver,
 )
-
-
-class EditorOperation(str, Enum):
-    """Identify one source-neutral editor intent."""
-
-    MOVE = "move"
-    TRANSFORM = "transform"
-    PAINT = "paint"
-    DELETE_PIXELS = "delete-pixels"
-    SELECT_PIXELS = "select-pixels"
-
-
-class EditorOperationTarget(str, Enum):
-    """Identify the semantic target chosen for an editor operation."""
-
-    FLOATING_PIXELS = "floating-pixels"
-    SELECTED_PIXELS = "selected-pixels"
-    LAYER = "layer"
-    PIXEL_SELECTION = "pixel-selection"
-    DEFAULT_PAINT_TARGET = "default-paint-target"
-
-
-class EditorOperationDenial(str, Enum):
-    """Explain why an editor intent cannot currently execute."""
-
-    NONE = "none"
-    NO_ACTIVE_SCENE = "no-active-scene"
-    NO_SELECTED_LAYER = "no-selected-layer"
-    NO_PIXEL_SELECTION = "no-pixel-selection"
-    NO_SELECTED_PIXELS = "no-selected-pixels"
-    POINTER_OUTSIDE_SELECTION = "pointer-outside-selection"
-    DIRECT_PIXEL_EDIT_UNSUPPORTED = "direct-pixel-edit-unsupported"
-    HOST_POLICY_DENIED = "host-policy-denied"
-    LAYER_NOT_SELECTABLE = "layer-not-selectable"
-    LAYER_NOT_MOVABLE = "layer-not-movable"
-    INVALID_LAYER_GEOMETRY = "invalid-layer-geometry"
-    SOURCE_UNAVAILABLE = "source-unavailable"
-
-
-class EditorOperationAlternative(str, Enum):
-    """Describe an explicit non-destructive alternative to a denied intent."""
-
-    RASTERIZE = "rasterize"
-    EDIT_CONTENTS = "edit-contents"
-    NEW_RASTER_LAYER = "new-raster-layer"
-
-
-@dataclass(frozen=True, slots=True)
-class EditorSourceOperations:
-    """Advertise source-owned alternatives without duplicating direct-edit owners."""
-
-    rasterize: bool = False
-    edit_contents: bool = False
-
-
-class EditorSourceOperationRegistry:
-    """Associate exact source-reference types with conversion alternatives."""
-
-    def __init__(self) -> None:
-        """Initialize an empty exact-type registry."""
-        self._resolvers: dict[
-            type[object],
-            Callable[[LayerSourceReference], EditorSourceOperations],
-        ] = {}
-
-    def register(
-        self,
-        source_type: type[object],
-        operations: EditorSourceOperations,
-    ) -> None:
-        """Register one source type exactly once."""
-        self.register_resolver(source_type, lambda _source: operations)
-
-    def register_resolver(
-        self,
-        source_type: type[object],
-        resolver: Callable[[LayerSourceReference], EditorSourceOperations],
-    ) -> None:
-        """Register one source-aware alternative resolver exactly once."""
-        if source_type in self._resolvers:
-            raise ValueError("editor source operations already registered")
-        self._resolvers[source_type] = resolver
-
-    def operations_for(self, source: LayerSourceReference) -> EditorSourceOperations:
-        """Return alternatives owned by the source's exact domain."""
-        resolver = self._resolvers.get(type(source))
-        return EditorSourceOperations() if resolver is None else resolver(source)
-
-
-@dataclass(frozen=True, slots=True)
-class EditorOperationResolution:
-    """Carry one complete operation decision for tools, commands, and UI."""
-
-    operation: EditorOperation
-    allowed: bool
-    target: EditorOperationTarget | None = None
-    scene_id: uuid.UUID | None = None
-    layer_id: uuid.UUID | None = None
-    denial: EditorOperationDenial = EditorOperationDenial.NONE
-    alternatives: tuple[EditorOperationAlternative, ...] = ()
-    selected_pixels: SelectedPixelMoveTarget | None = None
+from .source_operations import EditorSourceOperationRegistry
 
 
 class EditorOperationResolver:
@@ -160,6 +66,7 @@ class EditorOperationResolver:
         default_paint_target_available: Callable[[], bool],
         paint_target_supported: Callable[[PaintTargetContext], bool],
         pixel_owners: LayerPixelOwnerRegistry,
+        layer_geometry: LayerGeometryResolver,
         source_operations: EditorSourceOperationRegistry,
         capability_allowed: Callable[[EditorCapability], bool],
     ) -> None:
@@ -175,6 +82,7 @@ class EditorOperationResolver:
         self._default_paint_target_available = default_paint_target_available
         self._paint_target_supported = paint_target_supported
         self._pixel_owners = pixel_owners
+        self._layer_geometry = layer_geometry
         self._source_operations = source_operations
         self._capability_allowed = capability_allowed
 
@@ -211,6 +119,7 @@ class EditorOperationResolver:
                 scene,
                 scene_point,
                 candidate_layer_id,
+                target_preference=None,
             )
         if operation is EditorOperation.PAINT:
             return self._resolve_paint(scene)
@@ -223,15 +132,54 @@ class EditorOperationResolver:
             )
         return self._resolve_delete(scene, layer)
 
+    def resolve_transform_target(
+        self,
+        target: EditorOperationTarget,
+    ) -> EditorOperationResolution:
+        """Resolve one explicit affine target without changing editor state."""
+        if target not in {
+            EditorOperationTarget.SELECTED_PIXELS,
+            EditorOperationTarget.LAYER,
+        }:
+            raise ValueError("transform target must be selected pixels or layer")
+        scene = self._active_scene()
+        if scene is None:
+            return self._denied(
+                EditorOperation.TRANSFORM,
+                EditorOperationDenial.NO_ACTIVE_SCENE,
+            )
+        return self._resolve_geometry(
+            EditorOperation.TRANSFORM,
+            scene,
+            None,
+            None,
+            target_preference=target,
+        )
+
     def _resolve_geometry(
         self,
         operation: EditorOperation,
         scene: SceneDescriptor,
         scene_point: QPointF | None,
         candidate_layer_id: uuid.UUID | None,
+        *,
+        target_preference: EditorOperationTarget | None,
     ) -> EditorOperationResolution:
         """Apply floating, selected-pixel, then whole-layer precedence."""
         selected = self._layer_selection.current
+        if target_preference is EditorOperationTarget.LAYER:
+            if self._floating_pixels_active():
+                return self._denied(
+                    operation,
+                    EditorOperationDenial.FLOATING_PIXELS_ACTIVE,
+                    scene_id=scene.scene_id,
+                    layer_id=None if selected is None else selected.layer_id,
+                )
+            return self._resolve_layer_geometry(
+                operation,
+                scene,
+                candidate_layer_id,
+            )
         if self._floating_pixels_active():
             if (
                 operation is EditorOperation.MOVE
@@ -255,7 +203,10 @@ class EditorOperationResolver:
             if (
                 operation is EditorOperation.MOVE
                 and scene_point is not None
-                and not coverage_contains(selected_pixels.scene_coverage, scene_point)
+                and not coverage_contains(
+                    selected_pixels.scene_contribution,
+                    scene_point,
+                )
             ):
                 return self._denied(
                     operation,
@@ -270,9 +221,12 @@ class EditorOperationResolver:
                 selected_pixels.layer.layer_id,
                 selected_pixels=selected_pixels,
             )
-        if (
-            operation is EditorOperation.TRANSFORM
-            and self._pixel_selection.state(scene.scene_id).coverage is not None
+        pixel_selection_active = (
+            self._pixel_selection.state(scene.scene_id).coverage is not None
+        )
+        if operation is EditorOperation.TRANSFORM and (
+            target_preference is EditorOperationTarget.SELECTED_PIXELS
+            or pixel_selection_active
         ):
             if not self._capability_allowed(
                 self._geometry_capability(
@@ -292,6 +246,19 @@ class EditorOperationResolver:
                 scene_id=scene.scene_id,
                 layer_id=None if selected is None else selected.layer_id,
             )
+        return self._resolve_layer_geometry(
+            operation,
+            scene,
+            candidate_layer_id,
+        )
+
+    def _resolve_layer_geometry(
+        self,
+        operation: EditorOperation,
+        scene: SceneDescriptor,
+        candidate_layer_id: uuid.UUID | None,
+    ) -> EditorOperationResolution:
+        """Resolve one whole-layer geometry target through policy and bounds."""
         layer = (
             self._layer_by_id(scene, candidate_layer_id)
             if candidate_layer_id is not None
@@ -321,6 +288,16 @@ class EditorOperationResolver:
             return self._denied(
                 operation,
                 EditorOperationDenial.INVALID_LAYER_GEOMETRY,
+                scene_id=scene.scene_id,
+                layer_id=layer.layer_id,
+            )
+        if (
+            operation is EditorOperation.TRANSFORM
+            and self._layer_geometry.resolved_local_bounds(layer) is None
+        ):
+            return self._denied(
+                operation,
+                EditorOperationDenial.NOTHING_TO_TRANSFORM,
                 scene_id=scene.scene_id,
                 layer_id=layer.layer_id,
             )

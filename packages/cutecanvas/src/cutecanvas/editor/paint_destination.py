@@ -33,7 +33,8 @@ from ..types import (
     NonEditablePaintPolicy,
     RasterExtentPolicy,
 )
-from .operation_resolution import EditorOperation, EditorOperationResolver
+from .operation_contracts import EditorOperation
+from .operation_resolution import EditorOperationResolver
 
 
 class InteractivePaintDestinationCoordinator:

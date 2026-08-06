@@ -76,19 +76,23 @@ def _product_text(path: Path) -> str:
     normalized = path.as_posix()
     if normalized.startswith(("packages/ferrastra/", "crates/ferrastra-")):
         return "    Ferrastra - CPU-first native graphics product engine"
-    if normalized == "examples/ferrastra_demo.py":
+    if normalized == "packages/ferrastra/examples/ferrastra_demo.py":
         return "    Ferrastra - CPU-first native graphics product engine"
     if normalized.startswith("tools/architecture/") or "ferrastra" in path.name.lower():
         return (
             "    QPane + CuteCanvas + Ferrastra - Native graphics architecture tooling"
         )
-    if normalized.startswith(("packages/cutecanvas/", "examples/demonstration/")):
+    if normalized.startswith(
+        ("packages/cutecanvas/", "packages/cutecanvas/examples/demonstration/")
+    ):
         return "    CuteCanvas - High-performance layered image editor"
-    if normalized == "examples/cutecanvas_demo.py":
+    if normalized == "packages/cutecanvas/examples/cutecanvas_demo.py":
         return "    CuteCanvas - High-performance layered image editor"
-    if normalized.startswith(("packages/qpane/", "examples/qpane_demonstration/")):
+    if normalized.startswith(
+        ("packages/qpane/", "packages/qpane/examples/qpane_demonstration/")
+    ):
         return "    QPane - High-performance PySide6 image viewer"
-    if normalized == "examples/qpane_demo.py":
+    if normalized == "packages/qpane/examples/qpane_demo.py":
         return "    QPane - High-performance PySide6 image viewer"
     return "    QPane + CuteCanvas - High-performance PySide6 rendering and editing"
 

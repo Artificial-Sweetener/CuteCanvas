@@ -23,9 +23,9 @@ from collections.abc import Iterator
 
 import pytest
 from PySide6.QtWidgets import QApplication
-
-from tests.harness.process_lock import interactive_performance_isolation
-from tests.harness.qt_lifetime import flush_deferred_qt_lifetime
+from qpane import QPane
+from qpane_test_support.process_lock import interactive_performance_isolation
+from qpane_test_support.qt_lifetime import flush_deferred_qt_lifetime
 
 
 @pytest.fixture(autouse=True)
@@ -50,3 +50,44 @@ def _flush_deferred_qt_deletions(qapp: QApplication) -> Iterator[None]:
     """Deliver deferred Qt deletions after each package test."""
     yield
     flush_deferred_qt_lifetime(qapp)
+
+
+@pytest.fixture
+def qpane_core(qapp: QApplication) -> Iterator[QPane]:
+    """Provide a bare QPane viewer and dispose it after the test."""
+    del qapp
+    pane = QPane()
+    try:
+        yield pane
+    finally:
+        pane.deleteLater()
+
+
+@pytest.fixture
+def qpane_view(qpane_core: QPane) -> object:
+    """Return the view owned by the shared QPane fixture."""
+    return qpane_core.view()
+
+
+@pytest.fixture
+def qpane_presenter(qpane_view: object) -> object:
+    """Return the rendering presenter owned by the shared view."""
+    return qpane_view.presenter
+
+
+@pytest.fixture
+def qpane_viewport(qpane_view: object) -> object:
+    """Return the viewport owned by the shared view."""
+    return qpane_view.viewport
+
+
+@pytest.fixture
+def qpane_renderer(qpane_view: object) -> object:
+    """Return the renderer owned by the shared view."""
+    return qpane_view.renderer
+
+
+@pytest.fixture
+def catalog(qpane_core: QPane) -> object:
+    """Return the catalog attached to the shared QPane fixture."""
+    return qpane_core.catalog()

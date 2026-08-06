@@ -146,7 +146,9 @@ class EditorCursorController:
             self._apply_cursor(QCursor(Qt.CursorShape.ArrowCursor))
             return
         zoom = max(1e-6, float(canvas.view().viewport.zoom))
-        dpr = max(1e-6, float(canvas.devicePixelRatioF()))
+        dpr = canvas.cursor_builder.normalize_device_pixel_ratio(
+            canvas.devicePixelRatioF()
+        )
         logical_size = max(1, int(self.brush_size)) * zoom / dpr
         viewport_size = canvas.size()
         if logical_size > min(viewport_size.width(), viewport_size.height()):
@@ -170,7 +172,9 @@ class EditorCursorController:
         """Resolve host artwork before applying CuteCanvas's portable default."""
 
         canvas = self._canvas
-        dpr = max(0.01, float(canvas.devicePixelRatioF()))
+        dpr = canvas.cursor_builder.normalize_device_pixel_ratio(
+            canvas.devicePixelRatioF()
+        )
         theme = self._theme
         if theme is not None:
             try:
@@ -182,7 +186,9 @@ class EditorCursorController:
                     return cursor
         if intent is EditorCursorIntent.FORBIDDEN:
             return QCursor(Qt.CursorShape.ForbiddenCursor)
-        if intent is EditorCursorIntent.SELECTION_TRANSLATE:
+        if intent in {EditorCursorIntent.SELECTION_TRANSLATE, EditorCursorIntent.MOVE}:
+            return QCursor(Qt.CursorShape.SizeAllCursor)
+        if intent is EditorCursorIntent.MOVE_CUT:
             return QCursor(Qt.CursorShape.SizeAllCursor)
         if intent in (
             EditorCursorIntent.PRECISE,

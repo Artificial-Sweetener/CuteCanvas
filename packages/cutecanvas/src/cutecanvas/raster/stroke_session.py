@@ -24,7 +24,6 @@ import numpy as np
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from ..coverage import CoverageSnapshot
-from ..painting import BrushSourceCoordinateSession
 from ..selection import LayerCoverageProjector, PixelSelectionService
 
 
@@ -38,7 +37,6 @@ class RasterStrokeSession:
     before_bounds: RasterBounds
     constraint: CoverageSnapshot | None
     constrained: bool
-    coordinates: BrushSourceCoordinateSession
     before_tiles: dict[RasterBounds, np.ndarray] = field(default_factory=dict)
 
     def constraint_pixels(self, bounds: RasterBounds) -> np.ndarray | None:

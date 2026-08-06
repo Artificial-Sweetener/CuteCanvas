@@ -41,13 +41,14 @@ from .selection_projection import LayerSelectionProjectionCache
 
 @dataclass(frozen=True, slots=True)
 class SelectedPixelMoveTarget:
-    """Retain one resolved layer, selection, and authoritative pixel owner."""
+    """Retain selection geometry and content-filtered movable contribution."""
 
     scene: SceneDescriptor
     layer: LayerDescriptor
     selection: CoverageSnapshot
-    scene_coverage: CoverageSnapshot
-    local_coverage: CoverageSnapshot
+    scene_contribution: CoverageSnapshot
+    local_selection: CoverageSnapshot
+    local_contribution: CoverageSnapshot
     extent_policy: RasterExtentPolicy
     source_revision: object
     owner: LayerPixelMutationOwner
@@ -91,7 +92,10 @@ class SelectedPixelMoveTargetResolver:
     def resolve_at(self, scene_point: QPointF) -> SelectedPixelMoveTarget | None:
         """Resolve selected editable content only when ``scene_point`` is covered."""
         target = self.resolve_selected()
-        if target is None or not coverage_contains(target.scene_coverage, scene_point):
+        if target is None or not coverage_contains(
+            target.scene_contribution,
+            scene_point,
+        ):
             return None
         return target
 
@@ -147,8 +151,11 @@ class SelectedPixelMoveTargetResolver:
         )
         if local is None:
             return None
-        scene_coverage = self._projector.project(local, layer.transform)
-        if scene_coverage is None:
+        local_bounds = local.bounds
+        if local_bounds is None:
+            return None
+        scene_contribution = self._projector.project(local, layer.transform)
+        if scene_contribution is None:
             return None
         extent_policy = owner.extent_policy(layer)
         source_revision = owner.revision_token(layer)
@@ -158,7 +165,8 @@ class SelectedPixelMoveTargetResolver:
             resolved_scene,
             layer,
             selection,
-            scene_coverage,
+            scene_contribution,
+            local_selection,
             local,
             extent_policy,
             source_revision,

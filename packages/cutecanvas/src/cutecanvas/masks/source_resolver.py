@@ -95,6 +95,10 @@ class MaskRenderLookup(Protocol):
         """Return the current content and appearance render identity."""
         ...
 
+    def effective_source_bounds(self, mask_id: uuid.UUID) -> RasterBounds | None:
+        """Return durable bounds united with provisional visible coverage."""
+        ...
+
     def hybrid_style(self, mask_id: uuid.UUID) -> HybridPresentationStyle:
         """Return immutable presentation values for hybrid sampling."""
         ...
@@ -153,7 +157,7 @@ class MaskSourceCapabilities:
         *,
         scale: float | None = None,
     ) -> QImage | None:
-        """Return the full or explicitly sampled colorized presentation product."""
+        """Return durable pixels for dense rendering and transient fallback."""
         if not isinstance(source, ProjectResourceReference):
             return None
         pixmap = (
@@ -165,21 +169,23 @@ class MaskSourceCapabilities:
             return pixmap.toImage()
         layer = self.assets.get_layer(source.resource_id)
         if (
-            layer is None
-            or layer.coverage.raster.content_bounds() is not None
-            or layer.coverage.has_retained_items
+            layer is not None
+            and layer.coverage.raster.content_bounds() is None
+            and not layer.coverage.has_retained_items
         ):
-            return None
-        transparent = QImage(1, 1, QImage.Format_ARGB32_Premultiplied)
-        transparent.fill(0)
-        return transparent
+            transparent = QImage(1, 1, QImage.Format_ARGB32_Premultiplied)
+            transparent.fill(0)
+            return transparent
+        return None
 
     def source_size(self, source: LayerSourceReference) -> QSize | None:
         """Return mask storage dimensions without copying authoritative pixels."""
         if not isinstance(source, ProjectResourceReference):
             return None
         layer = self.assets.get_layer(source.resource_id)
-        bounds = None if layer is None else layer.coverage.source_bounds()
+        bounds = (
+            None if layer is None else self._effective_source_bounds(source.resource_id)
+        )
         return None if bounds is None else QSize(bounds.width, bounds.height)
 
     def source_patches(
@@ -199,6 +205,8 @@ class MaskSourceCapabilities:
         if layer is None or logical_bounds is None:
             return ()
         if layer.coverage.has_retained_items:
+            return ()
+        if layer.coverage.content_bounds() is None:
             return ()
         if (
             max(logical_bounds.width, logical_bounds.height)
@@ -248,14 +256,17 @@ class MaskSourceCapabilities:
         layer = self.assets.get_layer(source.resource_id)
         if layer is None:
             return None
-        return self.hybrids.source(
-            layer,
-            style,
-            self.renders.render_revision(source.resource_id),
-            include_empty_raster=(
-                self.renders.live_preview_patches(source.resource_id) is not None
-            ),
-        )
+        revision = self.renders.render_revision(source.resource_id)
+        effective_bounds = self._effective_source_bounds(source.resource_id)
+        durable_bounds = layer.coverage.source_bounds()
+        if effective_bounds is not None and effective_bounds != durable_bounds:
+            return self.hybrids.source_with_provisional_bounds(
+                layer,
+                style,
+                revision,
+                effective_bounds,
+            )
+        return self.hybrids.source(layer, style, revision)
 
     def source_path(self, source: LayerSourceReference) -> Path | None:
         """Return no path because mask assets are memory-backed."""
@@ -266,7 +277,15 @@ class MaskSourceCapabilities:
         if not isinstance(source, ProjectResourceReference):
             return None
         layer = self.assets.get_layer(source.resource_id)
-        return None if layer is None else layer.coverage.manipulation_bounds()
+        if layer is None:
+            return None
+        durable = layer.coverage.manipulation_bounds()
+        preview = self.renders.live_preview_patches(source.resource_id)
+        provisional = None if preview is None else preview.content_bounds
+        if provisional is None:
+            return durable
+        provisional_rect = _rectf(provisional)
+        return provisional_rect if durable is None else durable.united(provisional_rect)
 
     def storage_bounds(self, source: LayerSourceReference) -> QRectF | None:
         """Return sparse raster storage independently of retained mask geometry."""
@@ -281,8 +300,17 @@ class MaskSourceCapabilities:
         if not isinstance(source, ProjectResourceReference):
             return None
         layer = self.assets.get_layer(source.resource_id)
-        bounds = None if layer is None else layer.coverage.source_bounds()
+        bounds = (
+            None if layer is None else self._effective_source_bounds(source.resource_id)
+        )
         return None if bounds is None else _rectf(bounds)
+
+    def _effective_source_bounds(
+        self,
+        mask_id: uuid.UUID,
+    ) -> RasterBounds | None:
+        """Return durable geometry united with separately composed preview pixels."""
+        return self.renders.effective_source_bounds(mask_id)
 
     def contains(self, source: LayerSourceReference, point: QPointF) -> bool:
         """Select mask layers only where their authoritative pixels are painted."""

@@ -80,7 +80,7 @@ class PaintTargetOwner(Protocol):
         preset: BrushPreset,
         color: QColor,
     ) -> bool:
-        """Apply one deterministic segment to the active transaction."""
+        """Apply one deterministic target-local segment to the transaction."""
         ...
 
     def commit(self, target: PaintTargetContext) -> bool:

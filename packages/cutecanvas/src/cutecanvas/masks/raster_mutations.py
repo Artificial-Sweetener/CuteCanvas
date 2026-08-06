@@ -36,6 +36,7 @@ from qpane.sdk.execution import (
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageSurface
+from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
 from cutecanvas.types import RasterExtentPolicy
 
 from ..raster.structure_products import (
@@ -58,6 +59,7 @@ class _PendingBoundsRequest:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     mask_id: uuid.UUID
+    before_authored_bounds: RasterBounds | None
     is_current: Callable[[], bool]
     handle: ExecutionHandle[RasterReframeProduct, object] | None = None
 
@@ -145,12 +147,13 @@ class MaskRasterMutationOwner:
         """Replace prior work for this layer and submit one off-thread reframe."""
         if self._closed or not isinstance(layer.source, ProjectResourceReference):
             return None
-        surface = self._assets.get_surface(layer.source.resource_id)
-        if surface is None:
+        mask = self._assets.get_layer(layer.source.resource_id)
+        if mask is None:
             return None
+        surface = mask.coverage.raster
         request_id = uuid.uuid4()
         self._replace_pending(layer.layer_id, request_id)
-        if surface.bounds == bounds:
+        if surface.bounds == bounds and mask.coverage.authored_bounds == bounds:
             completion = RasterBoundsCompletion(
                 request_id,
                 scene.scene_id,
@@ -165,6 +168,7 @@ class MaskRasterMutationOwner:
             scene_id=scene.scene_id,
             layer_id=layer.layer_id,
             mask_id=layer.source.resource_id,
+            before_authored_bounds=mask.coverage.authored_bounds,
             is_current=is_current,
         )
         self._pending[request_id] = pending
@@ -297,12 +301,13 @@ class MaskRasterMutationOwner:
                 "raster layer is no longer current",
             )
             return
-        surface = self._assets.get_surface(pending.mask_id)
-        if surface is None:
+        mask = self._assets.get_layer(pending.mask_id)
+        if mask is None:
             self._publish_completion(
                 pending, request_id, False, "raster source no longer exists"
             )
             return
+        surface = mask.coverage.raster
         if surface.revisions() != product.source_revisions:
             self._publish_completion(
                 pending,
@@ -311,10 +316,17 @@ class MaskRasterMutationOwner:
                 "raster source changed while bounds were being prepared",
             )
             return
-        before = product.source_snapshot
-        after = product.result
-        surface.replace_with_state_snapshot(after)
-        if self._assets.record_applied_surface(pending.mask_id, before, after):
+        before = CoverageRasterStructureState(
+            product.source_snapshot,
+            pending.before_authored_bounds,
+        )
+        after = CoverageRasterStructureState(product.result, product.result.bounds)
+        mask.coverage.restore_raster_structure(after)
+        if self._assets.record_applied_raster_structure(
+            pending.mask_id,
+            before,
+            after,
+        ):
             self._undo_changed(pending.mask_id)
         layer = self._assets.get_layer(pending.mask_id)
         if layer is not None:

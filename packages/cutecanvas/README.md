@@ -221,6 +221,10 @@ the chosen result as one reversible baked edit.
 The brush system is shared by mask and color painting. A `BrushPreset` controls
 size, hardness, opacity, flow, spacing, smoothing, pressure, tilt, texture, and
 jitter without creating separate brush behavior for each target.
+`ControlMode.ERASER` identifies the explicit erasing interaction. Hosts can use
+`CuteCanvas.CONTROL_MODE_ERASER` with `setControlMode()` to apply the same
+preset and input behavior while always removing coverage or alpha; Alt never
+inverts that explicit tool.
 
 Clone Stamp uses that same brush feel and history path. Alt-click chooses a
 rendered source independently from the paint destination. Each stroke samples
@@ -265,7 +269,7 @@ small editor and a source-code tutorial for host applications:
 
 ```powershell
 # From the repository root
-python examples\cutecanvas_demo.py
+python packages\cutecanvas\examples\cutecanvas_demo.py
 ```
 
 The demo creates and opens compositions, manages a composition-and-layer tree,

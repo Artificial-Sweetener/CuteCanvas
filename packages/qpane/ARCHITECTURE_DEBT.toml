@@ -1,0 +1,134 @@
+schema_version = 1
+product = "qpane"
+
+[[debts]]
+id = "QPANE-ARCH-001"
+owner = "QPane configuration"
+paths = ["packages/qpane/src/qpane/core/config.py"]
+fingerprint = "sha256:53809da543af2277677a63ad7221bd0f95f5afadffda2809220f4c74e1352f69"
+issue = "chore:QPANE-ARCH-001"
+review_by = 2026-12-15
+responsibilities = [
+  "cache and prefetch configuration normalization",
+  "placeholder and general viewer configuration",
+  "feature descriptor materialization and strict validation",
+]
+next_extraction = "Extract cache and prefetch configuration values, coercion, and serialization into a cache-owned configuration module."
+
+[[debts]]
+id = "QPANE-ARCH-002"
+owner = "QPane scene composition"
+paths = ["packages/qpane/src/qpane/rendering/item_compositor.py"]
+fingerprint = "sha256:1fef2614edf84edd796cd392cdbfb7149b17a1c8957f7ed11e3fcbff7d2e780f"
+issue = "chore:QPANE-ARCH-002"
+review_by = 2026-12-15
+responsibilities = [
+  "scene item dispatch and raster, sampled, or vector composition",
+  "sampled-source and tile resolution",
+  "transient sampled-source and layer-isolation coordination",
+  "layer clipping, effects, and debug presentation",
+]
+next_extraction = "Extract sampled-source resolution and settled sampled replacement into a focused compositor that feeds the existing isolation and effect owners."
+
+[[debts]]
+id = "QPANE-ARCH-003"
+owner = "QPane presentation"
+paths = ["packages/qpane/src/qpane/rendering/presenter.py"]
+fingerprint = "sha256:c9cb1a9315ace8f76ff2d948777c3dbdb081f92b3755ab29fb9a175780a5f61a"
+issue = "chore:QPANE-ARCH-003"
+review_by = 2026-12-15
+responsibilities = [
+  "frame presentation and paint orchestration",
+  "navigation refinement scheduling",
+  "viewport buffer lifecycle and scroll reuse",
+  "coordinate projection and hit testing",
+  "layer clips, presentation effects, transient support, and overlays",
+]
+next_extraction = "Move coordinate projection, conversion, and hit-testing behavior to the existing scene-coordinate owner and migrate every presenter caller."
+
+[[debts]]
+id = "QPANE-ARCH-004"
+owner = "QPane pyramid rendering"
+paths = ["packages/qpane/src/qpane/rendering/pyramid.py"]
+fingerprint = "sha256:0629cd9b8096569dc74bb42e04705ddd57b279950690a168e24a43b652eef1fb"
+issue = "chore:QPANE-ARCH-004"
+review_by = 2026-12-15
+responsibilities = [
+  "pyramid product generation",
+  "pyramid cache admission and eviction",
+  "asynchronous generation retries and worker lifecycle",
+]
+next_extraction = "Extract asynchronous generation, cancellation, and retry scheduling into a pyramid work coordinator."
+
+[[debts]]
+id = "QPANE-ARCH-005"
+owner = "QPane buffered rendering"
+paths = ["packages/qpane/src/qpane/rendering/render.py"]
+fingerprint = "sha256:c11cea64e57f72145066db99873a34a6d5242eb081f7d8852a8970b8e8860ddc"
+issue = "chore:QPANE-ARCH-005"
+review_by = 2026-12-15
+responsibilities = [
+  "base buffer allocation and damage painting",
+  "scroll and transform reuse",
+  "navigation refinement lifecycle",
+  "presentation metrics and diagnostics",
+]
+next_extraction = "Extract navigation refinement state, repair publication, cancellation, and metrics into a focused refinement owner."
+
+[[debts]]
+id = "QPANE-ARCH-006"
+owner = "QPane tile rendering"
+paths = ["packages/qpane/src/qpane/rendering/tiles.py"]
+fingerprint = "sha256:81112d86615517a7e733d39ffe85842898d23bd3722c17684c3ff166b9ba36b7"
+issue = "chore:QPANE-ARCH-006"
+review_by = 2026-12-15
+responsibilities = [
+  "tile product generation and value types",
+  "tile cache admission and eviction",
+  "asynchronous worker, prefetch, and retry lifecycle",
+]
+next_extraction = "Extract tile submission, cancellation, prefetch, outcome adoption, and retry scheduling into a tile work coordinator."
+
+[[debts]]
+id = "QPANE-ARCH-007"
+owner = "QPane viewport"
+paths = ["packages/qpane/src/qpane/rendering/viewport.py"]
+fingerprint = "sha256:772fd09d322fe750f05b93e41a5e8a6cdf2ef1e9ac8cc69ded1e1e9e3e28a18f"
+issue = "chore:QPANE-ARCH-007"
+review_by = 2026-12-15
+responsibilities = [
+  "canonical pan, zoom, and transform state",
+  "smooth zoom animation and timing policy",
+  "translation inertia",
+  "configuration coercion and diagnostics",
+]
+next_extraction = "Extract smooth-zoom animation state, timing selection, ticking, and diagnostics into a viewport animation owner."
+
+[[debts]]
+id = "QPANE-ARCH-008"
+owner = "QPane semantic text"
+paths = ["packages/qpane/src/qpane/vector/text_layout.py"]
+fingerprint = "sha256:bfc7714796e62ebf92df5b13356a6bacd3780d52b4296035dc4d8e0e9e003f6a"
+issue = "chore:QPANE-ARCH-008"
+review_by = 2026-12-15
+responsibilities = [
+  "semantic text layout caching and budget enforcement",
+  "text shaping and paragraph layout",
+  "drawing, outline production, and caret geometry",
+]
+next_extraction = "Move cache keys, budget accounting, lookup, eviction, and publication into a semantic text layout cache module."
+
+[[debts]]
+id = "QPANE-ARCH-009"
+owner = "QPane viewer integration"
+paths = ["packages/qpane/src/qpane/viewer.py"]
+fingerprint = "sha256:81a0b82891132d75e2f738d73fb95b30ce507a22ac739f8f1a9c638b37b626fc"
+issue = "chore:QPANE-ARCH-009"
+review_by = 2026-12-15
+responsibilities = [
+  "viewer facade and scene lifecycle",
+  "catalog and comparison workflows",
+  "diagnostics and overlay registration",
+  "Qt event and input dispatch",
+]
+next_extraction = "Extract catalog selection, linking, comparison, and inspection workflows behind a focused viewer catalog subfacade."

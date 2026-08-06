@@ -230,6 +230,8 @@ coverage, `PixelSelectionSnapshot.bounds` encloses stored pixels, and
 identify origin; `FloatingPixelSnapshot.mode` records cut or copy;
 `FloatingPixelSnapshot.offset` records live displacement; and
 `FloatingPixelSnapshot.bounds` encloses the fragment in scene coordinates.
+`FloatingPixelSnapshot.dragging` distinguishes direct pointer movement from a
+suspended unresolved fragment so host chrome can hide only for the gesture.
 
 ## Paint and Raster State
 

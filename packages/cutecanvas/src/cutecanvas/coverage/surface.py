@@ -335,6 +335,20 @@ class CoverageSurface:
             self._content_bounds_generation = self.generation
             return bounds
 
+    def compact_storage(self) -> bool:
+        """Fit expandable logical storage to its exact nonzero tile content."""
+        with self._lock:
+            if self._extent_policy is RasterExtentPolicy.FIXED:
+                return False
+            compacted = self._grid.content_bounds()
+            if compacted == self._bounds:
+                return False
+            self._bounds = compacted
+            self._buffer = None
+            self._image = None
+            self._mark_changed(structure=True)
+            return True
+
     def versioned_snapshot(self) -> tuple[int, int, CoverageSnapshot]:
         """Return content/structure revisions with one atomic detached snapshot."""
         with self._lock:

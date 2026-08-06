@@ -33,7 +33,7 @@ from .mask import MaskLayer
 
 
 class MaskPixelTranslator:
-    """Move scalar mask values without treating black coverage as transparency."""
+    """Move contributing mask values while transparent storage remains inert."""
 
     def move(
         self,
@@ -43,9 +43,22 @@ class MaskPixelTranslator:
         delta_y: int,
     ) -> RasterPixelTransition | None:
         """Apply one immutable-source selected coverage translation."""
-        transition = self.preview_move(
+        bounds = coverage.bounds
+        surface_bounds = mask.coverage.raster.bounds
+        if (
+            bounds is None
+            or surface_bounds is None
+            or not surface_bounds.contains(bounds)
+        ):
+            return None
+        transition = self.preview_fragment_move(
             mask,
-            coverage,
+            RasterPixelFragment(
+                bounds,
+                RasterPixelFormat.COVERAGE8,
+                _capture_region(mask, bounds),
+                coverage,
+            ),
             delta_x,
             delta_y,
             cut_source=True,
@@ -54,24 +67,30 @@ class MaskPixelTranslator:
             return None
         return transition if self.restore(mask, transition, use_after=True) else None
 
-    def preview_move(
+    def preview_fragment_move(
         self,
         mask: MaskLayer,
-        coverage: CoverageSnapshot,
+        fragment: RasterPixelFragment,
         delta_x: int,
         delta_y: int,
         *,
         cut_source: bool,
     ) -> RasterPixelTransition | None:
-        """Compose an exact scalar transition without mutating mask storage."""
-        source_bounds = coverage.bounds
+        """Compose an exact scalar fragment transition without mutating storage."""
+        source_bounds = fragment.bounds
         surface_bounds = mask.coverage.raster.bounds
-        if source_bounds is None or surface_bounds is None:
+        if (
+            fragment.pixel_format is not RasterPixelFormat.COVERAGE8
+            or surface_bounds is None
+        ):
             return None
         source_bounds = source_bounds.intersection(surface_bounds)
         if source_bounds is None:
             return None
-        selection = _coverage_region(coverage, source_bounds)
+        selection = _coverage_region(
+            fragment.contribution_coverage,
+            source_bounds,
+        )
         if not np.any(selection):
             return None
         destination_bounds = source_bounds.translated(delta_x, delta_y)
@@ -89,7 +108,26 @@ class MaskPixelTranslator:
             return None
         before = _capture_region(mask, patch_bounds)
         after = np.array(before, copy=True)
-        source_pixels = _region(before, patch_bounds, source_bounds)
+        fragment_array_bounds = RasterBounds(
+            0,
+            0,
+            fragment.bounds.width,
+            fragment.bounds.height,
+        )
+        fragment_source_region = RasterBounds(
+            source_bounds.x - fragment.bounds.x,
+            source_bounds.y - fragment.bounds.y,
+            source_bounds.width,
+            source_bounds.height,
+        )
+        source_pixels = _region(
+            fragment.pixels,
+            fragment_array_bounds,
+            fragment_source_region,
+        )
+        selection = np.where(source_pixels != 0, selection, np.uint8(0))
+        if not np.any(selection):
+            return None
         minimum_selection = int(selection.min())
         hard_full_selection = minimum_selection == 255
         hard_selection = hard_full_selection or (
@@ -225,10 +263,13 @@ class MaskPixelTranslator:
         )
         source = _region(fragment.pixels, fragment_array_bounds, source_region)
         selection = _region(
-            fragment.coverage.pixels,
+            fragment.contribution_coverage.pixels,
             fragment_array_bounds,
             source_region,
         )
+        selection = np.where(source != 0, selection, np.uint8(0))
+        if not np.any(selection):
+            return None
         selection_wide = selection.astype(np.uint16)
         replacement = (
             after.astype(np.uint16) * (255 - selection_wide)

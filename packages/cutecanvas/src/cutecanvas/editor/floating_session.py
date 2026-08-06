@@ -31,7 +31,7 @@ from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.types import RasterExtentPolicy
 
 from ..scene.layer_selection import SceneLayerSelection
-from ..selection import PixelSelectionState
+from ..selection import LayerCoverageProjector, PixelSelectionState
 from .pixel_move_target import SelectedPixelMoveTarget
 
 
@@ -43,8 +43,8 @@ class FloatingPixelSession:
     layer_id: uuid.UUID
     layer: LayerDescriptor
     selection: CoverageSnapshot
-    movement_selection: CoverageSnapshot
-    local_coverage: CoverageSnapshot
+    transform_frame_coverage: CoverageSnapshot
+    local_contribution: CoverageSnapshot
     lift: RasterPixelLift
     selected_layer: SceneLayerSelection
     extent_policy: RasterExtentPolicy
@@ -57,6 +57,11 @@ class FloatingPixelSession:
     preview_revision: int = 0
     settled_transition: RasterPixelTransition | None = None
     fragment_transform: LayerTransform = field(default_factory=LayerTransform)
+    _selection_projector: LayerCoverageProjector = field(
+        default_factory=LayerCoverageProjector,
+        repr=False,
+    )
+    _preview_selection: CoverageSnapshot | None = field(default=None, repr=False)
 
     @classmethod
     def create(
@@ -66,6 +71,7 @@ class FloatingPixelSession:
         selected_layer: SceneLayerSelection,
         *,
         copy: bool,
+        transform_frame_coverage: CoverageSnapshot,
     ) -> FloatingPixelSession:
         """Create a session from one fully resolved editable target."""
         return cls(
@@ -73,8 +79,8 @@ class FloatingPixelSession:
             layer_id=target.layer.layer_id,
             layer=target.layer,
             selection=target.selection,
-            movement_selection=target.scene_coverage,
-            local_coverage=target.local_coverage,
+            transform_frame_coverage=transform_frame_coverage,
+            local_contribution=target.local_contribution,
             lift=lift,
             selected_layer=selected_layer,
             extent_policy=target.extent_policy,
@@ -89,13 +95,29 @@ class FloatingPixelSession:
 
     @property
     def preview_state(self) -> PixelSelectionState:
-        """Return translated render-only selection coverage."""
-        delta_x, delta_y = self.scene_delta
+        """Return affine render-only coverage for the session's selection frame."""
         return PixelSelectionState(
             self.scene_id,
             -self.preview_revision - 1,
-            self.movement_selection.translated(delta_x, delta_y),
+            self.preview_selection,
         )
+
+    @property
+    def preview_selection(self) -> CoverageSnapshot | None:
+        """Return cached scene coverage projected through current affine geometry."""
+        if self._preview_selection is not None:
+            return self._preview_selection
+        local = self._selection_projector.project(
+            self.transform_frame_coverage,
+            self.fragment_transform,
+        )
+        if local is None or self.layer.transform is None:
+            return None
+        self._preview_selection = self._selection_projector.project(
+            local,
+            self.layer.transform,
+        )
+        return self._preview_selection
 
     @property
     def raster_preview(self) -> RasterPixelMovePreview | None:
@@ -134,7 +156,10 @@ class FloatingPixelSession:
         local_point = transform.inverse_map(scene_point)
         return bool(
             local_point is not None
-            and coverage_contains(self.lift.fragment.coverage, local_point)
+            and coverage_contains(
+                self.lift.fragment.contribution_coverage,
+                local_point,
+            )
         )
 
     @property
@@ -220,6 +245,7 @@ class FloatingPixelSession:
     def advance_preview(self) -> None:
         """Advance transient identity after presentation-affecting state changes."""
         self.preview_revision += 1
+        self._preview_selection = None
 
     def set_fragment_transform(self, transform: LayerTransform) -> bool:
         """Replace affine fragment geometry and advance transient identity."""

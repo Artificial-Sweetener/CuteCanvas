@@ -27,6 +27,7 @@ from .target_contracts import (
     PaintTargetOwner,
     PaintTargetRegistry,
 )
+from .target_geometry import segment_with_target_tip_geometry
 
 
 @runtime_checkable
@@ -93,7 +94,15 @@ class DirectBrushStrokeOperation:
     ) -> bool:
         """Apply through the owner captured at transaction start."""
         owner = self._active_owner
-        return bool(owner is not None and owner.apply(target, segment, preset, color))
+        return bool(
+            owner is not None
+            and owner.apply(
+                target,
+                segment_with_target_tip_geometry(segment, target),
+                preset,
+                color,
+            )
+        )
 
     def commit(self, target: PaintTargetContext) -> bool:
         """Commit through the captured owner and release it."""

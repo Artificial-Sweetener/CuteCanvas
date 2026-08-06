@@ -1,0 +1,61 @@
+schema = 1
+product = "repository"
+test_root = "tools/testing/tests"
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+
+[[areas]]
+name = "architecture"
+sources = [
+  "ARCHITECTURE.md",
+  "ARCHITECTURE_DEBT.toml",
+  "ARCHITECTURE_POLICY.toml",
+  "ARCHITECTURE_WAIVERS.toml",
+  "pyright-ferrastraconfig.json",
+  "ruff-ferrastra.toml",
+  "rustfmt.toml",
+  "benchmarks/**",
+  "packages/*/ARCHITECTURE_DEBT.toml",
+  "packages/*/ARCHITECTURE_WAIVERS.toml",
+]
+proofs = ["contract", "packaging"]
+
+[[areas]]
+name = "tooling"
+sources = [
+  ".github/**",
+  ".gitignore",
+  ".pre-commit-config.yaml",
+  "pyproject.toml",
+  "requirements*.txt",
+  "tools/**",
+]
+proofs = ["contract"]
+
+[[boundaries]]
+name = "tooling"
+area = "tooling"
+
+[[subscriptions]]
+owner = "repository"
+boundary = "tooling"
+groups = ["architecture/contract", "architecture/packaging"]
+
+[[subscriptions]]
+owner = "ferrastra"
+boundary = "native"
+groups = ["architecture/contract", "architecture/packaging"]
+
+[[subscriptions]]
+owner = "qpane"
+boundary = "api"
+groups = ["tooling/contract"]
+
+[[subscriptions]]
+owner = "cutecanvas"
+boundary = "api"
+groups = ["tooling/contract"]
+
+[[subscriptions]]
+owner = "ferrastra"
+boundary = "bindings"
+groups = ["tooling/contract"]

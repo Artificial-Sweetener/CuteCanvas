@@ -65,8 +65,6 @@ class MaskHybridSourceFactory:
         layer: MaskLayer,
         style: HybridPresentationStyle,
         presentation_revision: int,
-        *,
-        include_empty_raster: bool = False,
     ) -> HybridSource | None:
         """Return one immutable QPane source without evaluating visible pixels."""
         return self._source(
@@ -74,7 +72,6 @@ class MaskHybridSourceFactory:
             style,
             presentation_revision,
             CoverageSurfaceSampler(layer.coverage.raster),
-            include_empty_raster=include_empty_raster,
         )
 
     def source_with_transition(
@@ -92,6 +89,28 @@ class MaskHybridSourceFactory:
             _TransitionSurfaceSampler(layer.coverage.raster, transition),
         )
 
+    def source_with_provisional_bounds(
+        self,
+        layer: MaskLayer,
+        style: HybridPresentationStyle,
+        presentation_revision: int,
+        provisional_bounds: RasterBounds,
+    ) -> HybridSource | None:
+        """Extend durable source geometry for separately composed preview pixels."""
+        durable_bounds = layer.coverage.source_bounds()
+        effective_bounds = (
+            provisional_bounds
+            if durable_bounds is None
+            else durable_bounds.united(provisional_bounds)
+        )
+        return self._source(
+            layer,
+            style,
+            presentation_revision,
+            CoverageSurfaceSampler(layer.coverage.raster),
+            source_bounds=effective_bounds,
+        )
+
     def _source(
         self,
         layer: MaskLayer,
@@ -99,10 +118,10 @@ class MaskHybridSourceFactory:
         presentation_revision: int,
         raster_sampler: CoverageSurfaceSampler | _TransitionSurfaceSampler,
         *,
-        include_empty_raster: bool = False,
+        source_bounds: RasterBounds | None = None,
     ) -> HybridSource | None:
         """Build one hybrid snapshot around the supplied raster sampler."""
-        bounds = layer.coverage.source_bounds()
+        bounds = source_bounds or layer.coverage.source_bounds()
         if bounds is None:
             return None
         primitives: list[_HybridPrimitive] = []
@@ -118,19 +137,6 @@ class MaskHybridSourceFactory:
                 HybridRasterPrimitive(
                     uuid.uuid5(layer.mask_id, "authoritative-raster"),
                     raster_bounds,
-                    raster_sampler,
-                )
-            )
-        elif include_empty_raster and not layer.coverage.has_retained_items:
-            primitives.append(
-                HybridRasterPrimitive(
-                    uuid.uuid5(layer.mask_id, "empty-raster-substrate"),
-                    RasterBounds(
-                        bounds.x + bounds.width + 1,
-                        bounds.y + bounds.height + 1,
-                        1,
-                        1,
-                    ),
                     raster_sampler,
                 )
             )

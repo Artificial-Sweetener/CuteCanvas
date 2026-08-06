@@ -80,6 +80,8 @@ class ResourcePixelHistoryOwner:
             )
         elif record.kind is ProjectResourceKind.COVERAGE:
             mask = self._masks.get_layer(resource_id)
+            if mask is not None:
+                mask.coverage.raster.ensure_writable(command.bounds)
             storage = (
                 None
                 if mask is None
@@ -100,6 +102,7 @@ class ResourcePixelHistoryOwner:
                 storage,
                 restore,
             )
+            mask.coverage.compact_raster_storage()
             self._masks.touch(resource_id)
             changed = True
         else:

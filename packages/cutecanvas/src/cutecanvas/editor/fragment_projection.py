@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import (
     AffineImageResampler,
@@ -62,41 +63,54 @@ class RasterFragmentProjector:
         if destination_bounds is None:
             return None
         if _unit_integer_translation(source_to_destination) is not None:
-            pixels = fragment.pixels
-            coverage_pixels = fragment.coverage.pixels
-        else:
-            if fragment.pixel_format is RasterPixelFormat.COVERAGE8:
-                pixels = qimage_to_numpy_grayscale8(
-                    self._images.project(
-                        numpy_to_qimage_grayscale8(fragment.pixels),
-                        source_bounds=moved_bounds,
-                        transform=source_to_destination,
-                        destination_bounds=destination_bounds,
-                        image_format=QImage.Format_Grayscale8,
-                    )
-                )
-            else:
-                pixels = qimage_to_numpy_argb32(
-                    self._images.project(
-                        numpy_to_qimage_argb32(fragment.pixels),
-                        source_bounds=moved_bounds,
-                        transform=source_to_destination,
-                        destination_bounds=destination_bounds,
-                        image_format=QImage.Format_ARGB32_Premultiplied,
-                    )
-                )
-            coverage_pixels = qimage_to_numpy_grayscale8(
+            coverage = fragment.contribution_coverage.with_bounds(destination_bounds)
+            return RasterPixelFragment._adopt_detached(
+                destination_bounds,
+                fragment.pixel_format,
+                fragment.pixels,
+                coverage,
+            )
+        if fragment.pixel_format is RasterPixelFormat.COVERAGE8:
+            pixels = qimage_to_numpy_grayscale8(
                 self._images.project(
-                    numpy_to_qimage_grayscale8(fragment.coverage.pixels),
+                    numpy_to_qimage_grayscale8(fragment.pixels),
                     source_bounds=moved_bounds,
                     transform=source_to_destination,
                     destination_bounds=destination_bounds,
                     image_format=QImage.Format_Grayscale8,
                 )
             )
+        else:
+            pixels = qimage_to_numpy_argb32(
+                self._images.project(
+                    numpy_to_qimage_argb32(fragment.pixels),
+                    source_bounds=moved_bounds,
+                    transform=source_to_destination,
+                    destination_bounds=destination_bounds,
+                    image_format=QImage.Format_ARGB32_Premultiplied,
+                )
+            )
+        coverage_pixels = qimage_to_numpy_grayscale8(
+            self._images.project(
+                numpy_to_qimage_grayscale8(fragment.contribution_coverage.pixels),
+                source_bounds=moved_bounds,
+                transform=source_to_destination,
+                destination_bounds=destination_bounds,
+                image_format=QImage.Format_Grayscale8,
+            )
+        )
+        supported = pixels != 0 if pixels.ndim == 2 else pixels[:, :, 3] != 0
+        if not bool(np.all(supported)):
+            coverage_pixels = np.where(
+                supported,
+                coverage_pixels,
+                np.uint8(0),
+            )
+        if not np.any(coverage_pixels):
+            return None
         coverage = CoverageSnapshot(
             destination_bounds,
-            fragment.coverage.extent_policy,
+            fragment.contribution_coverage.extent_policy,
             coverage_pixels,
         )
         return RasterPixelFragment(

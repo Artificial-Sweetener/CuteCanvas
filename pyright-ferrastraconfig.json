@@ -3,14 +3,13 @@
     "packages/ferrastra/src",
     "packages/ferrastra/tests",
     "tools/architecture",
-    "tools/check_ferrastra_architecture.py",
+    "tools/check_architecture.py",
     "tools/check_ferrastra_benchmarks.py",
     "tools/check_ferrastra_operations.py",
     "tools/check_ferrastra_ownership.py",
     "tools/ferrastra_ownership.py",
     "tools/verify_ferrastra_wheel.py",
-    "tests/test_ferrastra_architecture.py",
-    "tests/test_ferrastra_ownership.py"
+    "tools/testing/tests/architecture"
   ],
   "exclude": [
     "**/__pycache__"

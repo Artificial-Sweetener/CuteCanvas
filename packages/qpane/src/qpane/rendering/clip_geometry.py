@@ -23,9 +23,10 @@ from math import hypot
 
 from PySide6.QtCore import QLineF, QPointF, QRectF
 
-from ..scene.model import ClipCoordinateSpace, LayerClip, LayerPlacement
+from ..scene.model import ClipCoordinateSpace, LayerPlacement
 from ..scene.render_plan import SceneRenderItem, SceneRenderPlan
 from ..types import ComparisonOrientation
+from .layer_clip_projection import scene_clip_rect, scene_to_source_transform
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +122,7 @@ def projected_comparison_boundary(
             orientation=orientation,
         )
         if split_position is not None
-        else _clip_to_scene_rect(plan, item.clip)
+        else scene_clip_rect(plan, item.clip)
     )
     if scene_clip is None:
         return None
@@ -248,20 +249,6 @@ def _normalized_comparison_clip(
     )
 
 
-def _clip_to_scene_rect(plan: SceneRenderPlan, clip: LayerClip) -> QRectF | None:
-    """Convert a supported layer clip to scene coordinates."""
-    if clip.coordinate_space == ClipCoordinateSpace.NORMALIZED_SCENE:
-        return QRectF(
-            plan.scene_bounds.x + clip.x * plan.scene_bounds.width,
-            plan.scene_bounds.y + clip.y * plan.scene_bounds.height,
-            clip.width * plan.scene_bounds.width,
-            clip.height * plan.scene_bounds.height,
-        )
-    if clip.coordinate_space == ClipCoordinateSpace.SCENE:
-        return QRectF(clip.x, clip.y, clip.width, clip.height)
-    return None
-
-
 def _scene_boundary_to_source_line(
     item: SceneRenderItem,
     scene_clip: QRectF,
@@ -269,37 +256,14 @@ def _scene_boundary_to_source_line(
     orientation: ComparisonOrientation,
 ) -> QLineF | None:
     """Convert the comparison clip boundary from scene to source coordinates."""
-    placement = item.placement
-    source_width = item.source_size.width()
-    source_height = item.source_size.height()
-    if (
-        source_width <= 0
-        or source_height <= 0
-        or placement.width <= 0.0
-        or placement.height <= 0.0
-    ):
+    inverse = scene_to_source_transform(item)
+    if inverse is None:
         return None
-    left = _scene_x_to_source_x(scene_clip.left(), placement, source_width)
-    right = _scene_x_to_source_x(scene_clip.right(), placement, source_width)
-    top = _scene_y_to_source_y(scene_clip.top(), placement, source_height)
-    bottom = _scene_y_to_source_y(scene_clip.bottom(), placement, source_height)
     if orientation == ComparisonOrientation.HORIZONTAL:
-        return QLineF(QPointF(left, top), QPointF(right, top))
-    return QLineF(QPointF(left, top), QPointF(left, bottom))
-
-
-def _scene_x_to_source_x(
-    scene_x: float, placement: LayerPlacement, source_width: int
-) -> float:
-    """Map a scene x coordinate into item source x coordinates."""
-    return (scene_x - placement.x) * source_width / placement.width
-
-
-def _scene_y_to_source_y(
-    scene_y: float, placement: LayerPlacement, source_height: int
-) -> float:
-    """Map a scene y coordinate into item source y coordinates."""
-    return (scene_y - placement.y) * source_height / placement.height
+        scene_line = QLineF(scene_clip.topLeft(), scene_clip.topRight())
+    else:
+        scene_line = QLineF(scene_clip.topLeft(), scene_clip.bottomLeft())
+    return QLineF(inverse.map(scene_line.p1()), inverse.map(scene_line.p2()))
 
 
 def _clip_segment_to_rect(line: QLineF, rect: QRectF) -> QLineF | None:

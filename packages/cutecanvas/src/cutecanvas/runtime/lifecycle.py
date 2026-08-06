@@ -126,6 +126,7 @@ class CanvasLifecycleMixin:
                     ),
                     transform_changed=self._publish_scene_layer_change,
                     transform_preview_changed=self._refresh_scene_transform_preview,
+                    transform_state_changed=self._publish_editor_transform_state,
                     raster_structure_changed=self._handle_raster_structure_changed,
                     raster_bounds_completed=self._handle_raster_bounds_completion,
                     scene_content_changed=lambda _bounds: (

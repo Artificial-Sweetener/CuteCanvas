@@ -191,13 +191,6 @@ class MaskEditService:
         if writable.expanded and before is not None:
             self._stroke_history.capture_structure(mask_id, before)
             self.advance_epoch(mask_id, reason="stroke_surface_expanded")
-            self._renders.reframe_layer(
-                layer,
-                before=writable.before_bounds,
-                after=writable.after_bounds,
-            )
-            self._structure_changed()
-            self._mask_changed(mask_id, QRect())
         return writable
 
     @staticmethod
@@ -457,17 +450,20 @@ class MaskEditService:
     ) -> bool:
         """Submit the recorded update and refresh caches."""
         layer_before = self._get_layer(mask_id)
-        bounds_before = (
+        source_bounds_before = (
+            None if layer_before is None else layer_before.coverage.source_bounds()
+        )
+        storage_bounds_before = (
             None if layer_before is None else layer_before.coverage.raster.bounds
         )
         dirty_bounds = None
-        if patches and bounds_before is not None:
+        if patches and storage_bounds_before is not None:
             dirty_rect = QRect(patches[0].rect)
             for patch in patches[1:]:
                 dirty_rect = dirty_rect.united(patch.rect)
             dirty_bounds = RasterBounds(
-                bounds_before.x + dirty_rect.x(),
-                bounds_before.y + dirty_rect.y(),
+                storage_bounds_before.x + dirty_rect.x(),
+                storage_bounds_before.y + dirty_rect.y(),
                 dirty_rect.width(),
                 dirty_rect.height(),
             )
@@ -502,7 +498,8 @@ class MaskEditService:
         layer = self._get_layer(mask_id)
         if layer is not None and not preserve_cache:
             self._renders.invalidate_layer(layer)
-        if layer is not None and layer.coverage.raster.bounds != bounds_before:
+        source_bounds_after = None if layer is None else layer.coverage.source_bounds()
+        if source_bounds_after != source_bounds_before:
             self._structure_changed()
         self._undo_changed(mask_id)
         return True
@@ -547,7 +544,7 @@ class MaskEditService:
             logger.warning("Cannot update stroke for missing mask %s.", mask_id)
             return None
         existing_image = layer.mask_image
-        bounds_before = layer.coverage.raster.bounds
+        bounds_before = layer.coverage.source_bounds()
         if not existing_image.isNull() and not image.isNull():
             if existing_image.size() == image.size():
                 before_np = qimage_to_numpy_grayscale8(existing_image)
@@ -586,7 +583,7 @@ class MaskEditService:
         with self._assets.change_origin(self._presentation_identity):
             self._assets.set_mask_image(mask_id, image)
         self.advance_epoch(mask_id, reason="update_stroke_image")
-        if layer.coverage.raster.bounds != bounds_before:
+        if layer.coverage.source_bounds() != bounds_before:
             self._structure_changed()
         return layer
 
@@ -668,7 +665,7 @@ class MaskEditService:
         """Commit one complete policy-aware surface edit and invalidate geometry."""
         layer_before = self._get_layer(mask_id)
         bounds_before = (
-            None if layer_before is None else layer_before.coverage.raster.bounds
+            None if layer_before is None else layer_before.coverage.source_bounds()
         )
         with self._assets.change_origin(self._presentation_identity):
             if not self._assets.commit_mask_surface(mask_id, snapshot):
@@ -677,7 +674,7 @@ class MaskEditService:
         layer = self._get_layer(mask_id)
         if layer is not None:
             self._renders.invalidate_layer(layer)
-        if layer is not None and layer.coverage.raster.bounds != bounds_before:
+        if layer is not None and layer.coverage.source_bounds() != bounds_before:
             self._structure_changed()
         else:
             self._mask_changed(mask_id, QRect())

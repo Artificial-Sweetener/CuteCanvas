@@ -38,9 +38,9 @@ class TransformCursorFactory:
         """Return a bidirectional arrow aligned to the side tangent."""
         return self._cursor("skew", angle_degrees)
 
-    def rotate(self) -> QCursor:
-        """Return a curved rotation cursor for the exterior hit zone."""
-        return self._cursor("rotate", 0.0)
+    def rotate(self, tangent_angle_degrees: float) -> QCursor:
+        """Return restrained rotation feedback aligned to the nearest corner."""
+        return self._cursor("rotate", tangent_angle_degrees)
 
     def _cursor(self, kind: str, angle_degrees: float) -> QCursor:
         """Resolve one procedural cursor from a stable one-degree bucket."""
@@ -54,7 +54,7 @@ class TransformCursorFactory:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if kind == "rotate":
-            self._draw_rotation(painter)
+            self._draw_rotation(painter, math.radians(bucket))
         else:
             self._draw_bidirectional(painter, math.radians(bucket))
         painter.end()
@@ -80,17 +80,22 @@ class TransformCursorFactory:
         cls._stroke(painter, path)
 
     @classmethod
-    def _draw_rotation(cls, painter: QPainter) -> None:
-        """Draw a compact clockwise arc and arrowhead."""
+    def _draw_rotation(cls, painter: QPainter, angle: float) -> None:
+        """Draw a short corner-oriented arc instead of a generic spin glyph."""
+        painter.save()
+        painter.translate(16.0, 16.0)
+        painter.rotate(math.degrees(angle))
+        painter.translate(-16.0, -16.0)
         path = QPainterPath()
-        path.arcMoveTo(QRectF(7.0, 7.0, 18.0, 18.0), 35.0)
-        path.arcTo(QRectF(7.0, 7.0, 18.0, 18.0), 35.0, 275.0)
+        path.arcMoveTo(QRectF(10.0, 10.0, 12.0, 12.0), 30.0)
+        path.arcTo(QRectF(10.0, 10.0, 12.0, 12.0), 30.0, 105.0)
         tip = path.currentPosition()
         path.moveTo(tip)
-        path.lineTo(tip + QPointF(-0.5, -6.0))
+        path.lineTo(tip + QPointF(-0.5, -4.5))
         path.moveTo(tip)
-        path.lineTo(tip + QPointF(5.5, -2.0))
+        path.lineTo(tip + QPointF(4.0, -1.5))
         cls._stroke(painter, path)
+        painter.restore()
 
     @staticmethod
     def _stroke(painter: QPainter, path: QPainterPath) -> None:

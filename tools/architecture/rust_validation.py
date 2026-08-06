@@ -28,6 +28,7 @@ else:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
 from .model import ArchitecturePolicy, Diagnostic, RustCratePolicy
+from .structure_validation import hard_size_message
 
 _PYTHON_BINDING_CRATES = {"cpython", "numpy", "pyo3", "pyo3-ffi"}
 _FORBIDDEN_NATIVE_TERMS = {
@@ -178,12 +179,15 @@ def _source_diagnostics(
             )
         )
     lines = _production_line_count(source)
-    if lines > policy.structure.hard_lines:
+    excluded = {category.path.as_posix() for category in policy.structure_categories}
+    if relative_path in excluded:
+        pass
+    elif lines > policy.structure.hard_lines:
         diagnostics.append(
             Diagnostic(
                 "STRUCT003",
                 relative_path,
-                f"{lines} production lines exceed hard gate {policy.structure.hard_lines}",
+                hard_size_message(lines, policy.structure.hard_lines),
             )
         )
     elif lines > policy.structure.soft_lines:
@@ -191,7 +195,9 @@ def _source_diagnostics(
             Diagnostic(
                 "STRUCT002",
                 relative_path,
-                f"{lines} production lines exceed soft ceiling {policy.structure.soft_lines}",
+                f"{lines} production lines exceed the soft ceiling "
+                f"{policy.structure.soft_lines}; assess whether ownership "
+                "remains cohesive before extending this file.",
                 severity="warning",
             )
         )

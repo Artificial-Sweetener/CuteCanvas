@@ -45,6 +45,14 @@ class MaskLivePreviewStore(QObject):
         """Return whether one mask has shared provisional coverage."""
         return mask_id in self._previews
 
+    def prepare_settlement(self, mask_id: uuid.UUID) -> bool:
+        """Mark one active preview for retention through its durable commit."""
+        preview = self._previews.get(mask_id)
+        if preview is None:
+            return False
+        preview.prepare_settlement()
+        return True
+
     def apply_patch(
         self,
         mask_id: uuid.UUID,
@@ -54,9 +62,11 @@ class MaskLivePreviewStore(QObject):
     ) -> None:
         """Publish one native patch and notify every mounted document view."""
         preview = self._previews.get(mask_id)
-        if preview is None or preview.source_bounds != source_bounds:
+        if preview is None:
             preview = LiveMaskPreviewPatches(source_bounds)
             self._previews[mask_id] = preview
+        elif preview.source_bounds != source_bounds:
+            preview.reframe(source_bounds)
         preview.apply_patch(storage_rect, patch)
         self.changed.emit(mask_id, QRect(storage_rect))
 

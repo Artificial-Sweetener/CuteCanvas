@@ -1,0 +1,32 @@
+schema = 1
+product = "ferrastra"
+test_root = "packages/ferrastra/tests"
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+
+[[areas]]
+name = "api"
+sources = [
+  "packages/ferrastra/src/ferrastra/**",
+  "packages/ferrastra/examples/**",
+  "packages/ferrastra/pyproject.toml",
+]
+proofs = ["packaging"]
+
+[[areas]]
+name = "native"
+sources = [
+  "crates/**",
+  "Cargo.toml",
+  "Cargo.lock",
+  "deny.toml",
+  "rust-toolchain.toml",
+]
+proofs = ["contract"]
+
+[[boundaries]]
+name = "bindings"
+area = "api"
+
+[[boundaries]]
+name = "native"
+area = "native"

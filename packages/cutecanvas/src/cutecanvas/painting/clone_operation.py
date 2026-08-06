@@ -23,7 +23,7 @@ from typing import Protocol, runtime_checkable
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor
 from qpane.sdk.rendering import (
-    LayerSourcePoint,
+    LayerLocalPoint,
     PanelPoint,
     SceneCoordinateSystem,
     ScenePoint,
@@ -364,8 +364,8 @@ class CloneStampOperation:
         layer = target.layer
         if source is None or layer is None:
             return None
-        destination_scene = self._coordinates.layer_source_to_scene(
-            LayerSourcePoint.from_qt(
+        destination_scene = self._coordinates.layer_local_to_scene(
+            LayerLocalPoint.from_qt(
                 target.scene.scene_id,
                 layer.layer_id,
                 QPointF(*segment.start),
@@ -405,8 +405,8 @@ class CloneStampOperation:
         layer = target.layer
         if layer is None:
             return None
-        destination_scene = self._coordinates.layer_source_to_scene(
-            LayerSourcePoint.from_qt(
+        destination_scene = self._coordinates.layer_local_to_scene(
+            LayerLocalPoint.from_qt(
                 target.scene.scene_id,
                 layer.layer_id,
                 destination,

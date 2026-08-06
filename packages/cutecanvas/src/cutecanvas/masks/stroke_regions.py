@@ -17,17 +17,16 @@
 
 from __future__ import annotations
 
-import math
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QRect
 from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.coverage import WritableCoverageRegion
 
-from ..painting import BrushStrokeSegment
+from ..painting import BrushDabEngine, BrushDabRegionPlanner, BrushStrokeSegment
 from .mask import MaskLayer
 from .stroke_constraints import MaskStrokeConstraint
 
@@ -53,6 +52,8 @@ class MaskStrokeRegionPlanner:
     ) -> None:
         """Bind the source-owned writable-region boundary."""
         self._prepare_writable = prepare_writable
+        self._dabs = BrushDabEngine()
+        self._regions = BrushDabRegionPlanner()
 
     def prepare(
         self,
@@ -91,17 +92,9 @@ class MaskStrokeRegionPlanner:
             rebase_y=rebase_y,
         )
 
-    @staticmethod
-    def _requested_bounds(segment: BrushStrokeSegment) -> RasterBounds:
+    def _requested_bounds(self, segment: BrushStrokeSegment) -> RasterBounds:
         """Return the conservative layer-local footprint of ``segment``."""
-        start = QPoint(math.floor(segment.start[0]), math.floor(segment.start[1]))
-        end = QPoint(math.ceil(segment.end[0]), math.ceil(segment.end[1]))
-        stroke_rect = QRect(start, end).normalized()
-        margin = int(segment.maximum_diameter / 2.0) + 2
-        dirty_rect = stroke_rect.adjusted(-margin, -margin, margin, margin)
-        return RasterBounds(
-            dirty_rect.x(),
-            dirty_rect.y(),
-            dirty_rect.width(),
-            dirty_rect.height(),
-        )
+        bounds = self._regions.bounds(self._dabs.segment_dabs(segment))
+        if bounds is None:
+            raise ValueError("a paintable mask segment must resolve at least one dab")
+        return bounds

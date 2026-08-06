@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .pytest-tmp/
+.pytest-locks/
 .ruff_cache/
 .mypy_cache/
 .pyright/
@@ -13,9 +14,9 @@ __pycache__/
 # Virtual environments
 .venv/
 venv*/
-examples/venv-*/
-examples/demo_settings.json
-examples/demo_window_settings.json
+packages/*/examples/venv-*/
+packages/*/examples/demo_settings.json
+packages/*/examples/demo_window_settings.json
 
 # Mask autosave dumps
 **/saved_masks/

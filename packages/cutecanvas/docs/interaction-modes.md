@@ -51,6 +51,7 @@ CuteCanvas includes:
 * **Transform** for affine layer manipulation.
 * **Rectangle, Ellipse, and Lasso Select** for pixel selection.
 * **Brush** for mask and RGBA painting.
+* **Eraser** for explicit transparent painting with the active brush preset.
 * **Clone Stamp** for revision-stable rendered sampling onto RGBA layers.
 * **Paint Bucket** for selection-constrained flood fill.
 * **Rectangle, Ellipse, and Lasso Mask** for retained mask shapes.
@@ -152,13 +153,25 @@ undo restores every member. The live preview uses the same transform and
 clipping rules as the committed frame, so content does not temporarily escape
 a fixed clip or leave stale strips behind.
 
-## Transform a Layer
+## Transform Selected Pixels or Layer Content
 
-Transform draws a content-tight box around the selected movable layer:
+Hosts explicitly choose the affine frame authority. A pixel selection keeps its
+complete selection rectangle as the frame, including transparent selected area,
+while only pixels from the selected editable layer become the payload. A layer
+target instead derives a tight frame from that layer's nontransparent content:
 
 ```python
-canvas.setControlMode(canvas.CONTROL_MODE_TRANSFORM)
+from cutecanvas import EditorTransformCommand, EditorTransformTarget
+
+canvas.activateEditorTransform(EditorTransformTarget.SELECTION_CONTENT)
+canvas.applyEditorTransformCommand(EditorTransformCommand.ROTATE_RIGHT_90)
+canvas.applyEditorTransform()
 ```
+
+`EditorTransformTarget` keeps entry-point intent explicit:
+`EditorTransformTarget.SELECTION_CONTENT` uses the complete selection frame,
+while `EditorTransformTarget.LAYER_CONTENT` uses tight layer-content bounds.
+Both targets enter the same coordinator and direct-manipulation tool.
 
 Eight circular handles appear at the corners and side centers:
 
@@ -173,6 +186,34 @@ Eight circular handles appear at the corners and side centers:
 Enter or an interior double-click applies the complete transform as one undoable
 edit. Escape restores the exact starting transform. Holding Space to navigate
 preserves the unresolved transform and its handle state.
+
+Hosts can present frame-relative commands without creating another session.
+`EditorTransformCommand` provides
+`EditorTransformCommand.ROTATE_LEFT_90`,
+`EditorTransformCommand.ROTATE_RIGHT_90`,
+`EditorTransformCommand.FLIP_HORIZONTAL`, and
+`EditorTransformCommand.FLIP_VERTICAL`. Pass one to
+`CuteCanvas.applyEditorTransformCommand`; each command updates the cumulative
+preview around its current frame center. `CuteCanvas.applyEditorTransform`
+commits the complete preview once, while `CuteCanvas.cancelEditorTransform`
+restores the original.
+
+Call `CuteCanvas.editorTransformState` to obtain an
+`EditorTransformSnapshot` without changing editor state. Its
+`EditorTransformSnapshot.target`, `EditorTransformSnapshot.allowed`,
+`EditorTransformSnapshot.denial`, `EditorTransformSnapshot.scene_id`,
+`EditorTransformSnapshot.layer_id`, `EditorTransformSnapshot.corners`,
+`EditorTransformSnapshot.center`, `EditorTransformSnapshot.unresolved`, and
+`EditorTransformSnapshot.gesture_active` fields are detached host-facing state.
+The gesture flag is true only while direct pointer manipulation owns the
+session; command previews remain unresolved without claiming a gesture.
+Layer-content targets use exact nontransparent content bounds. An empty source
+returns `allowed=False` with the stable `nothing-to-transform` denial and does
+not create a transform frame or session.
+`CuteCanvas.editorTransformChanged`
+emits the current snapshot as live frame geometry or transaction state changes.
+Use `CuteCanvas.activateEditorTransform` to enter the shared session for an
+explicit target.
 
 The transform keeps floating-point geometry throughout the gesture. Snapping
 does not round the final layer position to integer scene coordinates.
@@ -223,6 +264,14 @@ editable RGBA layer, an active mask, or the document's pixel selection.
 
 ```python
 canvas.setControlMode(canvas.CONTROL_MODE_DRAW_BRUSH)
+```
+
+Eraser mode shares brush size, hardness, opacity, pressure, and wheel behavior,
+but always removes coverage or alpha. Alt does not invert explicit erasure and
+does not change the selected mode.
+
+```python
+canvas.setControlMode(canvas.CONTROL_MODE_ERASER)
 ```
 
 The brush preset and color are independent from tool activation. Changing the

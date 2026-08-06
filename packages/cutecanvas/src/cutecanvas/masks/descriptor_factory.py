@@ -64,6 +64,10 @@ class MaskDescriptorRenders(Protocol):
         """Return current derived-render revision."""
         ...
 
+    def effective_source_bounds(self, mask_id: uuid.UUID) -> RasterBounds | None:
+        """Return durable bounds united with provisional visible coverage."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class MaskLayerDescriptorFactory:
@@ -88,7 +92,7 @@ class MaskLayerDescriptorFactory:
         asset = self.assets.get_layer(mask_id)
         if asset is None:
             return None
-        raster_bounds: RasterBounds | None = asset.coverage.source_bounds()
+        raster_bounds = self.renders.effective_source_bounds(mask_id)
         if raster_bounds is None:
             return None
         revision = max(

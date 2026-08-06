@@ -60,8 +60,19 @@ class LayerGeometryResolver:
         return _rectf(layer.raster_bounds)
 
     def resolved_local_bounds(self, layer: LayerDescriptor) -> QRectF | None:
-        """Return policy bounds with intrinsic source geometry as fallback."""
-        return self.local_bounds(layer) or _rectf(layer.raster_bounds)
+        """Return policy bounds without inventing content for capable sources."""
+        bounds = self.local_bounds(layer)
+        if bounds is not None:
+            return bounds
+        policy = self._policy_for(layer)
+        registry = {
+            LayerGeometryMode.CONTENT: self._sources.content_bounds,
+            LayerGeometryMode.STORAGE: self._sources.storage_bounds,
+            LayerGeometryMode.AUTHORED: self._sources.authored_bounds,
+        }.get(policy.mode)
+        if registry is not None and registry.owner_for(layer.source) is not None:
+            return None
+        return _rectf(layer.raster_bounds)
 
     def resolved_scene_corners(
         self,

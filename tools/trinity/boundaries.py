@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Validate dependency direction and the two-product example boundary."""
+"""Validate dependency direction and package-owned public demo boundaries."""
 
 from __future__ import annotations
 
@@ -35,19 +35,29 @@ def validate_boundaries(
     products: tuple[ProductContract, ...],
 ) -> list[str]:
     """Return declarative product-boundary and public-demo violations."""
-    del products
     policy = load_policy(root / "ARCHITECTURE_POLICY.toml")
     errors = [
         diagnostic.render()
         for diagnostic in validate_python(root, policy)
         if diagnostic.severity == "error"
     ]
-    demos = {path.name for path in (root / "examples").glob("*_demo.py")}
-    expected = {"ferrastra_demo.py", "qpane_demo.py", "cutecanvas_demo.py"}
-    if demos != expected:
-        errors.append(
-            f"examples: expected exactly {sorted(expected)}, found {sorted(demos)}"
-        )
+    root_examples = root / "examples"
+    if root_examples.exists() and any(root_examples.rglob("*.py")):
+        errors.append("repository root must not own Python product examples")
+    for product in products:
+        examples = product.root / "examples"
+        demos = {path.resolve() for path in examples.glob("*_demo.py")}
+        expected = {
+            path.resolve()
+            for path in product.demo_paths
+            if path.name.endswith("_demo.py")
+        }
+        if demos != expected:
+            errors.append(
+                f"{product.package} examples: expected exactly "
+                f"{sorted(path.name for path in expected)}, found "
+                f"{sorted(path.name for path in demos)}"
+            )
     return errors
 
 

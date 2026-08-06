@@ -28,6 +28,7 @@ from PySide6.QtGui import QColor, QPainterPath, QPen
 from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from cutecanvas.coverage import CoverageCombineMode
+from cutecanvas.cursor import EditorCursorIntent
 
 from .dependencies import ToolDependencies
 
@@ -128,6 +129,9 @@ class MoveInteractionPort:
     update_move_hover: Callable[[QPointF], bool] = lambda _point: False
     clear_move_hover: Callable[[], bool] = _false
     move_target_available: Callable[[], bool] = _false
+    move_cursor_intent: Callable[[], EditorCursorIntent] = lambda: (
+        EditorCursorIntent.MOVE
+    )
     nudge_move: Callable[[int, int], bool] = lambda _x, _y: False
 
 
@@ -156,7 +160,8 @@ class PixelSelectionInteractionPort:
 
     panel_to_scene_point: Callable[[QPointF], QPointF | None] = lambda _point: None
     can_select: Callable[[], bool] = _true
-    clear_selected_pixels: Callable[[], bool] = _false
+    has_selection: Callable[[], bool] = _false
+    alt_constrains_empty_shape: bool = False
     commit_pixel_selection: Callable[[CoverageSnapshot, CoverageCombineMode], bool] = (
         lambda _coverage, _mode: False
     )
@@ -185,7 +190,6 @@ class PaintingInteractionPort:
     is_shift_held: Callable[[], bool] = _false
     can_paint: Callable[[], bool] = _true
     prepare_paint: Callable[[], bool] = _true
-    gesture_start_allowed: Callable[[QPointF], bool] = lambda _point: True
     get_brush_size: Callable[[], int] = lambda: 20
     get_preview_pens: Callable[[], tuple[QPen, QPen]] | None = None
     panel_hit_test: Callable[[QPoint], PanelHitTest | None] | None = None
@@ -357,6 +361,7 @@ class ToolActivationPorts:
             "mask-ellipse": self.coverage_shapes,
             "mask-lasso": self.coverage_shapes,
             "draw-brush": self.painting,
+            "eraser": self.painting,
             "clone-stamp": self.clone_stamp,
             "paint-bucket": self.paint_bucket,
             "smart-select": self.smart_segmentation,

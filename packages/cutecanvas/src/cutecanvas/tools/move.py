@@ -25,6 +25,8 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
+from cutecanvas.cursor import EditorCursorIntent
+
 from .base import BaseTool
 from .ports import MoveInteractionPort
 
@@ -50,6 +52,7 @@ class MoveTool(BaseTool):
         self._update_hover = dependencies.update_move_hover
         self._clear_hover = dependencies.clear_move_hover
         self._target_available = dependencies.move_target_available
+        self._cursor_intent = dependencies.move_cursor_intent
         self._nudge_move = dependencies.nudge_move
 
     def deactivate(self) -> None:
@@ -197,6 +200,10 @@ class MoveTool(BaseTool):
         )
         return QCursor(shape)
 
+    def cursor_intent(self) -> EditorCursorIntent:
+        """Return source-owned hover semantics for host cursor artwork."""
+        return self._cursor_intent()
+
     def _constrained_point(
         self,
         point: QPointF,
@@ -250,11 +257,11 @@ class MoveTool(BaseTool):
         self._begin_move: Callable[[QPointF, bool, bool, bool], bool] = (
             lambda _point, _copy, _extend, _toggle_auto: False
         )
-        self._update_move: Callable[[QPointF, bool], bool] = (
-            lambda _point, _suppress: False
+        self._update_move: Callable[[QPointF, bool], bool] = lambda _point, _suppress: (
+            False
         )
-        self._finish_move: Callable[[QPointF, bool], bool] = (
-            lambda _point, _suppress: False
+        self._finish_move: Callable[[QPointF, bool], bool] = lambda _point, _suppress: (
+            False
         )
         self._suspend_move: Callable[[], bool] = lambda: False
         self._cancel_move: Callable[[], bool] = lambda: False
@@ -262,6 +269,9 @@ class MoveTool(BaseTool):
         self._update_hover: Callable[[QPointF], bool] = lambda _point: False
         self._clear_hover: Callable[[], bool] = lambda: False
         self._target_available: Callable[[], bool] = lambda: False
+        self._cursor_intent: Callable[[], EditorCursorIntent] = lambda: (
+            EditorCursorIntent.MOVE
+        )
         self._nudge_move: Callable[[int, int], bool] = lambda _x, _y: False
 
 

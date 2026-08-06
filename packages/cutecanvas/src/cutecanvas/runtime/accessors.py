@@ -52,7 +52,7 @@ from cutecanvas.editor import (
     InteractivePaintDestinationCoordinator,
 )
 from cutecanvas.editor.layer_edge_modification import LayerEdgeModificationCoordinator
-from cutecanvas.editor.transform_interaction import EditorTransformInteraction
+from cutecanvas.editor.transform_coordinator import EditorTransformCoordinator
 from cutecanvas.fill import PaintBucketCoordinator, SelectionFillCoordinator
 from cutecanvas.masks.canvas_aperture import ActiveMaskCanvasAperture
 from cutecanvas.masks.coordinates import ActiveMaskLayerCoordinates
@@ -191,7 +191,7 @@ class CanvasAccessorsMixin:
             raise AttributeError("Scene layer movement accessed before initialization")
         return interaction
 
-    def sceneLayerTransformInteraction(self) -> EditorTransformInteraction:
+    def sceneLayerTransformInteraction(self) -> EditorTransformCoordinator:
         """Expose private panel-space affine transform interaction."""
         interaction = self._scene_transform_interaction
         if interaction is None:
@@ -380,6 +380,12 @@ class CanvasAccessorsMixin:
         self.view().mark_dirty()
         self.update()
 
+    def _publish_editor_transform_state(self) -> None:
+        """Publish detached transform geometry after target or preview changes."""
+        transform = self._scene_transform_interaction
+        if transform is not None and transform.target is not None:
+            self.editorTransformChanged.emit(transform.snapshot())
+
     def _refresh_selected_pixel_move_preview(self) -> None:
         """Invalidate only old/new preview pixels and refresh translated ants."""
         movement = self._selected_pixel_movement
@@ -387,11 +393,8 @@ class CanvasAccessorsMixin:
         selection_state = None
         if movement is not None:
             selection_state = movement.preview_state
-        suppress_selection = bool(movement is not None and movement.transforming)
-        if selection_state is None and scene_id is not None and not suppress_selection:
+        if selection_state is None and scene_id is not None:
             selection_state = self.pixelSelectionService().state(scene_id)
-        if suppress_selection:
-            selection_state = None
         self._editor_overlays.set_selection(selection_state)
         floating_state = self.floatingPixelEditState()
         if floating_state != self._last_floating_pixel_state:

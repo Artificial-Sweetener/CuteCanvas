@@ -75,6 +75,7 @@ class MaskCoverageTransactions:
         before = self._state(layer)
         if not layer.coverage.rasterize():
             return False
+        layer.coverage.compact_raster_storage()
         changed = self._history.record_applied_coverage(
             mask_id,
             before,
@@ -102,7 +103,7 @@ class MaskCoverageTransactions:
         changed = self._history.record_applied_coverage(
             mask_id,
             before,
-            self._state(layer),
+            self._normalized_state(layer),
             notify=notify,
         )
         if changed:
@@ -137,7 +138,7 @@ class MaskCoverageTransactions:
         changed = self._history.record_applied_coverage(
             mask_id,
             before,
-            self._state(layer),
+            self._normalized_state(layer),
         )
         if changed:
             self._changed(mask_id)
@@ -165,3 +166,9 @@ class MaskCoverageTransactions:
             layer.coverage.raster.state_snapshot(),
             layer.coverage.retained,
         )
+
+    @classmethod
+    def _normalized_state(cls, layer: CoverageLayer) -> MaskCoverageState:
+        """Compact derived allocation before capturing a committed revision."""
+        layer.coverage.compact_raster_storage()
+        return cls._state(layer)

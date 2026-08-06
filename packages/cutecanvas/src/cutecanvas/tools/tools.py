@@ -64,6 +64,7 @@ class Tools(ToolManager):
     CONTROL_MODE_MOVE = "move"
     CONTROL_MODE_TRANSFORM = "transform"
     CONTROL_MODE_DRAW_BRUSH = "draw-brush"
+    CONTROL_MODE_ERASER = "eraser"
     CONTROL_MODE_CLONE_STAMP = "clone-stamp"
     CONTROL_MODE_PAINT_BUCKET = "paint-bucket"
     CONTROL_MODE_SMART_SELECT = "smart-select"
@@ -84,6 +85,7 @@ class Tools(ToolManager):
         from ..painting.tools import (
             BrushTool,
             CloneStampTool,
+            EraserTool,
             connect_brush_signals,
             disconnect_brush_signals,
         )
@@ -102,6 +104,12 @@ class Tools(ToolManager):
         self.registerTool(
             self.CONTROL_MODE_DRAW_BRUSH,
             BrushTool,
+            on_connect=connect_brush_signals,
+            on_disconnect=disconnect_brush_signals,
+        )
+        self.registerTool(
+            self.CONTROL_MODE_ERASER,
+            EraserTool,
             on_connect=connect_brush_signals,
             on_disconnect=disconnect_brush_signals,
         )

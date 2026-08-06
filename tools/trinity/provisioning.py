@@ -28,7 +28,9 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 
 def validate_demo_provisioning(root: Path) -> list[str]:
     """Return errors when demo tiers request absent or unnecessary extras."""
-    tier_path = root / "examples" / "demo_environment.py"
+    tier_path = (
+        root / "packages" / "cutecanvas" / "examples" / "cutecanvas_demo_environment.py"
+    )
     metadata_path = root / "packages" / "cutecanvas" / "pyproject.toml"
     if not tier_path.exists():
         return [f"demo provisioning source is missing: {tier_path}"]

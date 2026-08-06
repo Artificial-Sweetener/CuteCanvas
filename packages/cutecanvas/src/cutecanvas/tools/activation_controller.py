@@ -78,6 +78,7 @@ class EditorToolActivationController:
             return False
         if mode in (
             Tools.CONTROL_MODE_DRAW_BRUSH,
+            Tools.CONTROL_MODE_ERASER,
             Tools.CONTROL_MODE_CLONE_STAMP,
         ):
             self._prepare_paint_target(mode)
@@ -100,7 +101,7 @@ class EditorToolActivationController:
         resolution = canvas.editorOperationResolver().resolve(EditorOperation.PAINT)
         mask_service = getattr(canvas, "mask_service", None)
         if (
-            mode == Tools.CONTROL_MODE_DRAW_BRUSH
+            mode in {Tools.CONTROL_MODE_DRAW_BRUSH, Tools.CONTROL_MODE_ERASER}
             and resolution.target is EditorOperationTarget.DEFAULT_PAINT_TARGET
             and mask_service is not None
         ):
@@ -112,7 +113,7 @@ class EditorToolActivationController:
                     EditorOperation.PAINT
                 )
         if (
-            mode == Tools.CONTROL_MODE_DRAW_BRUSH
+            mode in {Tools.CONTROL_MODE_DRAW_BRUSH, Tools.CONTROL_MODE_ERASER}
             and resolution.allowed
             and mask_service is not None
         ):

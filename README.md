@@ -16,11 +16,15 @@ Ferrastra is the CPU-first, Qt-neutral native graphics product engine described 
 Rust/PyO3/Python boundary, ownership policy, architecture gates, and
 conformance infrastructure without adding production graphics behavior.
 
+[`RCANDY_DESIGN.md`](RCANDY_DESIGN.md) defines R-Candy, Ferrastra's typed
+declarative graph-authoring language and structured authoring surface. Stage 0
+establishes its architecture without adding language behavior or an empty crate.
+
 See [the Ferrastra package guide](packages/ferrastra/README.md) and
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ```powershell
-python examples\ferrastra_demo.py
+python packages\ferrastra\examples\ferrastra_demo.py
 ```
 
 ## QPane
@@ -33,7 +37,7 @@ through the same immutable `RenderScene` pipeline.
 
 ```powershell
 pip install qpane
-python examples\qpane_demo.py
+python packages\qpane\examples\qpane_demo.py
 ```
 
 ```python
@@ -57,7 +61,7 @@ source-neutral renderer, viewport, cache, or SDK owner.
 
 ```powershell
 pip install cutecanvas
-python examples\cutecanvas_demo.py
+python packages\cutecanvas\examples\cutecanvas_demo.py
 ```
 
 ```python
@@ -76,11 +80,16 @@ covers its public facade and workflows.
 - `packages/cutecanvas/`: CuteCanvas metadata, source, contract, tests, and documentation.
 - `packages/ferrastra/`: Ferrastra metadata, typed facade, tests, and documentation.
 - `crates/`: executable Ferrastra native crates.
-- `examples/ferrastra_demo.py`: the single public Ferrastra example.
-- `examples/qpane_demo.py`: the single polished QPane example.
-- `examples/cutecanvas_demo.py`: the single polished CuteCanvas example.
-- `tests/`: renderer, editor, integration, abuse, performance, and packaging
-  proof shared by the monorepo.
+- `RCANDY_DESIGN.md`: normative R-Candy language and structured-authoring charter.
+- `packages/ferrastra/examples/ferrastra_demo.py`: the single public Ferrastra example.
+- `packages/qpane/examples/qpane_demo.py`: the single polished QPane example.
+- `packages/cutecanvas/examples/cutecanvas_demo.py`: the single polished CuteCanvas example.
+- `tools/testing/`: policy aggregation, ownership-driven test selection, and
+  repository-tool contract tests.
+
+Each product owns its tests and `TEST_POLICY.toml`. Tests are organized by
+behavioral area and proof kind so focused work does not require private pytest
+node IDs or a complete monorepo run.
 
 All three packages are licensed under GPL-3.0-or-later.
 

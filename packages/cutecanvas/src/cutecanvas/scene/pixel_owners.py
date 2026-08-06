@@ -80,14 +80,8 @@ class LayerPixelMutationOwner(Protocol):
         """Restore detached pixels into one source-local patch."""
         ...
 
-    def move_coverage(
-        self,
-        layer: LayerDescriptor,
-        coverage: CoverageSnapshot,
-        delta_x: int,
-        delta_y: int,
-    ) -> RasterPixelTransition | None:
-        """Move selected pixels and return the exact applied transition."""
+    def finalize_patch_edit(self, layer: LayerDescriptor) -> None:
+        """Finalize source-owned storage after patch capture completes."""
         ...
 
     def lift_coverage(
@@ -95,7 +89,7 @@ class LayerPixelMutationOwner(Protocol):
         layer: LayerDescriptor,
         coverage: CoverageSnapshot,
     ) -> RasterPixelLift | None:
-        """Capture a reversible source extraction without applying it."""
+        """Capture a reversible content-filtered extraction without applying it."""
         ...
 
     def preview_move(

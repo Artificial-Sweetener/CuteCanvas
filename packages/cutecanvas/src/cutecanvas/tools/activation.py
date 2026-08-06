@@ -109,6 +109,7 @@ def build_editor_tool_ports(
         update_move_hover=movement.update_hover,
         clear_move_hover=movement.clear_hover,
         move_target_available=lambda: movement.target_available,
+        move_cursor_intent=lambda: movement.cursor_intent,
         nudge_move=movement.nudge,
     )
     transform = qpane.sceneLayerTransformInteraction()
@@ -147,7 +148,10 @@ def build_editor_tool_ports(
             .resolve(EditorOperation.SELECT_PIXELS)
             .allowed
         ),
-        clear_selected_pixels=qpane.deleteSelectedPixels,
+        has_selection=lambda: bool(
+            (state := qpane.pixelSelectionState()) is not None and state.has_selection
+        ),
+        alt_constrains_empty_shape=True,
         commit_pixel_selection=qpane.editorInteraction().commit_active_pixel_selection,
         commit_coverage_item=qpane.editorInteraction().commit_active_coverage_item,
         is_shift_held=is_shift_held,
@@ -186,7 +190,6 @@ def build_editor_tool_ports(
         is_shift_held=is_shift_held,
         can_paint=paint_destination.can_prepare,
         prepare_paint=paint_destination.prepare,
-        gesture_start_allowed=canvas_aperture.contains_panel_point,
         get_brush_size=get_brush_size,
         get_preview_pens=get_preview_pens,
         panel_hit_test=qpane.panelHitTest,

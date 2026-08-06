@@ -50,4 +50,4 @@ class RasterPixelMovePreview:
     @property
     def coverage(self) -> CoverageSnapshot:
         """Return immutable source-local selection coverage for damage mapping."""
-        return self.lift.fragment.coverage
+        return self.lift.fragment.contribution_coverage

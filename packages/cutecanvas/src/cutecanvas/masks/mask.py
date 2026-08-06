@@ -35,6 +35,7 @@ from cutecanvas.coverage import (
     CoverageStateSnapshot,
     CoverageSurface,
 )
+from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
 
 from ..composition.edit_controller import CompositionEditController
 from ..raster.sparse_grid import SparseRasterSnapshot
@@ -69,6 +70,8 @@ class MaskLayer:
     @property
     def mask_image(self) -> QImage:
         """Return a detached snapshot of the current mask pixels."""
+        if self.coverage.raster.bounds is None and not self.coverage.has_retained_items:
+            return QImage()
         return self.coverage.snapshot_qimage()
 
     @mask_image.setter
@@ -181,13 +184,14 @@ class MaskAssetStore:
             editable=True,
             resource_id=mask_id,
         )
-        self._masks[mask_id] = MaskLayer(
+        layer = MaskLayer(
             mask_id=mask_id,
             coverage=CoverageAsset(
                 mask_id,
                 coverage,
             ),
         )
+        self._masks[mask_id] = layer
         self._history.initialize_mask(mask_id)
         return mask_id
 
@@ -228,10 +232,12 @@ class MaskAssetStore:
                 )
             )
             coverage = CoverageAsset(mask_id, surface)
-        self._masks[mask_id] = MaskLayer(
+        layer = MaskLayer(
             mask_id=mask_id,
             coverage=coverage,
         )
+        layer.coverage.compact_raster_storage()
+        self._masks[mask_id] = layer
         self._history.initialize_mask(mask_id)
 
     def delete_mask(self, mask_id: uuid.UUID) -> bool:
@@ -345,6 +351,25 @@ class MaskAssetStore:
     ) -> bool:
         """Record an already-applied structural surface transition."""
         changed = self._history.record_applied_surface(
+            mask_id,
+            before,
+            after,
+            notify=notify,
+        )
+        if changed:
+            self._touch(mask_id)
+        return changed
+
+    def record_applied_raster_structure(
+        self,
+        mask_id: uuid.UUID,
+        before: CoverageRasterStructureState,
+        after: CoverageRasterStructureState,
+        *,
+        notify: Callable[[uuid.UUID], None] | None = None,
+    ) -> bool:
+        """Record an already-applied authored raster-structure transition."""
+        changed = self._history.record_applied_raster_structure(
             mask_id,
             before,
             after,

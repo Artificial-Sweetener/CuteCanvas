@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 
@@ -51,6 +52,18 @@ class PythonProductPolicy:
 
     name: str
     root: Path
+    debt_registry: Path
+    waiver_registry: Path
+
+
+@dataclass(frozen=True, slots=True)
+class StructureCategoryPolicy:
+    """Identify one exact source whose line metric is inapplicable."""
+
+    name: str
+    product: str
+    path: Path
+    justification: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,16 +101,60 @@ class RustCratePolicy:
     """Define one Ferrastra crate's internal dependency allowlist."""
 
     name: str
+    product: str
     allowed_internal: frozenset[str]
     python_boundary: bool
 
 
 @dataclass(frozen=True, slots=True)
+class ArchitectureDebt:
+    """Describe the current mixed ownership of assessed source paths."""
+
+    identifier: str
+    product: str
+    owner: str
+    paths: tuple[str, ...]
+    fingerprint: str
+    issue: str
+    review_by: date
+    responsibilities: tuple[str, ...]
+    next_extraction: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArchitectureWaiver:
+    """Describe one bounded current architecture exception."""
+
+    identifier: str
+    product: str
+    owner: str
+    rule: str
+    path: str
+    kind: str
+    justification: str
+    issue: str
+    review_by: date
+    max_lines: int
+    next_limit: int | None
+    debt: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProductArchitectureState:
+    """Collect one product's current debt and waiver snapshots."""
+
+    product: str
+    debts: tuple[ArchitectureDebt, ...]
+    waivers: tuple[ArchitectureWaiver, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ArchitecturePolicy:
-    """Aggregate every declarative Stage 0 architecture rule."""
+    """Aggregate every declarative repository architecture rule."""
 
     structure: StructurePolicy
     python_products: tuple[PythonProductPolicy, ...]
+    structure_categories: tuple[StructureCategoryPolicy, ...]
     python_dependencies: tuple[PythonDependencyPolicy, ...]
     python_protected_roots: tuple[PythonProtectedRootPolicy, ...]
     python_layers: tuple[PythonLayerPolicy, ...]

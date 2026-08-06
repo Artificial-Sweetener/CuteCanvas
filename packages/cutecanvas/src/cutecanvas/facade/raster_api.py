@@ -560,6 +560,7 @@ class RasterApiMixin:
             ),
             offset=movement.offset,
             bounds=movement.scene_bounds,
+            dragging=movement.dragging,
         )
 
     def anchorFloatingPixels(

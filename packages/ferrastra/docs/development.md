@@ -11,7 +11,7 @@ scaffolding.
 
 The complete architecture, operation-entry checklist, conformance categories,
 waiver policy, and migration phases are documented in the repository
-`ARCHITECTURE.md` and `FERRASTRA_DESIGN.md`.
+`ARCHITECTURE.md`, `FERRASTRA_DESIGN.md`, and `RCANDY_DESIGN.md`.
 
 The repository bootstrap installs the pinned Rust 1.93.1 toolchain components,
 `cargo-deny` 0.20.2, maturin, Ruff, Pyright, and the editable package. Run the
@@ -27,7 +27,7 @@ cargo deny check
 Run the cross-language policy, strict Python, and packaging gates with:
 
 ```powershell
-.venv\Scripts\python tools\check_ferrastra_architecture.py
+.venv\Scripts\python tools\check_architecture.py
 .venv\Scripts\python tools\check_ferrastra_operations.py
 .venv\Scripts\python tools\check_ferrastra_ownership.py
 .venv\Scripts\python tools\check_ferrastra_benchmarks.py

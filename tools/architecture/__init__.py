@@ -13,7 +13,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Expose declarative cross-language architecture validation."""
+"""Expose repository architecture and current-state validation."""
 
 from .checker import validate_repository
 from .model import Diagnostic

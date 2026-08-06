@@ -19,13 +19,10 @@ from __future__ import annotations
 
 import uuid
 
-from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QSize
 from qpane.sdk.scene import (
-    RasterBounds,
     RasterLayerRenderItem,
     SampledLayerRenderItem,
-    SampledTileRenderData,
     SceneLayerAssetKey,
     TransientRasterResolvedContribution,
     TransientSampledResolvedContribution,
@@ -33,19 +30,20 @@ from qpane.sdk.scene import (
 
 from ..scene.pixel_fragments import RasterPixelFormat
 from ..scene.pixel_transitions import RasterPixelTransition
-from ..scene.source_capabilities import (
-    PixelPresentationRegistry,
-    PixelSampleGeometry,
-)
+from ..scene.source_capabilities import PixelPresentationOwner
+from .sampled_transition_tiles import SampledTransitionTileCompiler
 
 
 class RasterTransitionRenderCompiler:
     """Present one canonical pixel transition through its source owner."""
 
-    def __init__(self, presentations: PixelPresentationRegistry) -> None:
+    def __init__(self, presentations: PixelPresentationOwner) -> None:
         """Bind the sole source-presentation registry."""
         self._presentations = presentations
-        self._resolved_key: tuple[uuid.UUID, SceneLayerAssetKey, object] | None = None
+        self._sampled_tiles = SampledTransitionTileCompiler(presentations)
+        self._resolved_key: (
+            tuple[uuid.UUID, SceneLayerAssetKey, object, object] | None
+        ) = None
         self._resolved: (
             TransientRasterResolvedContribution
             | TransientSampledResolvedContribution
@@ -69,7 +67,11 @@ class RasterTransitionRenderCompiler:
         | None
     ):
         """Present one exact transition through an existing raster render item."""
-        key = (session_id, raster_item_asset_key(item), generation)
+        asset_key = raster_item_asset_key(item)
+        sample_batch_key = (
+            item.sample_batch_key if isinstance(item, SampledLayerRenderItem) else None
+        )
+        key = (session_id, asset_key, generation, sample_batch_key)
         if key == self._resolved_key:
             return self._resolved
         if isinstance(item, SampledLayerRenderItem):
@@ -79,6 +81,7 @@ class RasterTransitionRenderCompiler:
                 layer_id=layer_id,
                 pixel_format=pixel_format,
                 transition=transition,
+                transition_key=(session_id, asset_key, generation),
                 item=item,
                 retain_until_durable=retain_until_durable,
             )
@@ -139,6 +142,7 @@ class RasterTransitionRenderCompiler:
         layer_id: uuid.UUID,
         pixel_format: RasterPixelFormat,
         transition: RasterPixelTransition,
+        transition_key: tuple[uuid.UUID, SceneLayerAssetKey, object],
         item: SampledLayerRenderItem,
         retain_until_durable: bool,
     ) -> (
@@ -161,41 +165,16 @@ class RasterTransitionRenderCompiler:
                 retain_until_durable=retain_until_durable,
             )
         scale_x, scale_y = raster_item_sample_scale(item)
-        sample_geometry = tuple(
-            _sample_geometry(tile, scale_x, scale_y) for tile in item.tiles
+        resolved_tiles = self._sampled_tiles.compile(
+            transition_key=transition_key,
+            pixel_format=pixel_format,
+            transition=transition,
+            item=item,
+            sampled_bounds=sampled_bounds,
+            scale_x=scale_x,
+            scale_y=scale_y,
         )
-        exact_samples = self._presentations.present_transition_samples(
-            item.descriptor.source,
-            pixel_format,
-            transition,
-            sample_geometry,
-        )
-        if exact_samples is not None and len(exact_samples) == len(item.tiles):
-            return TransientSampledResolvedContribution(
-                session_id=session_id,
-                scene_id=scene_id,
-                layer_id=layer_id,
-                source_asset_key=raster_item_asset_key(item),
-                source_bounds=transition.patch_bounds,
-                tiles=tuple(
-                    SampledTileRenderData(
-                        image, tile.source_rect, tile.image_source_rect
-                    )
-                    for tile, image in zip(item.tiles, exact_samples, strict=True)
-                ),
-                retain_until_durable=retain_until_durable,
-            )
-        replacement_size = QSize(
-            max(1, round(transition.patch_bounds.width * scale_x)),
-            max(1, round(transition.patch_bounds.height * scale_y)),
-        )
-        replacement = self._presentations.present_pixels(
-            item.descriptor.source,
-            pixel_format,
-            transition.after_pixels,
-            replacement_size,
-        )
-        if replacement is None or replacement.isNull():
+        if resolved_tiles is None:
             return None
         return TransientSampledResolvedContribution(
             session_id=session_id,
@@ -203,16 +182,9 @@ class RasterTransitionRenderCompiler:
             layer_id=layer_id,
             source_asset_key=raster_item_asset_key(item),
             source_bounds=transition.patch_bounds,
-            tiles=tuple(
-                _replace_sampled_tile(
-                    tile,
-                    transition.patch_bounds,
-                    replacement,
-                    scale_x,
-                    scale_y,
-                )
-                for tile in item.tiles
-            ),
+            tiles=resolved_tiles,
+            sampled_raster_bounds=sampled_bounds,
+            sampled_source_size=item.source_size,
             retain_until_durable=retain_until_durable,
         )
 
@@ -252,47 +224,6 @@ def raster_item_sample_scale(
                 tile.image_source_rect.height() / tile.source_rect.height(),
             )
     return 1.0, 1.0
-
-
-def _replace_sampled_tile(
-    tile: SampledTileRenderData,
-    patch_bounds: RasterBounds,
-    replacement: QImage,
-    scale_x: float,
-    scale_y: float,
-) -> SampledTileRenderData:
-    """Return one sampled tile with a transient source patch applied in place."""
-    image = tile.image.copy()
-    paint_origin_x = tile.source_rect.x() - tile.image_source_rect.x() / scale_x
-    paint_origin_y = tile.source_rect.y() - tile.image_source_rect.y() / scale_y
-    target = QRectF(
-        (patch_bounds.x - paint_origin_x) * scale_x,
-        (patch_bounds.y - paint_origin_y) * scale_y,
-        patch_bounds.width * scale_x,
-        patch_bounds.height * scale_y,
-    )
-    painter = QPainter(image)
-    try:
-        painter.setCompositionMode(QPainter.CompositionMode_Source)
-        painter.drawImage(target, replacement, QRectF(replacement.rect()))
-    finally:
-        painter.end()
-    return SampledTileRenderData(image, tile.source_rect, tile.image_source_rect)
-
-
-def _sample_geometry(
-    tile: SampledTileRenderData,
-    scale_x: float,
-    scale_y: float,
-) -> PixelSampleGeometry:
-    """Recover one sampled tile's complete source footprint including bleed."""
-    source_rect = QRectF(
-        tile.source_rect.x() - tile.image_source_rect.x() / scale_x,
-        tile.source_rect.y() - tile.image_source_rect.y() / scale_y,
-        tile.image.width() / scale_x,
-        tile.image.height() / scale_y,
-    )
-    return PixelSampleGeometry(source_rect, tile.image.size())
 
 
 __all__ = [

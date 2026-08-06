@@ -1,0 +1,75 @@
+schema = 1
+product = "qpane"
+test_root = "packages/qpane/tests"
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+
+[[areas]]
+name = "api"
+sources = [
+  "packages/qpane/src/qpane/*.py",
+  "packages/qpane/src/qpane/*.pyi",
+  "packages/qpane/pyproject.toml",
+  "packages/qpane/src/qpane/core/**",
+  "packages/qpane/src/qpane/features/**",
+  "packages/qpane/src/qpane/sdk/**",
+]
+proofs = ["contract", "integration", "packaging"]
+
+[[areas]]
+name = "cache"
+sources = ["packages/qpane/src/qpane/cache/**"]
+proofs = ["integration"]
+
+[[areas]]
+name = "demos"
+sources = ["packages/qpane/examples/**"]
+proofs = ["contract", "qt"]
+
+[[areas]]
+name = "execution"
+sources = ["packages/qpane/src/qpane/execution/**"]
+proofs = ["contract", "integration"]
+
+[[areas]]
+name = "interaction"
+sources = ["packages/qpane/src/qpane/interaction/**"]
+proofs = ["abuse", "integration", "qt"]
+
+[[areas]]
+name = "presentation"
+sources = [
+  "packages/qpane/src/qpane/catalog/**",
+  "packages/qpane/src/qpane/compare/**",
+  "packages/qpane/src/qpane/inspection/**",
+  "packages/qpane/src/qpane/layout/**",
+  "packages/qpane/src/qpane/ui/**",
+]
+proofs = ["integration", "qt"]
+
+[[areas]]
+name = "rendering"
+sources = [
+  "packages/qpane/src/qpane/hybrid/**",
+  "packages/qpane/src/qpane/raster/**",
+  "packages/qpane/src/qpane/rendering/**",
+  "packages/qpane/src/qpane/scene/**",
+  "packages/qpane/src/qpane/vector/**",
+]
+proofs = ["contract", "integration", "qt"]
+
+[[boundaries]]
+name = "api"
+area = "api"
+
+[[boundaries]]
+name = "interaction"
+area = "interaction"
+
+[[boundaries]]
+name = "rendering"
+area = "rendering"
+
+[[subscriptions]]
+owner = "ferrastra"
+boundary = "bindings"
+groups = ["api/contract"]

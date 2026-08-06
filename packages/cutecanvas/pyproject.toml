@@ -61,3 +61,13 @@ regex = "^cutecanvas-v(?P<version>.+)$"
 
 [tool.setuptools_scm.scm.git]
 describe_command = "git describe --dirty --tags --long --abbrev=40 --match cutecanvas-v*[0-9]*"
+
+[tool.pytest.ini_options]
+addopts = ["--basetemp=.pytest-tmp"]
+pythonpath = ["src", "tests", "examples"]
+testpaths = ["tests"]
+markers = [
+  "interactive_performance: isolate strict interactive latency probes from shared hardware contention",
+  "performance: mark long-running performance benchmarks",
+  "swap_benchmark: mark swap latency benchmarks",
+]

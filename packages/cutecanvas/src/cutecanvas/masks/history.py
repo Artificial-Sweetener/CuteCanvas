@@ -35,6 +35,7 @@ from cutecanvas.coverage import (
     CoverageSnapshot,
     CoverageStateSnapshot,
 )
+from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
 from cutecanvas.coverage.snapshot_equality import coverage_state_snapshots_equal
 
 from ..composition.edit_controller import CompositionEditController
@@ -53,6 +54,7 @@ from .mask_undo import (
     MaskUndoCommand,
     MaskUndoState,
 )
+from .raster_structure_history import MaskRasterStructureCommand
 from .surface_history import MaskSurfaceCommand
 
 logger = logging.getLogger(__name__)
@@ -223,8 +225,10 @@ class MaskHistory:
         """Discard retained commands whose source asset was removed."""
         if self._edits is not None:
             self._edits.discard_where(
-                lambda command: isinstance(command, MaskCompositionEdit)
-                and command.mask_id == mask_id
+                lambda command: (
+                    isinstance(command, MaskCompositionEdit)
+                    and command.mask_id == mask_id
+                )
             )
 
     def set_limit(self, undo_limit: int, mask_ids: Sequence[uuid.UUID]) -> None:
@@ -285,6 +289,28 @@ class MaskHistory:
             MaskSurfaceCommand(mask_id, before, after, self._apply_surface, notify),
         )
 
+    def record_applied_raster_structure(
+        self,
+        mask_id: uuid.UUID,
+        before: CoverageRasterStructureState,
+        after: CoverageRasterStructureState,
+        *,
+        notify: Callable[[uuid.UUID], None] | None = None,
+    ) -> bool:
+        """Record an explicit authored-extent and storage transition."""
+        if before == after:
+            return False
+        return self._record(
+            mask_id,
+            MaskRasterStructureCommand(
+                mask_id,
+                before,
+                after,
+                self._apply_raster_structure,
+                notify,
+            ),
+        )
+
     def commit_surface(
         self,
         mask_id: uuid.UUID,
@@ -316,8 +342,9 @@ class MaskHistory:
             return None
         execution = self._edits.undo_where(
             scope_id,
-            lambda command: isinstance(command, MaskCompositionEdit)
-            and command.mask_id == mask_id,
+            lambda command: (
+                isinstance(command, MaskCompositionEdit) and command.mask_id == mask_id
+            ),
         )
         return _history_change(execution.command, "undo") if execution.changed else None
 
@@ -328,8 +355,9 @@ class MaskHistory:
             return None
         execution = self._edits.redo_where(
             scope_id,
-            lambda command: isinstance(command, MaskCompositionEdit)
-            and command.mask_id == mask_id,
+            lambda command: (
+                isinstance(command, MaskCompositionEdit) and command.mask_id == mask_id
+            ),
         )
         return _history_change(execution.command, "redo") if execution.changed else None
 
@@ -443,6 +471,16 @@ class MaskHistory:
         if layer is not None:
             layer.coverage.raster.replace_with_state_snapshot(snapshot)
 
+    def _apply_raster_structure(
+        self,
+        mask_id: uuid.UUID,
+        state: CoverageRasterStructureState,
+    ) -> None:
+        """Replay explicit mask storage and authored extent together."""
+        layer = self._assets.get_layer(mask_id)
+        if layer is not None:
+            layer.coverage.restore_raster_structure(state)
+
     def _apply_coverage(
         self,
         mask_id: uuid.UUID,
@@ -493,6 +531,8 @@ def _command_bytes(command: MaskUndoCommand) -> int:
         return command.before.sizeInBytes() + command.after.sizeInBytes()
     if isinstance(command, MaskSurfaceCommand):
         return _state_bytes(command.before) + _state_bytes(command.after)
+    if isinstance(command, MaskRasterStructureCommand):
+        return _state_bytes(command.before.raster) + _state_bytes(command.after.raster)
     if isinstance(command, MaskCoverageCommand):
         return (
             _state_bytes(command.before.raster)

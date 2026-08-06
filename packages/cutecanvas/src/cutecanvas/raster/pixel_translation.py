@@ -42,9 +42,17 @@ class ColorPixelTranslator:
         delta_y: int,
     ) -> RasterPixelTransition | None:
         """Apply selected pixels from an immutable pre-move patch."""
-        transition = self.preview_move(
+        bounds = coverage.bounds
+        if bounds is None or not surface.bounds.contains(bounds):
+            return None
+        transition = self.preview_fragment_move(
             surface,
-            coverage,
+            RasterPixelFragment(
+                bounds,
+                RasterPixelFormat.PREMULTIPLIED_ARGB32,
+                surface.capture_region(bounds),
+                coverage,
+            ),
             delta_x,
             delta_y,
             cut_source=True,
@@ -53,24 +61,27 @@ class ColorPixelTranslator:
             return None
         return transition if self.restore(surface, transition, use_after=True) else None
 
-    def preview_move(
+    def preview_fragment_move(
         self,
         surface: ColorRasterSurface,
-        coverage: CoverageSnapshot,
+        fragment: RasterPixelFragment,
         delta_x: int,
         delta_y: int,
         *,
         cut_source: bool,
     ) -> RasterPixelTransition | None:
-        """Compose an exact premultiplied transition without mutating storage."""
-        source_bounds = coverage.bounds
-        surface_bounds = surface.bounds
-        if source_bounds is None:
+        """Compose an exact premultiplied fragment transition without mutation."""
+        if fragment.pixel_format is not RasterPixelFormat.PREMULTIPLIED_ARGB32:
             return None
+        source_bounds = fragment.bounds
+        surface_bounds = surface.bounds
         source_bounds = source_bounds.intersection(surface_bounds)
         if source_bounds is None:
             return None
-        selection = _coverage_region(coverage, source_bounds)
+        selection = _coverage_region(
+            fragment.contribution_coverage,
+            source_bounds,
+        )
         if not np.any(selection):
             return None
         destination_bounds = source_bounds.translated(delta_x, delta_y)
@@ -88,7 +99,23 @@ class ColorPixelTranslator:
             return None
         before = surface.capture_region(patch_bounds)
         after = np.array(before, copy=True)
-        source_pixels = _region(before, patch_bounds, source_bounds)
+        fragment_array_bounds = RasterBounds(
+            0,
+            0,
+            fragment.bounds.width,
+            fragment.bounds.height,
+        )
+        fragment_source_region = RasterBounds(
+            source_bounds.x - fragment.bounds.x,
+            source_bounds.y - fragment.bounds.y,
+            source_bounds.width,
+            source_bounds.height,
+        )
+        source_pixels = _region(
+            fragment.pixels,
+            fragment_array_bounds,
+            fragment_source_region,
+        )
         minimum_selection = int(selection.min())
         hard_full_selection = minimum_selection == 255
         hard_selection = hard_full_selection or (
@@ -232,7 +259,7 @@ class ColorPixelTranslator:
         )
         raw_source = _region(fragment.pixels, fragment_array_bounds, source_region)
         selection = _region(
-            fragment.coverage.pixels,
+            fragment.contribution_coverage.pixels,
             fragment_array_bounds,
             source_region,
         ).astype(np.uint16)[:, :, np.newaxis]

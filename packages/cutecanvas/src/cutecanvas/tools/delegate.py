@@ -37,12 +37,12 @@ from .cursor_controller import EditorCursorController
 from .input import PointerInputController
 from .keyboard_input import EditorKeyboardInputController
 from .overlay_controller import EditorOverlayController
+from .selection_shortcuts import EditorSelectionShortcuts
 from .shortcuts import EditorHistoryShortcuts
 from .tools import Tools
 from .transient_input import TransientToolInput
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
-
     from ..canvas import CuteCanvas
 logger = logging.getLogger(__name__)
 
@@ -85,10 +85,15 @@ class ToolInteractionDelegate:
             undo=qpane.undoSceneEdit,
             redo=qpane.redoSceneEdit,
         )
+        self._selection_shortcuts = EditorSelectionShortcuts(
+            has_selection=self._has_pixel_selection,
+            clear_selected_pixels=qpane.deleteSelectedPixels,
+        )
         self._keyboard = EditorKeyboardInputController(
             qpane,
             transient=self._transient_input,
             history=self._history_shortcuts,
+            selection=self._selection_shortcuts,
             forward_widget_press=lambda event: super(type(qpane), qpane).keyPressEvent(
                 event
             ),
@@ -119,6 +124,12 @@ class ToolInteractionDelegate:
             palm_rejection_ms=lambda: int(qpane.settings.palm_rejection_ms),
             pointer_state_changed=self._handle_pointer_state_changed,
         )
+
+    def _has_pixel_selection(self) -> bool:
+        """Return whether the active document owns nonempty selected coverage."""
+
+        state = self._qpane.pixelSelectionState()
+        return state is not None and state.has_selection
 
     def _viewport(self):
         """Return the viewport managed by the rendering stack."""

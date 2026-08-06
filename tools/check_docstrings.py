@@ -31,10 +31,12 @@ from pathlib import Path
 # Directories to scan
 TARGET_DIRS = [
     "packages/qpane/src/qpane",
+    "packages/qpane/examples",
     "packages/cutecanvas/src/cutecanvas",
+    "packages/cutecanvas/examples",
     "packages/ferrastra/src/ferrastra",
+    "packages/ferrastra/examples",
     "tools/architecture",
-    "examples",
 ]
 
 # Directories to exclude
@@ -372,7 +374,7 @@ def main() -> None:
             print()
         if examples_errors:
             print("\n" + "=" * 60)
-            print("ISSUES IN EXAMPLES (examples/)")
+            print("ISSUES IN PACKAGE EXAMPLES")
             print("=" * 60)
             for filepath, errors in sorted(examples_errors.items()):
                 rel_path = filepath.relative_to(root)

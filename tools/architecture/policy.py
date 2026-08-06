@@ -33,6 +33,7 @@ from .model import (
     PythonProductPolicy,
     PythonProtectedRootPolicy,
     RustCratePolicy,
+    StructureCategoryPolicy,
     StructurePolicy,
 )
 
@@ -40,8 +41,8 @@ from .model import (
 def load_policy(path: Path) -> ArchitecturePolicy:
     """Load one schema-versioned architecture policy."""
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1:
-        raise ValueError(f"{path} must declare schema_version = 1")
+    if data.get("schema_version") != 2:
+        raise ValueError(f"{path} must declare schema_version = 2")
     structure_data = _mapping(data, "structure")
     return ArchitecturePolicy(
         structure=StructurePolicy(
@@ -53,8 +54,19 @@ def load_policy(path: Path) -> ArchitecturePolicy:
             PythonProductPolicy(
                 name=_string(item, "name"),
                 root=Path(_string(item, "root")),
+                debt_registry=Path(_string(item, "debt_registry")),
+                waiver_registry=Path(_string(item, "waiver_registry")),
             )
             for item in _tables(data, "python_products")
+        ),
+        structure_categories=tuple(
+            StructureCategoryPolicy(
+                name=_string(item, "name"),
+                product=_string(item, "product"),
+                path=Path(_string(item, "path")),
+                justification=_string(item, "justification"),
+            )
+            for item in _tables(data, "structure_categories")
         ),
         python_dependencies=tuple(
             PythonDependencyPolicy(
@@ -86,6 +98,7 @@ def load_policy(path: Path) -> ArchitecturePolicy:
         rust_crates=tuple(
             RustCratePolicy(
                 name=_string(item, "name"),
+                product=_string(item, "product"),
                 allowed_internal=frozenset(_strings(item, "allowed_internal")),
                 python_boundary=bool(item.get("python_boundary", False)),
             )

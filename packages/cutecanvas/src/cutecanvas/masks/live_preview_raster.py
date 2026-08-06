@@ -69,6 +69,7 @@ class LiveMaskPreviewPatches:
         self._patches: list[LivePreviewPatch] = []
         self._content_bounds: RasterBounds | None = None
         self._revision = 0
+        self._retain_until_durable = False
 
     @property
     def session_id(self) -> uuid.UUID:
@@ -89,6 +90,44 @@ class LiveMaskPreviewPatches:
     def revision(self) -> int:
         """Return the monotonic provisional content generation."""
         return self._revision
+
+    @property
+    def retain_until_durable(self) -> bool:
+        """Return whether a committed preview awaits durable presentation."""
+        return self._retain_until_durable
+
+    def prepare_settlement(self) -> None:
+        """Promote this active preview into commit handoff state."""
+        self._retain_until_durable = True
+
+    def reframe(self, source_bounds: RasterBounds) -> None:
+        """Adopt expanded storage geometry without dropping prior patches."""
+        content_bounds = self._content_bounds
+        if content_bounds is not None and not source_bounds.contains(content_bounds):
+            raise ValueError("reframed source bounds must retain preview content")
+        self._source_bounds = source_bounds
+
+    def presentation_bounds(
+        self,
+        durable_bounds: RasterBounds | None,
+    ) -> RasterBounds | None:
+        """Return the stable scene envelope required by provisional coverage.
+
+        Transparent storage remains an implementation detail while preview pixels
+        stay inside durable geometry.  Once a gesture crosses that geometry, the
+        current reserved storage envelope amortizes scene recompilation as the
+        pointer continues across the same edge.
+        """
+        provisional = self._content_bounds
+        if provisional is None:
+            return durable_bounds
+        if durable_bounds is not None and durable_bounds.contains(provisional):
+            return durable_bounds
+        return (
+            self._source_bounds
+            if durable_bounds is None
+            else durable_bounds.united(self._source_bounds)
+        )
 
     def apply_patch(self, storage_rect: QRect, patch: QImage) -> None:
         """Append one final-coverage patch without reading untouched storage."""

@@ -6,6 +6,7 @@
 - **Audience:** engineers implementing Ferrastra, engineers migrating QPane or CuteCanvas behavior into Ferrastra, reviewers, and maintainers
 - **License intent:** GPL-3.0-or-later, unless the project adopts a different explicit policy before the first published artifact
 - **Minimum release targets:** Windows x64 (`x86_64-pc-windows-msvc`), Linux x64 (`x86_64-unknown-linux-gnu`), and Apple Silicon macOS (`aarch64-apple-darwin`)
+- **Authoring-language charter:** `RCANDY_DESIGN.md`
 
 ---
 
@@ -41,6 +42,12 @@ QPane presents
 The compact rule is:
 
 > **CuteCanvas authors. Ferrastra evaluates. QPane presents.**
+
+R-Candy is Ferrastra's typed declarative authoring frontend. It lowers source
+and structured edits to the same canonical `GraphDefinition` used by Rust,
+Python, and CuteCanvas. It does not enter the evaluation runtime or change the
+responsibility split above. `RCANDY_DESIGN.md` is normative for its language,
+artifact, structured-authoring, and host-admission contracts.
 
 This document is normative. An implementation that reaches the correct pixels while violating the ownership, dependency, product, memory, or module-responsibility rules below is not an acceptable implementation.
 
@@ -87,6 +94,9 @@ Ferrastra must make the following outcomes natural rather than exceptional.
 - Clear package ownership with mechanically enforced dependency direction.
 - Source files and crates with one responsibility and one reason to change.
 - A public operation SDK that makes correct new operations easier to write than bespoke pipelines.
+- One canonical graph and operation-description surface that Rust, Python,
+  R-Candy, structured model tools, and visual authoring can share without
+  semantic adapters.
 - Explainable planning, caching, invalidation, and execution.
 
 ### 3.2 Performance goals
@@ -135,6 +145,8 @@ The following are explicitly not Ferrastra responsibilities.
 - QPane viewport state, visible-versus-guard tile priority, retained frames, repaint timing, or widget composition.
 - A mandatory node-editor user interface.
 - A JavaScript or browser frontend.
+- Language parsing, source formatting, model orchestration, package acquisition,
+  or host trust policy inside the graph compiler or runtime.
 - Replacing Qt image decoding, encoding, ICC profile interpretation, or display conversion in the first implementation.
 - A GPU-first architecture.
 - A global application scheduler owned by Ferrastra.
@@ -170,6 +182,21 @@ An immutable result created by evaluating an operation over one or more inputs.
 ### Product key
 
 A strong content identity derived from operation semantics, parameters, inputs, output port, region, scale, quality, format, and working-space rules.
+
+### Node ID
+
+A stable authoring identity used by graph patches, source maps, diagnostics, and
+undo. It is not computational content identity.
+
+### Graph revision ID
+
+The identity of one accepted graph edit revision, including authoring-only
+changes recorded by that revision.
+
+### Graph content ID
+
+The identity of the normalized computation. It excludes labels, prose, source
+formatting, comments, examples, tags, and control layout.
 
 ### Backward demand
 
@@ -232,6 +259,8 @@ QPane may request exact pixels from Ferrastra. It must not own the canonical num
 Ferrastra owns:
 
 - Framework-neutral product and pixel contracts.
+- Canonical typed graph, operation-descriptor, diagnostic, patch, analysis, and
+  computational-identity contracts shared by every authoring frontend.
 - Native raster, coverage, and vector stores.
 - Copy-on-write source revisions and bounded edit transactions.
 - Typed graph definitions, validation, compilation, and optimization.
@@ -243,6 +272,16 @@ Ferrastra owns:
 - CPU dispatch, scratch memory, cancellation polling, and evaluation diagnostics.
 
 Ferrastra must not interpret CuteCanvas layer or tool concepts or QPane viewport concepts.
+
+### 6.4 R-Candy owns declarative language concerns
+
+R-Candy is part of the Ferrastra product but remains outside computation and
+runtime crates. It owns grammar, syntax, spans, name and package resolution,
+type checking against Ferrastra descriptors, graph lowering, source maps,
+canonical formatting, and language diagnostics. It performs no evaluation,
+package acquisition, filesystem or network access, host policy, model
+orchestration, or document work. Detailed ownership and artifact rules are in
+`RCANDY_DESIGN.md`.
 
 ---
 
@@ -265,6 +304,12 @@ QPane  ✕ CuteCanvas
 Applications may depend on all three.
 
 The Rust crate dependency graph must remain acyclic and conform to the allowlist in Section 10.
+
+Within Ferrastra, `ferrastra-rcandy` may depend on `ferrastra-core` and
+`ferrastra-graph`; computation, graph, engine, and runtime crates never depend on
+it. `ferrastra-python` may depend on it only when exposing the implemented
+`ferrastra.rcandy` surface. Evaluation of a serialized `GraphDefinition` never
+requires R-Candy.
 
 ---
 
@@ -290,6 +335,16 @@ These invariants apply from the first commit.
 16. **No random quality behavior.** Interactive, exact, and export behavior are deterministic and explicit.
 17. **No operation without a semantic ID and version.** Crate versions do not substitute for operation semantics.
 18. **No operation without backward-demand, forward-damage, memory, cancellation, and conformance definitions.**
+19. **No frontend-specific graph semantics.** Rust builders, Python builders,
+    R-Candy lowering, CuteCanvas compilation, and structured tools produce the
+    same canonical graph contract.
+20. **No silent source/graph divergence.** An authored source and executable
+    graph are published together or explicitly detached as required by
+    `RCANDY_DESIGN.md`.
+21. **No authoring prose in computation identity.** Labels, comments, tags,
+    examples, search metadata, and control layout do not invalidate products.
+22. **No generated or imported bypass.** Every graph passes Ferrastra validation
+    and host admission regardless of its author.
 
 ---
 
@@ -305,6 +360,7 @@ crates/
 ├── ferrastra-core/
 ├── ferrastra-store/
 ├── ferrastra-graph/
+├── ferrastra-rcandy/          # introduced when executable language work begins
 ├── ferrastra-runtime/
 ├── ferrastra-raster/
 ├── ferrastra-engine/
@@ -326,7 +382,7 @@ packages/
     └── src/cutecanvas/ferrastra/
 
 tools/
-├── check_ferrastra_architecture.py
+├── check_architecture.py
 ├── check_ferrastra_operations.py
 └── ferrastra_benchmarks.py
 
@@ -354,6 +410,8 @@ Owns only stable value contracts:
 - Pixel and coverage format descriptions.
 - Borrowed product views.
 - Operation descriptors and operation trait contracts.
+- Typed parameter values, units, exposure classes, structured diagnostic
+  records, and request-analysis contracts.
 - Quality, edge, alpha, and working-space enums.
 - Cancellation and execution budgets.
 - Errors and evaluation reports.
@@ -383,9 +441,11 @@ Owns graph structure and compilation:
 
 - Typed nodes, ports, connections, and outputs.
 - Graph transactions and immutable graph revisions.
+- Versioned graph serialization, normalization, and unknown-record retention.
 - Cycle rejection and type checking.
 - Bounds and product inference.
-- Stable graph and node identities.
+- Stable node, graph-revision, and graph-content identities.
+- Transactional patches with base revisions and exact preconditions.
 - Nested graph expansion and compound operation templates.
 - Dead-node elimination and common-subexpression sharing.
 - Optimization metadata and compiled plan representation.
@@ -394,7 +454,24 @@ Allowed internal dependencies: `ferrastra-core`.
 
 Must not execute kernels, own caches, retain source pixels, or import operation implementation crates.
 
-### 10.4 `ferrastra-runtime`
+### 10.4 `ferrastra-rcandy`
+
+Owns declarative language behavior:
+
+- Tokens, syntax, spans, and typed syntax trees.
+- Name, operation-version, and supplied package-lock resolution.
+- Type checking against Ferrastra operation descriptors.
+- Lowering to canonical `GraphDefinition` and source-map construction.
+- Canonical formatting and language diagnostics.
+
+Allowed internal dependencies: `ferrastra-core`, `ferrastra-graph`.
+
+It must not own graph semantics, operation descriptors, evaluation, scheduling,
+caches, stores, package acquisition, host policy, model orchestration, Python,
+Qt, QPane, or CuteCanvas. Create the crate only when executable parser or
+compiler work begins.
+
+### 10.5 `ferrastra-runtime`
 
 Owns evaluation lifecycle:
 
@@ -411,7 +488,7 @@ Allowed internal dependencies: `ferrastra-core`, `ferrastra-store`, `ferrastra-g
 
 Runtime invokes operations through traits declared in `ferrastra-core`. It must not directly depend on `ferrastra-raster`, `ferrastra-vector`, or `ferrastra-paint`.
 
-### 10.5 `ferrastra-raster`
+### 10.6 `ferrastra-raster`
 
 Owns canonical pure raster and coverage operations:
 
@@ -427,7 +504,7 @@ Allowed internal dependencies: `ferrastra-core` and, only where required for own
 
 Must not own graph planning, runtime scheduling, Python bindings, or Qt adaptation.
 
-### 10.6 `ferrastra-vector`
+### 10.7 `ferrastra-vector`
 
 Owns framework-neutral vector computation:
 
@@ -441,7 +518,7 @@ Allowed internal dependencies: `ferrastra-core`, `ferrastra-store`.
 
 Text shaping remains outside Ferrastra initially; shaped glyph outlines may enter as vector products.
 
-### 10.7 `ferrastra-paint`
+### 10.8 `ferrastra-paint`
 
 Owns stateful native editing execution:
 
@@ -455,7 +532,7 @@ Allowed internal dependencies: `ferrastra-core`, `ferrastra-store`, `ferrastra-r
 
 Must not own CuteCanvas tools, undo, resource selection, or publication policy.
 
-### 10.8 `ferrastra-engine`
+### 10.9 `ferrastra-engine`
 
 Owns facade assembly only:
 
@@ -464,11 +541,12 @@ Owns facade assembly only:
 - Stable high-level Rust API.
 - Feature selection for the published engine.
 
-Allowed internal dependencies: all implemented Ferrastra crates.
+Allowed internal dependencies: implemented Ferrastra computation, store, graph,
+runtime, and operation crates. It does not depend on `ferrastra-rcandy`.
 
 No algorithms or planning logic may live here.
 
-### 10.9 `ferrastra-python`
+### 10.10 `ferrastra-python`
 
 Owns the Python boundary only:
 
@@ -476,9 +554,11 @@ Owns the Python boundary only:
 - Python buffer-protocol validation.
 - Exception translation.
 - Generated operation schemas and stubs.
+- The `ferrastra.rcandy` binding and typed Python surface when implemented.
 - Opaque handles for graph revisions, stores, products, sessions, and cancellation.
 
-Allowed internal dependencies: `ferrastra-engine` and the minimum supporting Ferrastra crates.
+Allowed internal dependencies: `ferrastra-engine`, the minimum supporting
+Ferrastra crates, and `ferrastra-rcandy` only for the public language surface.
 
 Only this crate may depend on PyO3 or Python/NumPy binding crates. It must not contain kernels, graph planning, cache policy, or package-specific adapters.
 
@@ -506,7 +586,7 @@ Every new or changed QPane/CuteCanvas adapter module keeps the repository’s ex
 - **Soft ceiling:** 350 nonblank, noncomment production lines.
 - **Hard gate:** 500 nonblank, noncomment production lines.
 - Generated files, large static test fixtures, and declarative tables may be excluded.
-- A hard-gate exception requires an entry in `ARCHITECTURE_WAIVERS.toml` containing owner, reason, issue, and expiry milestone.
+- A hard-gate exception requires an exact, bounded entry in the owning package's `ARCHITECTURE_WAIVERS.toml`; mixed ownership also requires a linked current debt snapshot.
 - Waivers may not be used for files that combine planning, execution, storage, binding, or package-adapter responsibilities.
 
 Line count is not the definition of responsibility, but it is a useful structural alarm.
@@ -727,19 +807,25 @@ The aspirational vector store supports:
 
 A graph definition contains:
 
-- Stable graph revision identity.
-- Typed node IDs and port IDs.
-- Operation semantic IDs and normalized parameters.
-- Typed connections.
-- Source revision handles.
-- Named graph outputs.
-- Optional nested compound-operation definitions.
+- Stable schema version, `GraphRevisionId`, and `GraphContentId`.
+- Stable authoring `NodeId` values and named typed ports.
+- Operation semantic IDs, versions, and normalized typed parameters with units.
+- Typed constants, parameter references, and connections.
+- Declared graph inputs and named outputs.
+- Source revision handles, explicit coordinates, seeds, and capabilities.
+- Exposed effect parameters and optional compound definitions.
+- Authoring metadata segregated from computational identity.
 
-Graph definitions are immutable once committed.
+Graph definitions are immutable once committed and serialize canonically.
+Unavailable operation versions and unknown records round-trip without loss but
+cannot compile for evaluation. Rust, Python, R-Candy, CuteCanvas, and structured
+tools construct this one schema. `RCANDY_DESIGN.md` defines the coordinated
+source artifact without making source executable authority.
 
 ### 14.2 Graph editing
 
-CuteCanvas must not resend an untyped full graph on every parameter drag. Ferrastra exposes graph transactions:
+CuteCanvas must not resend an untyped full graph on every parameter drag.
+Ferrastra exposes typed graph transactions and serializable `GraphPatch` values:
 
 ```python
 edit = graph.begin_edit()
@@ -748,7 +834,12 @@ edit.replace_source_revision(source_node, new_revision)
 next_graph = edit.commit()
 ```
 
-The runtime retains unchanged compiled state and caches by stable identity.
+Every patch names its base `GraphRevisionId` and exact preconditions. Validation
+and commit are atomic: stale or invalid patches return structured diagnostics or
+conflicts and publish nothing. Accepted patches preserve unchanged `NodeId`
+values. The runtime retains unchanged compiled state and caches by computational
+identity. Whole-graph replacement remains an explicit import operation rather
+than the only editing mechanism.
 
 ### 14.3 Graph validation
 
@@ -759,9 +850,15 @@ Compilation rejects:
 - Type-incompatible connections.
 - Unsupported format, alpha, color, edge, or quality combinations.
 - Invalid parameter ranges.
+- Invalid parameter units, coordinates, or deterministic-seed contracts.
 - Unbounded operations without declared domain policy.
 - Operations lacking demand/damage behavior.
 - Source revisions unavailable to the selected runtime.
+- Capabilities unavailable to the selected execution contract.
+
+Retention and executability are separate states: serialization preserves an
+unknown operation record, while compilation reports its unavailable semantic
+version with stable node and port targets.
 
 ### 14.4 Compiled execution graph
 
@@ -1002,16 +1099,19 @@ Adding a correct operation should require declaring semantics, not rebuilding en
 A first-party operation declaration should generate or register:
 
 - Semantic ID and version.
-- Category.
+- Exposure class and stable category.
 - Typed ports.
 - Parameter schema and normalization.
+- Defaults, hard limits, recommended ranges, units, and enum values.
 - Supported formats, alpha, working spaces, edge modes, and quality tiers.
-- Demand and damage behavior.
-- Memory estimate.
+- Coordinate, deterministic-seed, demand, damage, support, displacement, and
+  locality behavior.
+- Capability requirements and request-sensitive cost and memory analysis.
 - Graph-builder method.
 - Cache-key serialization.
 - Python binding and stub.
-- Documentation metadata.
+- Summary, detailed behavior, use cases, composition guidance, warnings,
+  inappropriate uses, and control hints.
 - Conformance-test scaffold.
 - Benchmark registration.
 
@@ -1033,7 +1133,15 @@ pub struct Lanczos3 {
 }
 ```
 
-CuteCanvas decides UI presentation. Ferrastra may provide semantic metadata such as unit, hard range, recommended range, default, precision, and description.
+The descriptor separates computation from authoring metadata. Computation fields
+govern validation, identity, compilation, and conformance. Prose, examples, tags,
+search data, translated labels, and control layout guide humans and authoring
+tools without changing products. CuteCanvas decides final UI presentation.
+
+Every entry point is classified as `public_graph`, `host_only`, `session_only`,
+or `internal`. R-Candy and structured graph tools expose only `public_graph`
+operations. Stateful edit sessions, runtime administration, stores, schedulers,
+caches, and host resource policy never masquerade as graph operations.
 
 ### 20.1 Operation categories
 
@@ -1568,9 +1676,12 @@ Architecture gates must be merged before the first production kernel.
 
 ### 29.1 Repository checker
 
-Add `tools/check_ferrastra_architecture.py`. It must fail CI for:
+Use `tools/check_architecture.py`. It must fail CI for:
 
 - Forbidden crate dependency edges according to Section 10.
+- Any computation, graph, engine, or runtime dependency on `ferrastra-rcandy`.
+- Any R-Candy dependency on runtime, stores, operation implementations, Python,
+  Qt, QPane, CuteCanvas, or host policy.
 - Qt dependencies or `PySide6` imports anywhere in Ferrastra.
 - PyO3/Python dependencies outside `ferrastra-python`.
 - QPane or CuteCanvas types referenced by Ferrastra.
@@ -1581,7 +1692,8 @@ Add `tools/check_ferrastra_architecture.py`. It must fail CI for:
 - Missing module responsibility declarations.
 - Unsafe modules without `SAFETY.md` ownership and allowlist entries.
 - Use of a global Rayon pool or equivalent unbounded global parallelism.
-- Operation definitions missing semantic IDs/versions or required contract metadata.
+- Operation definitions missing semantic IDs, versions, exposure class, complete
+  computational contracts, or required authoring metadata.
 
 Add `tests/test_ferrastra_architecture.py` to characterize the checker with deliberate invalid fixtures, following the existing `test_trinity_contracts.py` style.
 
@@ -1604,6 +1716,9 @@ Temporary presentation paths remain explicitly allowlisted by path and reason.
 - `ferrastra-core` compiles with no std features that require Python or application frameworks.
 - Operation implementation crates compile without `ferrastra-runtime`.
 - `ferrastra-graph` compiles without operation implementation crates.
+- `ferrastra-graph`, `ferrastra-runtime`, and `ferrastra-engine` compile without
+  `ferrastra-rcandy`, and `ferrastra-rcandy` compiles without runtime or host
+  crates once it exists.
 - `ferrastra-runtime` tests use injected test operations, proving no direct dependency on first-party raster/vector crates.
 
 ### 29.4 Public API and packaging tests
@@ -1644,6 +1759,12 @@ Required categories:
 - Deterministic product keys.
 - FFI fuzzing and panic containment.
 - Cross-platform output contract.
+- Canonical graph round trips and unknown-operation preservation.
+- Rust-builder, Python-builder, R-Candy-lowering, and structured-tool graph
+  equivalence for shared fixtures.
+- Graph-content identity isolation from prose and authoring metadata.
+- Transactional patch atomicity, stale-base rejection, and unaffected-branch
+  product-key preservation.
 
 ### 30.1 Sampler corpus
 
@@ -1726,6 +1847,12 @@ Do not relax a budget to land an implementation. Profile and fix the authoritati
 
 Ferrastra must make performance and correctness inspectable.
 
+Validation, compilation, patch, analysis, and execution failures use structured
+diagnostics with stable codes; severity; graph, node, port, parameter, package,
+and optional frontend source-span targets; expected and actual values; concise
+text; related records; and safe machine-readable repairs where available.
+Frontend source spans annotate Ferrastra targets and never enter graph identity.
+
 For any product, the runtime can report:
 
 - Graph revision.
@@ -1755,6 +1882,15 @@ runtime.product_provenance(product_key)
 
 QPane and CuteCanvas diagnostics should adapt these records rather than reproduce them.
 
+Before execution, request-aware analysis accepts graph output, region, scale,
+quality, format, capabilities, execution budget, and host limits. It reports
+locality, support, displacement, input expansion, required capabilities,
+dominant work, duplicated expensive branches, avoidable conversions, possible
+fusion, intermediate and retained memory, and interactive-quality availability.
+The result is a deterministic admission input with explicit assumptions, not an
+exact wall-clock prediction. Imported and generated graphs pass authoring checks,
+Ferrastra validation, and host admission as distinct gates.
+
 ---
 
 ## 33. Implementation phases
@@ -1766,17 +1902,24 @@ Each phase is a complete architectural slice with exit criteria. Do not merge pa
 Deliver:
 
 - This design document in the repository.
+- `RCANDY_DESIGN.md` adopted as the normative authoring-language charter and
+  reconciled with product, crate, identity, admission, and phase boundaries.
 - Ferrastra ownership sections added to root and package `AGENTS.md` files.
 - Rust workspace skeleton.
-- `check_ferrastra_architecture.py` and characterization tests.
+- `check_architecture.py` and characterization tests.
 - Crate dependency allowlist.
 - Module responsibility and line-count gates.
 - Licensing/header support for Rust files.
 - CI jobs for formatting, Clippy, Rust tests, architecture checks, and isolated Python wheel builds.
+- Non-production graph, descriptor, diagnostic, patch, unknown-record, and
+  cross-frontend fixtures sufficient to verify the planned contracts without
+  exposing speculative production APIs.
 
 Exit criteria:
 
 - No production behavior changes.
+- No parser, R-Candy crate, production graph API, placeholder operation, or
+  language-server surface.
 - Existing QPane/CuteCanvas suite passes.
 - Deliberate architecture violations fail tests.
 - A new engineer can identify the owner and allowed dependencies of every Ferrastra crate.
@@ -1786,14 +1929,20 @@ Exit criteria:
 Implement:
 
 - Core IDs, regions, transforms, formats, quality, alpha, color, and edge contracts.
-- Operation semantic identity and trait.
-- Minimal typed graph definition and immutable graph revision.
-- Cycle/type validation.
+- Operation semantic identity, exposure class, complete descriptor, and trait.
+- Versioned typed `GraphDefinition`, `NodeId`, `GraphRevisionId`,
+  `GraphContentId`, and immutable graph revisions.
+- Typed values and units, canonical serialization and normalization, exposed
+  parameters, and unknown-record preservation.
+- Cycle/type/unit/capability validation with stable structured diagnostics.
+- Transactional `GraphPatch` with base revisions and preconditions.
+- Request-analysis schema for capability, locality, cost, and memory admission.
 - Minimal compiled plan.
 - One native raster source product.
 - Backward demand and forward damage for source and identity/pass-through operations.
 - Runtime with cancellation, memory budget, product publication, and trace.
 - Product-key generation.
+- Rust and Python graph construction and serialization parity.
 
 First executable graph:
 
@@ -1807,6 +1956,9 @@ Exit criteria:
 - Damage is propagated correctly.
 - Product identity is deterministic.
 - Runtime and operation implementation crates remain decoupled.
+- Equivalent Rust and Python fixtures normalize to the same graph content ID.
+- Authoring metadata changes do not change graph content or product identity.
+- Invalid patches reject atomically and unknown operations round-trip unchanged.
 
 ### Phase 2 — Lanczos3 vertical slice
 
@@ -1944,6 +2096,9 @@ CuteCanvas adds persistent effect descriptors and graph compilation for:
 - Masks.
 - Opacity.
 - Initial blend operations.
+- Coordinated R-Candy-authored artifacts when the language surface is available,
+  including source, resolved package lock, source map, canonical graph,
+  diagnostics, generated controls, and transactional source or graph edits.
 
 QPane consumes compiled graph roots through source-neutral sampled products.
 
@@ -1952,6 +2107,8 @@ Exit criteria:
 - Effects can be edited without rewriting source pixels.
 - Parameter changes invalidate only affected graph products/regions.
 - Export and viewport use the same canonical exact graph result.
+- Failed source compilation preserves the last valid executable graph, and
+  unavailable operations remain losslessly retained without evaluation.
 
 ### Phase 9 — Native vector engine
 
@@ -2003,6 +2160,15 @@ Required for full large-document ambitions, but may follow the initial feature-c
 - Native export pipelines.
 - Graph profiler/inspector UI adapters.
 
+### R-Candy authoring track
+
+R-Candy follows the dependency-ordered track in `RCANDY_DESIGN.md`: Stage 0
+architecture, Phase 1 shared graph and catalog contracts, complete descriptors
+with the first real operations, a structured authoring prototype, the minimal
+compiler and Python surface, CuteCanvas authored-effect integration, then
+packages and language tooling. The parser does not block native operation work,
+and native runtime work never waits on or depends on the parser.
+
 ---
 
 ## 34. First implementation work packages
@@ -2019,10 +2185,12 @@ The team can begin with the following ordered pull requests.
    Add the architecture checker, invalid fixtures, line-count/waiver mechanism, and adapter-only import rules.
 
 4. **`feat(ferrastra-core): define products, regions, semantics, and operation contracts`**
-   No kernel yet.
+   Include typed values, units, descriptor exposure, diagnostics, and analysis;
+   no kernel yet.
 
 5. **`feat(ferrastra-graph): add immutable typed graph and compiler baseline`**
-   Source and identity nodes only.
+   Add canonical serialization, content identity, transactional patches, and
+   unknown-record preservation; source and identity nodes only.
 
 6. **`feat(ferrastra-runtime): add regional evaluation, damage, identity, and trace`**
    No QPane integration yet.
@@ -2034,7 +2202,7 @@ The team can begin with the following ordered pull requests.
    Same semantic ID; output must remain within the exact contract.
 
 9. **`feat(ferrastra-python): expose graph, source, cancellation, and resample contracts`**
-   Add independent wheel and isolated tests.
+   Prove graph construction parity and add independent wheel and isolated tests.
 
 10. **`feat(qpane): adopt Ferrastra for exact pyramid generation`**
     Add adapter, migrate every caller, delete the old exact Qt path, and preserve QPane lifecycle tests.
@@ -2044,6 +2212,15 @@ The team can begin with the following ordered pull requests.
 
 12. **`feat(ferrastra-raster): begin adaptive sampler framework`**
     Use it as the foundation for NoHalo and LoHalo, not as a one-off second resampler.
+
+13. **`test(ferrastra-authoring): prove structured graph authoring workflows`**
+    Exercise catalog discovery, construction, patching, validation, analysis,
+    and preview admission before introducing textual syntax.
+
+14. **`feat(ferrastra-rcandy): compile minimal typed effects`**
+    Add the crate only with executable parsing, resolution, lowering, source-map,
+    diagnostic, and formatting responsibilities; expose it through
+    `ferrastra.rcandy` with cross-frontend conformance.
 
 Do not begin broad operation migration before PRs 1–6 establish the architectural baseline.
 
@@ -2189,6 +2366,26 @@ Ferrastra is **not feature complete** until every required item below is satisfi
 - [ ] Cancellation and stale-work latency meet declared limits.
 - [ ] No GUI-thread heavy work has been introduced.
 
+### 35.11 R-Candy and structured authoring
+
+- [ ] Rust, Python, R-Candy, CuteCanvas, and structured tools share one
+  `GraphDefinition` and produce equivalent normalized computation.
+- [ ] Public graph operations have complete computation and authoring
+  descriptors with explicit exposure classes.
+- [ ] Graph revisions, graph content, node identities, and product keys remain
+  distinct and tested.
+- [ ] Unknown operations round-trip and failed source compilation preserves the
+  prior valid graph.
+- [ ] Graph patches are transactional, conflict-aware, and preserve unchanged
+  branches.
+- [ ] Request-aware analysis and host admission apply to imported and generated
+  graphs.
+- [ ] R-Candy compilation is deterministic, I/O-free, and locked to supplied
+  operation and package resolutions.
+- [ ] Evaluation crates do not depend on R-Candy and serialized graphs execute
+  without its compiler.
+- [ ] The R-Candy definition of done in `RCANDY_DESIGN.md` is complete.
+
 ---
 
 ## 36. Post-feature-complete aspirations
@@ -2255,20 +2452,25 @@ Before implementing any Ferrastra feature, the engineer must write down:
 1. The authoritative owner.
 2. Input and output product types.
 3. Semantic operation ID and version.
-4. Backward-demand rule.
-5. Forward-damage rule.
-6. Pixel/coverage/vector semantics.
-7. Alpha and working-space semantics.
-8. Edge behavior.
-9. Exact and interactive quality behavior.
-10. Product-key inputs.
-11. Memory and scratch estimate.
-12. Cancellation behavior.
-13. Parallelism policy.
-14. Numerical oracle.
-15. Tile-equivalence test.
-16. Performance gates.
-17. Current QPane/CuteCanvas code that will be deleted.
+4. Exposure class and complete operation descriptor.
+5. Typed parameters, units, ranges, defaults, and coordinate behavior.
+6. Backward-demand rule.
+7. Forward-damage rule.
+8. Pixel/coverage/vector semantics.
+9. Alpha and working-space semantics.
+10. Edge behavior.
+11. Exact and interactive quality behavior.
+12. Product-key inputs.
+13. Capability and request-analysis behavior.
+14. Memory and scratch estimate.
+15. Cancellation behavior.
+16. Parallelism policy.
+17. Structured diagnostic behavior.
+18. Numerical oracle.
+19. Tile-equivalence test.
+20. Cross-frontend construction fixture when `public_graph`.
+21. Performance gates.
+22. Current QPane/CuteCanvas code that will be deleted.
 
 If any answer is missing, implementation has not started at the correct level.
 
