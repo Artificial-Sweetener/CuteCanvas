@@ -51,6 +51,7 @@ class PresentedMaskFrame:
     image: QImage
     overscan_margin: int
     mask_layer_count: int
+    mask_layer_ids: tuple[uuid.UUID, ...]
     mask_sample_scales: tuple[float, ...]
     mask_item_states: tuple[tuple[str, int, int, int, int, int], ...]
 
@@ -106,6 +107,11 @@ class PresentedFrameProbe:
             mask_layer_count = sum(
                 item.descriptor.kind is LayerKind.MASK for item in plan.render_items
             )
+            mask_layer_ids = tuple(
+                item.descriptor.layer_id
+                for item in plan.render_items
+                if item.descriptor.kind is LayerKind.MASK
+            )
             mask_sample_scales = tuple(
                 round(
                     tile.image_source_rect.width() / tile.source_rect.width(),
@@ -126,6 +132,7 @@ class PresentedFrameProbe:
                     image=buffer.copy(),
                     overscan_margin=self._renderer.buffer_overscan_physical_px,
                     mask_layer_count=mask_layer_count,
+                    mask_layer_ids=mask_layer_ids,
                     mask_sample_scales=mask_sample_scales,
                     mask_item_states=mask_item_states,
                 )

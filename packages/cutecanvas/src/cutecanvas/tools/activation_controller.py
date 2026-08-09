@@ -107,7 +107,7 @@ class EditorToolActivationController:
         ):
             composition_id = canvas.currentCompositionID()
             if mask_service.ensureActiveMaskForComposition(composition_id):
-                mask_service.prepareBrushInteraction()
+                mask_service.stroke_interactions.prepare_brush()
                 canvas.view().coordinate_scene_descriptor()
                 resolution = canvas.editorOperationResolver().resolve(
                     EditorOperation.PAINT
@@ -117,4 +117,4 @@ class EditorToolActivationController:
             and resolution.allowed
             and mask_service is not None
         ):
-            mask_service.prepareBrushInteraction()
+            mask_service.stroke_interactions.prepare_brush()

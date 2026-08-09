@@ -47,6 +47,7 @@ from .target_contracts import (
     FloodFillTargetOwner,
     PaintTargetContext,
     PaintTargetIdentity,
+    PaintTargetInteractionPreparer,
     PaintTargetOwner,
     PaintTargetRegistry,
     RetainedCoverageTargetOwner,
@@ -362,6 +363,17 @@ class PaintingCoordinator:
     def current_context(self) -> PaintTargetContext | None:
         """Return the current resolved target context for editor coordinators."""
         return self._validated_context()
+
+    def prepare_interaction(self) -> bool:
+        """Let the current owner establish pointer-safe spatial authority."""
+        resolved = self._current()
+        if resolved is None:
+            return False
+        target, owner = resolved
+        return bool(
+            not isinstance(owner, PaintTargetInteractionPreparer)
+            or owner.prepare_interaction(target)
+        )
 
     def can_fill_coverage(self) -> bool:
         """Return whether the selected destination accepts bounded coverage fills."""

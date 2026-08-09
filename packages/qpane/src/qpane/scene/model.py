@@ -27,8 +27,8 @@ from typing import TYPE_CHECKING
 from .source_references import LayerSourceReference
 
 if TYPE_CHECKING:
-    from .affine import LayerTransform
     from .effects import LayerEffectReference
+    from .mapping import LayerMapping
     from .raster import RasterBounds
 
 
@@ -145,7 +145,7 @@ class LayerDescriptor:
     capabilities: LayerContentCapabilities = LayerContentCapabilities()
     source_revision: int = 0
     raster_bounds: RasterBounds | None = None
-    transform: LayerTransform | None = None
+    transform: LayerMapping | None = None
     effects: tuple[LayerEffectReference, ...] = ()
     label: str | None = None
 
@@ -155,6 +155,28 @@ class LayerDescriptor:
             raise ValueError("layer opacity must be between 0.0 and 1.0")
         if self.source_revision < 0:
             raise ValueError("layer source revision must be non-negative")
+        if self.transform is not None:
+            from .affine import LayerTransform
+            from .bilinear import BilinearLayerTransform
+            from .mapping import validate_layer_mapping
+            from .piecewise import PiecewiseLayerTransform
+            from .projective import ProjectiveLayerTransform
+
+            if not isinstance(
+                self.transform,
+                (
+                    LayerTransform,
+                    ProjectiveLayerTransform,
+                    PiecewiseLayerTransform,
+                    BilinearLayerTransform,
+                ),
+            ):
+                raise TypeError("layer transform must be a layer mapping")
+            if self.raster_bounds is None:
+                if not self.transform.is_invertible:
+                    raise ValueError("layer mapping must be invertible")
+            else:
+                validate_layer_mapping(self.transform, self.raster_bounds)
 
 
 @dataclass(frozen=True, slots=True)

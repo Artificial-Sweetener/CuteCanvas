@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 import numpy as np
 from qpane.sdk.scene import (
@@ -26,10 +27,12 @@ from qpane.sdk.scene import (
     RasterLayerRenderItem,
     SampledLayerRenderItem,
     SceneDescriptor,
+    SceneLayerAssetKey,
     SceneRenderItem,
     TransientRasterContribution,
 )
 
+from ..masks.live_preview_raster import LiveMaskPreviewPatches
 from ..masks.live_preview_store import MaskLivePreviewStore
 from ..scene.layer_edge_preview import LayerEdgePreviewStore
 from ..scene.pixel_fragments import RasterPixelFormat
@@ -38,7 +41,16 @@ from ..scene.pixel_transitions import RasterPixelTransition
 from ..scene.source_capabilities import EditorSourceCapabilities
 from .floating_pixels import FloatingPixelRenderCompiler
 from .layer_edge_preview import LayerEdgePreviewRenderCompiler
-from .raster_transitions import RasterTransitionRenderCompiler
+from .raster_transitions import RasterTransitionRenderCompiler, raster_item_asset_key
+
+
+@dataclass(frozen=True, slots=True)
+class _SettlingMaskPreview:
+    """Retain one committed preview until this view sees a newer source revision."""
+
+    preview: LiveMaskPreviewPatches
+    previous_asset_key: SceneLayerAssetKey | None
+    contribution: TransientRasterContribution | None
 
 
 class MaskLivePreviewRenderCompiler:
@@ -54,9 +66,27 @@ class MaskLivePreviewRenderCompiler:
         self._capabilities = capabilities
         self._previews = previews
         self._current_scene = current_scene
+        self._observed_asset_keys: dict[uuid.UUID, SceneLayerAssetKey] = {}
+        self._last_contributions: dict[uuid.UUID, TransientRasterContribution] = {}
+        self._settling: dict[uuid.UUID, _SettlingMaskPreview] = {}
+        self._closed = False
         self._transitions = RasterTransitionRenderCompiler(
             capabilities.pixel_presentation
         )
+        previews.settlement_prepared.connect(self._capture_settlement)
+
+    def shutdown(self) -> None:
+        """Release document observation and retained settlement snapshots."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._previews.settlement_prepared.disconnect(self._capture_settlement)
+        except RuntimeError:
+            pass
+        self._observed_asset_keys.clear()
+        self._last_contributions.clear()
+        self._settling.clear()
 
     def target(self) -> tuple[uuid.UUID, uuid.UUID, RasterBounds] | None:
         """Return the visible layer and local bounds carrying a mask preview."""
@@ -67,7 +97,7 @@ class MaskLivePreviewRenderCompiler:
             resource_id = getattr(layer.source, "resource_id", None)
             if not isinstance(resource_id, uuid.UUID):
                 continue
-            preview = self._previews.preview(resource_id)
+            preview = self._preview(resource_id)
             if preview is not None and preview.content_bounds is not None:
                 return scene.scene_id, layer.layer_id, preview.content_bounds
         return None
@@ -86,7 +116,29 @@ class MaskLivePreviewRenderCompiler:
             resource_id = getattr(descriptor.source, "resource_id", None)
             if not isinstance(resource_id, uuid.UUID):
                 continue
-            preview = self._previews.preview(resource_id)
+            preview = self._preview(resource_id)
+            if preview is not None:
+                self._observed_asset_keys[resource_id] = raster_item_asset_key(
+                    candidate
+                )
+            settlement = self._settling.get(resource_id)
+            retained_source_key: SceneLayerAssetKey | None = None
+            settlement_uses_current_asset = False
+            if (
+                preview is not None
+                and preview.retain_until_durable
+                and settlement is not None
+                and settlement.preview.session_id == preview.session_id
+            ):
+                previous_key = settlement.previous_asset_key
+                settlement_uses_current_asset = (
+                    previous_key is None
+                    or raster_item_asset_key(candidate) != previous_key
+                )
+                if not settlement_uses_current_asset:
+                    retained_source_key = previous_key
+                elif settlement.contribution is not None:
+                    return settlement.contribution
             surface_bounds = descriptor.raster_bounds
             patch_bounds = preview.content_bounds if preview is not None else None
             if preview is None or surface_bounds is None or patch_bounds is None:
@@ -110,17 +162,63 @@ class MaskLivePreviewRenderCompiler:
                 before,
                 after,
             )
-            return self._transitions.compile(
+            retain_until_durable = (
+                preview.retain_until_durable and not settlement_uses_current_asset
+            )
+            contribution = self._transitions.compile(
                 session_id=preview.session_id,
                 scene_id=descriptor.scene_id,
                 layer_id=descriptor.layer_id,
                 pixel_format=RasterPixelFormat.COVERAGE8,
                 transition=transition,
-                generation=(preview.revision, preview.retain_until_durable),
+                generation=(preview.revision, retain_until_durable),
                 item=candidate,
-                retain_until_durable=preview.retain_until_durable,
+                retain_until_durable=retain_until_durable,
             )
+            if contribution is None:
+                return None
+            if retained_source_key is not None:
+                contribution = replace(
+                    contribution,
+                    source_asset_key=retained_source_key,
+                )
+            self._last_contributions[resource_id] = contribution
+            return contribution
         return None
+
+    def admit(self, contribution: TransientRasterContribution) -> None:
+        """Release a settlement after QPane admits its exact handoff product."""
+        for mask_id, settlement in tuple(self._settling.items()):
+            if settlement.preview.session_id == contribution.session_id:
+                self._settling.pop(mask_id, None)
+                self._last_contributions.pop(mask_id, None)
+                return
+
+    def _preview(self, mask_id: uuid.UUID) -> LiveMaskPreviewPatches | None:
+        """Return active coverage or this view's unpresented settlement snapshot."""
+        active = self._previews.preview(mask_id)
+        if active is not None:
+            return active
+        settlement = self._settling.get(mask_id)
+        return None if settlement is None else settlement.preview
+
+    def _capture_settlement(
+        self,
+        mask_id: object,
+        preview: object,
+    ) -> None:
+        """Retain committed coverage until this view compiles its handoff frame."""
+        if isinstance(mask_id, uuid.UUID) and isinstance(
+            preview, LiveMaskPreviewPatches
+        ):
+            contribution = self._last_contributions.get(mask_id)
+            if contribution is not None:
+                contribution = replace(contribution, retain_until_durable=True)
+            self._settling[mask_id] = _SettlingMaskPreview(
+                preview,
+                self._observed_asset_keys.get(mask_id),
+                contribution,
+            )
 
 
 class TransientRasterRenderCoordinator:
@@ -144,6 +242,14 @@ class TransientRasterRenderCoordinator:
             mask_previews,
             current_scene,
         )
+
+    def shutdown(self) -> None:
+        """Release view-scoped transient presentation observation."""
+        self._masks.shutdown()
+
+    def admit(self, contribution: TransientRasterContribution) -> None:
+        """Acknowledge one contribution after QPane admits it for painting."""
+        self._masks.admit(contribution)
 
     def target(
         self,

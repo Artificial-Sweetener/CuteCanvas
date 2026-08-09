@@ -28,7 +28,10 @@ from cutecanvas.editor.selection_projection import (
 )
 from cutecanvas.selection import LayerCoverageProjector
 from cutecanvas.types import RasterExtentPolicy
+from PySide6.QtCore import QPointF
 from qpane.scene.affine import LayerTransform
+from qpane.scene.bilinear import BilinearLayerTransform
+from qpane.scene.piecewise import PiecewiseLayerTransform
 from qpane.scene.raster import RasterBounds
 
 
@@ -127,6 +130,74 @@ def test_integer_translation_round_trip_preserves_random_soft_coverage() -> None
         assert np.array_equal(restored.pixels, pixels)
         assert scene.pixels is source.pixels
         assert restored.pixels is source.pixels
+
+
+def test_joined_edge_projection_keeps_the_complete_source_selected() -> None:
+    """A scene selection containing the target triangle includes its joined edge."""
+    projector = LayerCoverageProjector()
+    mapping = BilinearLayerTransform(
+        (
+            QPointF(10.0, 10.0),
+            QPointF(30.0, 10.0),
+            QPointF(30.0, 30.0),
+            QPointF(10.0, 30.0),
+        ),
+        (
+            QPointF(30.0, 10.0),
+            QPointF(30.0, 10.0),
+            QPointF(30.0, 30.0),
+            QPointF(10.0, 30.0),
+        ),
+    )
+    scene = _coverage(
+        RasterBounds(10, 10, 20, 20),
+        np.full((20, 20), 255, dtype=np.uint8),
+    )
+
+    projected = projector.project_to_layer(
+        scene,
+        mapping,
+        RasterBounds(10, 10, 20, 20),
+    )
+
+    assert projected is not None
+    assert projected.bounds == RasterBounds(10, 10, 20, 20)
+    assert np.all(projected.pixels == 255)
+
+
+def test_piecewise_projection_keeps_every_affine_patch_selected() -> None:
+    """A scene selection containing the finite cage includes every source patch."""
+    projector = LayerCoverageProjector()
+    mapping = PiecewiseLayerTransform(
+        (
+            QPointF(10.0, 10.0),
+            QPointF(30.0, 10.0),
+            QPointF(30.0, 20.0),
+            QPointF(30.0, 30.0),
+            QPointF(10.0, 30.0),
+        ),
+        (
+            QPointF(10.0, 10.0),
+            QPointF(32.0, 10.0),
+            QPointF(28.0, 20.0),
+            QPointF(30.0, 30.0),
+            QPointF(10.0, 30.0),
+        ),
+    )
+    scene = _coverage(
+        RasterBounds(10, 10, 22, 20),
+        np.full((20, 22), 255, dtype=np.uint8),
+    )
+
+    projected = projector.project_to_layer(
+        scene,
+        mapping,
+        RasterBounds(10, 10, 20, 20),
+    )
+
+    assert projected is not None
+    assert projected.bounds == RasterBounds(10, 10, 20, 20)
+    assert np.all(projected.pixels == 255)
 
 
 def test_quarter_turn_projection_preserves_exact_coverage_and_local_bounds() -> None:

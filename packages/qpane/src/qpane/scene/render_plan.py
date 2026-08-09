@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QPainterPath, QPicture, QTransform
@@ -33,6 +33,9 @@ from .model import LayerClip, LayerDescriptor, LayerPlacement
 from .presentation_effects import LayerPresentationEffect
 from .raster import RasterBounds
 from .source_references import LayerSourceReference
+
+if TYPE_CHECKING:
+    from ..rendering.panel_mapping import PanelLayerMapping
 
 
 class RenderStrategy(str, Enum):
@@ -79,7 +82,7 @@ class RasterLayerRenderItem:
     asset_key: SceneLayerAssetKey
     pyramid_asset_key: SourceRenderAssetKey
     pyramid_scale: float
-    transform: QTransform
+    transform: PanelLayerMapping
     placement: LayerPlacement
     clip: LayerClip | None
     strategy: RenderStrategy
@@ -93,16 +96,23 @@ class RasterLayerRenderItem:
     visible_tile_range: tuple[int, int, int, int] | None
     is_base_raster: bool = False
     effect_clip_path: QPainterPath | None = None
+    mapping_clip_path: QPainterPath | None = None
 
     def __post_init__(self) -> None:
         """Validate stable raster planning values."""
-        object.__setattr__(self, "transform", QTransform(self.transform))
+        object.__setattr__(self, "transform", _detach_panel_mapping(self.transform))
         object.__setattr__(self, "tiles_to_draw", tuple(self.tiles_to_draw))
         if self.effect_clip_path is not None:
             object.__setattr__(
                 self,
                 "effect_clip_path",
                 QPainterPath(self.effect_clip_path),
+            )
+        if self.mapping_clip_path is not None:
+            object.__setattr__(
+                self,
+                "mapping_clip_path",
+                QPainterPath(self.mapping_clip_path),
             )
         if self.pyramid_scale <= 0.0:
             raise ValueError("pyramid scale must be positive")
@@ -196,7 +206,7 @@ class VectorLayerRenderItem:
 
     descriptor: LayerDescriptor
     picture: QPicture
-    transform: QTransform
+    transform: PanelLayerMapping
     placement: LayerPlacement
     clip: LayerClip | None
     source_size: QSize
@@ -205,11 +215,12 @@ class VectorLayerRenderItem:
     preview_picture: QPicture | None = None
     trailing_picture: QPicture | None = None
     refined_tiles: tuple[SampledTileRenderData, ...] = ()
+    mapping_clip_path: QPainterPath | None = None
 
     def __post_init__(self) -> None:
         """Detach mutable Qt drawing and geometry values."""
         object.__setattr__(self, "picture", QPicture(self.picture))
-        object.__setattr__(self, "transform", QTransform(self.transform))
+        object.__setattr__(self, "transform", _detach_panel_mapping(self.transform))
         object.__setattr__(self, "source_size", QSize(self.source_size))
         object.__setattr__(self, "refined_tiles", tuple(self.refined_tiles))
         if self.preview_picture is not None:
@@ -226,6 +237,12 @@ class VectorLayerRenderItem:
                 "effect_clip_path",
                 QPainterPath(self.effect_clip_path),
             )
+        if self.mapping_clip_path is not None:
+            object.__setattr__(
+                self,
+                "mapping_clip_path",
+                QPainterPath(self.mapping_clip_path),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +250,7 @@ class SampledLayerRenderItem:
     """Render one asynchronously sampled source from an atomic tile batch."""
 
     descriptor: LayerDescriptor
-    transform: QTransform
+    transform: PanelLayerMapping
     placement: LayerPlacement
     clip: LayerClip | None
     source_size: QSize
@@ -241,10 +258,11 @@ class SampledLayerRenderItem:
     tiles: tuple[SampledTileRenderData, ...]
     effect_clip_path: QPainterPath | None = None
     source_bounds: QRectF | None = None
+    mapping_clip_path: QPainterPath | None = None
 
     def __post_init__(self) -> None:
         """Detach mutable Qt drawing and geometry values."""
-        object.__setattr__(self, "transform", QTransform(self.transform))
+        object.__setattr__(self, "transform", _detach_panel_mapping(self.transform))
         object.__setattr__(self, "source_size", QSize(self.source_size))
         object.__setattr__(self, "tiles", tuple(self.tiles))
         if self.source_bounds is not None:
@@ -254,6 +272,12 @@ class SampledLayerRenderItem:
                 self,
                 "effect_clip_path",
                 QPainterPath(self.effect_clip_path),
+            )
+        if self.mapping_clip_path is not None:
+            object.__setattr__(
+                self,
+                "mapping_clip_path",
+                QPainterPath(self.mapping_clip_path),
             )
 
     @property
@@ -423,6 +447,11 @@ class SceneRenderPlan:
             if isinstance(item, RasterLayerRenderItem) and item.is_base_raster:
                 return item
         return None
+
+
+def _detach_panel_mapping(mapping: PanelLayerMapping) -> PanelLayerMapping:
+    """Detach mutable Qt transforms while retaining immutable patch mappings."""
+    return QTransform(mapping) if isinstance(mapping, QTransform) else mapping
 
 
 def _rect_key(rect: QRectF) -> tuple[float, float, float, float]:

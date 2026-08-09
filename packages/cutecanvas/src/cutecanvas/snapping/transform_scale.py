@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
-    LayerTransform,
+    LayerMapping,
     TransformHandle,
     TransformModifiers,
     TransformOperation,
@@ -36,7 +36,10 @@ from cutecanvas.scene.transform_session import LayerTransformBoxState
 from .axis_resolution import AxisSnapLock, AxisSnapResolver, build_candidate_index
 from .candidates import SnapTargetSnapshot
 from .configuration import SnapConfiguration
+from .edge_candidates import OrientedTargetSnapshot
+from .edge_model import SnapGuideValue
 from .model import SnapAxis, SnapFeatureKind, SnapGuide
+from .transform_oriented_scale import create_transform_oriented_scale_snap
 
 _CORNER_HANDLES = {
     TransformHandle.TOP_LEFT,
@@ -57,7 +60,7 @@ class TransformSnapResult:
     """Return a resolved scene pointer and truthful Smart Guides."""
 
     scene_point: QPointF
-    guides: tuple[SnapGuide, ...] = ()
+    guides: tuple[SnapGuideValue, ...] = ()
 
     def __post_init__(self) -> None:
         """Detach mutable Qt point storage from the session."""
@@ -74,6 +77,9 @@ class TransformScaleSnapSession:
         origin: QPointF,
         targets: SnapTargetSnapshot,
         configuration: SnapConfiguration,
+        *,
+        oriented_targets: OrientedTargetSnapshot | None = None,
+        scene_units_per_device_pixel: float = 1.0,
     ) -> None:
         """Capture affine geometry, candidates, thresholds, and pointer origin."""
         if (
@@ -89,6 +95,15 @@ class TransformScaleSnapSession:
         self._origin = QPointF(origin)
         self._geometry = AffineTransformGeometry(box.bounds, box.transform)
         self._initial_handle = self._geometry.scene_point(operation.handle)
+        self._oriented = create_transform_oriented_scale_snap(
+            box,
+            operation,
+            origin,
+            oriented_targets,
+            threshold_device_pixels=policy.threshold_device_pixels,
+            release_device_pixels=policy.release_device_pixels,
+            scene_units_per_device_pixel=scene_units_per_device_pixel,
+        )
         self._x = AxisSnapResolver(
             SnapAxis.X,
             candidate_index.for_axis(SnapAxis.X),
@@ -120,6 +135,10 @@ class TransformScaleSnapSession:
         """Return the pointer that produces an exactly snapped affine handle."""
         raw_point = QPointF(scene_point)
         if suppressed:
+            self._x.clear()
+            self._y.clear()
+            if self._oriented is not None:
+                self._oriented.clear()
             return TransformSnapResult(raw_point)
         raw_transform = self._geometry.transform_for_drag(
             self._operation,
@@ -132,6 +151,17 @@ class TransformScaleSnapSession:
             return TransformSnapResult(raw_point)
         scale = max(1e-9, float(scene_units_per_device_pixel))
         raw_handle = raw_transform.map_point(self._box.bounds.point(handle))
+        oriented = (
+            None
+            if self._oriented is None
+            else self._oriented.resolve(
+                raw_handle,
+                modifiers,
+                scene_units_per_device_pixel=scale,
+            )
+        )
+        if oriented is not None:
+            return TransformSnapResult(oriented[0], (oriented[1],))
         x = self._x.resolve(
             raw_handle.x(),
             ((self._kinds[0], raw_handle.x()),),
@@ -245,7 +275,7 @@ class TransformScaleSnapSession:
     def _guides(
         self,
         locks: tuple[tuple[SnapAxis, AxisSnapLock], ...],
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> tuple[SnapGuide, ...]:
         """Build guides spanning the resolved frame and stationary target."""
         corners = tuple(

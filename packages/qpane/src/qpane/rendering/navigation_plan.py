@@ -18,10 +18,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from itertools import pairwise
 
 from PySide6.QtCore import QPoint, QPointF, QRectF
-from PySide6.QtGui import QTransform
 
 from ..scene.render_plan import (
     RasterLayerRenderItem,
@@ -30,7 +28,8 @@ from ..scene.render_plan import (
     SceneRenderPlan,
     VectorLayerRenderItem,
 )
-from .raster_sampling import device_aligned_raster_transform
+from .navigation_mapping import retained_mapping_delta, translate_render_item
+from .rectangle_coverage import rectangles_cover
 
 _RETAINED_RASTER_ITEM_TYPES = (RasterLayerRenderItem, SampledLayerRenderItem)
 
@@ -45,7 +44,7 @@ def translated_navigation_plan(
 
     dpr = device_pixel_ratio if device_pixel_ratio > 0.0 else 1.0
     delta = (QPointF(target_pan) - plan.current_pan) / dpr
-    items = tuple(_translate_item(item, delta) for item in plan.render_items)
+    items = tuple(translate_render_item(item, delta) for item in plan.render_items)
     return replace(
         plan,
         current_pan=QPointF(target_pan),
@@ -133,27 +132,20 @@ def retained_raster_navigation_delta(
             type(first_item) is not type(second_item)
             or not isinstance(first_item, _RETAINED_RASTER_ITEM_TYPES)
             or first_item.descriptor != second_item.descriptor
-            or not _linear_transform_matches(
-                first_item.transform, second_item.transform
+            or retained_mapping_delta(
+                first_item.transform,
+                second_item.transform,
+                device_pixel_ratio=device_pixel_ratio,
             )
+            is None
         ):
             return None
-        first_transform = device_aligned_raster_transform(
+        item_delta = retained_mapping_delta(
             first_item.transform,
-            device_pixel_ratio,
-        )
-        second_transform = device_aligned_raster_transform(
             second_item.transform,
-            device_pixel_ratio,
+            device_pixel_ratio=device_pixel_ratio,
         )
-        item_delta = QPoint(
-            round(
-                (second_transform.m31() - first_transform.m31()) * device_pixel_ratio
-            ),
-            round(
-                (second_transform.m32() - first_transform.m32()) * device_pixel_ratio
-            ),
-        )
+        assert item_delta is not None
         if shared_delta is None:
             shared_delta = item_delta
         elif item_delta != shared_delta:
@@ -178,84 +170,7 @@ def _sampled_item_covers_panel_rect(
     required = panel_to_source.mapRect(panel_rect).intersected(source_bounds)
     if required.isEmpty():
         return True
-    return _rectangles_cover(required, tuple(tile.source_rect for tile in item.tiles))
-
-
-def _rectangles_cover(required: QRectF, candidates: tuple[QRectF, ...]) -> bool:
-    """Return whether a rectangle union completely covers ``required``."""
-    tolerance = 1e-9
-    clipped = tuple(
-        candidate.intersected(required)
-        for candidate in candidates
-        if candidate.intersects(required)
-    )
-    if not clipped:
-        return False
-    left = required.x()
-    right = left + required.width()
-    top = required.y()
-    bottom = top + required.height()
-    x_edges = sorted(
-        {
-            left,
-            right,
-            *(edge for rect in clipped for edge in (rect.x(), rect.x() + rect.width())),
-        }
-    )
-    for start, end in pairwise(x_edges):
-        if end - start <= tolerance:
-            continue
-        sample_x = (start + end) / 2.0
-        intervals = sorted(
-            (
-                rect.y(),
-                rect.y() + rect.height(),
-            )
-            for rect in clipped
-            if rect.x() <= sample_x + tolerance
-            and rect.x() + rect.width() >= sample_x - tolerance
-        )
-        if not intervals or intervals[0][0] > top + tolerance:
-            return False
-        covered_bottom = intervals[0][1]
-        for interval_top, interval_bottom in intervals[1:]:
-            if interval_top > covered_bottom + tolerance:
-                break
-            covered_bottom = max(covered_bottom, interval_bottom)
-        if covered_bottom < bottom - tolerance:
-            return False
-    return True
-
-
-def _translate_item(item: SceneRenderItem, delta: QPointF) -> SceneRenderItem:
-    """Translate one immutable item in logical painter coordinates."""
-
-    transform = item.transform
-    translated = QTransform(
-        transform.m11(),
-        transform.m12(),
-        transform.m13(),
-        transform.m21(),
-        transform.m22(),
-        transform.m23(),
-        transform.dx() + delta.x(),
-        transform.dy() + delta.y(),
-        transform.m33(),
-    )
-    return replace(item, transform=translated)
-
-
-def _linear_transform_matches(first: QTransform, second: QTransform) -> bool:
-    """Return whether two affine transforms differ only in translation."""
-    return (
-        first.m11() == second.m11()
-        and first.m12() == second.m12()
-        and first.m13() == second.m13()
-        and first.m21() == second.m21()
-        and first.m22() == second.m22()
-        and first.m23() == second.m23()
-        and first.m33() == second.m33()
-    )
+    return rectangles_cover(required, tuple(tile.source_rect for tile in item.tiles))
 
 
 def _product_identity(item: SceneRenderItem) -> tuple[object, ...]:

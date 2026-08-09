@@ -20,6 +20,8 @@ from __future__ import annotations
 import math
 import random
 
+from PySide6.QtCore import QPointF
+
 from .model import BrushDab, BrushStrokeSegment
 
 
@@ -32,11 +34,17 @@ class BrushDabEngine:
         end_x, end_y = map(float, segment.end)
         delta_x = end_x - start_x
         delta_y = end_y - start_y
-        forward = segment.tip_transform.inverted()
-        if forward is None:
-            return ()
-        scene_delta_x = forward.m11 * delta_x + forward.m21 * delta_y
-        scene_delta_y = forward.m12 * delta_x + forward.m22 * delta_y
+        if segment.tip_mapping is not None:
+            scene_start = segment.tip_mapping.map_point(QPointF(start_x, start_y))
+            scene_end = segment.tip_mapping.map_point(QPointF(end_x, end_y))
+            scene_delta_x = scene_end.x() - scene_start.x()
+            scene_delta_y = scene_end.y() - scene_start.y()
+        else:
+            forward = segment.tip_transform.inverted()
+            if forward is None:
+                return ()
+            scene_delta_x = forward.m11 * delta_x + forward.m21 * delta_y
+            scene_delta_y = forward.m12 * delta_x + forward.m22 * delta_y
         distance = math.hypot(scene_delta_x, scene_delta_y)
         minimum_diameter = max(
             1.0,
@@ -138,6 +146,7 @@ class BrushDabEngine:
             texture_scale=float(segment.texture_scale),
             texture_seed=int(segment.texture_seed) ^ int(segment.sequence),
             tip_transform=segment.tip_transform,
+            tip_mapping=segment.tip_mapping,
         )
 
 

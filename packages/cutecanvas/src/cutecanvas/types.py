@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF
 from PySide6.QtGui import QColor, QImage, QTransform
+from qpane.sdk.scene import BilinearLayerTransform, PiecewiseLayerTransform
 
 if TYPE_CHECKING:
     from .placed.model import PlacedAssetMode, PlacedAssetStatus
@@ -331,11 +332,12 @@ class CompositionLayerEntry:
     visible: bool
     opacity: float
     interaction: LayerPolicy
-    transform: QTransform
+    transform: QTransform | PiecewiseLayerTransform | BilinearLayerTransform
 
     def __post_init__(self) -> None:
         """Detach mutable Qt transform state from the composition owner."""
-        object.__setattr__(self, "transform", QTransform(self.transform))
+        if isinstance(self.transform, QTransform):
+            object.__setattr__(self, "transform", QTransform(self.transform))
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,12 +453,15 @@ class LayerSnapshot:
     metadata: Mapping[str, object] = field(default_factory=dict)
     interaction: LayerPolicy = LayerPolicy()
     label: str | None = None
-    transform: QTransform = field(default_factory=QTransform)
+    transform: QTransform | PiecewiseLayerTransform | BilinearLayerTransform = field(
+        default_factory=QTransform
+    )
 
     def __post_init__(self) -> None:
         """Normalize mutable public layer inputs into QPane-owned values."""
         object.__setattr__(self, "placement", QRectF(self.placement))
-        object.__setattr__(self, "transform", QTransform(self.transform))
+        if isinstance(self.transform, QTransform):
+            object.__setattr__(self, "transform", QTransform(self.transform))
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         if self.tint is not None:
             object.__setattr__(self, "tint", QColor(self.tint))

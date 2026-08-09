@@ -158,6 +158,14 @@ responsive layout contract.
 - `RenderScene` is an immutable canvas and ordered layer collection.
 - `RenderLayer` places one reusable raster, vector, or hybrid source.
 - `LayerTransform` is the six-coefficient affine local-to-scene transform.
+- `LayerMapping` is the accepted affine, projective, or bounded piecewise mapping contract for scene layers.
+- `ProjectiveLayerTransform` is the nine-coefficient homography used for exact convex-quadrilateral placement.
+- `PiecewiseLayerTransform` maps finite source and target cages through immutable affine triangle patches.
+- `BilinearLayerTransform` maps a complete quadrilateral source onto a joined-edge target triangle.
+- `TriangularLayerMappingPatch` exposes one immutable source/target triangle correspondence.
+- `inverse_mapping_linearization` returns the exact local scene-to-source differential at one source point.
+- `layer_mapping_from_qtransform` detaches a Qt transform into the narrow affine or projective immutable value.
+- `compose_layer_mappings` composes two supported mappings in explicit application order.
 - `LayerClip` and `ClipCoordinateSpace` define optional clipping.
 - `BlendMode` defines layer compositing.
 - `RasterBounds` defines signed integer source-local bounds.

@@ -619,7 +619,7 @@ class RasterApiMixin:
         if (
             service is not None
             and active_mask_id is not None
-            and service.has_pending_stroke(active_mask_id)
+            and service.stroke_interactions.is_busy(active_mask_id)
         ):
             return True
         scene_id = self._active_resolved_scene_id()
@@ -638,7 +638,7 @@ class RasterApiMixin:
         if (
             service is not None
             and active_mask_id is not None
-            and service.has_pending_stroke(active_mask_id)
+            and service.stroke_interactions.is_busy(active_mask_id)
         ):
             return False
         scene_id = self._active_resolved_scene_id()
@@ -663,7 +663,7 @@ class RasterApiMixin:
         if (
             service is not None
             and active_mask_id is not None
-            and service.defer_history_action(
+            and service.stroke_interactions.defer_history_action(
                 active_mask_id,
                 lambda: self._undo_scene_edit_scope(scene_id),
             )

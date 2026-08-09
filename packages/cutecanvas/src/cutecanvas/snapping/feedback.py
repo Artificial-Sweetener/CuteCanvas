@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .model import SnapGuide
+from .edge_model import SnapGuideValue
 
 
 class SnapGuideFeedback:
@@ -29,14 +29,14 @@ class SnapGuideFeedback:
     def __init__(self, changed: Callable[[], None]) -> None:
         """Bind the lightweight overlay invalidation callback."""
         self._changed = changed
-        self._guides: tuple[SnapGuide, ...] = ()
+        self._guides: tuple[SnapGuideValue, ...] = ()
 
     @property
-    def guides(self) -> tuple[SnapGuide, ...]:
+    def guides(self) -> tuple[SnapGuideValue, ...]:
         """Return the current immutable guide presentation."""
         return self._guides
 
-    def publish(self, guides: tuple[SnapGuide, ...]) -> bool:
+    def publish(self, guides: tuple[SnapGuideValue, ...]) -> bool:
         """Replace active guides and notify only when presentation differs."""
         normalized = tuple(guides)
         if normalized == self._guides:

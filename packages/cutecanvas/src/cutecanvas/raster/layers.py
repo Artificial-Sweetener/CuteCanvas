@@ -25,6 +25,7 @@ from PySide6.QtGui import QImage
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerInteractionPolicy,
+    LayerMapping,
     LayerPlacement,
     LayerTransform,
     RasterBounds,
@@ -259,7 +260,7 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
         changed = bool(
             composition_id is not None
             and layer.raster_bounds is not None
-            and self._layers.update_transform(
+            and self._layers.update_mapping(
                 composition_id,
                 layer.layer_id,
                 LayerTransform.from_placement(layer.raster_bounds, placement),
@@ -271,13 +272,13 @@ class EditableRasterSceneMutationOwner(BaseSceneMutationOwner):
         self,
         scene: SceneDescriptor,
         layer: LayerDescriptor,
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> SceneMutationResult:
         """Update exact composition-owned raster geometry."""
         composition_id = self._current_composition_id()
         changed = bool(
             composition_id is not None
-            and self._layers.update_transform(
+            and self._layers.update_mapping(
                 composition_id,
                 layer.layer_id,
                 transform,

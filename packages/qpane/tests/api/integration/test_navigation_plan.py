@@ -17,10 +17,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRect
+from dataclasses import replace
+
+from PySide6.QtCore import QPoint, QPointF, QRect
+from PySide6.QtGui import QTransform
+from qpane import PiecewiseLayerTransform
 from qpane.rendering.navigation_plan import (
+    retained_raster_navigation_delta,
     translated_navigation_plan,
 )
+from qpane.rendering.panel_mapping import PiecewisePanelMapping
 from qpane_test_support.render_plan import make_render_plan
 
 
@@ -43,3 +49,53 @@ def test_translated_navigation_plan_preserves_products_and_projects_pan() -> Non
     assert translated.current_pan == plan.current_pan + QPointF(35.0, -17.5)
     assert mapped_after == mapped_before + QPointF(20.0, -10.0)
     assert translated_item.source_image.cacheKey() == item.source_image.cacheKey()
+
+
+def test_translated_navigation_plan_projects_piecewise_items() -> None:
+    """Guard-covered pan translates every patch in one finite mapping."""
+    plan = make_render_plan(QRect(0, 0, 320, 180))
+    mapping = PiecewisePanelMapping.from_layer_mapping(
+        PiecewiseLayerTransform(
+            (
+                QPointF(0.0, 0.0),
+                QPointF(64.0, 0.0),
+                QPointF(64.0, 32.0),
+                QPointF(64.0, 64.0),
+                QPointF(0.0, 64.0),
+            ),
+            (
+                QPointF(0.0, 0.0),
+                QPointF(64.0, 0.0),
+                QPointF(48.0, 32.0),
+                QPointF(64.0, 64.0),
+                QPointF(0.0, 64.0),
+            ),
+        ),
+        QTransform(),
+    )
+    plan = replace(
+        plan,
+        render_items=(replace(plan.render_items[0], transform=mapping),),
+    )
+
+    translated = translated_navigation_plan(
+        plan,
+        plan.current_pan + QPointF(35.0, -17.5),
+        device_pixel_ratio=1.75,
+    )
+
+    translated_mapping = translated.render_items[0].transform
+    assert isinstance(translated_mapping, PiecewisePanelMapping)
+    for before, after in zip(
+        mapping.patches,
+        translated_mapping.patches,
+        strict=True,
+    ):
+        assert after.transform.map(before.source[0]) == before.panel[0] + QPointF(
+            20.0, -10.0
+        )
+    assert retained_raster_navigation_delta(
+        plan,
+        translated,
+        device_pixel_ratio=1.75,
+    ) == QPoint(35, -18)

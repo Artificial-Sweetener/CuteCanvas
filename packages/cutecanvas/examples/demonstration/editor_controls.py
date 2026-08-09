@@ -395,6 +395,11 @@ class EditorControls(QObject):
                 CuteCanvas.CONTROL_MODE_SELECT_LASSO,
                 "L",
             ),
+            self._tool_action(
+                "Polygon Select",
+                CuteCanvas.CONTROL_MODE_SELECT_POLYGON,
+                "P",
+            ),
         )
         for action in actions:
             group.addAction(action)
@@ -418,6 +423,11 @@ class EditorControls(QObject):
             self._tool_action(
                 "Lasso Mask",
                 CuteCanvas.CONTROL_MODE_MASK_LASSO,
+                "",
+            ),
+            self._tool_action(
+                "Polygon Mask",
+                CuteCanvas.CONTROL_MODE_MASK_POLYGON,
                 "",
             ),
         )

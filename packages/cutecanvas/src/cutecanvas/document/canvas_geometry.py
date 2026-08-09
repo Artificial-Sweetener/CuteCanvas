@@ -34,7 +34,8 @@ from qpane.sdk.scene import (
 )
 
 from ..composition import CompositionService
-from ..composition.layers import CompositionLayerInstance, instance_resources
+from ..composition.layers import CompositionLayerInstance
+from ..composition.resource_references import instance_resources
 from ..coverage import CoverageSnapshot
 from ..coverage.document import CoverageDocument
 from ..selection import PixelSelectionService
@@ -228,7 +229,9 @@ class CanvasBoundsResizeOwner:
         layers = tuple(
             replace(
                 layer,
-                transform=layer.transform.translated(delta_x, delta_y),
+                transform=layer.transform.followed_by(
+                    LayerTransform(dx=delta_x, dy=delta_y)
+                ),
                 clip=_translated_scene_clip(layer.clip, delta_x, delta_y),
             )
             for layer in before.layers

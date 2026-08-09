@@ -32,12 +32,14 @@ from qpane import (
 
 from .move import MoveTool
 from .paint_bucket import PaintBucketTool
+from .polygon_coverage import PolygonCoverageTool
 from .ports import ToolActivationPorts
 from .selection_shapes import (
     EllipseSelectionTool,
     LassoSelectionTool,
     RectangleSelectionTool,
 )
+from .shared_edge_resize import SharedEdgeResizeTool
 from .transform import TransformTool
 
 
@@ -63,6 +65,7 @@ class Tools(ToolManager):
     CONTROL_MODE_CURSOR = "cursor"
     CONTROL_MODE_MOVE = "move"
     CONTROL_MODE_TRANSFORM = "transform"
+    CONTROL_MODE_SHARED_EDGE_RESIZE = "shared-edge-resize"
     CONTROL_MODE_DRAW_BRUSH = "draw-brush"
     CONTROL_MODE_ERASER = "eraser"
     CONTROL_MODE_CLONE_STAMP = "clone-stamp"
@@ -72,9 +75,11 @@ class Tools(ToolManager):
     CONTROL_MODE_SELECT_RECTANGLE = "select-rectangle"
     CONTROL_MODE_SELECT_ELLIPSE = "select-ellipse"
     CONTROL_MODE_SELECT_LASSO = "select-lasso"
+    CONTROL_MODE_SELECT_POLYGON = "select-polygon"
     CONTROL_MODE_MASK_RECTANGLE = "mask-rectangle"
     CONTROL_MODE_MASK_ELLIPSE = "mask-ellipse"
     CONTROL_MODE_MASK_LASSO = "mask-lasso"
+    CONTROL_MODE_MASK_POLYGON = "mask-polygon"
 
     def __init__(self, parent: QObject | None = None) -> None:
         """Install viewer tools and the factory editor tool set."""
@@ -94,13 +99,19 @@ class Tools(ToolManager):
         self.registerTool(self.CONTROL_MODE_CURSOR, CursorTool)
         self.registerTool(self.CONTROL_MODE_MOVE, MoveTool)
         self.registerTool(self.CONTROL_MODE_TRANSFORM, TransformTool)
+        self.registerTool(
+            self.CONTROL_MODE_SHARED_EDGE_RESIZE,
+            SharedEdgeResizeTool,
+        )
         self.registerTool(self.CONTROL_MODE_PAINT_BUCKET, PaintBucketTool)
         self.registerTool(self.CONTROL_MODE_SELECT_RECTANGLE, RectangleSelectionTool)
         self.registerTool(self.CONTROL_MODE_SELECT_ELLIPSE, EllipseSelectionTool)
         self.registerTool(self.CONTROL_MODE_SELECT_LASSO, LassoSelectionTool)
+        self.registerTool(self.CONTROL_MODE_SELECT_POLYGON, PolygonCoverageTool)
         self.registerTool(self.CONTROL_MODE_MASK_RECTANGLE, RectangleSelectionTool)
         self.registerTool(self.CONTROL_MODE_MASK_ELLIPSE, EllipseSelectionTool)
         self.registerTool(self.CONTROL_MODE_MASK_LASSO, LassoSelectionTool)
+        self.registerTool(self.CONTROL_MODE_MASK_POLYGON, PolygonCoverageTool)
         self.registerTool(
             self.CONTROL_MODE_DRAW_BRUSH,
             BrushTool,

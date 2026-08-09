@@ -19,7 +19,15 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QRadialGradient, QTransform
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QRadialGradient,
+    QTransform,
+)
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     numpy_to_qimage_grayscale8,
@@ -46,7 +54,11 @@ def render_coverage_stroke(
 ) -> tuple[np.ndarray, QImage]:
     """Return exact coverage pixels plus a display-scale stroke preview."""
     active_compositor = _DEFAULT_COMPOSITOR if compositor is None else compositor
-    if any(segment.texture_strength > 0.0 for segment in segments):
+    projected_tips = any(
+        segment.texture_strength > 0.0 or segment.tip_mapping is not None
+        for segment in segments
+    )
+    if projected_tips:
         after = np.array(before, copy=True)
         for segment in segments:
             after = active_compositor.render_coverage_dabs(
@@ -66,7 +78,7 @@ def render_coverage_stroke(
     stride = max(1, int(preview_stride))
     if stride == 1:
         return after, image.copy()
-    if any(segment.texture_strength > 0.0 for segment in segments):
+    if projected_tips:
         return after, numpy_to_qimage_grayscale8(after[::stride, ::stride])
     preview_before = np.array(before[::stride, ::stride], copy=True)
     preview = numpy_to_qimage_grayscale8(preview_before)
@@ -115,12 +127,26 @@ def paint_coverage_segment(
     painter.setPen(Qt.PenStyle.NoPen)
     for dab in _DABS.segment_dabs(segment):
         alpha = max(0, min(255, round(255.0 * dab.opacity)))
+        dab_color = QColor(255, 255, 255, alpha)
+        nonlinear_path = _nonlinear_dab_path(dab)
+        if nonlinear_path is not None and dab.hardness >= 1.0:
+            scale = 1.0 / stride_value
+            local_to_output = QTransform(
+                scale,
+                0.0,
+                0.0,
+                scale,
+                -origin.x() * scale,
+                -origin.y() * scale,
+            )
+            painter.setBrush(QBrush(dab_color))
+            painter.drawPath(local_to_output.map(nonlinear_path))
+            continue
         center = QPointF(
             (dab.center[0] - origin.x()) / stride_value,
             (dab.center[1] - origin.y()) / stride_value,
         )
         radius = max(0.5, (dab.diameter / 2.0) / stride_value)
-        dab_color = QColor(255, 255, 255, alpha)
         painter.save()
         painter.translate(center)
         _concatenate_tip_transform(painter, dab)
@@ -190,7 +216,7 @@ def render_color_dabs(
     compositor: BrushCompositor | None = None,
 ) -> np.ndarray:
     """Composite already-resolved dabs into one premultiplied BGRA patch."""
-    if any(dab.texture_strength > 0.0 for dab in dabs):
+    if any(dab.texture_strength > 0.0 or dab.tip_mapping is not None for dab in dabs):
         active_compositor = _DEFAULT_COMPOSITOR if compositor is None else compositor
         return active_compositor.render_color_dabs(
             before=before,
@@ -237,6 +263,19 @@ def _paint_color_dabs(
         dab_color = QColor(255, 255, 255, alpha) if erasing else QColor(color)
         if not erasing:
             dab_color.setAlpha(round(dab_color.alpha() * alpha / 255.0))
+        nonlinear_path = _nonlinear_dab_path(dab)
+        if nonlinear_path is not None and dab.hardness >= 1.0:
+            local_to_output = QTransform(
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                -origin.x(),
+                -origin.y(),
+            )
+            painter.setBrush(QBrush(dab_color))
+            painter.drawPath(local_to_output.map(nonlinear_path))
+            continue
         painter.save()
         painter.translate(center)
         _concatenate_tip_transform(painter, dab)
@@ -268,6 +307,20 @@ def _concatenate_tip_transform(painter: QPainter, dab: BrushDab) -> None:
         ),
         True,
     )
+
+
+def _nonlinear_dab_path(dab: BrushDab) -> QPainterPath | None:
+    """Return one exact source-local footprint for a scene-circular tip."""
+    mapping = dab.tip_mapping
+    if mapping is None:
+        return None
+    local_center = QPointF(float(dab.center[0]), float(dab.center[1]))
+    scene_center = mapping.map_point(local_center)
+    radius = dab.diameter / 2.0
+    scene_path = QPainterPath()
+    scene_path.addEllipse(scene_center, radius, radius)
+    source_path = mapping.inverse_map_path(scene_path)
+    return None if source_path.isEmpty() else source_path
 
 
 def _paint_segments(

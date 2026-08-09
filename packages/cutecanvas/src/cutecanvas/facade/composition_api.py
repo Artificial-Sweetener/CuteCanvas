@@ -29,9 +29,18 @@ from PySide6.QtGui import (
     QImage,
     QTransform,
 )
-from qpane.sdk.scene import LayerPlacement, LayerTransform
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerMapping,
+    LayerPlacement,
+    PiecewiseLayerTransform,
+)
 
 from cutecanvas.composition.geometry_policy import LayerGeometryPolicy
+from cutecanvas.composition.public_layer_mapping import (
+    detached_public_layer_mapping,
+    normalize_public_layer_mapping,
+)
 from cutecanvas.composition.public_policy import (
     internal_document_policy,
     internal_layer_policy,
@@ -201,7 +210,7 @@ class CompositionApiMixin:
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-    ) -> QTransform | None:
+    ) -> QTransform | PiecewiseLayerTransform | BilinearLayerTransform | None:
         """Return one active layer's detached exact local-to-scene transform.
 
         Args:
@@ -209,7 +218,7 @@ class CompositionApiMixin:
             layer_id: Stable identifier of the layer to inspect.
 
         Returns:
-            A detached affine transform, or None when the layer is unavailable.
+            A detached exact transform, or None when the layer is unavailable.
 
         Raises:
             TypeError: If either identifier is not a UUID.
@@ -232,7 +241,9 @@ class CompositionApiMixin:
         if scene_id not in valid_scene_ids or composition_id is None:
             return None
         instance = self.compositionService().layers.layer(composition_id, layer_id)
-        return None if instance is None else instance.transform.to_qtransform()
+        if instance is None:
+            return None
+        return detached_public_layer_mapping(instance.transform)
 
     def layerLocalBounds(
         self,
@@ -408,21 +419,21 @@ class CompositionApiMixin:
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-        transform: QTransform,
+        transform: QTransform | LayerMapping,
     ) -> bool:
-        """Set one movable active layer's exact affine local-to-scene transform.
+        """Set one movable active layer's exact local-to-scene mapping.
 
         Args:
             scene_id: Public or resolved identifier for the active scene.
             layer_id: Stable identifier of the layer to transform.
-            transform: Finite, invertible affine local-to-scene mapping.
+            transform: Finite, invertible supported layer mapping.
 
         Returns:
             True when geometry changed and one history command was recorded.
 
         Raises:
             TypeError: If identifiers or transform use unsupported types.
-            ValueError: If the transform is projective, singular, or non-finite.
+            ValueError: If the transform is singular or non-finite.
 
         Side effects:
             Refreshes scene rendering and emits scene/history signals after a change.
@@ -431,9 +442,7 @@ class CompositionApiMixin:
             raise TypeError("scene_id must be a UUID")
         if not isinstance(layer_id, uuid.UUID):
             raise TypeError("layer_id must be a UUID")
-        if not isinstance(transform, QTransform):
-            raise TypeError("transform must be a QTransform")
-        normalized = LayerTransform.from_qtransform(QTransform(transform))
+        normalized = normalize_public_layer_mapping(transform)
         if not normalized.is_invertible:
             raise ValueError("transform must be numerically invertible")
         if not self._anchor_floating_pixels_before_edit():

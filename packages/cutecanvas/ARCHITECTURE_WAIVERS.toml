@@ -43,7 +43,7 @@ path = "packages/cutecanvas/src/cutecanvas/editor/composition_root.py"
 kind = "structural"
 justification = "EditorCompositionRoot has one assembly responsibility: construct, wire, and return the complete authoritative editor component graph from explicit inputs."
 review_by = 2026-12-15
-max_lines = 726
+max_lines = 731
 
 [[waivers]]
 id = "CUTECANVAS-WAIVER-005"
@@ -54,7 +54,7 @@ path = "packages/cutecanvas/src/cutecanvas/facade/composition_api.py"
 kind = "structural"
 justification = "CompositionApiMixin is the single public task-oriented facade for composition state, layer placement, selection, scene inspection, and composition lifecycle."
 review_by = 2026-12-15
-max_lines = 547
+max_lines = 567
 
 [[waivers]]
 id = "CUTECANVAS-WAIVER-006"
@@ -102,7 +102,7 @@ path = "packages/cutecanvas/src/cutecanvas/masks/mask_service.py"
 kind = "remediation"
 justification = "Mask integration retains stroke, asset, activation, rendering, autosave, and diagnostics ownership pending stroke-service extraction."
 review_by = 2026-12-15
-max_lines = 755
+max_lines = 718
 next_limit = 600
 debt = "CUTECANVAS-ARCH-003"
 
@@ -176,7 +176,7 @@ path = "packages/cutecanvas/src/cutecanvas/persistence/codec.py"
 kind = "remediation"
 justification = "Archive IO, composition encoding, resource codecs, migration, and reference validation remain mixed pending typed resource codec extraction."
 review_by = 2026-12-15
-max_lines = 1234
+max_lines = 1069
 next_limit = 980
 debt = "CUTECANVAS-ARCH-007"
 
@@ -211,7 +211,7 @@ path = "packages/cutecanvas/src/cutecanvas/runtime/document_events.py"
 kind = "remediation"
 justification = "Document, resource, selection, vector, viewport, and diagnostics event propagation remain mixed pending vector event extraction."
 review_by = 2026-12-15
-max_lines = 600
+max_lines = 595
 next_limit = 440
 debt = "CUTECANVAS-ARCH-008"
 

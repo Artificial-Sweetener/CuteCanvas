@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from math import isclose
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF, Qt
-from PySide6.QtGui import QImage, QPainter, QTransform
+from PySide6.QtGui import QImage, QPainter
 
 from ..scene.identity import (
     SceneLayerAssetKey,
@@ -52,6 +52,8 @@ from ..scene.source_capabilities import (
 from .compiled_scene import CompiledRenderLayer, CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
+from .panel_mapping import PanelLayerMapping, detached_panel_mapping
+from .projective_visibility import visible_scene_raster_bounds
 from .raster_products import RasterRenderProductStore
 from .raster_sampling import (
     smooth_raster_sampling_enabled,
@@ -82,7 +84,7 @@ class RasterLayerGeometry:
     asset_key: SceneLayerAssetKey
     pyramid_asset_key: SourceRenderAssetKey
     pyramid_scale: float
-    transform: QTransform
+    transform: PanelLayerMapping
     placement: LayerPlacement
     clip: LayerClip | None
     source_size: QSize
@@ -92,7 +94,7 @@ class RasterLayerGeometry:
 
     def __post_init__(self) -> None:
         """Detach mutable Qt geometry from planner-owned frame values."""
-        object.__setattr__(self, "transform", QTransform(self.transform))
+        object.__setattr__(self, "transform", detached_panel_mapping(self.transform))
         object.__setattr__(self, "source_size", QSize(self.source_size))
         object.__setattr__(
             self,
@@ -620,7 +622,7 @@ class RasterRenderPlanner:
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
         source_product: _RasterSourceProduct,
-        transform: QTransform,
+        transform: PanelLayerMapping,
         render_hint_enabled: bool,
     ) -> SampledLayerRenderItem | None:
         """Present patch-capable dense overlays on the shared source lattice."""
@@ -703,21 +705,14 @@ class RasterRenderPlanner:
         descriptor = layer.descriptor
         transform = descriptor.transform
         raster_bounds = descriptor.raster_bounds
-        inverse = None if transform is None else transform.inverted()
-        if inverse is None or raster_bounds is None:
+        if transform is None or raster_bounds is None:
             return None
-        scene_rect = QRectF(
-            compiled.scene.bounds.x,
-            compiled.scene.bounds.y,
-            compiled.scene.bounds.width,
-            compiled.scene.bounds.height,
-        ).intersected(frame.visible_scene_rect)
-        if scene_rect.isEmpty():
-            return None
-        local_rect = inverse.map_rect(scene_rect).toAlignedRect()
-        if local_rect.isEmpty():
-            return None
-        return raster_bounds.intersection(RasterBounds.from_qrect(local_rect))
+        return visible_scene_raster_bounds(
+            transform,
+            compiled.scene.bounds,
+            frame.visible_scene_rect,
+            raster_bounds,
+        )
 
     def _patch_product(
         self,
@@ -771,7 +766,11 @@ class RasterRenderPlanner:
         )
         requested_scale = min(
             1.0,
-            scale_bucket(layer_to_panel, frame.device_pixel_ratio),
+            scale_bucket(
+                layer_to_panel,
+                frame.device_pixel_ratio,
+                layer.source_size,
+            ),
         )
         target_width = layer.source_size.width() * requested_scale
         policy = self._raster_sources.product_policy(source)
@@ -863,7 +862,7 @@ class RasterRenderPlanner:
         source_image: QImage,
         pyramid_scale: float,
         frame: RenderFrameGeometry,
-    ) -> QTransform:
+    ) -> PanelLayerMapping:
         """Return the source-to-panel transform for a compiled raster layer."""
         if layer.uses_default_base_tile_math:
             return self._viewport.get_transform(
@@ -887,7 +886,7 @@ class RasterRenderPlanner:
         frame: RenderFrameGeometry,
         source_image: QImage,
         pyramid_scale: float,
-        transform: QTransform,
+        transform: PanelLayerMapping,
         strategy: RenderStrategy,
     ) -> _TilePlan:
         """Return tile payloads and visible identities for one raster layer."""
@@ -948,7 +947,7 @@ class RasterRenderPlanner:
         frame: RenderFrameGeometry,
         source_image: QImage,
         pyramid_scale: float,
-        transform: QTransform,
+        transform: PanelLayerMapping,
     ) -> QRectF:
         """Return the source region visible for tiled rendering."""
         if layer.uses_default_base_tile_math:

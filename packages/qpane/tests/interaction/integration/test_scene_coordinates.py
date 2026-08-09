@@ -31,7 +31,11 @@ from qpane.sdk.rendering import (
     SceneCoordinateSystem,
     ScenePoint,
 )
-from qpane.sdk.scene import LayerTransform
+from qpane.sdk.scene import (
+    LayerTransform,
+    PiecewiseLayerTransform,
+    ProjectiveLayerTransform,
+)
 
 
 def test_layer_projection_round_trips_affine_nonzero_source_origin() -> None:
@@ -87,6 +91,65 @@ def test_layer_projection_round_trips_affine_nonzero_source_origin() -> None:
     assert (scene_round_trip.x, scene_round_trip.y) == pytest.approx(
         (scene_point.x, scene_point.y)
     )
+
+
+def test_layer_projection_round_trips_projective_source_geometry() -> None:
+    """Typed coordinate routes preserve source identity through a homography."""
+    scene_id = uuid.uuid4()
+    layer_id = uuid.uuid4()
+    scene = SceneCoordinateProjection(
+        scene_id,
+        QTransform.fromScale(1.5, 1.5),
+    )
+    layer = LayerCoordinateProjection(
+        scene,
+        layer_id,
+        ProjectiveLayerTransform(
+            m11=1.2,
+            m12=0.1,
+            m13=0.002,
+            m21=-0.2,
+            m22=0.9,
+            m23=-0.001,
+            dx=18.0,
+            dy=-7.0,
+        ),
+        QPointF(-10.0, 5.0),
+    )
+    source = LayerSourcePoint(scene_id, layer_id, 42.0, 31.0)
+
+    panel = layer.source_to_panel(source)
+
+    assert panel is not None
+    restored = layer.panel_to_source(panel)
+    assert restored is not None
+    assert (restored.x, restored.y) == pytest.approx((source.x, source.y))
+
+
+def test_piecewise_projection_returns_none_outside_authored_boundary() -> None:
+    """Finite mappings reject out-of-cage dirty points without escaping callbacks."""
+    scene_id = uuid.uuid4()
+    layer_id = uuid.uuid4()
+    scene = SceneCoordinateProjection(scene_id, QTransform())
+    mapping = PiecewiseLayerTransform(
+        (
+            QPointF(0.0, 0.0),
+            QPointF(32.0, 0.0),
+            QPointF(32.0, 32.0),
+            QPointF(0.0, 32.0),
+        ),
+        (
+            QPointF(0.0, 0.0),
+            QPointF(28.0, 4.0),
+            QPointF(32.0, 32.0),
+            QPointF(0.0, 32.0),
+        ),
+    )
+    layer = LayerCoordinateProjection(scene, layer_id, mapping, QPointF())
+
+    result = layer.local_to_scene(LayerLocalPoint(scene_id, layer_id, -1.0, 16.0))
+
+    assert result is None
 
 
 def test_coordinate_system_rejects_points_from_other_domains_and_identities() -> None:

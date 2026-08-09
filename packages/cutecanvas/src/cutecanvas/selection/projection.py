@@ -19,9 +19,24 @@ from __future__ import annotations
 
 import math
 
-from qpane.sdk.scene import LayerPlacement, LayerTransform, RasterBounds
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerMapping,
+    LayerPlacement,
+    LayerTransform,
+    PiecewiseLayerTransform,
+    RasterBounds,
+)
 
 from cutecanvas.coverage import AffineCoverageResampler, CoverageSnapshot
+from cutecanvas.coverage.bilinear_resampling import (
+    project_bilinear_coverage,
+    project_scene_coverage_to_bilinear_layer,
+)
+from cutecanvas.coverage.piecewise_resampling import (
+    project_piecewise_coverage,
+    project_scene_coverage_to_piecewise_layer,
+)
 from cutecanvas.types import RasterExtentPolicy
 
 from .compositor import trim_selection_coverage
@@ -37,12 +52,38 @@ class LayerCoverageProjector:
     def project(
         self,
         coverage: CoverageSnapshot,
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> CoverageSnapshot | None:
         """Return antialiased scene coverage for one layer-local snapshot."""
         source_bounds = coverage.bounds
         if source_bounds is None:
             return None
+        if isinstance(transform, BilinearLayerTransform):
+            scene_bounds = _rasterize_placement(transform.map_bounds(source_bounds))
+            if scene_bounds is None:
+                return None
+            projected = project_bilinear_coverage(
+                coverage,
+                transform,
+                canvas_x=float(scene_bounds.x),
+                canvas_y=float(scene_bounds.y),
+                canvas_width=scene_bounds.width,
+                canvas_height=scene_bounds.height,
+            )
+            return trim_selection_coverage(
+                CoverageSnapshot(
+                    scene_bounds,
+                    RasterExtentPolicy.EXPAND_ON_WRITE,
+                    projected,
+                )
+            )
+        if isinstance(transform, PiecewiseLayerTransform):
+            scene_bounds = _rasterize_placement(transform.map_bounds(source_bounds))
+            if scene_bounds is None:
+                return None
+            return trim_selection_coverage(
+                project_piecewise_coverage(coverage, transform, scene_bounds)
+            )
         integer_translation = _unit_integer_translation(transform)
         if integer_translation is not None:
             return coverage.with_bounds(
@@ -64,7 +105,7 @@ class LayerCoverageProjector:
     def project_to_layer(
         self,
         coverage: CoverageSnapshot,
-        transform: LayerTransform,
+        transform: LayerMapping,
         layer_bounds: RasterBounds | None = None,
     ) -> CoverageSnapshot | None:
         """Project scene coverage into bounded or unbounded layer coordinates."""
@@ -72,6 +113,30 @@ class LayerCoverageProjector:
         if scene_bounds is None:
             return None
         unbounded = layer_bounds is None
+        if isinstance(transform, BilinearLayerTransform):
+            projected = project_scene_coverage_to_bilinear_layer(
+                coverage,
+                transform,
+                layer_bounds=layer_bounds,
+                extent_policy=(
+                    RasterExtentPolicy.EXPAND_ON_WRITE
+                    if unbounded
+                    else RasterExtentPolicy.FIXED
+                ),
+            )
+            return None if projected is None else trim_selection_coverage(projected)
+        if isinstance(transform, PiecewiseLayerTransform):
+            projected = project_scene_coverage_to_piecewise_layer(
+                coverage,
+                transform,
+                layer_bounds=layer_bounds,
+                extent_policy=(
+                    RasterExtentPolicy.EXPAND_ON_WRITE
+                    if unbounded
+                    else RasterExtentPolicy.FIXED
+                ),
+            )
+            return None if projected is None else trim_selection_coverage(projected)
         integer_translation = _unit_integer_translation(transform)
         if integer_translation is not None:
             return _project_integer_translation_to_layer(

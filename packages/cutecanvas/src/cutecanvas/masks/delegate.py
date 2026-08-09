@@ -126,7 +126,10 @@ class MaskDelegate:
             pass
         self._mask_undo_slot = None
         try:
-            service.resetStrokePipeline(clear_counter=True, request_redraw=False)
+            service.stroke_interactions.reset(
+                clear_counter=True,
+                request_redraw=False,
+            )
         except Exception:  # pragma: no cover - defensive guard
             logger.exception("Failed to reset mask stroke state during detach.")
         service.shutdown()

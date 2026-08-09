@@ -244,7 +244,7 @@ def test_mask_brush_preview_and_commit_respect_pixel_selection(
     selection.fill(255)
     assert qpane.setPixelSelection(selection, QRect(0, 0, 4, 8))
 
-    service.applyStrokeSegment(
+    service.stroke_interactions.apply(
         BrushStrokeSegment.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
     )
     preview = service.getColorizedMask(layer)
@@ -253,7 +253,7 @@ def test_mask_brush_preview_and_commit_respect_pixel_selection(
     assert preview_image.pixelColor(2, 4).alpha() > 0
     assert preview_image.pixelColor(6, 4).alpha() == 0
 
-    service.commitStroke()
+    service.stroke_interactions.commit()
     drain_mask_jobs(qpane)
     pixels = layer.coverage.raster.snapshot_array()
     assert pixels[4, 2] == 255
@@ -286,7 +286,7 @@ def test_transformed_mask_brush_preview_and_commit_share_scene_selection(
     selection.fill(255)
     assert qpane.setPixelSelection(selection, QRect(2, 0, 4, 8))
 
-    service.applyStrokeSegment(
+    service.stroke_interactions.apply(
         BrushStrokeSegment.fixed((0.0, 4.0), (7.0, 4.0), 4.0, False)
     )
     preview = service.getColorizedMask(layer)
@@ -296,7 +296,7 @@ def test_transformed_mask_brush_preview_and_commit_share_scene_selection(
     assert preview_image.pixelColor(1, 4).alpha() == 0
     assert preview_image.pixelColor(7, 4).alpha() == 0
 
-    service.commitStroke()
+    service.stroke_interactions.commit()
     drain_mask_jobs(qpane)
     pixels = layer.coverage.raster.snapshot_array()
     assert pixels[4, 3] == 255

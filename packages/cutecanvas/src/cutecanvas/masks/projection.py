@@ -26,8 +26,10 @@ from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import numpy_to_qimage_grayscale8
 from qpane.sdk.scene import (
+    BilinearLayerTransform,
     LayerDescriptor,
     LayerTransform,
+    PiecewiseLayerTransform,
     RasterBounds,
     SceneDescriptor,
 )
@@ -39,6 +41,15 @@ from cutecanvas.coverage import (
     combine_coverage,
     normalize_coverage_array,
     reframe_coverage_snapshot,
+)
+from cutecanvas.coverage.bilinear_resampling import (
+    project_bilinear_coverage,
+    project_scene_coverage_to_bilinear_layer,
+)
+from cutecanvas.coverage.content_bounds import occupied_coverage_bounds
+from cutecanvas.coverage.piecewise_resampling import (
+    project_piecewise_coverage,
+    project_scene_coverage_to_piecewise_layer,
 )
 from cutecanvas.types import RasterExtentPolicy
 
@@ -129,6 +140,49 @@ class MaskCanvasProjectionService:
         )
         bounds = target.bounds
         transform = layer.transform
+        if bounds is not None and isinstance(
+            transform,
+            (BilinearLayerTransform, PiecewiseLayerTransform),
+        ):
+            canvas_left = math.floor(scene.bounds.x)
+            canvas_top = math.floor(scene.bounds.y)
+            scene_coverage = CoverageSnapshot(
+                RasterBounds(canvas_left, canvas_top, canvas_width, canvas_height),
+                RasterExtentPolicy.FIXED,
+                incoming,
+            )
+            projected = (
+                project_scene_coverage_to_bilinear_layer(
+                    scene_coverage,
+                    transform,
+                    layer_bounds=bounds,
+                    extent_policy=target.extent_policy,
+                    scene_origin_x=scene.bounds.x,
+                    scene_origin_y=scene.bounds.y,
+                )
+                if isinstance(transform, BilinearLayerTransform)
+                else project_scene_coverage_to_piecewise_layer(
+                    scene_coverage,
+                    transform,
+                    layer_bounds=bounds,
+                    extent_policy=target.extent_policy,
+                )
+            )
+            mapped = (
+                np.zeros_like(target.pixels)
+                if projected is None
+                else reframe_coverage_snapshot(projected, bounds).pixels
+            )
+            combined = combine_coverage(
+                target.pixels,
+                mapped,
+                CoverageCombineMode.SUBTRACT if erase else CoverageCombineMode.ADD,
+            )
+            if target.bounds == snapshot.bounds and np.array_equal(
+                combined, snapshot.pixels
+            ):
+                return None
+            return CoverageSnapshot(bounds, target.extent_policy, combined)
         inverse = transform.inverted()
         if bounds is None or inverse is None:
             return None
@@ -181,6 +235,11 @@ class MaskCanvasProjectionService:
             or transform is None
             or snapshot.extent_policy is RasterExtentPolicy.FIXED
             or not transform.is_invertible
+        ):
+            return snapshot
+        if isinstance(
+            transform,
+            (BilinearLayerTransform, PiecewiseLayerTransform),
         ):
             return snapshot
         foreground_y, foreground_x = np.nonzero(incoming)
@@ -247,6 +306,26 @@ def project_mask_snapshot(
     transform = layer.transform
     if bounds is None or transform is None or not transform.is_invertible:
         return np.zeros((canvas_height, canvas_width), dtype=np.uint8)
+    if isinstance(transform, BilinearLayerTransform):
+        return project_bilinear_coverage(
+            snapshot,
+            transform,
+            canvas_x=canvas_x,
+            canvas_y=canvas_y,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+        )
+    if isinstance(transform, PiecewiseLayerTransform):
+        return project_piecewise_coverage(
+            snapshot,
+            transform,
+            RasterBounds(
+                round(canvas_x),
+                round(canvas_y),
+                canvas_width,
+                canvas_height,
+            ),
+        ).pixels
     local_to_canvas = transform.translated(-canvas_x, -canvas_y)
     return (
         AffineCoverageResampler()
@@ -259,3 +338,53 @@ def project_mask_snapshot(
         )
         .pixels
     )
+
+
+def project_mask_coverage_to_scene(
+    snapshot: CoverageSnapshot,
+    transform: LayerTransform | BilinearLayerTransform | PiecewiseLayerTransform,
+) -> CoverageSnapshot | None:
+    """Bake one mask mapping into minimal scene-coordinate coverage."""
+    source_bounds = snapshot.bounds
+    if source_bounds is None or not transform.is_invertible:
+        return None
+    placement = transform.map_bounds(source_bounds)
+    left = math.floor(placement.x)
+    top = math.floor(placement.y)
+    right = math.ceil(placement.x + placement.width)
+    bottom = math.ceil(placement.y + placement.height)
+    if right <= left or bottom <= top:
+        return None
+    destination = RasterBounds(left, top, right - left, bottom - top)
+    if isinstance(transform, BilinearLayerTransform):
+        projected = CoverageSnapshot(
+            destination,
+            RasterExtentPolicy.EXPAND_ON_WRITE,
+            project_bilinear_coverage(
+                snapshot,
+                transform,
+                canvas_x=float(destination.x),
+                canvas_y=float(destination.y),
+                canvas_width=destination.width,
+                canvas_height=destination.height,
+            ),
+        )
+    elif isinstance(transform, PiecewiseLayerTransform):
+        projected = project_piecewise_coverage(snapshot, transform, destination)
+    else:
+        projected = AffineCoverageResampler().project(
+            snapshot,
+            transform,
+            destination,
+            extent_policy=RasterExtentPolicy.EXPAND_ON_WRITE,
+            smooth=False,
+        )
+    occupied = occupied_coverage_bounds(projected)
+    return None if occupied is None else projected.clipped_to(occupied)
+
+
+__all__ = [
+    "MaskCanvasProjectionService",
+    "project_mask_coverage_to_scene",
+    "project_mask_snapshot",
+]

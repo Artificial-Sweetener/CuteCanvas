@@ -72,8 +72,8 @@ from .editor import (
     LayerSelectionProjectionCache,
     SelectedPixelMovementController,
 )
+from .editor.affine_interactions import EditorAffineInteractions
 from .editor.move_configuration import MoveToolConfiguration
-from .editor.transform_coordinator import EditorTransformCoordinator
 from .fill import PaintBucketCoordinator, SelectionFillCoordinator
 from .masks.canvas_aperture import ActiveMaskCanvasAperture
 from .masks.coordinates import ActiveMaskLayerCoordinates
@@ -114,6 +114,7 @@ from .scene.layer_assembly import CompositionLayerSceneAssembler
 from .scene.layer_geometry import LayerGeometryResolver
 from .scene.layer_move import SceneLayerMoveController
 from .scene.layer_selection import SceneLayerSelectionController
+from .scene.mapping_preview import SceneLayerMappingPreview
 from .scene.movement_interaction import SceneLayerMovementInteraction
 from .scene.mutations import SceneMutationCoordinator
 from .scene.pixel_edits import LayerPixelMutationCoordinator
@@ -122,7 +123,6 @@ from .scene.raster_mutations import (
     RasterLayerMutationCoordinator,
 )
 from .scene.source_capabilities import EditorSourceCapabilities
-from .scene.transform_preview import SceneLayerTransformPreview
 from .scene.transform_session import SceneLayerTransformController
 from .selection import PixelSelectionModificationCoordinator, PixelSelectionService
 from .snapping.system import SnappingSubsystem
@@ -441,13 +441,13 @@ class CuteCanvas(
         self._scene_selection = SceneLayerSelectionController(
             self._handle_selected_layer_changed
         )
-        self._scene_transform_preview = SceneLayerTransformPreview(
+        self._scene_mapping_preview = SceneLayerMappingPreview(
             resolve_transform_preview_clip
         )
         self._scene_movement: SceneLayerMoveController | None = None
         self._scene_transform: SceneLayerTransformController | None = None
         self._scene_movement_interaction: SceneLayerMovementInteraction | None = None
-        self._scene_transform_interaction: EditorTransformCoordinator | None = None
+        self._scene_transform_interaction: EditorAffineInteractions | None = None
         self._active_mask_coordinates: ActiveMaskLayerCoordinates | None = None
         self._active_mask_aperture: ActiveMaskCanvasAperture | None = None
         self._scene_provider_registry: SceneProviderRegistry | None = None

@@ -18,13 +18,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from math import hypot, isfinite
+from math import isfinite
 
 from PySide6.QtCore import QPointF
 
 from ..rendering.scene_hit_testing import SceneRenderHitTester
 from ..rendering.sdk import RenderScene
-from ..scene.affine import LayerTransform
+from ..scene.mapping import LayerMapping, conservative_mapping_scale
+from ..scene.raster import RasterBounds
 from ..scene.render_plan import SceneRenderItem, SceneRenderPlan
 
 _MAXIMUM_RELATIVE_ZOOM = 10.0
@@ -70,7 +71,11 @@ class SceneNativeZoomResolver:
         ):
             return fallback * _MAXIMUM_RELATIVE_ZOOM
         native_zooms = tuple(
-            self._native_zoom_for_transform(layer.transform, fallback)
+            self._native_zoom_for_transform(
+                layer.transform,
+                layer.source.bounds,
+                fallback,
+            )
             for layer in scene.layers
         )
         return max(native_zooms, default=fallback) * _MAXIMUM_RELATIVE_ZOOM
@@ -81,21 +86,21 @@ class SceneNativeZoomResolver:
 
         return SceneNativeZoomResolver._native_zoom_for_transform(
             item.descriptor.transform,
+            item.descriptor.raster_bounds,
             fallback,
         )
 
     @staticmethod
     def _native_zoom_for_transform(
-        transform: LayerTransform | None,
+        transform: LayerMapping | None,
+        bounds: RasterBounds | None,
         fallback: float,
     ) -> float:
         """Return finite source-native zoom from one source-to-scene transform."""
 
-        if transform is None:
+        if transform is None or bounds is None:
             return fallback
-        source_scale_x = hypot(transform.m11, transform.m12)
-        source_scale_y = hypot(transform.m21, transform.m22)
-        source_scale = max(source_scale_x, source_scale_y)
+        source_scale = conservative_mapping_scale(transform, bounds)
         if not isfinite(source_scale) or source_scale <= 0.0:
             return fallback
         return fallback / source_scale

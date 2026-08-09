@@ -173,7 +173,7 @@ of the same source.
 `LayerPolicy` controls what the user and host are allowed to do with a layer:
 
 * `selectable` allows direct layer selection.
-* `movable` allows position and affine-transform changes.
+* `movable` allows position and local-to-scene mapping changes.
 * `pixel_editable` allows pixel commands when the source itself supports them.
 * `reorderable` allows stack-order changes.
 * `removable` allows the instance to be deleted.
@@ -210,7 +210,8 @@ layer.center(horizontally=True, vertically=False)
 `translate()` preserves scale, rotation, reflection, and skew. `center()`
 aligns the chosen content center with the composition canvas.
 
-Use `set_transform()` when the host owns the complete affine value:
+Use `set_transform()` when the host owns the complete affine, projective, or
+piecewise mapping:
 
 ```python
 from PySide6.QtGui import QTransform
@@ -221,6 +222,11 @@ transform.rotate(15.0)
 transform.scale(0.75, 0.75)
 layer.set_transform(transform)
 ```
+
+For a finite deformation cage, pass QPane's immutable
+`PiecewiseLayerTransform` or `BilinearLayerTransform`. `layerTransform()` and layer snapshots return that
+value unchanged; ordinary affine and projective mappings remain detached
+`QTransform` values for familiar Qt integration.
 
 The Move and Transform tools use these same composition operations. Their
 gesture behavior, snapping, and temporary navigation are covered in

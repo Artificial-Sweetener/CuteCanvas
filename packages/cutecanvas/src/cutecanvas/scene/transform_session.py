@@ -24,6 +24,7 @@ from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
     LayerDescriptor,
+    LayerMapping,
     LayerTransform,
     SceneDescriptor,
     SceneLayerHitTestResult,
@@ -31,12 +32,13 @@ from qpane.sdk.scene import (
     TransformModifiers,
     TransformOperation,
     TransformOperationKind,
+    compose_layer_mappings,
 )
 
 from .layer_geometry import LayerGeometryResolver
 from .layer_selection import SceneLayerSelectionController
+from .mapping_preview import SceneLayerMappingPreview
 from .mutations import SceneMutationCoordinator, SceneMutationResult
-from .transform_preview import SceneLayerTransformPreview
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +48,7 @@ class LayerTransformBoxState:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     bounds: TransformLocalBounds
-    transform: LayerTransform
+    transform: LayerMapping
     unresolved: bool
     excluded_layer_ids: tuple[uuid.UUID, ...] = ()
 
@@ -58,7 +60,7 @@ class LayerTransformSession:
     scene_id: uuid.UUID
     layer_id: uuid.UUID
     bounds: TransformLocalBounds
-    initial_transform: LayerTransform
+    initial_transform: LayerMapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +78,7 @@ class SceneLayerTransformController:
     def __init__(
         self,
         selection: SceneLayerSelectionController,
-        preview: SceneLayerTransformPreview,
+        preview: SceneLayerMappingPreview,
         mutations: SceneMutationCoordinator,
         geometry: LayerGeometryResolver,
     ) -> None:
@@ -107,7 +109,7 @@ class SceneLayerTransformController:
         bounds = self._bounds_for_layer(_scene, layer)
         if bounds is None or layer.transform is None:
             return None
-        preview_transform = self._preview.transform_for(
+        preview_transform = self._preview.mapping_for(
             layer.scene_id,
             layer.layer_id,
         )
@@ -132,7 +134,7 @@ class SceneLayerTransformController:
         scene, layer = resolved
         return self._begin_layer(scene, layer, operation, scene_point)
 
-    def preview_selected_transform(self, transform: LayerTransform) -> bool:
+    def preview_selected_transform(self, transform: LayerMapping) -> bool:
         """Publish one cumulative selected-layer transform without a gesture."""
         resolved = self._selected_layer()
         if resolved is None:
@@ -222,7 +224,7 @@ class SceneLayerTransformController:
         session = self._session
         if session is None:
             return None
-        preview_transform = self._preview.transform_for(
+        preview_transform = self._preview.mapping_for(
             session.scene_id,
             session.layer_id,
         )
@@ -264,7 +266,10 @@ class SceneLayerTransformController:
         return self._mutations.set_transform(
             layer.scene_id,
             layer.layer_id,
-            layer.transform.translated(delta_x, delta_y),
+            compose_layer_mappings(
+                layer.transform,
+                LayerTransform(dx=delta_x, dy=delta_y),
+            ),
         )
 
     def clear_selection(self) -> bool:
@@ -301,7 +306,7 @@ class SceneLayerTransformController:
         bounds = self._bounds_for_layer(scene, layer)
         if bounds is None:
             return False
-        preview_transform = self._preview.transform_for(
+        preview_transform = self._preview.mapping_for(
             layer.scene_id,
             layer.layer_id,
         )

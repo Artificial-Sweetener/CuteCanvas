@@ -15,7 +15,11 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Shared grayscale coverage storage for masks and pixel selections."""
 
-from .asset import CoverageAsset, CoverageAssetSnapshot
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
 from .authoring import CoverageShapeConfiguration, CoverageShapeOptions
 from .document import (
     CoverageDocument,
@@ -24,7 +28,6 @@ from .document import (
     StrokeCoverageItem,
     VectorCoverageItem,
 )
-from .evaluation import CoverageDocumentEvaluator
 from .filters import (
     CoverageFilterCancelledError,
     dilate_coverage,
@@ -36,7 +39,6 @@ from .modification import (
     CoverageEdgeModificationRequest,
     build_coverage_edge_modification,
 )
-from .movement import CoverageItemMoveSession
 from .operations import CoverageCombineMode, combine_coverage
 from .projection import AffineCoverageResampler
 from .surface import (
@@ -47,6 +49,27 @@ from .surface import (
     normalize_coverage_array,
     reframe_coverage_snapshot,
 )
+
+if TYPE_CHECKING:
+    from .asset import CoverageAsset, CoverageAssetSnapshot
+    from .evaluation import CoverageDocumentEvaluator
+    from .movement import CoverageItemMoveSession
+
+_DEFERRED_EXPORTS = {
+    "CoverageAsset": ("cutecanvas.coverage.asset", "CoverageAsset"),
+    "CoverageAssetSnapshot": (
+        "cutecanvas.coverage.asset",
+        "CoverageAssetSnapshot",
+    ),
+    "CoverageDocumentEvaluator": (
+        "cutecanvas.coverage.evaluation",
+        "CoverageDocumentEvaluator",
+    ),
+    "CoverageItemMoveSession": (
+        "cutecanvas.coverage.movement",
+        "CoverageItemMoveSession",
+    ),
+}
 
 __all__ = [
     "AffineCoverageResampler",
@@ -77,3 +100,13 @@ __all__ = [
     "normalize_coverage_array",
     "reframe_coverage_snapshot",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Load higher-level coverage owners only when explicitly requested."""
+    target = _DEFERRED_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(target[0]), target[1])
+    globals()[name] = value
+    return value

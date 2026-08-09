@@ -18,7 +18,7 @@
 import uuid
 
 from cutecanvas.editor.transform_interaction import TransformBoxPresentation
-from cutecanvas.tools.ports import TransformInteractionPort
+from cutecanvas.tools.affine_ports import TransformInteractionPort
 from cutecanvas.tools.transform import TransformTool
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent

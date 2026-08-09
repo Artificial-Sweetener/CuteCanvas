@@ -22,10 +22,13 @@ import uuid
 from collections.abc import Hashable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QSize, QSizeF
 from PySide6.QtGui import QTransform
 
 from ..scene.raster import RasterBounds
+from .panel_mapping import PanelLayerMapping
+from .projective_sampling import conservative_transform_scale
+from .projective_visibility import visible_source_rect
 
 _TILE_PIXELS = 512
 _TILE_BLEED_PIXELS = 2
@@ -66,23 +69,20 @@ def visible_tile_requests(
     revision_key: Hashable,
     fallback_key: Hashable,
     bounds: RasterBounds,
-    source_to_panel: QTransform,
+    source_to_panel: PanelLayerMapping,
     panel_rect: QRectF,
     device_pixel_ratio: float,
     budget_bytes: int,
     maximum_scale: float | None = None,
 ) -> tuple[RenderTileRequest, ...] | None:
     """Build a bounded complete request on one stable source-local grid."""
-    panel_to_source, invertible = source_to_panel.inverted()
-    if not invertible:
-        return ()
     source_rect = _bounds_rect(bounds)
-    visible = panel_to_source.mapRect(panel_rect).intersected(source_rect)
+    visible = visible_source_rect(source_to_panel, panel_rect, source_rect)
     if visible.isEmpty():
         return ()
     if budget_bytes <= 0:
         return None
-    scale = scale_bucket(source_to_panel, device_pixel_ratio)
+    scale = scale_bucket(source_to_panel, device_pixel_ratio, source_rect)
     if maximum_scale is not None:
         if maximum_scale <= 0.0:
             raise ValueError("maximum_scale must be positive")
@@ -114,7 +114,7 @@ def guarded_tile_requests(
     revision_key: Hashable,
     fallback_key: Hashable,
     bounds: RasterBounds,
-    source_to_panel: QTransform,
+    source_to_panel: PanelLayerMapping,
     panel_rect: QRectF,
     budget_bytes: int,
     visible_requests: tuple[RenderTileRequest, ...],
@@ -122,11 +122,8 @@ def guarded_tile_requests(
     """Return the largest bounded tile guard surrounding the visible request."""
     if not visible_requests or budget_bytes <= 0:
         return visible_requests
-    panel_to_source, invertible = source_to_panel.inverted()
-    if not invertible:
-        return visible_requests
     source_rect = _bounds_rect(bounds)
-    visible = panel_to_source.mapRect(panel_rect).intersected(source_rect)
+    visible = visible_source_rect(source_to_panel, panel_rect, source_rect)
     if visible.isEmpty():
         return visible_requests
     scale = visible_requests[0].key.scale
@@ -218,11 +215,27 @@ def estimated_request_bytes(requests: tuple[RenderTileRequest, ...]) -> int:
     )
 
 
-def scale_bucket(transform: QTransform, device_pixel_ratio: float) -> float:
+def scale_bucket(
+    transform: QTransform,
+    device_pixel_ratio: float,
+    source_bounds: QRectF | QSize | QSizeF | None = None,
+) -> float:
     """Return a non-undersampling power-of-two physical scale bucket."""
-    x_scale = math.hypot(transform.m11(), transform.m12())
-    y_scale = math.hypot(transform.m21(), transform.m22())
-    exact = max(x_scale, y_scale) * max(0.01, float(device_pixel_ratio))
+    source_rect = (
+        QRectF(0.0, 0.0, source_bounds.width(), source_bounds.height())
+        if isinstance(source_bounds, (QSize, QSizeF))
+        else source_bounds
+    )
+    if not transform.isAffine() and source_rect is None:
+        raise ValueError("projective scale selection requires finite source bounds")
+    exact = (
+        conservative_transform_scale(transform, source_rect)
+        if source_rect is not None
+        else max(
+            math.hypot(transform.m11(), transform.m12()),
+            math.hypot(transform.m21(), transform.m22()),
+        )
+    ) * max(0.01, float(device_pixel_ratio))
     if exact <= _MIN_SCALE:
         return _MIN_SCALE
     bucket = 2.0 ** math.ceil(math.log2(exact))

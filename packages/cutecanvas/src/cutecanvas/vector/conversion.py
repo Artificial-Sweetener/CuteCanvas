@@ -44,12 +44,12 @@ from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import (
     CompositionLayerInstance,
     CompositionLayerStore,
-    instance_resources,
 )
 from ..composition.resource_lifetime import (
     CompositionResourceLifetime,
     ResourceLeaseKind,
 )
+from ..composition.resource_references import instance_resources
 from ..raster.assets import EditableRasterAssetStore
 from ..resources import ProjectResourceReference
 from ..runtime.latest_requests import DocumentLatestRequestRegistry

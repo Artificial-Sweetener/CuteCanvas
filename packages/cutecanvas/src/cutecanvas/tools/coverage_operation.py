@@ -32,3 +32,21 @@ def resolve_coverage_operation(
     if shift_held:
         return CoverageCombineMode.ADD
     return default
+
+
+def resolve_coverage_gesture_operation(
+    *,
+    default: CoverageCombineMode,
+    alt_held: bool,
+    shift_held: bool,
+    has_coverage: bool,
+    alt_constrains_empty: bool,
+) -> CoverageCombineMode:
+    """Resolve one operation while preserving first-selection Alt geometry."""
+    if alt_held and alt_constrains_empty and not has_coverage:
+        return CoverageCombineMode.REPLACE
+    return resolve_coverage_operation(
+        default=default,
+        alt_held=alt_held,
+        shift_held=shift_held,
+    )

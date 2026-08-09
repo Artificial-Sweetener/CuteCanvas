@@ -21,9 +21,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QTransform
 
 from ..scene.model import ClipCoordinateSpace, LayerClip, LayerPlacement
+from .panel_mapping import PanelLayerMapping
+from .projective_visibility import visible_source_rect
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +53,7 @@ def visible_source_rect_for_layer(
     visible_scene_rect: QRectF,
     clip: LayerClip | None,
     viewport_rect: QRectF,
-    item_transform: QTransform | None = None,
+    item_transform: PanelLayerMapping | None = None,
 ) -> LayerVisibility | None:
     """Return the source-space rectangle that can contribute pixels."""
     if source_size.width() <= 0 or source_size.height() <= 0:
@@ -64,6 +65,29 @@ def visible_source_rect_for_layer(
     scene_visible = QRectF(visible_scene_rect).intersected(layer_scene_rect)
     if scene_visible.isEmpty():
         return None
+    if item_transform is not None and not item_transform.isAffine():
+        source_bounds = QRectF(
+            0.0,
+            0.0,
+            float(source_size.width()),
+            float(source_size.height()),
+        )
+        panel_visible = QRectF(viewport_rect)
+        if clip is not None and clip.coordinate_space in {
+            ClipCoordinateSpace.NORMALIZED_VIEWPORT,
+            ClipCoordinateSpace.VIEWPORT,
+        }:
+            panel_visible = panel_visible.intersected(
+                _viewport_clip_rect(clip, viewport_rect)
+            )
+        source_visible = visible_source_rect(
+            item_transform,
+            panel_visible,
+            source_bounds,
+        )
+        if source_visible.isEmpty():
+            return None
+        return LayerVisibility(scene_visible, source_visible)
 
     if clip is None:
         return _visibility_from_scene_rect(
@@ -172,7 +196,7 @@ def _viewport_clip_to_source_rect(
     clip: LayerClip,
     *,
     viewport_rect: QRectF,
-    item_transform: QTransform | None,
+    item_transform: PanelLayerMapping | None,
 ) -> QRectF | None:
     """Convert a viewport-space clip variant into source coordinates."""
     if item_transform is None:
@@ -180,18 +204,22 @@ def _viewport_clip_to_source_rect(
     inverse, invertible = item_transform.inverted()
     if not invertible:
         return None
+    clip_rect = _viewport_clip_rect(clip, viewport_rect)
+    if clip_rect.isEmpty():
+        return QRectF()
+    return inverse.mapRect(clip_rect)
+
+
+def _viewport_clip_rect(clip: LayerClip, viewport_rect: QRectF) -> QRectF:
+    """Return one viewport clip in absolute panel coordinates."""
     if clip.coordinate_space == ClipCoordinateSpace.NORMALIZED_VIEWPORT:
-        clip_rect = QRectF(
+        return QRectF(
             viewport_rect.x() + clip.x * viewport_rect.width(),
             viewport_rect.y() + clip.y * viewport_rect.height(),
             clip.width * viewport_rect.width(),
             clip.height * viewport_rect.height(),
         )
-    else:
-        clip_rect = QRectF(clip.x, clip.y, clip.width, clip.height)
-    if clip_rect.isEmpty():
-        return QRectF()
-    return inverse.mapRect(clip_rect)
+    return QRectF(clip.x, clip.y, clip.width, clip.height)
 
 
 def _scene_rect_to_source_rect(

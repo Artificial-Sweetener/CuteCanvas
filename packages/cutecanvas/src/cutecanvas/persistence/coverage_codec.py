@@ -188,6 +188,8 @@ def _encode_segment(segment: BrushStrokeSegment) -> dict[str, object]:
     """Return deterministic brush segment values without derived dabs."""
     result: dict[str, object] = {}
     for definition in fields(BrushStrokeSegment):
+        if definition.metadata.get("persist") is False:
+            continue
         value = getattr(segment, definition.name)
         if isinstance(value, BrushOperation):
             result[definition.name] = value.value
@@ -204,7 +206,11 @@ def _decode_segment(value: object) -> BrushStrokeSegment:
     """Validate one deterministic brush segment through its domain constructor."""
     if not isinstance(value, dict):
         raise TypeError("coverage stroke segments must be objects")
-    allowed = {definition.name for definition in fields(BrushStrokeSegment)}
+    allowed = {
+        definition.name
+        for definition in fields(BrushStrokeSegment)
+        if definition.metadata.get("persist") is not False
+    }
     supplied = set(value)
     if supplied not in (allowed, allowed - {"tip_transform"}):
         raise ValueError("coverage stroke fields do not match the current format")

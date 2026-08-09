@@ -35,7 +35,6 @@ from cutecanvas.coverage import CoverageItem, CoverageSnapshot
 from ..composition.layers import CompositionLayerInstance
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
-from ..painting import BrushStrokeSegment
 from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..types import DiagnosticsDomain
 from .activation import MaskActivationController
@@ -53,7 +52,10 @@ from .render_coordination import (
     SNIPPET_ASYNC_THRESHOLD_PX,
     MaskRenderWorkCoordinator,
 )
+from .spatial_paint import MaskSpatialPaintNormalizer
+from .spatial_paint_history import MaskSpatialPaintHistory
 from .stroke_constraints import MaskStrokeConstraint
+from .stroke_interactions import MaskStrokeInteractionCoordinator
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
@@ -105,10 +107,6 @@ class MaskService:
             publish_status=self._record_status,
         )
         self._status_messages: deque[tuple[str, str]] = deque(maxlen=8)
-        self._history_actions_after_stroke: dict[
-            uuid.UUID,
-            deque[Callable[[], None]],
-        ] = {}
         self._layers = MaskLayerCoordinator(
             layers=qpane.compositionService().layers,
             layer_edits=qpane.compositionService().layer_edits,
@@ -117,6 +115,19 @@ class MaskService:
             current_composition_id=qpane.currentCompositionID,
         )
         self._mask_controller.set_color_resolver(self._layers.color)
+        self._spatial_paint_history = MaskSpatialPaintHistory(
+            assets=mask_assets,
+            layers=self._layers.store,
+            controller=mask_controller,
+        )
+        mask_assets.set_history_command_decorator(self._spatial_paint_history.decorate)
+        self._spatial_paint = MaskSpatialPaintNormalizer(
+            assets=mask_assets,
+            layers=self._layers,
+            controller=mask_controller,
+            history=self._spatial_paint_history,
+            current_composition_id=qpane.currentCompositionID,
+        )
         self._render_work = MaskRenderWorkCoordinator(
             assets=mask_assets,
             controller=mask_controller,
@@ -161,7 +172,15 @@ class MaskService:
             diagnostics=stroke_diagnostics,
             compositor=qpane.paintingCoordinator().compositor,
         )
-        self._stroke_pipeline.set_idle_callback(self._handle_stroke_idle)
+        self._stroke_interactions = MaskStrokeInteractionCoordinator(
+            pipeline=self._stroke_pipeline,
+            render_work=self._render_work,
+            controller=mask_controller,
+            spatial_paint=self._spatial_paint,
+            spatial_history=self._spatial_paint_history,
+            refresh_coordinates=qpane.view().coordinate_scene_descriptor,
+        )
+        self._stroke_pipeline.set_idle_callback(self._stroke_interactions.handle_idle)
         self._layer_workflow = MaskLayerWorkflow(
             qpane=qpane,
             assets=mask_assets,
@@ -192,73 +211,10 @@ class MaskService:
         """Expose the owner of asynchronous mask render work."""
         return self._render_work
 
-    def applyStrokeSegment(
-        self,
-        segment: BrushStrokeSegment,
-    ) -> None:
-        """Handle a brush segment emitted by the tool manager."""
-        active_mask_id = self._mask_controller.get_active_mask_id()
-        if active_mask_id is not None and not self._stroke_pipeline.is_mask_busy(
-            active_mask_id
-        ):
-            self._render_work.prioritize_interaction(active_mask_id)
-        self._stroke_pipeline.apply_stroke_segment(segment)
-
-    def prepareBrushInteraction(self) -> None:
-        """Stop derived render work that could compete with direct brush input."""
-        active_mask_id = self._mask_controller.get_active_mask_id()
-        if active_mask_id is not None:
-            self._render_work.prioritize_interaction(active_mask_id)
-
-    def commitStroke(self) -> None:
-        """Flush the currently recorded stroke to the controller."""
-        self._stroke_pipeline.commit_active_stroke()
-
-    def cancelStroke(self) -> None:
-        """Discard the currently recorded provisional stroke."""
-        self._stroke_pipeline.cancel_active_stroke()
-
-    def resetStrokePipeline(
-        self,
-        mask_id: uuid.UUID | None = None,
-        *,
-        clear_counter: bool = False,
-        request_redraw: bool = True,
-    ) -> None:
-        """Expose a direct reset hook for delegates/tests."""
-        self._stroke_pipeline.reset_state(
-            mask_id,
-            clear_counter=clear_counter,
-            request_redraw=request_redraw,
-        )
-
-    def defer_history_action(
-        self,
-        mask_id: uuid.UUID,
-        action: Callable[[], None],
-    ) -> bool:
-        """Run one chronological history action after a pending stroke commits."""
-        if not self._stroke_pipeline.is_mask_busy(mask_id):
-            return False
-        self._history_actions_after_stroke.setdefault(mask_id, deque()).append(action)
-        return True
-
-    def has_pending_stroke(self, mask_id: uuid.UUID) -> bool:
-        """Return whether provisional or worker stroke state remains for a mask."""
-        return self._stroke_pipeline.is_mask_busy(mask_id)
-
-    def _handle_stroke_idle(self, mask_id: uuid.UUID) -> None:
-        """Resume derived work and replay history intents after stroke commit."""
-        self._render_work.handle_mask_idle(mask_id)
-        actions = self._history_actions_after_stroke.pop(mask_id, ())
-        for action in actions:
-            try:
-                action()
-            except Exception:  # pragma: no cover - defensive Qt callback boundary
-                logger.exception(
-                    "Deferred history action failed after mask stroke %s",
-                    mask_id,
-                )
+    @property
+    def stroke_interactions(self) -> MaskStrokeInteractionCoordinator:
+        """Return the owner of direct mask stroke interaction lifecycle."""
+        return self._stroke_interactions
 
     def strokeDebugSnapshot(self) -> MaskStrokeDebugSnapshot:
         """Return a snapshot of pending preview/job state for tests."""

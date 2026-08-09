@@ -31,8 +31,9 @@ from cutecanvas.selection import PixelSelectionService
 from .authoring import AuthoringSnapCoordinator
 from .candidates import SnapCandidateProvider
 from .configuration import SnapConfiguration
+from .edge_candidates import OrientedEdgeCandidateProvider
+from .edge_model import SnapGuideValue
 from .feedback import SnapGuideFeedback
-from .model import SnapGuide
 from .movement import MovementSnapCoordinator
 from .scale import scene_units_per_device_pixel
 from .transform import TransformSnapCoordinator
@@ -44,6 +45,7 @@ class SnappingSubsystem:
 
     configuration: SnapConfiguration
     candidates: SnapCandidateProvider
+    oriented_candidates: OrientedEdgeCandidateProvider
     feedback: SnapGuideFeedback
     movement: MovementSnapCoordinator
     authoring: AuthoringSnapCoordinator
@@ -69,6 +71,11 @@ class SnappingSubsystem:
             pixel_selection=pixel_selection,
             configuration=configuration,
         )
+        oriented_candidates = OrientedEdgeCandidateProvider(
+            active_scene=active_scene,
+            geometry=geometry,
+            configuration=configuration,
+        )
         feedback = SnapGuideFeedback(changed)
         scale = lambda: scene_units_per_device_pixel(viewport_zoom())
         suppressed = lambda: bool(
@@ -92,16 +99,25 @@ class SnappingSubsystem:
         )
         transform = TransformSnapCoordinator(
             candidates=candidates,
+            oriented_candidates=oriented_candidates,
             configuration=configuration,
             feedback=feedback,
             movement=movement,
             scene_units_per_device_pixel=scale,
             suppressed=suppressed,
         )
-        return cls(configuration, candidates, feedback, movement, authoring, transform)
+        return cls(
+            configuration,
+            candidates,
+            oriented_candidates,
+            feedback,
+            movement,
+            authoring,
+            transform,
+        )
 
     @property
-    def guides(self) -> tuple[SnapGuide, ...]:
+    def guides(self) -> tuple[SnapGuideValue, ...]:
         """Return the current shared Smart Guide presentation."""
         return self.feedback.guides
 

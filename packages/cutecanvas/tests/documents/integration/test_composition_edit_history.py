@@ -27,8 +27,9 @@ from cutecanvas.composition.resource_lifetime import (
     ResourceLeaseKind,
 )
 from cutecanvas.resources import ProjectResourceReference
-from cutecanvas.scene.transform_edit import LayerTransformEdit, LayerTransformTransition
+from cutecanvas.scene.mapping_edit import LayerMappingEdit, LayerMappingTransition
 from qpane.scene.affine import LayerTransform
+from qpane.scene.projective import ProjectiveLayerTransform
 
 _TRANSFORM = LayerTransform()
 
@@ -51,18 +52,34 @@ class _ResourceCommand:
     retained_resources: tuple[ProjectResourceReference, ...]
 
 
-def _placement_edit(scope_id: uuid.UUID, x: float) -> LayerTransformEdit:
+def _placement_edit(scope_id: uuid.UUID, x: float) -> LayerMappingEdit:
     """Return a representative transform edit in ``scope_id``."""
-    return LayerTransformEdit(
+    return LayerMappingEdit(
         scene_id=scope_id,
         transitions=(
-            LayerTransformTransition(
+            LayerMappingTransition(
                 layer_id=uuid.uuid4(),
                 before=_TRANSFORM,
                 after=LayerTransform(dx=x),
             ),
         ),
     )
+
+
+def test_mapping_edit_budget_accounts_for_projective_coefficients() -> None:
+    """History budgeting must include all retained homography coefficients."""
+    edit = LayerMappingEdit(
+        scene_id=uuid.uuid4(),
+        transitions=(
+            LayerMappingTransition(
+                layer_id=uuid.uuid4(),
+                before=LayerTransform(),
+                after=ProjectiveLayerTransform(m13=0.001),
+            ),
+        ),
+    )
+
+    assert edit.retained_bytes == 120
 
 
 def test_edit_history_advances_each_scope_independently() -> None:

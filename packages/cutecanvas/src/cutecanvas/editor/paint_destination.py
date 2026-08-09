@@ -72,7 +72,10 @@ class InteractivePaintDestinationCoordinator:
         """Resolve the selected layer or create and select an editable one above it."""
         resolution = self._operations.resolve(EditorOperation.PAINT)
         if resolution.allowed:
-            return self._select_resolved_layer(resolution.layer_id)
+            return (
+                self._select_resolved_layer(resolution.layer_id)
+                and self._painting.prepare_interaction()
+            )
         scene = self._active_scene()
         selected = self._selection.resolve(scene)
         if scene is None or selected is None or not self._can_create_layer():

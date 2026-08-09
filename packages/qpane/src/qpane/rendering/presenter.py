@@ -62,6 +62,7 @@ from ..vector.render_cache import VectorRenderCache
 from .compiled_scene import CompiledRenderScene
 from .coordinates import CoordinateContext, PanelHitTest
 from .frame_geometry import RenderFrameGeometry, visible_scene_rect
+from .frame_item_assembly import FrameItemAssembler
 from .frame_projector import SceneFrameProjector
 from .hybrid_planner import HybridRenderPlanner, SampledFramePlan
 from .layer_clip_presentation import LayerClipPresentationRegistry
@@ -90,6 +91,7 @@ from .scene_coordinates import (
 from .scene_hit_testing import SceneRenderHitTester
 from .tiles import TileManager
 from .transient_hybrid_support import TransientHybridSupport
+from .transient_raster_bridge import TransientRasterBridge
 from .vector_planner import VectorRenderPlanner
 from .viewport import Viewport
 from .viewport_resize import ViewportResizeAlignment
@@ -241,12 +243,14 @@ class RenderingPresenter:
         self._hybrid_items = SampledFramePlan(())
         self._transient_hybrid_support = TransientHybridSupport()
         self._sampled_frame_continuity = SampledFrameContinuity()
-        self._transient_raster_provider: Callable[
-            [tuple[SceneRenderItem, ...]], TransientRasterContribution | None
-        ] = lambda _items: None
-        self._transient_raster_target_provider: Callable[
-            [], tuple[uuid.UUID, uuid.UUID, RasterBounds] | None
-        ] = lambda: None
+        self._frame_item_assembler = FrameItemAssembler(
+            self._raster_planner,
+            self._vector_planner,
+            self._layer_effects,
+            self._sampled_frame_continuity,
+            self._layer_clip_presentations,
+        )
+        self._transient_rasters = TransientRasterBridge()
         self.coordinates = SceneCoordinateSystem(
             scene_projection=self._scene_coordinate_projection,
             layer_projection=self._layer_coordinate_projection,
@@ -254,6 +258,7 @@ class RenderingPresenter:
 
     def shutdown(self) -> None:
         """Cancel presenter-owned asynchronous derived rendering work."""
+        self._transient_rasters.shutdown()
         try:
             self._navigation_refinement_timer.stop()
         except RuntimeError:
@@ -269,21 +274,20 @@ class RenderingPresenter:
         self._vector_cache.set_text_layouts(layouts)
         self.invalidate_frame_plan()
 
-    def set_transient_raster_provider(
+    def configure_transient_raster(
         self,
         provider: Callable[
             [tuple[SceneRenderItem, ...]], TransientRasterContribution | None
         ],
+        target_provider: Callable[[], tuple[uuid.UUID, uuid.UUID, RasterBounds] | None],
+        admission_observer: Callable[[TransientRasterContribution], None],
     ) -> None:
-        """Install a source-neutral transient raster contribution provider."""
-        self._transient_raster_provider = provider
-
-    def set_transient_raster_target_provider(
-        self,
-        provider: Callable[[], tuple[uuid.UUID, uuid.UUID, RasterBounds] | None],
-    ) -> None:
-        """Install the active transient raster target resolver."""
-        self._transient_raster_target_provider = provider
+        """Install one source-neutral transient raster integration boundary."""
+        self._transient_rasters.configure(
+            provider,
+            target_provider,
+            admission_observer,
+        )
 
     def calculateRenderPlan(
         self,
@@ -294,7 +298,7 @@ class RenderingPresenter:
         """Build the active scene render plan for the current viewport."""
         if is_blank:
             return None
-        transient_target = self._transient_raster_target_provider()
+        transient_target = self._transient_rasters.target()
         if self._transient_refinement_pending and transient_target is None:
             self._transient_refinement_pending = False
             self._invalidate_frame_items()
@@ -323,65 +327,12 @@ class RenderingPresenter:
             frame,
             transient_support_bounds=transient_support_bounds,
         )
-        source_transition_ids = self._sampled_frame_continuity.changed_layer_ids(
-            (layer.descriptor for layer in compiled.hybrid_layers),
-            previous_plan=self.renderer.get_current_render_plan(),
-        )
-        sampled_layer_ids = frozenset(
-            item.descriptor.layer_id for item in hybrid_plan.items
-        )
-        fallback_ids = (hybrid_plan.pending_layer_ids & source_transition_ids) | (
-            transient_support_bounds.keys() - sampled_layer_ids
-        )
-        fallback_layers = tuple(
-            layer
-            for layer in compiled.hybrid_fallback_layers
-            if layer.descriptor.layer_id in fallback_ids
-        )
-        raster_items = self._raster_planner.build_frame_items(
+        render_items = self._frame_item_assembler.assemble(
             compiled,
             frame,
-            layers=(*compiled.layers, *fallback_layers),
-        )
-        fallback_layer_ids = frozenset(
-            item.descriptor.layer_id
-            for item in raster_items
-            if item.descriptor.layer_id in fallback_ids
-        )
-        vector_items = self._vector_planner.build_frame_items(compiled, frame)
-        hybrid_items = tuple(
-            item
-            for item in hybrid_plan.items
-            if item.descriptor.layer_id not in fallback_layer_ids
-        )
-        effect_items = self._layer_effects.apply(
-            (
-                *raster_items,
-                *vector_items,
-                *hybrid_items,
-            )
-        )
-        effect_items = self._sampled_frame_continuity.resolve(
-            effect_items,
-            pending_layer_ids=(
-                hybrid_plan.pending_layer_ids
-                - fallback_layer_ids
-                - transient_support_bounds.keys()
-            ),
             previous_plan=self.renderer.get_current_render_plan(),
-            frame=frame,
-        )
-        items_by_layer_id: dict[uuid.UUID, list[SceneRenderItem]] = {}
-        for item in effect_items:
-            items_by_layer_id.setdefault(item.descriptor.layer_id, []).append(item)
-        render_items: tuple[SceneRenderItem, ...] = tuple(
-            item
-            for layer in compiled.scene.layers
-            for item in items_by_layer_id.get(layer.layer_id, ())
-        )
-        render_items = self._layer_clip_presentations.apply(
-            compiled.scene.scene_id,
-            render_items,
+            sampled=hybrid_plan,
+            transient_support_bounds=transient_support_bounds,
         )
         plan = SceneRenderPlan(
             scene_id=compiled.scene.scene_id,
@@ -394,7 +345,7 @@ class RenderingPresenter:
             physical_viewport_rect=frame.physical_viewport_rect,
             render_items=render_items,
             hit_test_items=compiled.hit_test_items,
-            transient_raster=self._transient_raster_provider(render_items),
+            transient_raster=self._transient_rasters.compile(render_items),
             presentation_effects=self._presentation_effects.snapshot(
                 scene_id=compiled.scene.scene_id
             ),
@@ -556,6 +507,10 @@ class RenderingPresenter:
         if render_plan:
             self._ensure_buffer_matches_widget()
             self.renderer.paint(render_plan)
+            painted_plan = self.renderer.get_current_render_plan()
+            self._transient_rasters.admit(
+                None if painted_plan is None else painted_plan.transient_raster
+            )
             self._last_scroll_reuse_signature = self._scroll_reuse_signature_for_plan(
                 render_plan
             )
@@ -1443,6 +1398,9 @@ class RenderingPresenter:
             compiled,
             frame,
             transient_support_bounds=transient_support_bounds,
+            prior_items=self._sampled_frame_continuity.prior_sampled_items(
+                self.renderer.get_current_render_plan()
+            ),
         )
         self._hybrid_items_compiled = compiled
         self._hybrid_items_geometry = frame

@@ -28,6 +28,7 @@ def test_qpane_public_api_symbols() -> None:
     """QPane should expose only its viewer, rendering, and execution contract."""
     expected = {
         "BackendSubmission",
+        "BilinearLayerTransform",
         "BlendMode",
         "CacheMode",
         "CancellationToken",
@@ -85,6 +86,7 @@ def test_qpane_public_api_symbols() -> None:
         "InlineDispatcher",
         "LayerClip",
         "LayerLocalPoint",
+        "LayerMapping",
         "LayerPresentationEffect",
         "LayerPresentationEffectKind",
         "LayerPresentationStyle",
@@ -102,7 +104,9 @@ def test_qpane_public_api_symbols() -> None:
         "PointerInputPort",
         "PointerPhase",
         "PointerSample",
+        "PiecewiseLayerTransform",
         "ProjectedViewport",
+        "ProjectiveLayerTransform",
         "QPane",
         "QtDelayScheduler",
         "QtOwnerDispatcher",
@@ -136,6 +140,7 @@ def test_qpane_public_api_symbols() -> None:
         "TouchGestureKind",
         "TouchNavigationPort",
         "TouchNavigationSession",
+        "TriangularLayerMappingPatch",
         "TileSizeSetting",
         "VectorDocument",
         "VectorFillRule",

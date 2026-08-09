@@ -26,6 +26,7 @@ from pathlib import Path
 from tools.testing.model import TestGroup, TestPolicy, TestSelection
 
 CommandRunner = Callable[[Sequence[str], Path], int]
+_MAX_PARALLEL_TEST_PROCESSES = 8
 
 
 def group_paths(
@@ -62,7 +63,15 @@ def run_selection(
     paths = group_paths(selection.groups, policies)
     if paths:
         result = active_runner(
-            (sys.executable, "-m", "pytest", "-n", "auto", *paths),
+            (
+                sys.executable,
+                "-m",
+                "pytest",
+                "-n",
+                "auto",
+                f"--maxprocesses={_MAX_PARALLEL_TEST_PROCESSES}",
+                *paths,
+            ),
             root,
         )
         if result:

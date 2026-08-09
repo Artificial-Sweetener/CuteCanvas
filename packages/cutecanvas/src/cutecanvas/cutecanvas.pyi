@@ -78,6 +78,11 @@ from qpane.sdk.layout import ResponsiveGridPacking as ResponsiveGridPacking
 from qpane.sdk.layout import ResponsiveGridPolicy as ResponsiveGridPolicy
 from qpane.sdk.layout import ResponsiveGridSnapshot as ResponsiveGridSnapshot
 from qpane.sdk.layout import ResponsiveGridTopology as ResponsiveGridTopology
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerMapping,
+    PiecewiseLayerTransform,
+)
 from qpane.sdk.ui import (
     DragSubject as DragSubject,
 )
@@ -543,7 +548,7 @@ class CompositionLayerEntry:
     visible: bool
     opacity: float
     interaction: LayerPolicy
-    transform: QTransform
+    transform: QTransform | PiecewiseLayerTransform | BilinearLayerTransform
 
 class LayerSelectionSnapshot:
     scene_id: uuid.UUID
@@ -627,7 +632,7 @@ class LayerSnapshot:
     metadata: Mapping[str, object]
     interaction: LayerPolicy
     label: str | None
-    transform: QTransform
+    transform: QTransform | PiecewiseLayerTransform | BilinearLayerTransform
 
 class SceneSnapshot:
     composition_id: uuid.UUID
@@ -694,6 +699,7 @@ class CuteCanvas(QWidget):
     CONTROL_MODE_CURSOR: str
     CONTROL_MODE_MOVE: str
     CONTROL_MODE_TRANSFORM: str
+    CONTROL_MODE_SHARED_EDGE_RESIZE: str
     CONTROL_MODE_DRAW_BRUSH: str
     CONTROL_MODE_ERASER: str
     CONTROL_MODE_CLONE_STAMP: str
@@ -703,9 +709,11 @@ class CuteCanvas(QWidget):
     CONTROL_MODE_SELECT_RECTANGLE: str
     CONTROL_MODE_SELECT_ELLIPSE: str
     CONTROL_MODE_SELECT_LASSO: str
+    CONTROL_MODE_SELECT_POLYGON: str
     CONTROL_MODE_MASK_RECTANGLE: str
     CONTROL_MODE_MASK_ELLIPSE: str
     CONTROL_MODE_MASK_LASSO: str
+    CONTROL_MODE_MASK_POLYGON: str
     CONTROL_MODE_VECTOR_SHAPE: str
     CONTROL_MODE_VECTOR_PATH: str
     CONTROL_MODE_VECTOR_NODE: str
@@ -943,7 +951,7 @@ class CuteCanvas(QWidget):
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-    ) -> QTransform | None: ...
+    ) -> QTransform | PiecewiseLayerTransform | BilinearLayerTransform | None: ...
     def layerLocalBounds(
         self,
         scene_id: uuid.UUID,
@@ -1110,7 +1118,7 @@ class CuteCanvas(QWidget):
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-        transform: QTransform,
+        transform: QTransform | LayerMapping,
     ) -> bool: ...
     def setLayerIndex(
         self,

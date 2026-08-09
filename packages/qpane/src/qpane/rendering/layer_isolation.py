@@ -29,6 +29,8 @@ class LayerIsolationCompositor:
     def __init__(self) -> None:
         """Create an isolation owner without allocating a frame-sized image."""
         self._buffer: QImage | None = None
+        self._nested_buffers: list[QImage | None] = []
+        self._depth = 0
 
     def composite(
         self,
@@ -38,30 +40,35 @@ class LayerIsolationCompositor:
         paint_layer: Callable[[QPainter], None],
     ) -> None:
         """Render a complete layer independently, then blend it over the backdrop."""
-        buffer = self._prepare_buffer(painter)
-        layer_painter = QPainter(buffer)
+        depth = self._depth
+        self._depth += 1
         try:
-            layer_painter.setWorldTransform(painter.worldTransform())
-            if painter.hasClipping():
-                layer_painter.setClipRegion(painter.clipRegion())
-            paint_layer(layer_painter)
+            buffer = self._prepare_buffer(painter, depth=depth)
+            layer_painter = QPainter(buffer)
+            try:
+                layer_painter.setWorldTransform(painter.worldTransform())
+                if painter.hasClipping():
+                    layer_painter.setClipRegion(painter.clipRegion())
+                paint_layer(layer_painter)
+            finally:
+                layer_painter.end()
+            painter.save()
+            try:
+                painter.resetTransform()
+                painter.setOpacity(opacity)
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                painter.drawImage(QPointF(), buffer)
+            finally:
+                painter.restore()
         finally:
-            layer_painter.end()
-        painter.save()
-        try:
-            painter.resetTransform()
-            painter.setOpacity(opacity)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.drawImage(QPointF(), buffer)
-        finally:
-            painter.restore()
+            self._depth -= 1
 
-    def _prepare_buffer(self, painter: QPainter) -> QImage:
+    def _prepare_buffer(self, painter: QPainter, *, depth: int) -> QImage:
         """Return a cleared reusable surface matching the current paint device."""
         device = painter.device()
         size = QSize(device.width(), device.height())
         dpr = float(device.devicePixelRatioF())
-        buffer = self._buffer
+        buffer = self._buffer_at_depth(depth)
         if (
             buffer is None
             or buffer.size() != size
@@ -69,7 +76,7 @@ class LayerIsolationCompositor:
         ):
             buffer = QImage(size, QImage.Format_ARGB32_Premultiplied)
             buffer.setDevicePixelRatio(dpr)
-            self._buffer = buffer
+            self._set_buffer_at_depth(depth, buffer)
             buffer.fill(Qt.transparent)
         elif painter.hasClipping():
             clear = QPainter(buffer)
@@ -83,6 +90,25 @@ class LayerIsolationCompositor:
         else:
             buffer.fill(Qt.transparent)
         return buffer
+
+    def _buffer_at_depth(self, depth: int) -> QImage | None:
+        """Return the reusable surface assigned to one nesting depth."""
+        if depth == 0:
+            return self._buffer
+        index = depth - 1
+        return (
+            self._nested_buffers[index] if index < len(self._nested_buffers) else None
+        )
+
+    def _set_buffer_at_depth(self, depth: int, buffer: QImage) -> None:
+        """Retain one reusable surface at its independent nesting depth."""
+        if depth == 0:
+            self._buffer = buffer
+            return
+        index = depth - 1
+        while len(self._nested_buffers) <= index:
+            self._nested_buffers.append(None)
+        self._nested_buffers[index] = buffer
 
 
 __all__ = ["LayerIsolationCompositor"]

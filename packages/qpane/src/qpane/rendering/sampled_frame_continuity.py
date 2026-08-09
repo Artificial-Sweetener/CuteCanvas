@@ -19,11 +19,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from math import isclose
 
 from ..scene.model import LayerDescriptor
 from ..scene.render_plan import (
+    SampledLayerRenderItem,
     SceneRenderItem,
     SceneRenderPlan,
 )
@@ -80,22 +81,31 @@ class SampledFrameContinuity:
         *,
         previous_plan: SceneRenderPlan | None,
     ) -> frozenset[uuid.UUID]:
-        """Return layers without a matching previously presented source revision."""
+        """Return layers without a matching previously sampled source revision."""
         prior = self._retired_plan or previous_plan
         if prior is None:
             return frozenset(descriptor.layer_id for descriptor in descriptors)
-        prior_descriptors = {
-            item.descriptor.layer_id: item.descriptor for item in prior.render_items
-        }
         return frozenset(
             descriptor.layer_id
             for descriptor in descriptors
-            if (previous := prior_descriptors.get(descriptor.layer_id)) is None
-            or (
-                previous.source == descriptor.source
-                and previous.source_revision != descriptor.source_revision
-            )
+            if not _has_matching_sampled_source(prior.render_items, descriptor)
         )
+
+    def prior_sampled_items(
+        self,
+        previous_plan: SceneRenderPlan | None,
+    ) -> Mapping[uuid.UUID, SampledLayerRenderItem]:
+        """Return latest sampled products plus retired coverage for missing layers."""
+        items: dict[uuid.UUID, SampledLayerRenderItem] = {}
+        for plan in (self._retired_plan, previous_plan):
+            if plan is None:
+                continue
+            items.update(
+                (item.descriptor.layer_id, item)
+                for item in plan.render_items
+                if isinstance(item, SampledLayerRenderItem)
+            )
+        return items
 
 
 def _same_frame(plan: SceneRenderPlan, frame: RenderFrameGeometry) -> bool:
@@ -105,4 +115,19 @@ def _same_frame(plan: SceneRenderPlan, frame: RenderFrameGeometry) -> bool:
         and plan.current_pan == frame.current_pan
         and plan.qpane_rect == frame.qpane_rect
         and plan.physical_viewport_rect == frame.physical_viewport_rect
+    )
+
+
+def _has_matching_sampled_source(
+    prior_items: tuple[SceneRenderItem, ...],
+    descriptor: LayerDescriptor,
+) -> bool:
+    """Return whether a prior sampled item represents the same source product."""
+    return any(
+        isinstance(item, SampledLayerRenderItem)
+        and item.descriptor.layer_id == descriptor.layer_id
+        and item.descriptor.source == descriptor.source
+        and item.descriptor.source_revision == descriptor.source_revision
+        and item.descriptor.raster_bounds == descriptor.raster_bounds
+        for item in prior_items
     )

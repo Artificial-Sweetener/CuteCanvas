@@ -64,6 +64,7 @@ def test_test_process_failure_is_returned_to_the_caller() -> None:
     )
     assert commands[0][-1] == "tools/check_architecture.py"
     assert "pytest" in commands[1]
+    assert commands[1][3:6] == ("-n", "auto", "--maxprocesses=8")
 
 
 def test_native_commit_gate_denies_warnings_and_dependency_risk() -> None:

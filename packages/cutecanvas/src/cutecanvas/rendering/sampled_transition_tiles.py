@@ -18,11 +18,12 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections.abc import Hashable
 
 from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage, QPainter, QRegion
 from qpane.sdk.scene import (
     RasterBounds,
     SampledLayerRenderItem,
@@ -160,6 +161,23 @@ class SampledTransitionTileCompiler:
         )
 
 
+def sampled_tiles_cover_bounds(
+    tiles: tuple[SampledTileRenderData, ...],
+    bounds: RasterBounds,
+) -> bool:
+    """Return whether sampled tile cores cover every pixel in ``bounds``."""
+    coverage = QRegion()
+    for tile in tiles:
+        source_rect = tile.source_rect
+        left = math.ceil(source_rect.left())
+        top = math.ceil(source_rect.top())
+        right = math.floor(source_rect.left() + source_rect.width())
+        bottom = math.floor(source_rect.top() + source_rect.height())
+        if right > left and bottom > top:
+            coverage += QRegion(left, top, right - left, bottom - top)
+    return coverage.contains(bounds.to_qrect())
+
+
 def _replace_sampled_tile(
     tile: SampledTileRenderData,
     patch_bounds: RasterBounds,
@@ -215,4 +233,4 @@ def _sample_geometry(
     return PixelSampleGeometry(source_rect, tile.image.size())
 
 
-__all__ = ["SampledTransitionTileCompiler"]
+__all__ = ["SampledTransitionTileCompiler", "sampled_tiles_cover_bounds"]

@@ -17,15 +17,15 @@
 
 from .layer_assembly import CompositionLayerSceneAssembler
 from .layer_selection import SceneLayerSelection, SceneLayerSelectionController
+from .mapping_preview import SceneLayerMappingPreview
 from .mutations import SceneMutationCoordinator
-from .transform_preview import SceneLayerTransformPreview
 from .transform_session import SceneLayerTransformController
 
 __all__ = [
     "CompositionLayerSceneAssembler",
+    "SceneLayerMappingPreview",
     "SceneLayerSelection",
     "SceneLayerSelectionController",
     "SceneLayerTransformController",
-    "SceneLayerTransformPreview",
     "SceneMutationCoordinator",
 ]

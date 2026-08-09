@@ -9,7 +9,10 @@ Most applications need only four values:
 
 * `RasterSource`, `VectorSource`, or `HybridSource` describes reusable content.
 * `RenderLayer` places one source in a scene.
-* `LayerTransform` maps the source into scene coordinates.
+* `LayerTransform` maps a source through one affine transform.
+* `ProjectiveLayerTransform` maps a source through one homography.
+* `PiecewiseLayerTransform` maps a source through one finite deformation cage.
+* `BilinearLayerTransform` maps a complete quadrilateral source onto a joined-edge triangle.
 * `RenderScene` gives the ordered layers a canvas.
 
 ## Build a Two-Image Scene
@@ -84,6 +87,86 @@ placed = RenderLayer(
 
 Changing placement means submitting a new scene or layer value. The source ID
 and revision stay the same, so cached source products remain reusable.
+
+## Map a Layer to a Quadrilateral
+
+`ProjectiveLayerTransform` maps four ordered source corners onto an arbitrary
+convex quadrilateral without resampling or changing the source. QPane applies
+the homography consistently to visibility, demand, hit testing, clipping,
+damage, and presentation:
+
+```python
+from PySide6.QtCore import QPointF
+from qpane import ProjectiveLayerTransform, RenderLayer
+
+mapping = ProjectiveLayerTransform.from_quadrilaterals(
+    (
+        QPointF(0.0, 0.0),
+        QPointF(800.0, 0.0),
+        QPointF(800.0, 600.0),
+        QPointF(0.0, 600.0),
+    ),
+    (
+        QPointF(80.0, 40.0),
+        QPointF(760.0, 90.0),
+        QPointF(720.0, 560.0),
+        QPointF(30.0, 520.0),
+    ),
+)
+placed = RenderLayer(left_source, transform=mapping)
+```
+
+The mapping is immutable and retains all nine Qt matrix coefficients. Invalid,
+singular, horizon-crossing, and non-finite mappings are rejected at the scene
+boundary.
+
+`LayerMapping` is the typed union accepted by scene-layer APIs.
+`layer_mapping_from_qtransform()` preserves the narrow `LayerTransform` value
+for affine input and returns `ProjectiveLayerTransform` when perspective terms
+are present. `compose_layer_mappings()` combines mappings in explicit
+application order without flattening projective coefficients.
+
+## Map a Layer through a Finite Deformation Cage
+
+`PiecewiseLayerTransform` maps finite source and target cages through bounded
+affine patches. Matching simple boundaries use deterministic triangles for
+local deformation. `BilinearLayerTransform` represents the exact limit where
+one target edge joins at a point while retaining the complete source domain.
+Both forms support clipping, hit testing, damage, sampled demand, and exact
+inverse coordinate projection without changing source pixels.
+
+Each immutable `TriangularLayerMappingPatch` exposes one source triangle, its
+corresponding target triangle, and the solved affine transform.
+
+```python
+from PySide6.QtCore import QPointF
+from qpane import PiecewiseLayerTransform, RenderLayer
+
+mapping = PiecewiseLayerTransform(
+    source_boundary=(
+        QPointF(0.0, 0.0),
+        QPointF(800.0, 0.0),
+        QPointF(800.0, 300.0),
+        QPointF(800.0, 600.0),
+        QPointF(0.0, 600.0),
+    ),
+    target_boundary=(
+        QPointF(40.0, 30.0),
+        QPointF(760.0, 50.0),
+        QPointF(700.0, 300.0),
+        QPointF(740.0, 570.0),
+        QPointF(20.0, 540.0),
+    ),
+)
+placed = RenderLayer(left_source, transform=mapping)
+```
+
+Both boundaries contain 4–128 finite vertices, have matching topology and
+winding, enclose nonzero area, and do not self-intersect or backtrack.
+`inverse_mapping_linearization()` returns the scene-to-source differential at a
+source point for spatially varying brush, sampling, or measurement geometry.
+Global affine or projective mappings can compose before or after one piecewise
+mapping; two independent piecewise cages require an explicit new cage.
 
 ## Control Visibility and Clipping
 
@@ -306,7 +389,7 @@ sample = rasterizer.rasterize(
 )
 ```
 
-The rasterizer preserves layer order, affine placement, visibility, opacity,
+The rasterizer preserves layer order, exact layer mapping, visibility, opacity,
 clips, and raster, vector, and hybrid presentation while allocating only the
 requested output. Omit `layer_scope` to render the complete visible scene.
 When supplied, `SceneLayerRenderScope` includes only those layer identities

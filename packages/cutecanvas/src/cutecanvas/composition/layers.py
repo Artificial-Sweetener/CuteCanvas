@@ -27,12 +27,20 @@ from qpane.sdk.scene import (
     LayerClip,
     LayerEffectReference,
     LayerInteractionPolicy,
+    LayerMapping,
     LayerSourceReference,
     LayerTransform,
 )
 
 from .geometry_policy import LayerGeometryPolicy
+from .layer_mapping_validation import validate_composition_layer_mapping
 from .resource_lifetime import CompositionResourceLifetime, ResourceLeaseKind
+from .resource_references import instance_resources
+
+
+def _source_key(source: LayerSourceReference) -> tuple[str, uuid.UUID]:
+    """Return the stable index key for one typed source reference."""
+    return source.kind, source.resource_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +49,7 @@ class CompositionLayerInstance:
 
     layer_id: uuid.UUID
     source: LayerSourceReference
-    transform: LayerTransform = field(default_factory=LayerTransform)
+    transform: LayerMapping = field(default_factory=LayerTransform)
     visible: bool = True
     opacity: float = 1.0
     tint: QColor | None = None
@@ -60,6 +68,7 @@ class CompositionLayerInstance:
             raise ValueError("layer opacity must be between 0.0 and 1.0")
         if not isinstance(self.source, LayerSourceReference):
             raise TypeError("layer source must satisfy LayerSourceReference")
+        validate_composition_layer_mapping(self.transform)
         if self.tint is not None:
             object.__setattr__(self, "tint", QColor(self.tint))
         object.__setattr__(self, "metadata", dict(self.metadata))
@@ -294,7 +303,7 @@ class CompositionLayerStore:
         layer_id: uuid.UUID,
         duplicate_layer_id: uuid.UUID,
         *,
-        transform: LayerTransform | None = None,
+        transform: LayerMapping | None = None,
     ) -> CompositionLayerInstance | None:
         """Append an independent instance sharing one existing source."""
         if self.layer(composition_id, duplicate_layer_id) is not None:
@@ -401,31 +410,31 @@ class CompositionLayerStore:
             lambda current: replace(current, interaction=interaction),
         )
 
-    def update_transform(
+    def update_mapping(
         self,
         composition_id: uuid.UUID,
         layer_id: uuid.UUID,
-        transform: LayerTransform,
+        mapping: LayerMapping,
     ) -> bool:
-        """Replace authoritative layer-to-scene transform for one instance."""
+        """Replace the authoritative layer-to-scene mapping for one instance."""
         return self._replace_layer(
             composition_id,
             layer_id,
-            lambda current: replace(current, transform=transform),
+            lambda current: replace(current, transform=mapping),
         )
 
-    def update_transforms(
+    def update_mappings(
         self,
         composition_id: uuid.UUID,
-        transforms: tuple[tuple[uuid.UUID, LayerTransform], ...],
+        mappings: tuple[tuple[uuid.UUID, LayerMapping], ...],
     ) -> bool:
-        """Replace multiple instance transforms as one validated publication."""
+        """Replace multiple instance mappings as one validated publication."""
         layers = self._layers_by_composition.get(composition_id)
-        if not layers or not transforms:
+        if not layers or not mappings:
             return False
-        requested = dict(transforms)
-        if len(requested) != len(transforms):
-            raise ValueError("layer transform identities must be unique")
+        requested = dict(mappings)
+        if len(requested) != len(mappings):
+            raise ValueError("layer mapping identities must be unique")
         known_ids = {layer.layer_id for layer in layers}
         if not requested.keys() <= known_ids:
             return False
@@ -565,16 +574,4 @@ class CompositionLayerStore:
         self._instance_revisions[key] = self._instance_revisions.get(key, 0) + 1
 
 
-def _source_key(source: LayerSourceReference) -> tuple[str, uuid.UUID]:
-    """Return the stable index key for one typed source reference."""
-    return source.kind, source.resource_id
-
-
-def instance_resources(
-    instance: CompositionLayerInstance,
-) -> tuple[LayerSourceReference, ...]:
-    """Return unique main and effect sources retained by one instance."""
-    sources = [instance.source]
-    for effect in instance.effects:
-        sources.extend(effect.retained_sources)
-    return tuple(dict.fromkeys(sources))
+__all__ = ["CompositionLayerInstance", "CompositionLayerStore"]

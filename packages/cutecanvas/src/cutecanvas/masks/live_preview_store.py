@@ -31,6 +31,7 @@ class MaskLivePreviewStore(QObject):
     """Own document-scoped provisional mask patches and their invalidation."""
 
     changed = Signal(object, QRect)
+    settlement_prepared = Signal(object, object)
 
     def __init__(self) -> None:
         """Create an empty document-scoped preview registry."""
@@ -51,6 +52,7 @@ class MaskLivePreviewStore(QObject):
         if preview is None:
             return False
         preview.prepare_settlement()
+        self.settlement_prepared.emit(mask_id, preview)
         return True
 
     def apply_patch(

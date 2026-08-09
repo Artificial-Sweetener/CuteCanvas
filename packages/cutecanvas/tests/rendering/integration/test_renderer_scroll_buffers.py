@@ -1293,58 +1293,6 @@ def test_clipped_public_scene_pan_reuses_exact_layered_pixels(qapp) -> None:
         qapp.processEvents()
 
 
-def test_base_only_predicate_accepts_default_raster_plan() -> None:
-    """A single full-scene base raster item should qualify for fast paths."""
-    plan = make_render_plan(QRect(0, 0, 64, 64))
-
-    assert plan.base_raster_item is not None
-
-    assert Renderer._base_only_raster_item(plan) is plan.base_raster_item
-
-
-def test_base_only_predicate_rejects_mask_plan() -> None:
-    """Mask render items must keep the layered renderer path."""
-    mask_plan, _mask_item = _make_mask_plan(QRect(0, 0, 64, 64))
-
-    assert Renderer._base_only_raster_item(mask_plan) is None
-
-
-def test_base_only_predicate_rejects_clipped_plan() -> None:
-    """Clipped reveal/comparison layers must keep visibility-aware rendering."""
-    plan = make_render_plan(QRect(0, 0, 64, 64))
-    base_item = plan.base_raster_item
-    assert base_item is not None
-    clip = LayerClip(
-        coordinate_space=ClipCoordinateSpace.NORMALIZED_VIEWPORT,
-        x=0.0,
-        y=0.0,
-        width=0.5,
-        height=1.0,
-    )
-    clipped_item = replace(
-        base_item,
-        descriptor=replace(base_item.descriptor, clip=clip),
-        clip=clip,
-    )
-    clipped_plan = replace(plan, render_items=(clipped_item,))
-
-    assert Renderer._base_only_raster_item(clipped_plan) is None
-
-
-def test_base_only_predicate_rejects_multi_image_plan() -> None:
-    """Additional raster layers must keep the general scene renderer."""
-    plan = make_render_plan(QRect(0, 0, 64, 64))
-    base_item = plan.base_raster_item
-    assert base_item is not None
-    additional_item = replace(
-        base_item,
-        descriptor=replace(base_item.descriptor, layer_id=uuid.uuid4()),
-    )
-    layered_plan = replace(plan, render_items=(base_item, additional_item))
-
-    assert Renderer._base_only_raster_item(layered_plan) is None
-
-
 def test_base_dirty_redraw_uses_direct_fast_path(
     qpane_with_image,
     monkeypatch,

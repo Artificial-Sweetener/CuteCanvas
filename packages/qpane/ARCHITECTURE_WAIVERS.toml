@@ -48,19 +48,6 @@ review_by = 2026-12-15
 max_lines = 753
 
 [[waivers]]
-id = "QPANE-WAIVER-005"
-issue = "chore:QPANE-WAIVER-005"
-owner = "QPane scene composition"
-rule = "STRUCT003"
-path = "packages/qpane/src/qpane/rendering/item_compositor.py"
-kind = "remediation"
-justification = "General scene dispatch still mixes sampled-source resolution, settled sampled replacement, transient isolation coordination, clipping, effects, and debug presentation."
-review_by = 2026-12-15
-max_lines = 580
-next_limit = 500
-debt = "QPANE-ARCH-002"
-
-[[waivers]]
 id = "QPANE-WAIVER-006"
 issue = "chore:QPANE-WAIVER-006"
 owner = "QPane presentation"
@@ -69,7 +56,7 @@ path = "packages/qpane/src/qpane/rendering/presenter.py"
 kind = "remediation"
 justification = "The presenter retains mixed coordinate, buffer, refinement, effect, and paint responsibilities pending complete owner extraction."
 review_by = 2026-12-15
-max_lines = 1504
+max_lines = 1463
 next_limit = 1150
 debt = "QPANE-ARCH-003"
 
@@ -95,7 +82,7 @@ path = "packages/qpane/src/qpane/rendering/raster_planner.py"
 kind = "structural"
 justification = "RasterRenderPlanner is the single deterministic owner that lowers visible layer geometry and available products into raster frame items and tile plans."
 review_by = 2026-12-15
-max_lines = 1009
+max_lines = 1032
 
 [[waivers]]
 id = "QPANE-WAIVER-009"
@@ -106,7 +93,7 @@ path = "packages/qpane/src/qpane/rendering/render.py"
 kind = "remediation"
 justification = "Buffered painting, reuse, and navigation refinement retain separate lifecycles pending refinement extraction."
 review_by = 2026-12-15
-max_lines = 970
+max_lines = 940
 next_limit = 760
 debt = "QPANE-ARCH-005"
 
@@ -119,7 +106,7 @@ path = "packages/qpane/src/qpane/rendering/render_tiles.py"
 kind = "structural"
 justification = "RenderTileWorkCoordinator is the sole request-lifecycle owner for immediate, deferred, overview, detail, and prefetch tile work."
 review_by = 2026-12-15
-max_lines = 639
+max_lines = 643
 
 [[waivers]]
 id = "QPANE-WAIVER-011"

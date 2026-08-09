@@ -232,6 +232,8 @@ from .rendering.sdk import (
 )
 from .rendering.viewport import ViewportZoomMode as ViewportZoomMode
 from .scene.affine import LayerTransform as LayerTransform
+from .scene.bilinear import BilinearLayerTransform as BilinearLayerTransform
+from .scene.mapping import LayerMapping as LayerMapping
 from .scene.model import (
     BlendMode as BlendMode,
 )
@@ -240,6 +242,10 @@ from .scene.model import (
 )
 from .scene.model import (
     LayerClip as LayerClip,
+)
+from .scene.piecewise import PiecewiseLayerTransform as PiecewiseLayerTransform
+from .scene.piecewise import (
+    TriangularLayerMappingPatch as TriangularLayerMappingPatch,
 )
 from .scene.presentation_effects import (
     LayerPresentationEffect as LayerPresentationEffect,
@@ -250,6 +256,7 @@ from .scene.presentation_effects import (
 from .scene.presentation_effects import (
     LayerPresentationStyle as LayerPresentationStyle,
 )
+from .scene.projective import ProjectiveLayerTransform as ProjectiveLayerTransform
 from .scene.raster import RasterBounds as RasterBounds
 from .scene.render_plan import SceneRenderPlan
 from .scene.source_capabilities import (

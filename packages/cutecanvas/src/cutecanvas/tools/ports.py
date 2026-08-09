@@ -30,16 +30,14 @@ from qpane import CursorInteractionPort, NavigationInteractionPort
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.cursor import EditorCursorIntent
 
+from .affine_ports import SharedEdgeResizePort, TransformInteractionPort
 from .dependencies import ToolDependencies
 
 if TYPE_CHECKING:
     from qpane.sdk.rendering import PanelHitTest
-    from qpane.sdk.scene import TransformModifiers, TransformOperation
 
     from cutecanvas.coverage import CoverageItem, CoverageSnapshot
     from cutecanvas.painting.tools.brush_preview import AffineBrushPreview
-
-    from ..editor.transform_interaction import TransformBoxPresentation
 
 
 def _false() -> bool:
@@ -93,6 +91,11 @@ def _point(
     return QPointF(point)
 
 
+def _optional_point(point: QPointF) -> QPointF | None:
+    """Return a detached point for inert target-to-panel projection."""
+    return QPointF(point)
+
+
 @dataclass(frozen=True, slots=True)
 class AuthoringSnapPort:
     """Resolve panel-space geometry through the shared authoring session."""
@@ -136,29 +139,11 @@ class MoveInteractionPort:
 
 
 @dataclass(frozen=True, slots=True)
-class TransformInteractionPort:
-    """Dependencies used by source-neutral affine transform interaction."""
-
-    transform_presentation: Callable[[], TransformBoxPresentation | None] = lambda: None
-    begin_transform: Callable[[TransformOperation, QPointF], bool] = (
-        lambda _operation, _point: False
-    )
-    update_transform: Callable[[QPointF, TransformModifiers], bool] = (
-        lambda _point, _modifiers: False
-    )
-    end_transform_gesture: Callable[[QPointF, TransformModifiers], bool] = (
-        lambda _point, _modifiers: False
-    )
-    commit_transform: Callable[[], bool] = _false
-    cancel_transform: Callable[[], bool] = _false
-    suspend_transform: Callable[[], bool] = _false
-
-
-@dataclass(frozen=True, slots=True)
 class PixelSelectionInteractionPort:
     """Dependencies used by geometric pixel-selection tools."""
 
     panel_to_scene_point: Callable[[QPointF], QPointF | None] = lambda _point: None
+    target_to_panel_point: Callable[[QPointF], QPointF | None] = _optional_point
     can_select: Callable[[], bool] = _true
     has_selection: Callable[[], bool] = _false
     alt_constrains_empty_shape: bool = False
@@ -305,6 +290,7 @@ BuiltInToolPort = (
     | NavigationInteractionPort
     | MoveInteractionPort
     | TransformInteractionPort
+    | SharedEdgeResizePort
     | PixelSelectionInteractionPort
     | PaintingInteractionPort
     | CloneStampInteractionPort
@@ -327,6 +313,9 @@ class ToolActivationPorts:
     movement: MoveInteractionPort = field(default_factory=MoveInteractionPort)
     transform: TransformInteractionPort = field(
         default_factory=TransformInteractionPort
+    )
+    shared_edge_resize: SharedEdgeResizePort = field(
+        default_factory=SharedEdgeResizePort
     )
     pixel_selection: PixelSelectionInteractionPort = field(
         default_factory=PixelSelectionInteractionPort
@@ -354,12 +343,15 @@ class ToolActivationPorts:
             "panzoom": self.navigation,
             "move": self.movement,
             "transform": self.transform,
+            "shared-edge-resize": self.shared_edge_resize,
             "select-rectangle": self.pixel_selection,
             "select-ellipse": self.pixel_selection,
             "select-lasso": self.pixel_selection,
+            "select-polygon": self.pixel_selection,
             "mask-rectangle": self.coverage_shapes,
             "mask-ellipse": self.coverage_shapes,
             "mask-lasso": self.coverage_shapes,
+            "mask-polygon": self.coverage_shapes,
             "draw-brush": self.painting,
             "eraser": self.painting,
             "clone-stamp": self.clone_stamp,
@@ -376,6 +368,7 @@ def tool_activation_ports(
     navigation: NavigationInteractionPort,
     movement: MoveInteractionPort,
     transform: TransformInteractionPort,
+    shared_edge_resize: SharedEdgeResizePort,
     pixel_selection: PixelSelectionInteractionPort,
     painting: PaintingInteractionPort,
     clone_stamp: CloneStampInteractionPort | None = None,
@@ -448,6 +441,7 @@ def tool_activation_ports(
         navigation=navigation,
         movement=movement,
         transform=transform,
+        shared_edge_resize=shared_edge_resize,
         pixel_selection=pixel_selection,
         coverage_shapes=coverage_shapes or pixel_selection,
         painting=painting,

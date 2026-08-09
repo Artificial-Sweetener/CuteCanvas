@@ -22,7 +22,7 @@ from typing import Protocol
 
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QTransform
-from qpane import LayerPresentationEffect, LayerPresentationStyle
+from qpane import LayerMapping, LayerPresentationEffect, LayerPresentationStyle
 
 from ..composition.geometry_policy import LayerGeometryPolicy
 from ..document import CanvasAnchor, CanvasResamplingMode
@@ -144,9 +144,9 @@ class EditorHandleHost(Protocol):
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-        transform: QTransform,
+        transform: QTransform | LayerMapping,
     ) -> bool:
-        """Replace one layer's affine transform."""
+        """Replace one layer's complete local-to-scene mapping."""
         ...
 
     def setLayerVisible(

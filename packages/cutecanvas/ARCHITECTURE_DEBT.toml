@@ -5,7 +5,7 @@ product = "cutecanvas"
 id = "CUTECANVAS-ARCH-001"
 owner = "CuteCanvas raster facade"
 paths = ["packages/cutecanvas/src/cutecanvas/facade/raster_api.py"]
-fingerprint = "sha256:920c09d4a1291d713ab794818b5b18d860fe1012334557b75f8244c235a4cc4e"
+fingerprint = "sha256:f8230c1164a23b016b27956be3dc1b2a1def96665e5a2fdaa39d57206ab5f346"
 issue = "chore:CUTECANVAS-ARCH-001"
 review_by = 2026-12-15
 responsibilities = [
@@ -34,16 +34,16 @@ next_extraction = "Move direct stroke sessions, coverage application, and raster
 id = "CUTECANVAS-ARCH-003"
 owner = "CuteCanvas mask integration"
 paths = ["packages/cutecanvas/src/cutecanvas/masks/mask_service.py"]
-fingerprint = "sha256:b7c390022582be565940b170a2247ac7c45dc486cabd373438594ff57fce7bed"
+fingerprint = "sha256:9cecfbfa16a333990005796041a36a3385b43dcf7b6d974c8c96c711d8aa6896"
 issue = "chore:CUTECANVAS-ARCH-003"
 review_by = 2026-12-15
 responsibilities = [
-  "stroke pipeline orchestration",
-  "mask asset, layer, activation, and edit workflows",
-  "render cache, prefetch, and invalidation",
-  "autosave, configuration, status, and diagnostics integration",
+  "mask component graph assembly and facade delegation",
+  "asset, layer, activation, and edit workflow integration",
+  "render cache, prefetch, invalidation, and generated-mask routing",
+  "autosave, configuration, file workflow, status, and diagnostics integration",
 ]
-next_extraction = "Extract stroke preparation, pending-stroke lifecycle, commit, cancellation, and stroke diagnostics into a mask stroke service."
+next_extraction = "Extract diagnostics registration, status publication, stroke metrics, and configuration updates into a focused mask diagnostics integration service."
 
 [[debts]]
 id = "CUTECANVAS-ARCH-004"
@@ -94,14 +94,14 @@ next_extraction = "Move SAM manager attachment, predictor reset, generated-mask 
 id = "CUTECANVAS-ARCH-007"
 owner = "CuteCanvas persistence"
 paths = ["packages/cutecanvas/src/cutecanvas/persistence/codec.py"]
-fingerprint = "sha256:9ae7ebff24ab809c21d5c3cb433b5ac1a664482b54e440f3a45eb49be0a8800b"
+fingerprint = "sha256:80f99c91bd78f57007de9e2161863c8c7fa3273ce12d680cf47e51b48f202fe7"
 issue = "chore:CUTECANVAS-ARCH-007"
 review_by = 2026-12-15
 responsibilities = [
-  "archive container IO and version validation",
-  "composition, layer, clip, and interaction encoding",
+  "archive container IO and version dispatch",
+  "composition document table and root assembly",
   "raster, coverage, placed, mask, and vector resource codecs",
-  "legacy migration and cross-reference validation",
+  "resource reference and archive graph validation",
 ]
 next_extraction = "Extract placed and raster resource encoders and decoders behind typed resource codec owners."
 
@@ -109,13 +109,13 @@ next_extraction = "Extract placed and raster resource encoders and decoders behi
 id = "CUTECANVAS-ARCH-008"
 owner = "CuteCanvas document events"
 paths = ["packages/cutecanvas/src/cutecanvas/runtime/document_events.py"]
-fingerprint = "sha256:34503a3977d12f37006af3fdfad8e2b061a625c5b33314df29d5e79f2d93ff01"
+fingerprint = "sha256:fe4f93aee803d1e9ded7c9bfeb767c912e4a96afde3251cb492f4ad1bc4c948d"
 issue = "chore:CUTECANVAS-ARCH-008"
 review_by = 2026-12-15
 responsibilities = [
   "composition and scene publication",
   "resource completion and pixel-content change handling",
-  "selection, paint-target, vector, and interaction synchronization",
+  "selection, paint-target, and vector synchronization",
   "viewport and diagnostics propagation",
 ]
 next_extraction = "Extract vector selection, node selection, text edit, option, and content publication into a vector document-event owner."
@@ -124,7 +124,7 @@ next_extraction = "Extract vector selection, node selection, text edit, option, 
 id = "CUTECANVAS-ARCH-009"
 owner = "CuteCanvas runtime lifecycle"
 paths = ["packages/cutecanvas/src/cutecanvas/runtime/lifecycle.py"]
-fingerprint = "sha256:c900308dedd836e5bb1f87033aebfd8ada09b03be00473aa4f552dd3b329ffad"
+fingerprint = "sha256:a325c47f40c3fc67906f5255d2dbaab608e4bef5fe6a13a77c918645040d68cb"
 issue = "chore:CUTECANVAS-ARCH-009"
 review_by = 2026-12-15
 responsibilities = [

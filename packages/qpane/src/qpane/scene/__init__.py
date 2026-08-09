@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from .affine import LayerTransform
+from .bilinear import BilinearLayerTransform
 from .identity import (
     SceneLayerAssetKey,
     SceneLayerTileKey,
@@ -28,6 +29,7 @@ from .identity import (
     scene_image_asset_key,
     source_render_asset_key,
 )
+from .mapping import LayerMapping
 from .model import (
     BlendMode,
     ClipCoordinateSpace,
@@ -41,6 +43,8 @@ from .model import (
     SceneDescriptor,
     SceneKind,
 )
+from .piecewise import PiecewiseLayerTransform, TriangularLayerMappingPatch
+from .projective import ProjectiveLayerTransform
 from .providers import SceneContribution, SceneProvider, SceneResolver
 from .raster import RasterBounds
 from .registry import (
@@ -68,6 +72,7 @@ from .source_capabilities import (
 from .source_references import LayerSourceReference
 
 __all__ = [
+    "BilinearLayerTransform",
     "BlendMode",
     "ClipCoordinateSpace",
     "LayerClip",
@@ -76,10 +81,13 @@ __all__ = [
     "LayerHitTest",
     "LayerInteractionPolicy",
     "LayerKind",
+    "LayerMapping",
     "LayerPlacement",
     "LayerSourceCapabilities",
     "LayerSourceReference",
     "LayerTransform",
+    "PiecewiseLayerTransform",
+    "ProjectiveLayerTransform",
     "RasterBounds",
     "RasterLayerRenderItem",
     "RasterPresentation",
@@ -104,6 +112,7 @@ __all__ = [
     "SourceMetadataRegistry",
     "SourceRenderAssetKey",
     "TileRenderData",
+    "TriangularLayerMappingPatch",
     "placeholder_layer_id",
     "placeholder_scene_id",
     "placeholder_source_id",

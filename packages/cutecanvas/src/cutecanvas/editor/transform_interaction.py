@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
-    LayerTransform,
+    LayerMapping,
     TransformHandle,
     TransformModifiers,
     TransformOperation,
@@ -145,12 +145,20 @@ class SceneLayerTransformInteraction:
         """Release a gesture without changing unresolved preview geometry."""
         return self._transforms.suspend()
 
-    def preview_scene_transform(self, transform: LayerTransform) -> bool:
+    def preview_scene_transform(self, transform: LayerMapping) -> bool:
         """Publish one cumulative transform through the layer session owner."""
         if not self._transforms.preview_selected_transform(transform):
             return False
         self._refresh_preview()
         return True
+
+    def publish_committed_change(self) -> None:
+        """Publish a durable affine change through the shared facade boundary."""
+        self._publish_change()
+
+    def refresh_transform_preview(self) -> None:
+        """Invalidate old and new geometry after a transient transform change."""
+        self._refresh_preview()
 
 
 def _project_presentation(

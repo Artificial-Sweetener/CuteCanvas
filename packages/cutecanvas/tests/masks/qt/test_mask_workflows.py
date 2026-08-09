@@ -964,16 +964,18 @@ def test_cancelled_provisional_preview_does_not_drop_next_stroke(qapp):
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)
     try:
-        service.applyStrokeSegment(BrushStrokeSegment.fixed((8, 8), (8, 8), 5, False))
+        service.stroke_interactions.apply(
+            BrushStrokeSegment.fixed((8, 8), (8, 8), 5, False)
+        )
         assert mask_id in service.strokeDebugSnapshot().preview_state_ids
-        service.cancelStroke()
+        service.stroke_interactions.cancel()
         assert mask_id not in service.strokeDebugSnapshot().preview_state_ids
         assert not service.strokeDebugSnapshot().invalidated_job_tokens
 
-        service.applyStrokeSegment(
+        service.stroke_interactions.apply(
             BrushStrokeSegment.fixed((20, 20), (24, 20), 5, False)
         )
-        service.commitStroke()
+        service.stroke_interactions.commit()
         qpane._test_execution_backend.run_all()
         qapp.processEvents()
 
@@ -993,7 +995,7 @@ def test_cancelled_preview_restores_only_its_durable_region(qapp, monkeypatch):
     assert mask_id is not None
     assert qpane.setActiveMaskID(mask_id)
     try:
-        service.applyStrokeSegment(
+        service.stroke_interactions.apply(
             BrushStrokeSegment.fixed((200, 200), (220, 220), 20, False)
         )
         updates: list[tuple[QRect, QImage | None]] = []
@@ -1016,7 +1018,7 @@ def test_cancelled_preview_restores_only_its_durable_region(qapp, monkeypatch):
 
         monkeypatch.setattr(service._stroke_pipeline, "_update_region", track_update)
 
-        service.cancelStroke()
+        service.stroke_interactions.cancel()
 
         assert len(updates) == 1
         restored_rect, durable_region = updates[0]

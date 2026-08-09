@@ -21,7 +21,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 
-from ..composition.layers import CompositionLayerInstance, instance_resources
+from ..composition.layers import CompositionLayerInstance
+from ..composition.resource_references import instance_resources
 from .model import ProjectResourceKind, ProjectResourceReference
 from .store import ProjectResourceStore
 

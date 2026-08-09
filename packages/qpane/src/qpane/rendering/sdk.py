@@ -28,6 +28,7 @@ from PySide6.QtGui import QImage
 
 from ..hybrid.model import HybridDocument, HybridPresentationStyle
 from ..scene.affine import LayerTransform
+from ..scene.mapping import LayerMapping, validate_layer_mapping
 from ..scene.model import BlendMode, LayerClip
 from ..scene.raster import RasterBounds
 from ..scene.source_capabilities import RasterProductPolicy, RasterSourcePatch
@@ -256,7 +257,7 @@ class RenderLayer:
 
     source: RenderSource
     layer_id: uuid.UUID = field(default_factory=uuid.uuid4)
-    transform: LayerTransform = field(default_factory=LayerTransform)
+    transform: LayerMapping = field(default_factory=LayerTransform)
     visible: bool = True
     opacity: float = 1.0
     blend_mode: BlendMode = BlendMode.NORMAL
@@ -271,6 +272,7 @@ class RenderLayer:
             raise TypeError(
                 "source must be RasterSource, VectorSource, or HybridSource"
             )
+        validate_layer_mapping(self.transform, self.source.bounds)
         if not 0.0 <= self.opacity <= 1.0:
             raise ValueError("layer opacity must be between 0.0 and 1.0")
         object.__setattr__(self, "blend_mode", BlendMode(self.blend_mode))

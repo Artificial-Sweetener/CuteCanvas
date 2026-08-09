@@ -36,6 +36,7 @@ from qpane.sdk.scene import (
 )
 
 from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.coverage.boundary import sparse_coverage_convex_boundary
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.scene.source_capabilities import PixelSampleGeometry
@@ -129,6 +130,10 @@ class MaskSourceCapabilities:
     assets: MaskAssetLookup
     renders: MaskRenderLookup
     hybrids: MaskHybridSourceFactory = field(default_factory=MaskHybridSourceFactory)
+    _boundary_cache: dict[
+        uuid.UUID,
+        tuple[object, tuple[QPointF, ...]],
+    ] = field(default_factory=dict, compare=False, repr=False)
 
     def presentation_for(
         self,
@@ -286,6 +291,28 @@ class MaskSourceCapabilities:
             return durable
         provisional_rect = _rectf(provisional)
         return provisional_rect if durable is None else durable.united(provisional_rect)
+
+    def content_boundary(
+        self,
+        source: LayerSourceReference,
+    ) -> tuple[QPointF, ...]:
+        """Return a revision-cached polygon around durable visible coverage."""
+        if not isinstance(source, ProjectResourceReference):
+            return ()
+        layer = self.assets.get_layer(source.resource_id)
+        if layer is None:
+            return ()
+        if layer.coverage.has_retained_items:
+            return ()
+        revision = layer.coverage.revision
+        cached = self._boundary_cache.get(source.resource_id)
+        if cached is not None and cached[0] == revision:
+            return tuple(QPointF(point) for point in cached[1])
+        boundary = sparse_coverage_convex_boundary(
+            layer.coverage.raster.state_snapshot()
+        )
+        self._boundary_cache[source.resource_id] = (revision, boundary)
+        return tuple(QPointF(point) for point in boundary)
 
     def storage_bounds(self, source: LayerSourceReference) -> QRectF | None:
         """Return sparse raster storage independently of retained mask geometry."""

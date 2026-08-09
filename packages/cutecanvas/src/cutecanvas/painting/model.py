@@ -22,7 +22,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerTransform
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerTransform,
+    PiecewiseLayerTransform,
+)
+
+BrushTipMapping = BilinearLayerTransform | PiecewiseLayerTransform
 
 
 class BrushOperation(str, Enum):
@@ -184,6 +190,12 @@ class BrushStrokeSegment:
     texture_seed: int = 0
     size_dynamics_applied: bool = False
     tip_transform: LayerTransform = field(default_factory=LayerTransform)
+    tip_mapping: BrushTipMapping | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+        metadata={"persist": False},
+    )
 
     @classmethod
     def fixed(
@@ -253,6 +265,13 @@ class BrushStrokeSegment:
             texture_seed=self.texture_seed,
             size_dynamics_applied=self.size_dynamics_applied,
             tip_transform=self.tip_transform,
+            tip_mapping=(
+                None
+                if self.tip_mapping is None
+                else self.tip_mapping.preceded_by(
+                    LayerTransform(dx=-delta_x, dy=-delta_y)
+                )
+            ),
         )
 
 
@@ -269,3 +288,8 @@ class BrushDab:
     texture_scale: float = 8.0
     texture_seed: int = 0
     tip_transform: LayerTransform = field(default_factory=LayerTransform)
+    tip_mapping: BrushTipMapping | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )

@@ -23,10 +23,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from qpane.sdk.scene import TransformHandle
 
+from .affine_handles import draw_affine_handle
+
 if TYPE_CHECKING:
     from ..editor.transform_interaction import TransformBoxPresentation
-
-_HANDLE_RADIUS = 4.0
 
 
 class TransformBoxRenderer:
@@ -49,7 +49,9 @@ class TransformBoxRenderer:
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPolygon(QPolygonF(state.corners))
         for handle, point in state.handles:
-            radius = _HANDLE_RADIUS + (1.0 if handle is hovered_handle else 0.0)
-            painter.setBrush(QColor(238, 242, 247, 245))
-            painter.drawEllipse(point, radius, radius)
+            draw_affine_handle(
+                painter,
+                point,
+                emphasized=handle is hovered_handle,
+            )
         painter.restore()

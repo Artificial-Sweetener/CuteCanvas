@@ -327,6 +327,7 @@ def _register_resource_capabilities(
         editor_capabilities.coverage,
         editor_capabilities.pixel_presentation,
         editor_capabilities.content_bounds,
+        editor_capabilities.content_boundary,
         editor_capabilities.storage_bounds,
         editor_capabilities.authored_bounds,
     ):

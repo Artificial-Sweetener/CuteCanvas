@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from math import ceil, floor
 
-from PySide6.QtCore import QRectF, QSize
+from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.execution import CancellationToken
 from qpane.sdk.scene import (
@@ -305,13 +305,27 @@ def _scaled_geometry(
     policy: LayerGeometryPolicy,
     scale: LayerTransform,
 ) -> LayerGeometryPolicy:
-    """Scale explicit source-local manipulation bounds when present."""
-    if policy.mode is not LayerGeometryMode.CUSTOM or policy.custom_bounds is None:
-        return policy
-    return LayerGeometryPolicy(
-        LayerGeometryMode.CUSTOM,
-        scaled_raster_bounds(policy.custom_bounds, scale),
-    )
+    """Scale explicit source-local manipulation geometry when present."""
+    if policy.mode is LayerGeometryMode.CUSTOM and policy.custom_bounds is not None:
+        return LayerGeometryPolicy(
+            LayerGeometryMode.CUSTOM,
+            scaled_raster_bounds(policy.custom_bounds, scale),
+        )
+    if policy.mode is LayerGeometryMode.BOUNDARY:
+        boundary = tuple(
+            _point_coordinates(scale.map_point(point))
+            for point in policy.boundary_points()
+        )
+        return LayerGeometryPolicy(
+            LayerGeometryMode.BOUNDARY,
+            custom_boundary=boundary,
+        )
+    return policy
+
+
+def _point_coordinates(point: QPointF) -> tuple[float, float]:
+    """Return one immutable coordinate pair from a mapped Qt point."""
+    return float(point.x()), float(point.y())
 
 
 def _scaled_scene_clip(

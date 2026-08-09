@@ -33,8 +33,8 @@ from qpane.sdk.scene import (
 
 from ..ui.transform_box import TransformBoxRenderer
 from ..ui.transform_cursor import TransformCursorFactory
+from .affine_ports import TransformInteractionPort
 from .base import BaseTool
-from .ports import TransformInteractionPort
 
 if TYPE_CHECKING:
     from ..editor.transform_interaction import TransformBoxPresentation

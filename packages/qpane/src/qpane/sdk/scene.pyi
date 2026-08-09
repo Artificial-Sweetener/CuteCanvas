@@ -15,9 +15,18 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from ..scene.affine import LayerTransform as LayerTransform
+from ..scene.bilinear import BilinearLayerTransform as BilinearLayerTransform
 from ..scene.effects import LayerEffectReference as LayerEffectReference
 from ..scene.effects import LayerEffectRenderRegistry as LayerEffectRenderRegistry
 from ..scene.identity import SceneLayerAssetKey as SceneLayerAssetKey
+from ..scene.mapping import LayerMapping as LayerMapping
+from ..scene.mapping import compose_layer_mappings as compose_layer_mappings
+from ..scene.mapping import (
+    inverse_mapping_linearization as inverse_mapping_linearization,
+)
+from ..scene.mapping import (
+    layer_mapping_from_qtransform as layer_mapping_from_qtransform,
+)
 from ..scene.model import BlendMode as BlendMode
 from ..scene.model import ClipCoordinateSpace as ClipCoordinateSpace
 from ..scene.model import LayerClip as LayerClip
@@ -29,6 +38,11 @@ from ..scene.model import LayerKind as LayerKind
 from ..scene.model import LayerPlacement as LayerPlacement
 from ..scene.model import SceneDescriptor as SceneDescriptor
 from ..scene.model import SceneKind as SceneKind
+from ..scene.piecewise import PiecewiseLayerTransform as PiecewiseLayerTransform
+from ..scene.piecewise import (
+    TriangularLayerMappingPatch as TriangularLayerMappingPatch,
+)
+from ..scene.projective import ProjectiveLayerTransform as ProjectiveLayerTransform
 from ..scene.providers import SceneContribution as SceneContribution
 from ..scene.raster import RasterBounds as RasterBounds
 from ..scene.registry import SceneProviderRegistry as SceneProviderRegistry

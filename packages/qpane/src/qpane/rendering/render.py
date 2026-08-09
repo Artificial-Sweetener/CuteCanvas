@@ -27,11 +27,11 @@ from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QImage, QPainter, QRegion, QTransform
 
 from ..scene.render_plan import (
-    RasterLayerRenderItem,
     RenderStrategy,
     SceneRenderItem,
     SceneRenderPlan,
 )
+from .base_raster_fast_path import base_only_raster_item
 from .coordinates import CoordinateContext
 from .frame_buffer_presenter import FrameBufferPresenter
 from .frame_patch_painter import FramePatchPainter
@@ -630,6 +630,7 @@ class Renderer:
             or not isclose(base_item.descriptor.opacity, 1.0)
             or base_item.clip is not None
             or base_item.descriptor.effects
+            or not isinstance(base_item.transform, QTransform)
             or base_item.transform.type().value
             > QTransform.TransformationType.TxScale.value
             or not self._image_is_fully_opaque(base_item.source_image)
@@ -747,7 +748,7 @@ class Renderer:
 
     def _can_repair_base_strips_directly(self, plan: SceneRenderPlan) -> bool:
         """Return whether repair can use the single-raster fast path."""
-        base_item = self._base_only_raster_item(plan)
+        base_item = base_only_raster_item(plan)
         return base_item is not None and base_item.strategy == RenderStrategy.DIRECT
 
     def _repair_base_raster_strips_directly(
@@ -887,7 +888,7 @@ class Renderer:
             return
         if full_viewport_dirty:
             self._surface.begin_full_repaint()
-        base_only_item = self._base_only_raster_item(plan)
+        base_only_item = base_only_raster_item(plan)
 
         def draw(
             painter: QPainter,
@@ -1002,39 +1003,6 @@ class Renderer:
                     if not patch.isEmpty():
                         patches[(row, column)] = patch
         return [patches[index] for index in sorted(patches)]
-
-    @staticmethod
-    def _base_only_raster_item(plan: SceneRenderPlan) -> RasterLayerRenderItem | None:
-        """Return the sole base raster item when a plan matches old-QPane shape."""
-        if plan.transient_raster is not None or plan.presentation_effects:
-            return None
-        return Renderer._sole_base_raster_item(plan)
-
-    @staticmethod
-    def _sole_base_raster_item(plan: SceneRenderPlan) -> RasterLayerRenderItem | None:
-        """Return the sole base raster item independent of presentation effects."""
-        if plan.transient_raster is not None:
-            return None
-        if len(plan.render_items) != 1:
-            return None
-        item = plan.render_items[0]
-        if not isinstance(item, RasterLayerRenderItem):
-            return None
-        if item is not plan.base_raster_item:
-            return None
-        if not item.descriptor.visible:
-            return None
-        if not isclose(item.descriptor.opacity, 1.0, rel_tol=0.0, abs_tol=1e-9):
-            return None
-        if item.clip is not None:
-            return None
-        if item.effect_clip_path is not None:
-            return None
-        if item.placement != plan.scene_bounds:
-            return None
-        if item.source_image.isNull():
-            return None
-        return item
 
     def _overscanned_buffer_size(self, viewport_size: QSize) -> QSize:
         """Return the backing-buffer size including physical overscan."""

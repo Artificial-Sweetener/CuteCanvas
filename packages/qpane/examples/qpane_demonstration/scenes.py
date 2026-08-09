@@ -20,11 +20,14 @@ from __future__ import annotations
 import math
 import uuid
 
-from PySide6.QtCore import QObject, QSize, Qt, Signal
+from PySide6.QtCore import QObject, QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
 from qpane import (
+    BilinearLayerTransform,
     ComparisonOrientation,
     LayerTransform,
+    PiecewiseLayerTransform,
+    ProjectiveLayerTransform,
     QPane,
     RasterBounds,
     RasterSource,
@@ -154,8 +157,61 @@ class ViewerSceneController(QObject):
                 RenderLayer(raster, label="Raster source"),
                 RenderLayer(
                     vectors,
-                    transform=LayerTransform(dx=510.0, dy=285.0),
-                    label="Semantic vector source",
+                    transform=ProjectiveLayerTransform.from_quadrilaterals(
+                        (
+                            QPointF(0.0, 0.0),
+                            QPointF(780.0, 0.0),
+                            QPointF(780.0, 510.0),
+                            QPointF(0.0, 510.0),
+                        ),
+                        (
+                            QPointF(570.0, 250.0),
+                            QPointF(1_350.0, 320.0),
+                            QPointF(1_290.0, 830.0),
+                            QPointF(510.0, 760.0),
+                        ),
+                    ),
+                    label="Projectively mapped vector source",
+                ),
+                RenderLayer(
+                    vectors,
+                    transform=PiecewiseLayerTransform(
+                        source_boundary=(
+                            QPointF(0.0, 0.0),
+                            QPointF(780.0, 0.0),
+                            QPointF(780.0, 255.0),
+                            QPointF(780.0, 510.0),
+                            QPointF(0.0, 510.0),
+                        ),
+                        target_boundary=(
+                            QPointF(90.0, 90.0),
+                            QPointF(470.0, 70.0),
+                            QPointF(500.0, 220.0),
+                            QPointF(440.0, 430.0),
+                            QPointF(70.0, 390.0),
+                        ),
+                    ),
+                    opacity=0.72,
+                    label="Piecewise mapped vector source",
+                ),
+                RenderLayer(
+                    vectors,
+                    transform=BilinearLayerTransform(
+                        source_boundary=(
+                            QPointF(0.0, 0.0),
+                            QPointF(780.0, 0.0),
+                            QPointF(780.0, 510.0),
+                            QPointF(0.0, 510.0),
+                        ),
+                        target_boundary=(
+                            QPointF(1_430.0, 180.0),
+                            QPointF(1_430.0, 180.0),
+                            QPointF(1_720.0, 850.0),
+                            QPointF(1_050.0, 850.0),
+                        ),
+                    ),
+                    opacity=0.58,
+                    label="Joined-edge bilinear vector source",
                 ),
             ),
         )

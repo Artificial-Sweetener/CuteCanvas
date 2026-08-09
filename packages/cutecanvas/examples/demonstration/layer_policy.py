@@ -30,10 +30,14 @@ class DemoLayerPolicyController(QObject):
         self._qpane = qpane
         self._active_mask_id = None
         self._reconciling = False
+        self._shared_edge_resize_active = self._is_shared_edge_resize_mode(
+            qpane.getControlMode()
+        )
         qpane.compositionSelectionChanged.connect(self.reconcile)
         qpane.compositionChanged.connect(self.reconcile)
         qpane.selectedLayerChanged.connect(self.reconcile)
         qpane.sceneChanged.connect(self.reconcile)
+        qpane.controlModeChanged.connect(self._on_control_mode_changed)
 
     def reconcile(self, *_args: object) -> None:
         """Apply the demo policy from current selection and intrinsic capabilities."""
@@ -58,6 +62,19 @@ class DemoLayerPolicyController(QObject):
                 self.reconcile()
                 return
 
+    def _on_control_mode_changed(self, mode: str) -> None:
+        """Reconcile only when the mode changes shared-edge mobility policy."""
+        shared_edge_resize_active = self._is_shared_edge_resize_mode(mode)
+        if shared_edge_resize_active == self._shared_edge_resize_active:
+            return
+        self._shared_edge_resize_active = shared_edge_resize_active
+        self.reconcile()
+
+    @staticmethod
+    def _is_shared_edge_resize_mode(mode: str) -> bool:
+        """Return whether *mode* requires every selectable layer to be movable."""
+        return mode == CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE
+
     def _apply_current_policy(self) -> None:
         """Reconcile every current layer through public capability queries."""
         scene = self._qpane.currentScene()
@@ -70,6 +87,7 @@ class DemoLayerPolicyController(QObject):
             pixel_editable=True,
         )
         movable = LayerPolicy(selectable=True, movable=True)
+        shared_edge_resize = self._shared_edge_resize_active
         selected = self._qpane.selectedLayer()
         selected_layer_id = None if selected is None else selected.layer_id
         active_mask_id = self._qpane.activeMaskID()
@@ -99,7 +117,7 @@ class DemoLayerPolicyController(QObject):
             policy = (
                 editable
                 if pixel_editable
-                else (movable if selected_layer else selectable)
+                else (movable if selected_layer or shared_edge_resize else selectable)
             )
             if layer.interaction != policy:
                 self._qpane.setLayerInteractionPolicy(

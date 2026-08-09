@@ -21,6 +21,7 @@ import uuid
 
 from PySide6.QtCore import QPointF
 from qpane.sdk.rendering import SceneCoordinateSystem, ScenePoint
+from qpane.sdk.scene import LayerMapping
 
 from ..clone_operation import CloneStampOperation
 from .brush_preview import AffineBrushPreview
@@ -47,8 +48,18 @@ class CloneStampFeedbackProjector:
         if layer is None or layer.transform is None or center is None:
             return None
         radius = max(0.5, float(diameter) / 2.0)
-        destination_x = layer.transform.map_vector(QPointF(radius, 0.0))
-        destination_y = layer.transform.map_vector(QPointF(0.0, radius))
+        destination_x = _mapped_vector_at(
+            layer.transform,
+            center,
+            QPointF(radius, 0.0),
+        )
+        destination_y = _mapped_vector_at(
+            layer.transform,
+            center,
+            QPointF(0.0, radius),
+        )
+        if destination_x is None or destination_y is None:
+            return None
         source_x = linear.map_vector(destination_x)
         source_y = linear.map_vector(destination_y)
         panel_center = self._panel_point(layer.scene_id, center)
@@ -78,3 +89,17 @@ class CloneStampFeedbackProjector:
             ScenePoint.from_qt(scene_id, point)
         )
         return None if projected is None else projected.to_qt()
+
+
+def _mapped_vector_at(
+    mapping: LayerMapping,
+    scene_anchor: QPointF,
+    local_vector: QPointF,
+) -> QPointF | None:
+    """Return one local vector mapped at a finite projective anchor."""
+    local_anchor = mapping.inverse_map(scene_anchor)
+    if local_anchor is None:
+        return None
+    mapped_anchor = mapping.map_point(local_anchor)
+    mapped_tip = mapping.map_point(local_anchor + local_vector)
+    return mapped_tip - mapped_anchor

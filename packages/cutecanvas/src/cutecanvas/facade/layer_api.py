@@ -23,7 +23,7 @@ import uuid
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF
-from PySide6.QtGui import QTransform
+from qpane.sdk.scene import LayerTransform, compose_layer_mappings
 
 from cutecanvas.types import LayerEdgeOperation
 
@@ -214,8 +214,10 @@ class LayerApiMixin:
         instance = self.compositionService().layers.layer(scene_id, layer_id)
         if instance is None:
             return False
-        transform = instance.transform.to_qtransform()
-        translated = transform * QTransform.fromTranslate(offset.x(), offset.y())
+        translated = compose_layer_mappings(
+            instance.transform,
+            LayerTransform(dx=offset.x(), dy=offset.y()),
+        )
         return self.setLayerTransform(scene_id, layer_id, translated)
 
     def centerLayer(
@@ -270,15 +272,18 @@ class LayerApiMixin:
         )
         if instance is None or local_bounds is None:
             return False
-        transform = instance.transform.to_qtransform()
-        mapped_bounds = transform.mapRect(local_bounds)
+        transform = instance.transform
+        mapped_bounds = transform.map_rect(local_bounds)
         canvas_center = record.canvas_bounds.center()
         layer_center = mapped_bounds.center()
         offset = QPointF(
             canvas_center.x() - layer_center.x() if horizontally else 0.0,
             canvas_center.y() - layer_center.y() if vertically else 0.0,
         )
-        translated = transform * QTransform.fromTranslate(offset.x(), offset.y())
+        translated = compose_layer_mappings(
+            transform,
+            LayerTransform(dx=offset.x(), dy=offset.y()),
+        )
         return self.setLayerTransform(scene_id, layer_id, translated)
 
 

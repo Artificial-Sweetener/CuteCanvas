@@ -20,6 +20,10 @@ import logging
 
 import pytest
 from cutecanvas.tools import ToolDependencies
+from cutecanvas.tools.affine_ports import (
+    SharedEdgeResizePort,
+    TransformInteractionPort,
+)
 from cutecanvas.tools.base import BaseTool
 from cutecanvas.tools.ports import (
     CursorInteractionPort,
@@ -29,7 +33,6 @@ from cutecanvas.tools.ports import (
     PixelSelectionInteractionPort,
     SmartSegmentationInteractionPort,
     ToolActivationPorts,
-    TransformInteractionPort,
     tool_activation_ports,
 )
 from cutecanvas.tools.tools import Tools
@@ -150,6 +153,7 @@ def test_custom_tool_receives_frozen_dependency_mapping_projection(qapp) -> None
         navigation=NavigationInteractionPort(get_zoom=lambda: 2.0),
         movement=MoveInteractionPort(),
         transform=TransformInteractionPort(),
+        shared_edge_resize=SharedEdgeResizePort(),
         pixel_selection=PixelSelectionInteractionPort(),
         painting=PaintingInteractionPort(get_brush_size=lambda: 31),
         smart_segmentation=SmartSegmentationInteractionPort(),

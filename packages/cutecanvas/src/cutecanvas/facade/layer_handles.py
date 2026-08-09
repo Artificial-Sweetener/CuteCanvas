@@ -21,7 +21,7 @@ import uuid
 
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QTransform
-from qpane import LayerPresentationStyle
+from qpane import LayerMapping, LayerPresentationStyle
 
 from ..composition.geometry_policy import LayerGeometryPolicy
 from ..types import CompositionLayerEntry, LayerPolicy
@@ -89,8 +89,8 @@ class LayerHandle:
         """Select this layer in its open composition."""
         return self._host.setSelectedLayer(self._scene_id(), self._layer_id)
 
-    def set_transform(self, transform: QTransform) -> bool:
-        """Replace this layer's affine transform as one history edit."""
+    def set_transform(self, transform: QTransform | LayerMapping) -> bool:
+        """Replace this layer's exact mapping as one history edit."""
         return self._host.setLayerTransform(
             self._scene_id(),
             self._layer_id,

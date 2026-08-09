@@ -255,10 +255,10 @@ def test_multi_layer_preview_stays_bounded_under_reversal_storm(qapp) -> None:
             QTest.mouseMove(viewer, right if index % 2 else left, delay=0)
             harness.drain_events()
             latencies_ms.append((interaction_clock() - started) * 1000.0)
-            assert len(viewer._scene_transform_preview.previews) == 2
+            assert len(viewer._scene_mapping_preview.previews) == 2
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=right)
         harness.drain_events()
-        assert not viewer._scene_transform_preview.previews
+        assert not viewer._scene_mapping_preview.previews
         assert max(stable_latency_samples(latencies_ms)) < 32.0, latencies_ms
     finally:
         harness.close()

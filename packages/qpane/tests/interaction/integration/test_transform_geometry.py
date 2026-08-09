@@ -22,6 +22,7 @@ import math
 import pytest
 from PySide6.QtCore import QPointF
 from qpane.scene.affine import LayerTransform
+from qpane.scene.projective import ProjectiveLayerTransform
 from qpane.scene.transform_geometry import (
     AffineTransformGeometry,
     TransformHandle,
@@ -191,6 +192,58 @@ def test_scale_refuses_the_singular_crossing_sample() -> None:
     )
 
     assert transformed is None
+
+
+def test_affine_gesture_composes_over_projective_layer_mapping() -> None:
+    """Ordinary move and scale remain available after a projective edit."""
+    initial = ProjectiveLayerTransform.from_quadrilaterals(
+        (
+            QPointF(0.0, 0.0),
+            QPointF(100.0, 0.0),
+            QPointF(100.0, 80.0),
+            QPointF(0.0, 80.0),
+        ),
+        (
+            QPointF(0.0, 0.0),
+            QPointF(110.0, 10.0),
+            QPointF(100.0, 80.0),
+            QPointF(0.0, 80.0),
+        ),
+    )
+    geometry = AffineTransformGeometry(
+        TransformLocalBounds(0.0, 0.0, 100.0, 80.0),
+        initial,
+    )
+    move_delta = QPointF(13.0, -7.0)
+
+    moved = geometry.transform_for_drag(
+        TransformOperation(TransformOperationKind.MOVE),
+        QPointF(20.0, 20.0),
+        QPointF(20.0, 20.0) + move_delta,
+        TransformModifiers(),
+    )
+
+    assert moved is not None
+    for corner in (
+        QPointF(0.0, 0.0),
+        QPointF(100.0, 0.0),
+        QPointF(100.0, 80.0),
+        QPointF(0.0, 80.0),
+    ):
+        _assert_point(moved.map_point(corner), initial.map_point(corner) + move_delta)
+
+    handle = TransformHandle.TOP_RIGHT
+    origin = geometry.scene_point(handle)
+    anchor = geometry.bounds.opposite(handle)
+    anchor_scene = initial.map_point(anchor)
+    scaled = geometry.transform_for_drag(
+        TransformOperation(TransformOperationKind.SCALE, handle),
+        origin,
+        anchor_scene + (origin - anchor_scene) * 1.2,
+        TransformModifiers(proportional=True),
+    )
+    assert scaled is not None
+    _assert_point(scaled.map_point(anchor), anchor_scene)
 
 
 @pytest.mark.parametrize("handle", tuple(TransformHandle))

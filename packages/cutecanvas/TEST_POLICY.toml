@@ -16,7 +16,7 @@ sources = [
   "packages/cutecanvas/src/cutecanvas/persistence/**",
   "packages/cutecanvas/src/cutecanvas/resources/**",
 ]
-proofs = ["abuse", "integration", "performance", "qt"]
+proofs = ["abuse", "integration", "performance", "qt", "unit"]
 
 [[areas]]
 name = "editor"
@@ -76,7 +76,7 @@ sources = [
   "packages/cutecanvas/src/cutecanvas/tools/**",
   "packages/cutecanvas/src/cutecanvas/vector/**",
 ]
-proofs = ["abuse", "integration", "qt"]
+proofs = ["abuse", "integration", "performance", "qt"]
 
 [[boundaries]]
 name = "api"

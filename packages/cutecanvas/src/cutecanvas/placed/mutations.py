@@ -23,6 +23,7 @@ from collections.abc import Callable
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerInteractionPolicy,
+    LayerMapping,
     LayerPlacement,
     LayerTransform,
     SceneDescriptor,
@@ -131,7 +132,7 @@ class PlacedAssetSceneMutationOwner(BaseSceneMutationOwner):
         changed = bool(
             scope_id is not None
             and layer.raster_bounds is not None
-            and self._layers.update_transform(
+            and self._layers.update_mapping(
                 scope_id,
                 layer.layer_id,
                 LayerTransform.from_placement(layer.raster_bounds, placement),
@@ -143,13 +144,13 @@ class PlacedAssetSceneMutationOwner(BaseSceneMutationOwner):
         self,
         scene: SceneDescriptor,
         layer: LayerDescriptor,
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> SceneMutationResult:
         """Replace exact composition-owned placed geometry."""
         scope_id = self._current_scope_id()
         changed = bool(
             scope_id is not None
-            and self._layers.update_transform(scope_id, layer.layer_id, transform)
+            and self._layers.update_mapping(scope_id, layer.layer_id, transform)
         )
         return _result(self.name, scene, layer, changed)
 

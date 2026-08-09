@@ -26,19 +26,11 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QColor
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     qimage_to_numpy_argb32,
 )
-from qpane.sdk.scene import (
-    ClipCoordinateSpace,
-    LayerClip,
-    LayerInteractionPolicy,
-    LayerSourceReference,
-    LayerTransform,
-    RasterBounds,
-)
+from qpane.sdk.scene import RasterBounds
 from qpane.sdk.vector import VectorDocument, VectorObject
 
 from cutecanvas.coverage import (
@@ -48,12 +40,13 @@ from cutecanvas.coverage import (
 )
 from cutecanvas.types import RasterExtentPolicy
 
-from ..composition.layers import CompositionLayerInstance, instance_resources
+from ..composition.layers import CompositionLayerInstance
 from ..composition.model import (
     CompositionDocumentPolicy,
     CompositionOrigin,
     CompositionRecord,
 )
+from ..composition.resource_references import instance_resources
 from ..placed.model import (
     FileFingerprint,
     PlacedAssetMode,
@@ -76,14 +69,14 @@ from .coverage_codec import (
     encode_coverage_document,
     write_coverage_pixels,
 )
-from .effect_codec import decode_layer_effect, encode_layer_effect
-from .layer_geometry_codec import decode_layer_geometry, encode_layer_geometry
+from .layer_codec import decode_layer, encode_layer
+from .legacy_shared_edges import recover_version_14_shared_edges
 from .model import CompositionArchiveSnapshot
 from .vector_object_codec import decode_vector_object, encode_vector_object
 
 _FORMAT = "qpane-composition"
-_VERSION = 13
-_MIGRATABLE_VERSIONS = frozenset({2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, _VERSION})
+_VERSION = 15
+_MIGRATABLE_VERSIONS = frozenset(range(2, _VERSION + 1))
 _MAX_RASTER_PIXELS = 268_435_456
 _MAX_COLOR_RASTER_BYTES = _MAX_RASTER_PIXELS * 4
 _MAX_VECTOR_OBJECTS = 100_000
@@ -165,6 +158,9 @@ class CompositionArchiveCodec:
                 if version == 2
                 else self._read_resource_table(container, manifest, version=version)
             )
+            snapshot = (
+                recover_version_14_shared_edges(snapshot) if version == 14 else snapshot
+            )
         self._validate_references(snapshot)
         return snapshot
 
@@ -184,7 +180,7 @@ class CompositionArchiveCodec:
                         archive.documents[document_id]
                     ),
                     "instances": [
-                        CompositionArchiveCodec._encode_layer(layer)
+                        encode_layer(layer)
                         for layer in archive.layer_stacks[document_id]
                     ],
                 }
@@ -244,130 +240,6 @@ class CompositionArchiveCodec:
             resources.append(entry)
         return resources
 
-    @staticmethod
-    def _encode_layer(layer: CompositionLayerInstance) -> dict[str, object]:
-        """Convert one immutable layer instance into JSON values."""
-        transform = layer.transform
-        tint = None if layer.tint is None else list(layer.tint.getRgb())
-        return {
-            "layer_id": str(layer.layer_id),
-            "source": {
-                "kind": layer.source.kind,
-                "resource_id": str(layer.source.resource_id),
-            },
-            "transform": [
-                transform.m11,
-                transform.m12,
-                transform.m21,
-                transform.m22,
-                transform.dx,
-                transform.dy,
-            ],
-            "visible": layer.visible,
-            "opacity": layer.opacity,
-            "tint": tint,
-            "hit_test": layer.hit_test,
-            "interaction": [
-                layer.interaction.selectable,
-                layer.interaction.movable,
-                layer.interaction.pixel_editable,
-                layer.interaction.reorderable,
-                layer.interaction.removable,
-            ],
-            "role": layer.role,
-            "label": layer.label,
-            "clip": _encode_clip(layer.clip),
-            "metadata": dict(layer.metadata),
-            "effects": [encode_layer_effect(effect) for effect in layer.effects],
-            "geometry": encode_layer_geometry(layer.geometry),
-        }
-
-    @staticmethod
-    def _decode_layer(
-        item: object, *, legacy_version_two: bool = False
-    ) -> CompositionLayerInstance:
-        """Validate and reconstruct one layer manifest entry."""
-        if not isinstance(item, dict):
-            raise TypeError("layer entries must be objects")
-        transform_values = item["transform"]
-        interaction_values = item["interaction"]
-        expected_transform_values = 4 if legacy_version_two else 6
-        if (
-            not isinstance(transform_values, list)
-            or len(transform_values) != expected_transform_values
-        ):
-            raise ValueError(
-                f"layer transform must contain {expected_transform_values} values"
-            )
-        if not isinstance(interaction_values, list) or len(interaction_values) not in {
-            3,
-            5,
-        }:
-            raise ValueError("layer interaction must contain three or five values")
-        tint_values = item.get("tint")
-        tint = None
-        if tint_values is not None:
-            if not isinstance(tint_values, list) or len(tint_values) != 4:
-                raise ValueError("layer tint must contain four channels")
-            tint = QColor(*(int(channel) for channel in tint_values))
-        metadata = item.get("metadata", {})
-        if not isinstance(metadata, dict):
-            raise TypeError("layer metadata must be an object")
-        source_item = (
-            {
-                "kind": item["source_kind"],
-                "resource_id": item["source_id"],
-            }
-            if legacy_version_two
-            else item.get("source")
-        )
-        if not isinstance(source_item, dict):
-            raise TypeError("layer source must be an object")
-        effects = item.get("effects", [])
-        if not isinstance(effects, list):
-            raise TypeError("layer effects must be a list")
-        return CompositionLayerInstance(
-            layer_id=uuid.UUID(item["layer_id"]),
-            source=_decode_source_reference(
-                str(source_item["kind"]), uuid.UUID(source_item["resource_id"])
-            ),
-            transform=(
-                LayerTransform(
-                    m11=float(transform_values[0]),
-                    m22=float(transform_values[1]),
-                    dx=float(transform_values[2]),
-                    dy=float(transform_values[3]),
-                )
-                if legacy_version_two
-                else LayerTransform(*(float(value) for value in transform_values))
-            ),
-            visible=bool(item["visible"]),
-            opacity=float(item["opacity"]),
-            tint=tint,
-            hit_test=bool(item["hit_test"]),
-            interaction=LayerInteractionPolicy(
-                selectable=bool(interaction_values[0]),
-                movable=bool(interaction_values[1]),
-                pixel_editable=bool(interaction_values[2]),
-                reorderable=(
-                    bool(interaction_values[3])
-                    if len(interaction_values) == 5
-                    else False
-                ),
-                removable=(
-                    bool(interaction_values[4])
-                    if len(interaction_values) == 5
-                    else False
-                ),
-            ),
-            role=str(item["role"]),
-            label=None if item.get("label") is None else str(item["label"]),
-            clip=_decode_clip(item.get("clip")),
-            metadata=dict(metadata),
-            effects=tuple(decode_layer_effect(effect) for effect in effects),
-            geometry=decode_layer_geometry(item.get("geometry")),
-        )
-
     @classmethod
     def _read_version_two(
         cls,
@@ -383,7 +255,7 @@ class CompositionArchiveCodec:
         assert isinstance(mask_items, dict)
         assert isinstance(raster_items, dict)
         layers = tuple(
-            cls._decode_layer(item, legacy_version_two=True) for item in layer_items
+            decode_layer(item, legacy_version_two=True) for item in layer_items
         )
         masks = {
             uuid.UUID(mask_id): cls._decode_mask(container, mask_id, item)
@@ -461,7 +333,7 @@ class CompositionArchiveCodec:
                     raise ValueError("archive document identities must be unique")
                 document_records[document.composition_id] = document
                 document_layers[document.composition_id] = tuple(
-                    cls._decode_layer(layer) for layer in instances
+                    decode_layer(layer) for layer in instances
                 )
             instance_items = [
                 layer for item in document_items for layer in item["instances"]
@@ -471,7 +343,7 @@ class CompositionArchiveCodec:
         resource_items = manifest["resources"]
         assert isinstance(instance_items, list)
         assert isinstance(resource_items, list)
-        layers = tuple(cls._decode_layer(item) for item in instance_items)
+        layers = tuple(decode_layer(item) for item in instance_items)
         masks: dict[uuid.UUID, CoverageAssetSnapshot] = {}
         rasters: dict[uuid.UUID, SparseRasterSnapshot] = {}
         placed_assets: dict[uuid.UUID, PlacedAssetSnapshot] = {}
@@ -1049,23 +921,6 @@ class CompositionArchiveCodec:
             raise ValueError("archive composition resources and documents must match")
 
 
-def _decode_source_reference(kind: str, resource_id: uuid.UUID) -> LayerSourceReference:
-    """Decode one version-2 source reference through known domain values."""
-    constructors = {
-        "mask": ProjectResourceReference,
-        "project-resource": ProjectResourceReference,
-        "raster": ProjectResourceReference,
-        "placed-asset": ProjectResourceReference,
-        "imported-raster": ProjectResourceReference,
-        "linked-raster": ProjectResourceReference,
-        "vector": ProjectResourceReference,
-    }
-    constructor = constructors.get(kind)
-    if constructor is None:
-        raise ValueError(f"unsupported layer source kind: {kind}")
-    return constructor(resource_id)
-
-
 def _project_resource_manifest(
     record: ProjectResourceRecord,
 ) -> dict[str, object]:
@@ -1272,31 +1127,3 @@ def _vector_manifest(document: VectorDocument) -> dict[str, object]:
         "revision": document.revision,
         "objects": [encode_vector_object(item) for item in document.objects],
     }
-
-
-def _encode_clip(clip: LayerClip | None) -> dict[str, object] | None:
-    """Return detached JSON values for one optional instance clip."""
-    if clip is None:
-        return None
-    return {
-        "coordinate_space": clip.coordinate_space.value,
-        "rect": [clip.x, clip.y, clip.width, clip.height],
-    }
-
-
-def _decode_clip(item: object) -> LayerClip | None:
-    """Validate and decode one optional instance clip."""
-    if item is None:
-        return None
-    if not isinstance(item, dict):
-        raise TypeError("layer clip must be an object")
-    rect = item.get("rect")
-    if not isinstance(rect, list) or len(rect) != 4:
-        raise ValueError("layer clip rect must contain four values")
-    return LayerClip(
-        coordinate_space=ClipCoordinateSpace(str(item["coordinate_space"])),
-        x=float(rect[0]),
-        y=float(rect[1]),
-        width=float(rect[2]),
-        height=float(rect[3]),
-    )

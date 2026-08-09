@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 
-from ..composition.layers import instance_resources
+from ..composition.resource_references import instance_resources
 from ..composition.service import CompositionService
 from ..masks.mask import MaskAssetStore
 from ..placed.store import PlacedAssetStore

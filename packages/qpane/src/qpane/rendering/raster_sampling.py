@@ -21,19 +21,26 @@ from math import floor, hypot, isclose
 
 from PySide6.QtGui import QTransform
 
+from .panel_mapping import PanelLayerMapping, PiecewisePanelMapping
+
 NATIVE_RASTER_SAMPLE_SCALE = 1.0
 _SHARP_PHYSICAL_SCALE = 2.0
 
 
 def smooth_raster_sampling_enabled(
-    source_to_panel: QTransform,
+    source_to_panel: PanelLayerMapping,
     device_pixel_ratio: float,
 ) -> bool:
     """Return whether displayed source pixels remain below the sharp threshold."""
     if device_pixel_ratio <= 0.0:
         raise ValueError("device_pixel_ratio must be positive")
-    scale_x = hypot(source_to_panel.m11(), source_to_panel.m12())
-    scale_y = hypot(source_to_panel.m21(), source_to_panel.m22())
+    transforms = (
+        tuple(patch.transform for patch in source_to_panel.patches)
+        if isinstance(source_to_panel, PiecewisePanelMapping)
+        else (source_to_panel,)
+    )
+    scale_x = max(hypot(transform.m11(), transform.m12()) for transform in transforms)
+    scale_y = max(hypot(transform.m21(), transform.m22()) for transform in transforms)
     physical_scale = max(scale_x, scale_y) * device_pixel_ratio
     return smooth_raster_sampling_for_physical_scale(physical_scale)
 
@@ -46,7 +53,7 @@ def smooth_raster_sampling_for_physical_scale(physical_scale: float) -> bool:
 
 
 def raster_sample_scale_limit(
-    source_to_panel: QTransform,
+    source_to_panel: PanelLayerMapping,
     device_pixel_ratio: float,
 ) -> float | None:
     """Return a native-resolution cap only while sharp sampling is active."""

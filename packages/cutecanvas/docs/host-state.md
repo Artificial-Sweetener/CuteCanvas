@@ -146,10 +146,12 @@ identify its render source. `CompositionLayerEntry.label` and
 changes. `LayerPolicy.reorderable` and `LayerPolicy.removable` govern structural
 commands. Permission cannot create an operation unsupported by the source.
 
-`LayerGeometryMode` selects the bounds used for manipulation and snapping, while
-`SnapPolicy` contains the global snapping choices shared by movement and
-geometric authoring tools. `LayerHandle` is stable application-facing identity,
-and `LayerEffectHandle` is stable identity for one temporary visual treatment.
+`LayerGeometryMode` selects the bounds used for manipulation and snapping.
+`LayerGeometryMode.BOUNDARY` carries exact polygon vertices when a finite layer
+deformation is baked into editable raster coverage. `SnapPolicy` contains the
+global snapping choices shared by movement and geometric authoring tools.
+`LayerHandle` is stable application-facing identity, and `LayerEffectHandle` is
+stable identity for one temporary visual treatment.
 
 A `LayerSelectionSnapshot.scene_id` identifies the open scene and
 `LayerSelectionSnapshot.layer_id` identifies one selected layer. The tuple from

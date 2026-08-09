@@ -29,6 +29,7 @@ from ..coverage.canvas_aperture import CoverageCanvasAperture
 from ..editor import EditorOperation
 from ..painting.tools.clone_feedback import CloneStampFeedbackProjector
 from ..selection.translation_interaction import PixelSelectionTranslationInteraction
+from .affine_ports import SharedEdgeResizePort, TransformInteractionPort
 from .ports import (
     AuthoringSnapPort,
     CloneStampInteractionPort,
@@ -39,7 +40,6 @@ from .ports import (
     SelectionTranslationPort,
     SmartSegmentationInteractionPort,
     ToolActivationPorts,
-    TransformInteractionPort,
     VectorInteractionPort,
     VectorNodeInteractionPort,
     VectorTextInteractionPort,
@@ -122,6 +122,16 @@ def build_editor_tool_ports(
         cancel_transform=transform.cancel,
         suspend_transform=transform.suspend,
     )
+    shared_edge = qpane.sharedEdgeResizeInteraction()
+    shared_edge_port = SharedEdgeResizePort(
+        presentation=shared_edge.presentation,
+        update_hover=shared_edge.update_hover,
+        clear_hover=shared_edge.clear_hover,
+        begin=shared_edge.begin,
+        update=shared_edge.update,
+        finish=shared_edge.finish,
+        cancel=shared_edge.cancel,
+    )
     painting = qpane.paintingCoordinator()
     paint_destination = qpane.interactivePaintDestination()
     mask_aperture = qpane.activeMaskCanvasAperture()
@@ -143,6 +153,7 @@ def build_editor_tool_ports(
     )
     selection_port = PixelSelectionInteractionPort(
         panel_to_scene_point=qpane.view().panel_to_scene_point,
+        target_to_panel_point=qpane.view().scene_to_panel_point,
         can_select=lambda: (
             qpane.editorOperationResolver()
             .resolve(EditorOperation.SELECT_PIXELS)
@@ -173,6 +184,7 @@ def build_editor_tool_ports(
     )
     coverage_shape_port = PixelSelectionInteractionPort(
         panel_to_scene_point=mask_coordinates.panel_to_source,
+        target_to_panel_point=mask_coordinates.source_to_panel,
         can_select=painting.can_commit_coverage_item,
         commit_coverage_item=painting.commit_coverage_item,
         is_shift_held=is_shift_held,
@@ -279,6 +291,7 @@ def build_editor_tool_ports(
         navigation=navigation,
         movement=movement_port,
         transform=transform_port,
+        shared_edge_resize=shared_edge_port,
         pixel_selection=selection_port,
         coverage_shapes=coverage_shape_port,
         painting=painting_port,

@@ -26,6 +26,10 @@ from PySide6.QtCore import QPoint, QPointF
 from PySide6.QtGui import QTransform
 
 from ..scene.affine import LayerTransform
+from ..scene.bilinear import BilinearLayerTransform
+from ..scene.mapping import LayerMapping
+from ..scene.piecewise import PiecewiseLayerTransform
+from ..scene.projective import ProjectiveLayerTransform
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +207,7 @@ class LayerCoordinateProjection:
         self,
         scene: SceneCoordinateProjection,
         layer_id: uuid.UUID,
-        layer_transform: LayerTransform,
+        layer_transform: LayerMapping,
         source_origin: QPoint | QPointF,
     ) -> None:
         """Capture one layer transform and its source-storage origin."""
@@ -211,8 +215,16 @@ class LayerCoordinateProjection:
             raise TypeError("scene must be SceneCoordinateProjection")
         if not isinstance(layer_id, uuid.UUID):
             raise TypeError("layer_id must be a UUID")
-        if not isinstance(layer_transform, LayerTransform):
-            raise TypeError("layer_transform must be LayerTransform")
+        if not isinstance(
+            layer_transform,
+            (
+                LayerTransform,
+                ProjectiveLayerTransform,
+                PiecewiseLayerTransform,
+                BilinearLayerTransform,
+            ),
+        ):
+            raise TypeError("layer_transform must be a layer mapping")
         if not isinstance(source_origin, (QPoint, QPointF)):
             raise TypeError("source_origin must be QPoint or QPointF")
         self.scene_id = scene.scene_id
@@ -273,7 +285,15 @@ class LayerCoordinateProjection:
             raise TypeError("point must be LayerLocalPoint")
         if point.scene_id != self.scene_id or point.layer_id != self.layer_id:
             return None
-        result = self._layer_transform.map_point(point.to_qt())
+        try:
+            result = self._layer_transform.map_point(point.to_qt())
+        except ValueError:
+            if isinstance(
+                self._layer_transform,
+                (PiecewiseLayerTransform, BilinearLayerTransform),
+            ):
+                return None
+            raise
         return ScenePoint(self.scene_id, result.x(), result.y())
 
     def local_to_source(self, point: LayerLocalPoint) -> LayerSourcePoint | None:

@@ -68,11 +68,19 @@ class MaskCoveragePaintTargetOwner:
         ):
             return False
         if self._active_mask_id is not None:
-            self._service.resetStrokePipeline(self._active_mask_id)
+            self._service.stroke_interactions.reset(self._active_mask_id)
         self._service.activateMask(source.resource_id)
         self._service.pushActiveMaskState()
         self._active_mask_id = source.resource_id
         return True
+
+    def prepare_interaction(self, target: PaintTargetContext) -> bool:
+        """Normalize finite mask geometry before the brush resolves its point."""
+        layer = target.layer
+        return (
+            layer is not None
+            and self._service.stroke_interactions.prepare_spatial_target(layer)
+        )
 
     def apply(
         self,
@@ -93,7 +101,7 @@ class MaskCoveragePaintTargetOwner:
         if mask is None:
             return False
         configured = self._compiler.compile(segment, preset)
-        self._service.applyStrokeSegment(configured)
+        self._service.stroke_interactions.apply(configured)
         return True
 
     def commit(self, target: PaintTargetContext) -> bool:
@@ -104,7 +112,7 @@ class MaskCoveragePaintTargetOwner:
             or source.resource_id != self._active_mask_id
         ):
             return False
-        self._service.commitStroke()
+        self._service.stroke_interactions.commit()
         self._active_mask_id = None
         return True
 
@@ -113,8 +121,9 @@ class MaskCoveragePaintTargetOwner:
         mask_id = self._active_mask_id
         if mask_id is None:
             return False
-        self._service.resetStrokePipeline(mask_id)
+        self._service.stroke_interactions.reset(mask_id)
         self._service.controller.edits.cancel_stroke(mask_id)
+        self._service.stroke_interactions.cancel_spatial_target(mask_id)
         self._active_mask_id = None
         return True
 

@@ -26,7 +26,9 @@ import numpy as np
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPainterPath, QPolygonF
 from qpane.sdk.scene import (
+    BilinearLayerTransform,
     LayerDescriptor,
+    PiecewiseLayerTransform,
     RasterBounds,
     SceneDescriptor,
 )
@@ -107,6 +109,19 @@ class ActiveMaskCanvasAperture:
             QPointF(bounds.x + bounds.width, bounds.y + bounds.height),
             QPointF(bounds.x, bounds.y + bounds.height),
         )
+        if isinstance(
+            transform,
+            (PiecewiseLayerTransform, BilinearLayerTransform),
+        ):
+            scene_path = QPainterPath()
+            scene_path.addPolygon(QPolygonF(scene_points))
+            scene_path.closeSubpath()
+            path = transform.inverse_map_path(scene_path)
+            if path.isEmpty():
+                return None
+            self._path_key = key
+            self._source_path = QPainterPath(path)
+            return path
         local_points = tuple(transform.inverse_map(point) for point in scene_points)
         if any(point is None for point in local_points):
             return None

@@ -44,7 +44,11 @@ from .base import BaseTool
 from .coverage_operation import resolve_coverage_operation
 from .coverage_preview import draw_clipped_marching_ants
 from .cursor_feedback import ToolCursorStyle
-from .modifier_snapshot import alt_is_active, shift_is_active
+from .modifier_snapshot import (
+    alt_is_active,
+    shift_is_active,
+    snapping_is_suppressed,
+)
 from .ports import PixelSelectionInteractionPort, SelectionTranslationPort
 
 
@@ -405,7 +409,7 @@ class SelectionShapeTool(BaseTool):
         """Resolve one geometric anchor when this tool participates in snapping."""
         if not self.supports_snapping:
             return QPointF(panel_point)
-        return self._snapping.begin(panel_point, _snap_suppressed(modifiers))
+        return self._snapping.begin(panel_point, snapping_is_suppressed(modifiers))
 
     def _snap_update(
         self,
@@ -417,7 +421,7 @@ class SelectionShapeTool(BaseTool):
             return QPointF(panel_point)
         return self._snapping.update(
             panel_point,
-            _snap_suppressed(modifiers),
+            snapping_is_suppressed(modifiers),
             shift_is_active(self._is_shift_held(), modifiers),
         )
 
@@ -571,8 +575,3 @@ def _gesture_rectangle(
         )
     rectangle = QRectF(origin, endpoint).normalized()
     return None if rectangle.isEmpty() else rectangle
-
-
-def _snap_suppressed(modifiers: Qt.KeyboardModifier) -> bool:
-    """Return whether the standard temporary snap override is held."""
-    return bool(modifiers & Qt.KeyboardModifier.ControlModifier)

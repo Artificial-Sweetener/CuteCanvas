@@ -41,6 +41,33 @@ canvas.editor.tools.activate(canvas.CONTROL_MODE_TRANSFORM)
 print(canvas.editor.tools.active)
 ```
 
+Use `canvas.CONTROL_MODE_SHARED_EDGE_RESIZE` to drag the coincident straight
+manipulation edge shared by movable layers. CuteCanvas infers maximal continuous
+groups from current geometry, including T junctions and rectangular grids,
+previews every participant mapping together, and commits the release as one
+undoable edit. A locked or otherwise ineligible participant blocks the complete
+group. Transparent pixels and alpha contours do not define eligibility.
+
+While the mode is active, every valid shared edge shows Transform-style endpoint
+and midpoint handles. Drag a horizontal or vertical midpoint to move the
+complete group edge in parallel. Angled midpoints remain visible but disabled;
+their preserved parallel-translation geometry is not exposed. An eligible
+endpoint remains movable at any angle and follows the common straight rail of
+the participants that own that endpoint. When an endpoint lies inside one
+participant's longer side, CuteCanvas inserts the matching boundary vertex
+without changing the layer's appearance. Eligible endpoints use the Transform
+corner cursor. Disabled handles use the native forbidden cursor.
+
+Polygon Select and Polygon Mask place deliberate points rather than sampling a
+freehand path. Before closing the polygon, drag any placed point to revise it,
+drag an existing segment to insert a point between its neighbors, press Delete
+to remove the selected point, or press Backspace to remove the open endpoint.
+Click the first point, double-click, or press Enter to commit one retained shape
+and one history edit. Escape or a cancelled pointer sequence discards the whole
+unfinished polygon. Snapping applies while points are placed or moved.
+Activate them with `CuteCanvas.CONTROL_MODE_SELECT_POLYGON` and
+`CuteCanvas.CONTROL_MODE_MASK_POLYGON`.
+
 ## Built-in Tools
 
 CuteCanvas includes:
@@ -49,12 +76,13 @@ CuteCanvas includes:
 * **Cursor** for a neutral pointer and configured image drag-out.
 * **Move** for selected pixels or whole layers.
 * **Transform** for affine layer manipulation.
-* **Rectangle, Ellipse, and Lasso Select** for pixel selection.
+* **Shared Edge Resize** for atomic resizing of every layer in a shared-edge group.
+* **Rectangle, Ellipse, Polygon, and Lasso Select** for pixel selection.
 * **Brush** for mask and RGBA painting.
 * **Eraser** for explicit transparent painting with the active brush preset.
 * **Clone Stamp** for revision-stable rendered sampling onto RGBA layers.
 * **Paint Bucket** for selection-constrained flood fill.
-* **Rectangle, Ellipse, and Lasso Mask** for retained mask shapes.
+* **Rectangle, Ellipse, Polygon, and Lasso Mask** for retained mask shapes.
 * **Vector Shape, Path, Nodes, and Text** for vector authoring.
 * **Smart Select and Smart Mask** when the optional model feature is active.
 
@@ -78,8 +106,8 @@ or brush transaction.
 
 ## Select Pixels
 
-Rectangle, ellipse, and lasso selection tools edit one soft selection attached
-to the open document:
+Rectangle, ellipse, polygon, and lasso selection tools edit one soft selection
+attached to the open document:
 
 ```python
 canvas.setControlMode(canvas.CONTROL_MODE_SELECT_RECTANGLE)

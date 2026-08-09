@@ -46,6 +46,7 @@ from .sampled_lattice import (
     sampled_source_lattice,
     source_sampling_phase_is_fractional,
 )
+from .sampled_projection_fallback import reproject_sampled_fallback
 from .sdk import HybridSource
 
 
@@ -55,6 +56,7 @@ class SampledFramePlan:
 
     items: tuple[SampledLayerRenderItem, ...]
     pending_layer_ids: frozenset[uuid.UUID] = frozenset()
+    projection_fallbacks: tuple[SampledLayerRenderItem, ...] = ()
 
 
 class HybridRenderPlanner:
@@ -78,10 +80,13 @@ class HybridRenderPlanner:
         frame: RenderFrameGeometry,
         *,
         transient_support_bounds: Mapping[uuid.UUID, RasterBounds] | None = None,
+        prior_items: Mapping[uuid.UUID, SampledLayerRenderItem] | None = None,
     ) -> SampledFramePlan:
         """Return sampled primitives for every compiled hybrid layer."""
         support_bounds_by_layer = transient_support_bounds or {}
+        previous_items = prior_items or {}
         items: list[SampledLayerRenderItem] = []
+        projection_fallbacks: list[SampledLayerRenderItem] = []
         pending_layer_ids: set[uuid.UUID] = set()
         for compiled_layer in compiled.hybrid_layers:
             layer = compiled_layer.descriptor
@@ -144,6 +149,15 @@ class HybridRenderPlanner:
             if refinement.pending:
                 pending_layer_ids.add(layer.layer_id)
             if products is None:
+                fallback = reproject_sampled_fallback(
+                    previous_items,
+                    descriptor=layer,
+                    transform=layer_to_panel,
+                    source_size=source_size,
+                    render_hint_enabled=render_hint_enabled,
+                )
+                if fallback is not None:
+                    projection_fallbacks.append(fallback)
                 continue
             tiles = tuple(
                 SampledTileRenderData(
@@ -186,6 +200,7 @@ class HybridRenderPlanner:
                     tiles,
                     layer_to_panel,
                     frame.device_pixel_ratio,
+                    support_bounds,
                 )
                 support_tile = self._transient_support_tile(
                     layer,
@@ -212,14 +227,24 @@ class HybridRenderPlanner:
             source = compiled_layer.snapshot
             if not isinstance(source, RenderTileBatchSource):
                 continue
-            item, pending = self._sampled_item(
-                compiled, frame, compiled_layer.descriptor, source
+            item, pending, projection_fallback = self._sampled_item(
+                compiled,
+                frame,
+                compiled_layer.descriptor,
+                source,
+                prior_items=previous_items,
             )
             if pending:
                 pending_layer_ids.add(compiled_layer.descriptor.layer_id)
             if item is not None:
                 items.append(item)
-        return SampledFramePlan(tuple(items), frozenset(pending_layer_ids))
+            if projection_fallback is not None:
+                projection_fallbacks.append(projection_fallback)
+        return SampledFramePlan(
+            tuple(items),
+            frozenset(pending_layer_ids),
+            tuple(projection_fallbacks),
+        )
 
     @staticmethod
     def _transient_support_item(
@@ -233,7 +258,16 @@ class HybridRenderPlanner:
         """Build a bounded empty source lattice for one active transient edit."""
         support_scale = min(
             1.0,
-            scale_bucket(layer_to_panel, device_pixel_ratio),
+            scale_bucket(
+                layer_to_panel,
+                device_pixel_ratio,
+                QRectF(
+                    support_bounds.x,
+                    support_bounds.y,
+                    support_bounds.width,
+                    support_bounds.height,
+                ),
+            ),
         )
         tile = HybridRenderPlanner._transient_support_tile(
             layer,
@@ -296,7 +330,13 @@ class HybridRenderPlanner:
         frame: RenderFrameGeometry,
         layer: LayerDescriptor,
         source: RenderTileBatchSource,
-    ) -> tuple[SampledLayerRenderItem | None, bool]:
+        *,
+        prior_items: Mapping[uuid.UUID, SampledLayerRenderItem],
+    ) -> tuple[
+        SampledLayerRenderItem | None,
+        bool,
+        SampledLayerRenderItem | None,
+    ]:
         """Plan one generic sampled source through the shared tile coordinator."""
         source_size = QSize(source.bounds.width, source.bounds.height)
         layer_to_panel = self._projector.layer_to_panel(
@@ -320,7 +360,17 @@ class HybridRenderPlanner:
             ),
         )
         if refinement.products is None:
-            return None, refinement.pending
+            return (
+                None,
+                refinement.pending,
+                reproject_sampled_fallback(
+                    prior_items,
+                    descriptor=layer,
+                    transform=layer_to_panel,
+                    source_size=source_size,
+                    render_hint_enabled=render_hint_enabled,
+                ),
+            )
         products = refinement.products or ()
         return (
             SampledLayerRenderItem(
@@ -340,6 +390,7 @@ class HybridRenderPlanner:
                 ),
             ),
             refinement.pending,
+            None,
         )
 
 
@@ -347,6 +398,7 @@ def _support_sample_scale(
     tiles: tuple[SampledTileRenderData, ...],
     layer_to_panel: QTransform,
     device_pixel_ratio: float,
+    support_bounds: RasterBounds,
 ) -> tuple[float, float]:
     """Return the sampled density shared by durable and support products."""
     for tile in tiles:
@@ -355,5 +407,17 @@ def _support_sample_scale(
                 tile.image_source_rect.width() / tile.source_rect.width(),
                 tile.image_source_rect.height() / tile.source_rect.height(),
             )
-    scale = min(1.0, scale_bucket(layer_to_panel, device_pixel_ratio))
+    scale = min(
+        1.0,
+        scale_bucket(
+            layer_to_panel,
+            device_pixel_ratio,
+            QRectF(
+                support_bounds.x,
+                support_bounds.y,
+                support_bounds.width,
+                support_bounds.height,
+            ),
+        ),
+    )
     return scale, scale

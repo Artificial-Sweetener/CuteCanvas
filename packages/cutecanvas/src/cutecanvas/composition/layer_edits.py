@@ -26,9 +26,9 @@ from .edit_controller import CompositionEditController
 from .layers import (
     CompositionLayerInstance,
     CompositionLayerStore,
-    instance_resources,
 )
 from .resource_lifetime import CompositionResourceLifetime, ResourceLeaseKind
+from .resource_references import instance_resources
 
 
 @dataclass(frozen=True, slots=True)

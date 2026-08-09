@@ -52,6 +52,7 @@ from cutecanvas.editor import (
     InteractivePaintDestinationCoordinator,
 )
 from cutecanvas.editor.layer_edge_modification import LayerEdgeModificationCoordinator
+from cutecanvas.editor.shared_edge_interaction import SharedEdgeResizeInteraction
 from cutecanvas.editor.transform_coordinator import EditorTransformCoordinator
 from cutecanvas.fill import PaintBucketCoordinator, SelectionFillCoordinator
 from cutecanvas.masks.canvas_aperture import ActiveMaskCanvasAperture
@@ -193,10 +194,17 @@ class CanvasAccessorsMixin:
 
     def sceneLayerTransformInteraction(self) -> EditorTransformCoordinator:
         """Expose private panel-space affine transform interaction."""
-        interaction = self._scene_transform_interaction
-        if interaction is None:
+        interactions = self._scene_transform_interaction
+        if interactions is None:
             raise AttributeError("Scene layer transform accessed before initialization")
-        return interaction
+        return interactions.transform
+
+    def sharedEdgeResizeInteraction(self) -> SharedEdgeResizeInteraction:
+        """Expose the private coupled shared-edge interaction."""
+        interactions = self._scene_transform_interaction
+        if interactions is None:
+            raise AttributeError("Shared edge resize accessed before initialization")
+        return interactions.shared_edge
 
     def editorMovementInteraction(self) -> EditorMovementInteraction:
         """Expose private selection-aware movement arbitration."""
@@ -375,16 +383,16 @@ class CanvasAccessorsMixin:
         self._handle_internal_scene_content_changed()
         self._emit_scene_changed()
 
-    def _refresh_scene_transform_preview(self) -> None:
+    def _refresh_scene_mapping_preview(self) -> None:
         """Invalidate scene pixels and schedule painting for transient geometry."""
         self.view().mark_dirty()
         self.update()
 
     def _publish_editor_transform_state(self) -> None:
         """Publish detached transform geometry after target or preview changes."""
-        transform = self._scene_transform_interaction
-        if transform is not None and transform.target is not None:
-            self.editorTransformChanged.emit(transform.snapshot())
+        interactions = self._scene_transform_interaction
+        if interactions is not None and interactions.transform.target is not None:
+            self.editorTransformChanged.emit(interactions.transform.snapshot())
 
     def _refresh_selected_pixel_move_preview(self) -> None:
         """Invalidate only old/new preview pixels and refresh translated ants."""

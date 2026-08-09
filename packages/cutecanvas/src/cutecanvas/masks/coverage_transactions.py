@@ -110,6 +110,21 @@ class MaskCoverageTransactions:
             self._changed(mask_id)
         return changed
 
+    def replace_spatial_authority(
+        self,
+        mask_id: uuid.UUID,
+        snapshot: CoverageSnapshot,
+    ) -> bool:
+        """Replace equivalent mapped authorship without creating a history step."""
+        layer = self._layer(mask_id)
+        if layer is None:
+            return False
+        layer.coverage.raster.replace_with_snapshot(snapshot)
+        layer.coverage.restore_retained(layer.coverage.retained.clear())
+        layer.coverage.compact_raster_storage()
+        self._changed(mask_id)
+        return True
+
     def begin_mixed_stroke(self, mask_id: uuid.UUID) -> bool:
         """Flatten retained work provisionally before a raster brush stroke."""
         layer = self._layer(mask_id)

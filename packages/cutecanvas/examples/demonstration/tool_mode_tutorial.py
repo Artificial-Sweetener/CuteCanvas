@@ -212,6 +212,7 @@ class ToolModeTutorialController:
             CuteCanvas.CONTROL_MODE_PANZOOM,
             CuteCanvas.CONTROL_MODE_MOVE,
             CuteCanvas.CONTROL_MODE_TRANSFORM,
+            CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE,
             CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
             CuteCanvas.CONTROL_MODE_ERASER,
             CuteCanvas.CONTROL_MODE_CLONE_STAMP,
@@ -253,6 +254,7 @@ class ToolModeTutorialController:
             if current not in {
                 CuteCanvas.CONTROL_MODE_MOVE,
                 CuteCanvas.CONTROL_MODE_TRANSFORM,
+                CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE,
                 CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
                 CuteCanvas.CONTROL_MODE_ERASER,
                 CuteCanvas.CONTROL_MODE_CLONE_STAMP,
@@ -264,6 +266,7 @@ class ToolModeTutorialController:
             CuteCanvas.CONTROL_MODE_PANZOOM,
             CuteCanvas.CONTROL_MODE_MOVE,
             CuteCanvas.CONTROL_MODE_TRANSFORM,
+            CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE,
             CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
             CuteCanvas.CONTROL_MODE_ERASER,
             CuteCanvas.CONTROL_MODE_CLONE_STAMP,
@@ -275,6 +278,9 @@ class ToolModeTutorialController:
         self.mode_cursor_action.setChecked(mode == CuteCanvas.CONTROL_MODE_CURSOR)
         self.mode_pan_action.setChecked(mode == CuteCanvas.CONTROL_MODE_PANZOOM)
         self.mode_move_action.setChecked(mode == CuteCanvas.CONTROL_MODE_MOVE)
+        self.mode_shared_edge_action.setChecked(
+            mode == CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE
+        )
         transforming = mode == CuteCanvas.CONTROL_MODE_TRANSFORM
         self.mode_transform_action.setChecked(
             transforming
@@ -330,6 +336,7 @@ class ToolModeTutorialController:
         enable(self.mode_pan_action, panzoom)
         self.mode_cursor_action.setEnabled(True)
         enable(self.mode_move_action, has_document)
+        enable(self.mode_shared_edge_action, has_document)
         enable(self.mode_transform_action, has_document)
         enable(
             self.mode_transform_selection_action,
@@ -355,6 +362,7 @@ class ToolModeTutorialController:
                 {
                     CuteCanvas.CONTROL_MODE_MOVE,
                     CuteCanvas.CONTROL_MODE_TRANSFORM,
+                    CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE,
                     CuteCanvas.CONTROL_MODE_DRAW_BRUSH,
                     CuteCanvas.CONTROL_MODE_ERASER,
                     CuteCanvas.CONTROL_MODE_CLONE_STAMP,
@@ -398,6 +406,7 @@ class ToolModeTutorialController:
             self.mode_cursor_action,
             self.mode_pan_action,
             self.mode_move_action,
+            self.mode_shared_edge_action,
             self.mode_transform_action,
             self.mode_transform_selection_action,
             self.mode_brush_action,
@@ -415,6 +424,12 @@ class ToolModeTutorialController:
         self.mode_pan_action = QAction("Pan/Zoom", self._parent, checkable=True)
         self.mode_cursor_action = QAction("Cursor", self._parent, checkable=True)
         self.mode_move_action = QAction("Move", self._parent, checkable=True)
+        self.mode_shared_edge_action = QAction(
+            "Shared Edge Resize", self._parent, checkable=True
+        )
+        self.mode_shared_edge_action.setStatusTip(
+            "Resize every layer in a coincident-edge group as one atomic edit."
+        )
         self.mode_move_action.setStatusTip(
             "Drag selected content without disturbing pixels beneath transparent "
             "holes, or move a layer when no pixel selection is active."
@@ -459,6 +474,10 @@ class ToolModeTutorialController:
             (self.mode_pan_action, CuteCanvas.CONTROL_MODE_PANZOOM),
             (self.mode_cursor_action, CuteCanvas.CONTROL_MODE_CURSOR),
             (self.mode_move_action, CuteCanvas.CONTROL_MODE_MOVE),
+            (
+                self.mode_shared_edge_action,
+                CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE,
+            ),
             (self.mode_brush_action, CuteCanvas.CONTROL_MODE_DRAW_BRUSH),
             (self.mode_eraser_action, CuteCanvas.CONTROL_MODE_ERASER),
             (
@@ -524,6 +543,7 @@ class ToolModeTutorialController:
             CuteCanvas.CONTROL_MODE_PANZOOM: "Pan / Zoom",
             CuteCanvas.CONTROL_MODE_MOVE: "Move",
             CuteCanvas.CONTROL_MODE_TRANSFORM: "Transform",
+            CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE: "Shared Edge Resize",
             CuteCanvas.CONTROL_MODE_DRAW_BRUSH: "Brush",
             CuteCanvas.CONTROL_MODE_ERASER: "Eraser",
             CuteCanvas.CONTROL_MODE_CLONE_STAMP: "Clone Stamp",

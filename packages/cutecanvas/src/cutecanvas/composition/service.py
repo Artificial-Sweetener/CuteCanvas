@@ -24,9 +24,11 @@ from dataclasses import replace
 
 from PySide6.QtCore import QRectF
 from qpane.sdk.scene import (
+    BilinearLayerTransform,
     LayerInteractionPolicy,
+    LayerMapping,
     LayerSourceReference,
-    LayerTransform,
+    PiecewiseLayerTransform,
 )
 
 from ..resources.composition_resources import CompositionResourceOwner
@@ -385,13 +387,13 @@ class CompositionService:
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> bool:
         """Replace exact geometry for one stored composition layer."""
         record = self._records.get(scene_id)
         if record is None or self._layers.layer(scene_id, layer_id) is None:
             return False
-        changed = self._layers.update_transform(scene_id, layer_id, transform)
+        changed = self._layers.update_mapping(scene_id, layer_id, transform)
         if changed:
             self._touch()
         return changed
@@ -476,7 +478,14 @@ class CompositionService:
             visible=instance.visible,
             opacity=instance.opacity,
             interaction=public_layer_policy(instance.interaction),
-            transform=instance.transform.to_qtransform(),
+            transform=(
+                instance.transform
+                if isinstance(
+                    instance.transform,
+                    (PiecewiseLayerTransform, BilinearLayerTransform),
+                )
+                else instance.transform.to_qtransform()
+            ),
         )
 
     def _touch(self) -> None:

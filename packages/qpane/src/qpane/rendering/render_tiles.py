@@ -26,7 +26,6 @@ from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from PySide6.QtCore import QRectF, QTimer
-from PySide6.QtGui import QTransform
 
 from ..execution import (
     CancellationToken,
@@ -41,6 +40,7 @@ from ..execution import (
     ExecutionUrgency,
 )
 from ..scene.raster import RasterBounds
+from .panel_mapping import PanelLayerMapping, detached_panel_mapping
 from .render_tile_cache import RenderTileCache
 from .render_tile_geometry import (
     RenderTileKey,
@@ -151,14 +151,18 @@ class _DeferredPrefetch:
     """Retain the latest settled-view guard request for one source."""
 
     source: RenderTileBatchSource
-    source_to_panel: QTransform
+    source_to_panel: PanelLayerMapping
     panel_rect: QRectF
     visible_requests: tuple[RenderTileRequest, ...]
     overview_signature: tuple[RenderTileKey, ...]
 
     def __post_init__(self) -> None:
         """Detach mutable Qt geometry from the caller's frame."""
-        object.__setattr__(self, "source_to_panel", QTransform(self.source_to_panel))
+        object.__setattr__(
+            self,
+            "source_to_panel",
+            detached_panel_mapping(self.source_to_panel),
+        )
         object.__setattr__(self, "panel_rect", QRectF(self.panel_rect))
 
 
@@ -239,7 +243,7 @@ class RenderTileWorkCoordinator:
         self,
         *,
         source: RenderTileBatchSource,
-        source_to_panel: QTransform,
+        source_to_panel: PanelLayerMapping,
         panel_rect: QRectF,
         device_pixel_ratio: float,
         maximum_scale: float | None = None,
@@ -362,7 +366,7 @@ class RenderTileWorkCoordinator:
         self,
         *,
         source: RenderTileBatchSource,
-        source_to_panel: QTransform,
+        source_to_panel: PanelLayerMapping,
         panel_rect: QRectF,
         visible_requests: tuple[RenderTileRequest, ...],
         overview_signature: tuple[RenderTileKey, ...],
@@ -398,7 +402,7 @@ class RenderTileWorkCoordinator:
         self,
         *,
         source: RenderTileBatchSource,
-        source_to_panel: QTransform,
+        source_to_panel: PanelLayerMapping,
         panel_rect: QRectF,
         visible_requests: tuple[RenderTileRequest, ...],
         overview_signature: tuple[RenderTileKey, ...],

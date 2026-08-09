@@ -58,3 +58,8 @@ def shift_is_active(
         pointer_modifiers,
         Qt.KeyboardModifier.ShiftModifier,
     )
+
+
+def snapping_is_suppressed(pointer_modifiers: Qt.KeyboardModifier) -> bool:
+    """Return whether Control temporarily suppresses authoring snapping."""
+    return bool(pointer_modifiers & Qt.KeyboardModifier.ControlModifier)

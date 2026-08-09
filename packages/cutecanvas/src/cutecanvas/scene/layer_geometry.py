@@ -20,7 +20,12 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF, QRectF
-from qpane.sdk.scene import LayerDescriptor, RasterBounds
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerDescriptor,
+    PiecewiseLayerTransform,
+    RasterBounds,
+)
 
 from ..composition.geometry_policy import LayerGeometryMode, LayerGeometryPolicy
 from .source_capabilities import EditorSourceCapabilities
@@ -57,6 +62,9 @@ class LayerGeometryResolver:
             )
         if mode is LayerGeometryMode.CUSTOM:
             return _rectf(policy.custom_bounds)
+        if mode is LayerGeometryMode.BOUNDARY:
+            boundary = policy.boundary_points()
+            return None if not boundary else _point_bounds(boundary)
         return _rectf(layer.raster_bounds)
 
     def resolved_local_bounds(self, layer: LayerDescriptor) -> QRectF | None:
@@ -94,6 +102,25 @@ class LayerGeometryResolver:
             transform.map_point(QPointF(left, bottom)),
         )
 
+    def resolved_scene_boundary(
+        self,
+        layer: LayerDescriptor,
+    ) -> tuple[QPointF, ...]:
+        """Return the retained manipulation boundary in scene coordinates."""
+        transform = layer.transform
+        if isinstance(transform, (PiecewiseLayerTransform, BilinearLayerTransform)):
+            return tuple(QPointF(point) for point in transform.target_boundary)
+        policy = self._policy_for(layer)
+        if transform is not None and policy.mode is LayerGeometryMode.BOUNDARY:
+            return tuple(
+                transform.map_point(point) for point in policy.boundary_points()
+            )
+        if transform is not None and policy.mode is LayerGeometryMode.CONTENT:
+            boundary = self._sources.content_boundary.content_boundary(layer.source)
+            if len(boundary) >= 3:
+                return tuple(transform.map_point(point) for point in boundary)
+        return self.resolved_scene_corners(layer)
+
 
 def _rectf(bounds: RasterBounds | None) -> QRectF | None:
     """Detach integer raster geometry into the continuous editor domain."""
@@ -107,3 +134,10 @@ def _rectf(bounds: RasterBounds | None) -> QRectF | None:
             float(bounds.height),
         )
     )
+
+
+def _point_bounds(points: tuple[QPointF, ...]) -> QRectF:
+    """Return the finite bounding rectangle around polygon points."""
+    xs = tuple(point.x() for point in points)
+    ys = tuple(point.y() for point in points)
+    return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))

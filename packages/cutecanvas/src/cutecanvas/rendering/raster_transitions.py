@@ -31,7 +31,10 @@ from qpane.sdk.scene import (
 from ..scene.pixel_fragments import RasterPixelFormat
 from ..scene.pixel_transitions import RasterPixelTransition
 from ..scene.source_capabilities import PixelPresentationOwner
-from .sampled_transition_tiles import SampledTransitionTileCompiler
+from .sampled_transition_tiles import (
+    SampledTransitionTileCompiler,
+    sampled_tiles_cover_bounds,
+)
 
 
 class RasterTransitionRenderCompiler:
@@ -42,7 +45,7 @@ class RasterTransitionRenderCompiler:
         self._presentations = presentations
         self._sampled_tiles = SampledTransitionTileCompiler(presentations)
         self._resolved_key: (
-            tuple[uuid.UUID, SceneLayerAssetKey, object, object] | None
+            tuple[uuid.UUID, SceneLayerAssetKey, object, object, bool] | None
         ) = None
         self._resolved: (
             TransientRasterResolvedContribution
@@ -71,7 +74,13 @@ class RasterTransitionRenderCompiler:
         sample_batch_key = (
             item.sample_batch_key if isinstance(item, SampledLayerRenderItem) else None
         )
-        key = (session_id, asset_key, generation, sample_batch_key)
+        key = (
+            session_id,
+            asset_key,
+            generation,
+            sample_batch_key,
+            retain_until_durable,
+        )
         if key == self._resolved_key:
             return self._resolved
         if isinstance(item, SampledLayerRenderItem):
@@ -152,8 +161,10 @@ class RasterTransitionRenderCompiler:
     ):
         """Patch one edit into the sampled source's exact tile products."""
         sampled_bounds = item.descriptor.raster_bounds
-        if sampled_bounds is None or not sampled_bounds.contains(
-            transition.patch_bounds
+        if (
+            sampled_bounds is None
+            or not sampled_bounds.contains(transition.patch_bounds)
+            or not sampled_tiles_cover_bounds(item.tiles, transition.patch_bounds)
         ):
             return self._compile_patch(
                 session_id=session_id,

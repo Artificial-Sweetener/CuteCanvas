@@ -23,13 +23,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF
-from qpane.sdk.scene import LayerTransform, SceneDescriptor, TransformLocalBounds
+from qpane.sdk.scene import (
+    LayerMapping,
+    LayerTransform,
+    SceneDescriptor,
+    TransformLocalBounds,
+    compose_layer_mappings,
+)
 
 from .layer_geometry import LayerGeometryResolver
 from .layer_selection import SceneLayerSelectionController
-from .movement_mutations import LayerMovementMutationOwner, LayerMovementValue
+from .mapping_mutations import LayerMappingMutationOwner, LayerMappingValue
+from .mapping_preview import LayerMappingPreview, SceneLayerMappingPreview
 from .mutations import SceneMutationResult
-from .transform_preview import LayerTransformPreview, SceneLayerTransformPreview
 from .transform_session import LayerTransformBoxState
 
 
@@ -38,7 +44,7 @@ class LayerMoveTarget:
     """Retain one selected layer's durable translation base and scene bounds."""
 
     layer_id: uuid.UUID
-    initial_transform: LayerTransform
+    initial_mapping: LayerMapping
     scene_bounds: QRectF
 
     def __post_init__(self) -> None:
@@ -66,8 +72,8 @@ class SceneLayerMoveController:
         self,
         *,
         selection: SceneLayerSelectionController,
-        preview: SceneLayerTransformPreview,
-        mutations: LayerMovementMutationOwner,
+        preview: SceneLayerMappingPreview,
+        mutations: LayerMappingMutationOwner,
         geometry: LayerGeometryResolver,
         scene_provider: Callable[[], SceneDescriptor | None],
     ) -> None:
@@ -113,15 +119,18 @@ class SceneLayerMoveController:
             else session.targets[-1].layer_id
         )
         first_target = session.targets[0]
-        preview_transform = self._preview.transform_for(
+        preview_mapping = self._preview.mapping_for(
             session.scene_id,
             first_target.layer_id,
         )
         translation = LayerTransform()
-        if preview_transform is not None:
+        if preview_mapping is not None:
+            origin = QPointF()
+            initial_origin = first_target.initial_mapping.map_point(origin)
+            preview_origin = preview_mapping.map_point(origin)
             translation = LayerTransform(
-                dx=preview_transform.dx - first_target.initial_transform.dx,
-                dy=preview_transform.dy - first_target.initial_transform.dy,
+                dx=preview_origin.x() - initial_origin.x(),
+                dy=preview_origin.y() - initial_origin.y(),
             )
         return LayerTransformBoxState(
             session.scene_id,
@@ -145,10 +154,13 @@ class SceneLayerMoveController:
         delta = scene_point - session.origin
         return self._preview.set_many(
             tuple(
-                LayerTransformPreview(
+                LayerMappingPreview(
                     session.scene_id,
                     target.layer_id,
-                    target.initial_transform.translated(delta.x(), delta.y()),
+                    compose_layer_mappings(
+                        target.initial_mapping,
+                        LayerTransform(dx=delta.x(), dy=delta.y()),
+                    ),
                 )
                 for target in session.targets
             )
@@ -164,7 +176,7 @@ class SceneLayerMoveController:
         result = self._mutations.commit(
             session.scene_id,
             tuple(
-                LayerMovementValue(preview.layer_id, preview.transform)
+                LayerMappingValue(preview.layer_id, preview.mapping)
                 for preview in previews
             ),
         )
@@ -179,8 +191,10 @@ class SceneLayerMoveController:
         return self._preview.clear() or had_session
 
     def suspend(self) -> bool:
-        """Cancel layer movement when another tool takes input ownership."""
-        return self.cancel()
+        """Release pointer ownership while preserving the last live preview."""
+        had_session = self._session is not None
+        self._session = None
+        return had_session
 
     def nudge(self, delta_x: float, delta_y: float) -> SceneMutationResult | None:
         """Commit one atomic keyboard translation for selected movable layers."""
@@ -193,9 +207,12 @@ class SceneLayerMoveController:
         return self._mutations.commit(
             scene.scene_id,
             tuple(
-                LayerMovementValue(
+                LayerMappingValue(
                     target.layer_id,
-                    target.initial_transform.translated(delta_x, delta_y),
+                    compose_layer_mappings(
+                        target.initial_mapping,
+                        LayerTransform(dx=delta_x, dy=delta_y),
+                    ),
                 )
                 for target in targets
             ),

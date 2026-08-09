@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
-from PySide6.QtCore import QRectF, QSize
+from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.scene import LayerSourceReference, RasterBounds, SourceCapabilityRegistry
 
@@ -62,6 +62,17 @@ class SourceContentBoundsOwner(Protocol):
 
     def content_bounds(self, source: LayerSourceReference) -> QRectF | None:
         """Return minimal meaningful source-local bounds without dense scanning."""
+        ...
+
+
+class SourceContentBoundaryOwner(Protocol):
+    """Expose a content-tight polygon independently of storage geometry."""
+
+    def content_boundary(
+        self,
+        source: LayerSourceReference,
+    ) -> tuple[QPointF, ...]:
+        """Return an ordered source-local manipulation boundary."""
         ...
 
 
@@ -128,6 +139,21 @@ class SourceContentBoundsRegistry(SourceCapabilityRegistry[SourceContentBoundsOw
         return None if bounds is None else QRectF(bounds)
 
 
+class SourceContentBoundaryRegistry(
+    SourceCapabilityRegistry[SourceContentBoundaryOwner]
+):
+    """Route polygon geometry to the exact source-domain owner."""
+
+    def content_boundary(
+        self,
+        source: LayerSourceReference,
+    ) -> tuple[QPointF, ...]:
+        """Return detached source-owned boundary points."""
+        owner = self.owner_for(source)
+        boundary = () if owner is None else owner.content_boundary(source)
+        return tuple(QPointF(point) for point in boundary)
+
+
 class SourceStorageBoundsRegistry(SourceCapabilityRegistry[SourceStorageBoundsOwner]):
     """Route storage-geometry queries to exact source-domain owners."""
 
@@ -189,6 +215,7 @@ class EditorSourceCapabilities:
 
     coverage: SourceCoverageRegistry
     content_bounds: SourceContentBoundsRegistry
+    content_boundary: SourceContentBoundaryRegistry
     storage_bounds: SourceStorageBoundsRegistry
     authored_bounds: SourceAuthoredBoundsRegistry
     pixel_presentation: PixelPresentationRegistry
@@ -199,6 +226,7 @@ class EditorSourceCapabilities:
         return cls(
             SourceCoverageRegistry(),
             SourceContentBoundsRegistry(),
+            SourceContentBoundaryRegistry(),
             SourceStorageBoundsRegistry(),
             SourceAuthoredBoundsRegistry(),
             PixelPresentationRegistry(),

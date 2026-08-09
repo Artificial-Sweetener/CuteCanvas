@@ -19,15 +19,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from PySide6.QtCore import QRectF
+
 from ..scene.identity import SceneLayerAssetKey
 from ..scene.render_plan import (
     RasterLayerRenderItem,
     SampledLayerRenderItem,
+    SampledTileRenderData,
     SceneRenderPlan,
     TransientRasterContribution,
+    TransientRasterResolvedContribution,
     TransientRasterTransformContribution,
     TransientSampledResolvedContribution,
 )
+from .panel_mapping import PanelMappingKey, panel_mapping_key
+from .rectangle_coverage import rectangles_cover
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +43,7 @@ class _SampledViewKey:
     zoom: float
     pan: tuple[float, float]
     viewport: tuple[float, float, float, float]
-    item_transform: tuple[float, float, float, float, float, float, float, float, float]
+    item_transform: PanelMappingKey
 
     @classmethod
     def from_plan(
@@ -47,7 +53,6 @@ class _SampledViewKey:
     ) -> _SampledViewKey:
         """Return exact view and layer geometry for one sampled presentation."""
         viewport = plan.physical_viewport_rect
-        transform = item.transform
         return cls(
             zoom=plan.zoom,
             pan=(plan.current_pan.x(), plan.current_pan.y()),
@@ -57,17 +62,7 @@ class _SampledViewKey:
                 viewport.width(),
                 viewport.height(),
             ),
-            item_transform=(
-                transform.m11(),
-                transform.m12(),
-                transform.m13(),
-                transform.m21(),
-                transform.m22(),
-                transform.m23(),
-                transform.m31(),
-                transform.m32(),
-                transform.m33(),
-            ),
+            item_transform=panel_mapping_key(item.transform),
         )
 
 
@@ -84,14 +79,18 @@ class TransientRasterHandoff:
         """Return a plan that cannot flash before a newer durable revision arrives."""
         active = plan.transient_raster
         if active is not None:
+            item = self._matching_item(plan, active)
             if isinstance(active, TransientSampledResolvedContribution):
-                item = self._matching_item(plan, active)
-                if (
-                    not isinstance(item, SampledLayerRenderItem)
-                    or item.sample_geometry_key != active.sample_geometry_key
-                ):
+                if not isinstance(
+                    item, SampledLayerRenderItem
+                ) or not _sampled_contribution_covers(item, active):
                     self._clear()
                     return replace(plan, transient_raster=None), True
+                self._sampled_view_key = _SampledViewKey.from_plan(plan, item)
+            elif isinstance(
+                active,
+                TransientRasterResolvedContribution,
+            ) and isinstance(item, SampledLayerRenderItem):
                 self._sampled_view_key = _SampledViewKey.from_plan(plan, item)
             else:
                 self._sampled_view_key = None
@@ -110,6 +109,11 @@ class TransientRasterHandoff:
         item = self._matching_item(plan, pending)
         if isinstance(pending, TransientSampledResolvedContribution):
             return self._settled_sampled_plan(plan, item, pending)
+        if isinstance(
+            pending,
+            TransientRasterResolvedContribution,
+        ) and isinstance(item, SampledLayerRenderItem):
+            return self._settled_sampled_patch_plan(plan, item, pending)
         if not isinstance(item, RasterLayerRenderItem):
             self._clear()
             return plan, True
@@ -144,8 +148,36 @@ class TransientRasterHandoff:
                 pending.sampled_source_size is not None
                 and item.source_size != pending.sampled_source_size
             )
+            or not _sampled_contribution_covers(item, pending)
             or self._sampled_view_key != _SampledViewKey.from_plan(plan, item)
         ):
+            self._clear()
+            return plan, True
+        descriptor = item.descriptor
+        asset_key = SceneLayerAssetKey(
+            scene_id=descriptor.scene_id,
+            layer_id=descriptor.layer_id,
+            source_id=descriptor.source.resource_id,
+            source_kind=descriptor.source.kind,
+            source_revision=descriptor.source_revision,
+        )
+        if asset_key == pending.source_asset_key:
+            return replace(plan, transient_raster=pending), False
+        if self._durable_asset_key is None:
+            self._durable_asset_key = asset_key
+        elif asset_key != self._durable_asset_key:
+            self._clear()
+            return plan, True
+        return replace(plan, transient_raster=pending), False
+
+    def _settled_sampled_patch_plan(
+        self,
+        plan: SceneRenderPlan,
+        item: SampledLayerRenderItem,
+        pending: TransientRasterResolvedContribution,
+    ) -> tuple[SceneRenderPlan, bool]:
+        """Retain one bounded patch without replacing unrelated sampled tiles."""
+        if self._sampled_view_key != _SampledViewKey.from_plan(plan, item):
             self._clear()
             return plan, True
         descriptor = item.descriptor
@@ -186,3 +218,26 @@ class TransientRasterHandoff:
         self._pending = None
         self._durable_asset_key = None
         self._sampled_view_key = None
+
+
+def _sampled_contribution_covers(
+    item: SampledLayerRenderItem,
+    contribution: TransientSampledResolvedContribution,
+) -> bool:
+    """Return whether current products cover the retained presentation demand."""
+    if (
+        contribution.sampled_raster_bounds is not None
+        and item.descriptor.raster_bounds != contribution.sampled_raster_bounds
+    ) or (
+        contribution.sampled_source_size is not None
+        and item.source_size != contribution.sampled_source_size
+    ):
+        return False
+    current = tuple(_painted_source_rect(tile) for tile in item.tiles)
+    retained = tuple(_painted_source_rect(tile) for tile in contribution.tiles)
+    return all(rectangles_cover(rect, current) for rect in retained)
+
+
+def _painted_source_rect(tile: SampledTileRenderData) -> QRectF:
+    """Return the source-local core actually painted for one sampled tile."""
+    return tile.source_clip_rect or tile.source_rect

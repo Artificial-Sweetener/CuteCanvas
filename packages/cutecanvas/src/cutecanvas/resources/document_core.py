@@ -30,7 +30,7 @@ from ..raster.structure_mutations import (
     ColorRasterStructureEdit,
     ColorRasterStructureHistoryOwner,
 )
-from ..scene.transform_edit import LayerTransformEdit, LayerTransformHistoryOwner
+from ..scene.mapping_edit import LayerMappingEdit, LayerMappingHistoryOwner
 from ..selection import PixelSelectionEdit, PixelSelectionService, PixelSelectionState
 from .composition_resources import CompositionResourceOwner
 from .image_documents import ImageDocumentWorkflow
@@ -109,11 +109,11 @@ class DocumentResourceCore:
             undo=pixel_selection.undo_edit,
             redo=pixel_selection.redo_edit,
         )
-        transform_history = LayerTransformHistoryOwner(compositions.layers)
+        mapping_history = LayerMappingHistoryOwner(compositions.layers)
         compositions.edit_controller.register_handler(
-            LayerTransformEdit,
-            undo=transform_history.undo,
-            redo=transform_history.redo,
+            LayerMappingEdit,
+            undo=mapping_history.undo,
+            redo=mapping_history.redo,
         )
         raster_paint_history = RasterPaintHistory(
             assets=raster_assets,

@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .pytest-tmp/
+.pytest-tmp-*/
 .pytest-locks/
 .ruff_cache/
 .mypy_cache/

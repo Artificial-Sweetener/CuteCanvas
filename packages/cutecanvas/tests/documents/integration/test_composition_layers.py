@@ -131,7 +131,7 @@ def test_one_composition_can_place_the_same_source_more_than_once():
     )
 
     moved = LayerTransform(dx=19.0, dy=7.0)
-    assert store.update_transform(image_id, second.layer_id, moved)
+    assert store.update_mapping(image_id, second.layer_id, moved)
     assert store.layer(image_id, first.layer_id).transform == LayerTransform()
     assert store.layer(image_id, second.layer_id).transform == moved
 
@@ -202,7 +202,7 @@ def test_layer_store_replaces_policy_and_transform_as_instance_state():
 
     assert store.update_interaction(image_id, mask.layer_id, interaction)
     transform = LayerTransform.from_placement(RasterBounds(0, 0, 100, 80), moved)
-    assert store.update_transform(image_id, mask.layer_id, transform)
+    assert store.update_mapping(image_id, mask.layer_id, transform)
 
     updated = store.layer(image_id, mask.layer_id)
     assert updated is not None

@@ -42,7 +42,7 @@ from ..raster.sparse_grid import SparseRasterSnapshot
 from ..resources import ProjectResourceKind, ProjectResourceStore
 from ..types import RasterExtentPolicy
 from .coverage_transactions import MaskCoverageTransactions
-from .history import MaskHistory
+from .history import MaskCommandDecorator, MaskHistory
 from .mask_undo import (
     MaskHistoryChange,
     MaskPatch,
@@ -156,6 +156,13 @@ class MaskAssetStore:
     ) -> None:
         """Bind the document's sole chronological mask history owner."""
         self._history.bind(edits, scope_for_mask, self._publish_history_change)
+
+    def set_history_command_decorator(
+        self,
+        decorator: MaskCommandDecorator,
+    ) -> None:
+        """Replace the active service's mask command decorator."""
+        self._history.set_command_decorator(decorator)
 
     def _publish_history_change(self, change: MaskHistoryChange) -> None:
         """Publish history replay once through the document change stream."""

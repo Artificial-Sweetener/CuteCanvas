@@ -20,7 +20,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from qpane.sdk.scene import LayerTransform
+from PySide6.QtCore import QPointF
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    PiecewiseLayerTransform,
+    inverse_mapping_linearization,
+)
 
 from .model import BrushStrokeSegment
 from .target_contracts import PaintTargetContext
@@ -34,18 +39,22 @@ def segment_with_target_tip_geometry(
 
     layer = target.layer
     transform = None if layer is None else layer.transform
-    inverse = None if transform is None else transform.inverted()
-    if inverse is None:
+    if transform is None:
         return segment
-    tip_transform = LayerTransform(
-        m11=inverse.m11,
-        m12=inverse.m12,
-        m21=inverse.m21,
-        m22=inverse.m22,
+    tip_transform = inverse_mapping_linearization(
+        transform,
+        QPointF(float(segment.end[0]), float(segment.end[1])),
     )
-    if tip_transform == segment.tip_transform:
+    if tip_transform is None:
         return segment
-    return replace(segment, tip_transform=tip_transform)
+    tip_mapping = (
+        transform
+        if isinstance(transform, (BilinearLayerTransform, PiecewiseLayerTransform))
+        else None
+    )
+    if tip_transform == segment.tip_transform and tip_mapping == segment.tip_mapping:
+        return segment
+    return replace(segment, tip_transform=tip_transform, tip_mapping=tip_mapping)
 
 
 __all__ = ["segment_with_target_tip_geometry"]

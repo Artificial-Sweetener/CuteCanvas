@@ -31,6 +31,7 @@ from cutecanvas.scene.transform_session import LayerTransformBoxState
 
 from .candidates import SnapCandidateProvider
 from .configuration import SnapConfiguration
+from .edge_candidates import OrientedEdgeCandidateProvider
 from .feedback import SnapGuideFeedback
 from .movement import MovementSnapCoordinator
 from .transform_scale import TransformScaleSnapSession
@@ -43,6 +44,7 @@ class TransformSnapCoordinator:
         self,
         *,
         candidates: SnapCandidateProvider,
+        oriented_candidates: OrientedEdgeCandidateProvider,
         configuration: SnapConfiguration,
         feedback: SnapGuideFeedback,
         movement: MovementSnapCoordinator,
@@ -51,6 +53,7 @@ class TransformSnapCoordinator:
     ) -> None:
         """Bind shared targets, policy, movement behavior, scale, and feedback."""
         self._candidates = candidates
+        self._oriented_candidates = oriented_candidates
         self._configuration = configuration
         self._feedback = feedback
         self._movement = movement
@@ -102,6 +105,12 @@ class TransformSnapCoordinator:
             origin,
             targets,
             self._configuration,
+            oriented_targets=self._oriented_candidates.capture(
+                excluded_layer_ids=(box.layer_id,),
+            ),
+            scene_units_per_device_pixel=max(
+                1e-9, float(self._scene_units_per_device_pixel())
+            ),
         )
         return True
 

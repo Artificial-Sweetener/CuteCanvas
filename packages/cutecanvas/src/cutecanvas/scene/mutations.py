@@ -25,15 +25,19 @@ from enum import Enum
 from typing import Protocol
 
 from qpane.sdk.scene import (
+    BilinearLayerTransform,
     LayerDescriptor,
     LayerInteractionPolicy,
+    LayerMapping,
     LayerPlacement,
     LayerTransform,
+    PiecewiseLayerTransform,
+    ProjectiveLayerTransform,
     SceneDescriptor,
 )
 
 from ..composition.edit_controller import CompositionEditController
-from .transform_edit import LayerTransformEdit, LayerTransformTransition
+from .mapping_edit import LayerMappingEdit, LayerMappingTransition
 
 
 class SceneMutationStatus(str, Enum):
@@ -122,7 +126,7 @@ class SceneMutationOwner(Protocol):
         self,
         scene: SceneDescriptor,
         layer: LayerDescriptor,
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> SceneMutationResult:
         """Update exact local-to-scene geometry through the authoritative owner."""
         ...
@@ -189,7 +193,7 @@ class BaseSceneMutationOwner:
         self,
         scene: SceneDescriptor,
         layer: LayerDescriptor,
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> SceneMutationResult:
         """Reject affine transform updates for unsupported owners."""
         return self._unsupported(scene, layer, "set transform")
@@ -352,12 +356,10 @@ class SceneMutationCoordinator:
             and after is not None
         ):
             self._edit_controller.record_applied(
-                LayerTransformEdit(
+                LayerMappingEdit(
                     scene_id=scene.scene_id,
                     transitions=(
-                        LayerTransformTransition(
-                            layer.layer_id, layer.transform, after
-                        ),
+                        LayerMappingTransition(layer.layer_id, layer.transform, after),
                     ),
                 )
             )
@@ -367,14 +369,22 @@ class SceneMutationCoordinator:
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-        transform: LayerTransform,
+        transform: LayerMapping,
     ) -> SceneMutationResult:
-        """Route one policy-authorized invertible affine transform update."""
-        if not isinstance(transform, LayerTransform):
+        """Route one policy-authorized invertible layer-mapping update."""
+        if not isinstance(
+            transform,
+            (
+                LayerTransform,
+                ProjectiveLayerTransform,
+                PiecewiseLayerTransform,
+                BilinearLayerTransform,
+            ),
+        ):
             return self._invalid_request(
                 scene_id,
                 layer_id,
-                "transform must be LayerTransform",
+                "transform must be a supported layer mapping",
             )
         if not transform.is_invertible:
             return self._invalid_request(
@@ -403,10 +413,10 @@ class SceneMutationCoordinator:
         result = owner.set_transform(scene, layer, transform)
         if result.changed and self._edit_controller is not None:
             self._edit_controller.record_applied(
-                LayerTransformEdit(
+                LayerMappingEdit(
                     scene_id=scene.scene_id,
                     transitions=(
-                        LayerTransformTransition(
+                        LayerMappingTransition(
                             layer.layer_id,
                             layer.transform,
                             transform,

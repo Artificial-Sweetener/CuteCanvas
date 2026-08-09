@@ -31,6 +31,7 @@ from ..rendering.render_tile_types import RegionSampleSource
 from ..rendering.sdk import HybridSource
 from ..scene.affine import LayerTransform
 from ..scene.effects import LayerEffectRenderRegistry
+from ..scene.mapping import compose_layer_mappings
 from ..scene.model import (
     ClipCoordinateSpace,
     LayerClip,
@@ -41,6 +42,7 @@ from ..scene.raster import RasterBounds
 from ..scene.source_capabilities import LayerSourceCapabilities
 from ..vector.drawing import draw_vector_document
 from ..vector.snapshot import VectorPresentationSnapshot
+from .projective_visibility import visible_source_rect
 
 
 @runtime_checkable
@@ -172,8 +174,9 @@ class SceneRegionRasterizer:
         )
         if visible_local is None:
             return
-        local_to_pixels = local_to_scene.followed_by(
-            LayerTransform.from_qtransform(scene_to_pixels)
+        local_to_pixels = compose_layer_mappings(
+            local_to_scene,
+            LayerTransform.from_qtransform(scene_to_pixels),
         ).to_qtransform()
         painter.save()
         try:
@@ -326,11 +329,14 @@ def _visible_local_bounds(
         scene.bounds.height,
     )
     scene_rect = scene_rect.intersected(canvas)
-    inverse = layer.transform.inverted()
     bounds = layer.raster_bounds
-    if scene_rect.isEmpty() or inverse is None or bounds is None:
+    if scene_rect.isEmpty() or bounds is None:
         return None
-    local_rect = inverse.map_rect(scene_rect).toAlignedRect()
+    local_rect = visible_source_rect(
+        layer.transform.to_qtransform(),
+        scene_rect,
+        _rectf(bounds),
+    ).toAlignedRect()
     if local_rect.isEmpty():
         return None
     return bounds.intersection(RasterBounds.from_qrect(local_rect))

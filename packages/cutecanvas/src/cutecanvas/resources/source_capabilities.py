@@ -171,6 +171,12 @@ class ProjectResourceSourceCapabilities:
         owner = self._owner(source)
         return None if owner is None else owner.content_bounds(source)
 
+    def content_boundary(self, source: LayerSourceReference) -> tuple[QPointF, ...]:
+        """Return content boundary through the current payload owner."""
+        owner = self._owner(source)
+        method = None if owner is None else getattr(owner, "content_boundary", None)
+        return () if not callable(method) else tuple(method(source))
+
     def storage_bounds(self, source: LayerSourceReference) -> QRectF | None:
         """Return storage bounds through the current payload owner."""
         owner = self._owner(source)

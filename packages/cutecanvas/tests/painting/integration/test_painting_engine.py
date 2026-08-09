@@ -52,7 +52,12 @@ from cutecanvas.raster.color_surface import ColorRasterSurface
 from cutecanvas.raster.revision_reader import RasterRevisionReader
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
-from qpane.sdk.scene import LayerTransform, RasterBounds
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerTransform,
+    PiecewiseLayerTransform,
+    RasterBounds,
+)
 
 
 def _transparent_image(width: int, height: int) -> QImage:
@@ -332,6 +337,115 @@ def test_coverage_renderer_supports_soft_paint_and_soft_erase() -> None:
         segments=(erase,),
     )
     assert 62 <= int(erased[32, 32]) <= 65
+
+
+def test_soft_brush_uses_exact_scene_geometry_after_joined_edge_resize() -> None:
+    """Coverage and color brushes must follow one nonlinear scene-space tip."""
+    mapping = BilinearLayerTransform(
+        (
+            QPointF(0.0, 0.0),
+            QPointF(80.0, 0.0),
+            QPointF(80.0, 100.0),
+            QPointF(0.0, 100.0),
+        ),
+        (
+            QPointF(80.0, 0.0),
+            QPointF(80.0, 0.0),
+            QPointF(80.0, 100.0),
+            QPointF(0.0, 100.0),
+        ),
+    )
+    source_center = QPointF(40.0, 5.0)
+    segment = BrushStrokeSegment(
+        start=(source_center.x(), source_center.y()),
+        end=(source_center.x(), source_center.y()),
+        start_diameter=20.0,
+        end_diameter=20.0,
+        hardness=0.5,
+        tip_mapping=mapping,
+    )
+    bounds = QRect(0, 0, 80, 100)
+
+    coverage, _preview = render_coverage_stroke(
+        before=np.zeros((100, 80), dtype=np.uint8),
+        dirty_rect=bounds,
+        segments=(segment,),
+    )
+    color = render_color_stroke(
+        before=np.zeros((100, 80, 4), dtype=np.uint8),
+        patch_bounds=bounds,
+        segments=(segment,),
+        color=QColor(255, 255, 255),
+    )
+
+    assert np.array_equal(coverage, color[:, :, 3])
+    scene_center = mapping.map_point(source_center)
+    for y, x in zip(*np.nonzero(coverage), strict=True):
+        scene_point = mapping.map_point(QPointF(x + 0.5, y + 0.5))
+        assert (
+            math.hypot(
+                scene_point.x() - scene_center.x(),
+                scene_point.y() - scene_center.y(),
+            )
+            <= 11.0
+        )
+    assert coverage[5, 40] > 200
+
+
+def test_piecewise_brush_and_eraser_cross_patch_seam_in_scene_space() -> None:
+    """Paint and erase must retain one footprint across piecewise patch seams."""
+    mapping = PiecewiseLayerTransform(
+        (
+            QPointF(0.0, 0.0),
+            QPointF(80.0, 0.0),
+            QPointF(80.0, 100.0),
+            QPointF(0.0, 100.0),
+        ),
+        (
+            QPointF(10.0, 0.0),
+            QPointF(80.0, 10.0),
+            QPointF(70.0, 100.0),
+            QPointF(0.0, 90.0),
+        ),
+    )
+    source_center = QPointF(40.0, 50.0)
+    paint = BrushStrokeSegment(
+        start=(source_center.x(), source_center.y()),
+        end=(source_center.x(), source_center.y()),
+        start_diameter=20.0,
+        end_diameter=20.0,
+        hardness=1.0,
+        tip_mapping=mapping,
+    )
+    bounds = QRect(0, 0, 80, 100)
+
+    painted, _preview = render_coverage_stroke(
+        before=np.zeros((100, 80), dtype=np.uint8),
+        dirty_rect=bounds,
+        segments=(paint,),
+    )
+    erased, _preview = render_coverage_stroke(
+        before=np.full((100, 80), 255, dtype=np.uint8),
+        dirty_rect=bounds,
+        segments=(replace(paint, operation=BrushOperation.ERASE),),
+    )
+
+    scene_center = mapping.map_point(source_center)
+    assert painted[50, 40] > 0
+    assert erased[50, 40] == 0
+    for y in range(100):
+        for x in range(80):
+            scene_point = mapping.map_point(QPointF(x + 0.5, y + 0.5))
+            distance = math.hypot(
+                scene_point.x() - scene_center.x(),
+                scene_point.y() - scene_center.y(),
+            )
+            if distance <= 8.0:
+                assert painted[y, x] > 0
+                assert erased[y, x] == 0
+            elif distance >= 12.0:
+                assert painted[y, x] == 0
+                assert erased[y, x] == 255
 
 
 def test_editable_raster_paint_target_commits_one_undoable_stroke(

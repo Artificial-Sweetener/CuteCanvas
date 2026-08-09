@@ -74,6 +74,7 @@ from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QImage
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import LayerInteractionPolicy, LayerPlacement
+from qpane.scene.projective import ProjectiveLayerTransform
 from qpane.scene.raster import RasterBounds
 from qpane.vector.model import VectorObject
 from qpane.vector.public import VectorObjectKind
@@ -255,7 +256,13 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     mask_instance = CompositionLayerInstance(
         layer_id=uuid.uuid4(),
         source=ProjectResourceReference(mask_id),
-        transform=LayerTransform(dx=12.0, dy=-4.0),
+        transform=ProjectiveLayerTransform(
+            m11=1.0,
+            m13=0.001,
+            m22=1.0,
+            dx=12.0,
+            dy=-4.0,
+        ),
         opacity=0.35,
         tint=QColor(12, 34, 56, 200),
         interaction=LayerInteractionPolicy(selectable=True, movable=True),
@@ -328,7 +335,7 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     )
     with zipfile.ZipFile(archive_path) as container:
         manifest = json.loads(container.read("manifest.json"))
-    assert manifest["version"] == 13
+    assert manifest["version"] == 15
     assert manifest["documents"][0]["document"]["canvas_bounds"] == [
         0.0,
         0.0,
@@ -337,10 +344,9 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     ]
     assert len(manifest["documents"][0]["instances"]) == 4
     assert len(manifest["resources"]) == 4
-    assert all(
-        len(instance["transform"]) == 6
-        for instance in manifest["documents"][0]["instances"]
-    )
+    assert sorted(
+        len(instance["transform"]) for instance in manifest["documents"][0]["instances"]
+    ) == [6, 6, 6, 9]
     decoded = codec.read(archive_path)
     restored_owners = _resource_owners()
     restored_layers = CompositionLayerStore(CompositionResourceLifetime())

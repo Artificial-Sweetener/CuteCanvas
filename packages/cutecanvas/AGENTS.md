@@ -51,9 +51,18 @@ mask-specific aperture geometry. Tools do not reproduce either concern.
 `SceneLayerSelectionController` owns an ordered selection with the active member
 last. `SceneLayerMoveController` owns translation-only layer-set sessions.
 `SceneLayerTransformController` owns single-layer affine transforms.
-`SceneLayerTransformPreview` presents either workflow as one coherent transient
-set. `LayerMovementMutationOwner` commits Move-tool sets through one layer-store
-publication and one history edit.
+`SceneLayerMappingPreview` presents affine, projective, piecewise, or bilinear
+workflows as one coherent transient set. `LayerMappingMutationOwner` commits exact mapping sets
+through one layer-store publication and one history edit.
+
+Axis snapping retains its optimized scalar path. Oriented snapping uses exact
+finite manipulation edges, a frozen spatial index, deterministic ranking, and
+device-pixel thresholds. Shared-edge resize infers one current seam between
+exactly two eligible layers. Midpoint drags derive both affine previews from one
+scalar. A common-corner endpoint pivots only along the continuous rail shared by
+both participants and derives paired piecewise previews from immutable bases.
+Both operations commit or cancel atomically. Alpha contours never define the
+seam, and interaction never resamples or bakes layer pixels.
 
 ## Facade and public surface
 

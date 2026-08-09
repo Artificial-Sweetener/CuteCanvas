@@ -105,7 +105,7 @@ class CanvasLifecycleMixin:
                 cache_registry=self._state.cache_registry,
                 diagnostics=self._diagnostics_manager,
                 layer_selection=self._scene_selection,
-                transform_preview=self._scene_transform_preview,
+                mapping_preview=self._scene_mapping_preview,
                 selection_projections=self._selection_layer_projections,
                 floating_promotions=self._floating_layer_promotions,
                 editor_policy=self._editor_policy,
@@ -125,7 +125,7 @@ class CanvasLifecycleMixin:
                         self.layerEdgeModificationCompleted.emit
                     ),
                     transform_changed=self._publish_scene_layer_change,
-                    transform_preview_changed=self._refresh_scene_transform_preview,
+                    transform_preview_changed=self._refresh_scene_mapping_preview,
                     transform_state_changed=self._publish_editor_transform_state,
                     raster_structure_changed=self._handle_raster_structure_changed,
                     raster_bounds_completed=self._handle_raster_bounds_completion,

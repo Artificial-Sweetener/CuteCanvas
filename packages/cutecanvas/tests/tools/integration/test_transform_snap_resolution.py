@@ -23,6 +23,8 @@ import pytest
 from cutecanvas.scene.transform_session import LayerTransformBoxState
 from cutecanvas.snapping import SnapConfiguration
 from cutecanvas.snapping.candidates import SnapTargetSnapshot
+from cutecanvas.snapping.edge_candidates import OrientedTargetSnapshot
+from cutecanvas.snapping.edge_model import OrientedEdge, OrientedSnapGuide
 from cutecanvas.snapping.model import (
     SnapAxis,
     SnapCandidate,
@@ -32,6 +34,7 @@ from cutecanvas.snapping.model import (
 from cutecanvas.snapping.transform_scale import TransformScaleSnapSession
 from PySide6.QtCore import QPointF, QRectF
 from qpane.sdk.scene import (
+    AffineTransformGeometry,
     LayerTransform,
     TransformHandle,
     TransformLocalBounds,
@@ -88,6 +91,49 @@ def test_side_handle_snaps_exactly_to_another_layer_edge() -> None:
     assert len(result.guides) == 1
     assert result.guides[0].axis is SnapAxis.X
     assert result.guides[0].position == 200.0
+
+
+def test_rotated_side_handle_snaps_to_parallel_diagonal_edge() -> None:
+    """A rotated frame side should align through finite oriented geometry."""
+    root = 2**-0.5
+    box = _box(LayerTransform(root, root, -root, root, 100.0, 20.0))
+    geometry = AffineTransformGeometry(box.bounds, box.transform)
+    origin = geometry.scene_point(TransformHandle.RIGHT)
+    start = geometry.scene_point(TransformHandle.TOP_RIGHT)
+    end = geometry.scene_point(TransformHandle.BOTTOM_RIGHT)
+    source = OrientedEdge(
+        str(box.layer_id),
+        start,
+        end,
+        geometry.scene_center(),
+    )
+    target = source.translated(20.0)
+    target = OrientedEdge(
+        "target",
+        target.start,
+        target.end,
+        target.owner_center,
+    )
+    session = TransformScaleSnapSession(
+        box,
+        TransformOperation(TransformOperationKind.SCALE, TransformHandle.RIGHT),
+        origin,
+        SnapTargetSnapshot(box.scene_id, (), None),
+        SnapConfiguration(),
+        oriented_targets=OrientedTargetSnapshot(box.scene_id, (target,), None),
+    )
+
+    result = session.resolve(
+        origin + source.normal * 15.0,
+        TransformModifiers(proportional=False),
+        scene_units_per_device_pixel=1.0,
+    )
+
+    expected = origin + source.normal * 20.0
+    assert result.scene_point.x() == pytest.approx(expected.x())
+    assert result.scene_point.y() == pytest.approx(expected.y())
+    assert len(result.guides) == 1
+    assert isinstance(result.guides[0], OrientedSnapGuide)
 
 
 def test_corner_snap_preserves_proportional_scaling_about_center() -> None:
@@ -203,7 +249,7 @@ def test_rotated_side_handle_snaps_along_its_affine_scale_axis() -> None:
 
 
 def test_suppression_removes_resolution_and_feedback_without_losing_precision() -> None:
-    """Temporary suppression should preserve the exact unsnapped pointer."""
+    """Suppression preserves exact input and releases prior hysteresis locks."""
     box = _box()
     session = _session(
         box,
@@ -212,15 +258,28 @@ def test_suppression_removes_resolution_and_feedback_without_losing_precision() 
         bounds_candidates("target", QRectF(200.0, 0.0, 100.0, 100.0)),
     )
 
-    result = session.resolve(
-        QPointF(197.25, 50.0),
+    acquired = session.resolve(
+        QPointF(197.0, 50.0),
+        TransformModifiers(proportional=False),
+        scene_units_per_device_pixel=1.0,
+    )
+    suppressed = session.resolve(
+        QPointF(190.5, 50.0),
         TransformModifiers(proportional=False),
         scene_units_per_device_pixel=1.0,
         suppressed=True,
     )
+    released = session.resolve(
+        QPointF(190.5, 50.0),
+        TransformModifiers(proportional=False),
+        scene_units_per_device_pixel=1.0,
+    )
 
-    assert result.scene_point == QPointF(197.25, 50.0)
-    assert result.guides == ()
+    assert acquired.scene_point.x() == 200.0
+    assert suppressed.scene_point == QPointF(190.5, 50.0)
+    assert suppressed.guides == ()
+    assert released.scene_point == QPointF(190.5, 50.0)
+    assert released.guides == ()
 
 
 def test_scale_snap_hysteresis_holds_through_jitter_then_releases() -> None:

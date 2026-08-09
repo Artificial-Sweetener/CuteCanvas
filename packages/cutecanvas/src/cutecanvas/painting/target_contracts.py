@@ -97,6 +97,15 @@ class PaintTargetOwner(Protocol):
 
 
 @runtime_checkable
+class PaintTargetInteractionPreparer(Protocol):
+    """Prepare target-owned spatial authority before pointer coordinates resolve."""
+
+    def prepare_interaction(self, target: PaintTargetContext) -> bool:
+        """Make one current target ready for direct pointer-local painting."""
+        ...
+
+
+@runtime_checkable
 class RetainedCoverageTargetOwner(Protocol):
     """Commit semantic coverage items to a compatible paint destination."""
 

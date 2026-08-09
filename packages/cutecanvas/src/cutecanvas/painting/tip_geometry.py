@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 
+from PySide6.QtCore import QPointF, QRectF
 from qpane.sdk.scene import RasterBounds
 
 from .model import BrushDab
@@ -28,8 +29,25 @@ from .model import BrushDab
 def brush_dab_bounds(dab: BrushDab) -> RasterBounds:
     """Return antialias-safe target-local bounds for one transformed dab."""
 
-    transform = dab.tip_transform
     radius = dab.diameter / 2.0 + 1.0
+    if dab.tip_mapping is not None:
+        center = dab.tip_mapping.map_point(
+            QPointF(float(dab.center[0]), float(dab.center[1]))
+        )
+        rectangle = dab.tip_mapping.inverse_map_rect(
+            QRectF(
+                center.x() - radius,
+                center.y() - radius,
+                radius * 2.0,
+                radius * 2.0,
+            )
+        )
+        left = math.floor(rectangle.left())
+        top = math.floor(rectangle.top())
+        right = math.ceil(rectangle.right())
+        bottom = math.ceil(rectangle.bottom())
+        return RasterBounds(left, top, max(1, right - left), max(1, bottom - top))
+    transform = dab.tip_transform
     extent_x = radius * math.hypot(transform.m11, transform.m21)
     extent_y = radius * math.hypot(transform.m12, transform.m22)
     left = math.floor(dab.center[0] - extent_x)

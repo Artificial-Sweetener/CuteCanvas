@@ -16,8 +16,15 @@
 """Supported immutable scene, source, transform, and render-plan contracts."""
 
 from ..scene.affine import LayerTransform
+from ..scene.bilinear import BilinearLayerTransform
 from ..scene.effects import LayerEffectReference, LayerEffectRenderRegistry
 from ..scene.identity import SceneLayerAssetKey
+from ..scene.mapping import (
+    LayerMapping,
+    compose_layer_mappings,
+    inverse_mapping_linearization,
+    layer_mapping_from_qtransform,
+)
 from ..scene.model import (
     BlendMode,
     ClipCoordinateSpace,
@@ -31,6 +38,8 @@ from ..scene.model import (
     SceneDescriptor,
     SceneKind,
 )
+from ..scene.piecewise import PiecewiseLayerTransform, TriangularLayerMappingPatch
+from ..scene.projective import ProjectiveLayerTransform
 from ..scene.providers import SceneContribution
 from ..scene.raster import RasterBounds
 from ..scene.registry import SceneProviderRegistry
@@ -64,6 +73,7 @@ from ..scene.transform_geometry import (
 
 __all__ = (
     "AffineTransformGeometry",
+    "BilinearLayerTransform",
     "BlendMode",
     "ClipCoordinateSpace",
     "LayerClip",
@@ -74,10 +84,13 @@ __all__ = (
     "LayerHitTest",
     "LayerInteractionPolicy",
     "LayerKind",
+    "LayerMapping",
     "LayerPlacement",
     "LayerSourceCapabilities",
     "LayerSourceReference",
     "LayerTransform",
+    "PiecewiseLayerTransform",
+    "ProjectiveLayerTransform",
     "RasterBounds",
     "RasterLayerRenderItem",
     "RasterPresentation",
@@ -102,4 +115,8 @@ __all__ = (
     "TransientRasterResolvedContribution",
     "TransientRasterTransformContribution",
     "TransientSampledResolvedContribution",
+    "TriangularLayerMappingPatch",
+    "compose_layer_mappings",
+    "inverse_mapping_linearization",
+    "layer_mapping_from_qtransform",
 )

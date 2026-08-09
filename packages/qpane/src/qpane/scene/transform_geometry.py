@@ -24,6 +24,7 @@ from enum import Enum
 from PySide6.QtCore import QPointF
 
 from .affine import LayerTransform
+from .mapping import LayerMapping, compose_layer_mappings
 
 
 class TransformHandle(str, Enum):
@@ -136,7 +137,7 @@ class AffineTransformGeometry:
     def __init__(
         self,
         bounds: TransformLocalBounds,
-        initial_transform: LayerTransform,
+        initial_transform: LayerMapping,
     ) -> None:
         """Bind source-local bounds and one invertible durable transform."""
         if not initial_transform.is_invertible:
@@ -150,7 +151,7 @@ class AffineTransformGeometry:
         return self._bounds
 
     @property
-    def initial_transform(self) -> LayerTransform:
+    def initial_transform(self) -> LayerMapping:
         """Return the immutable durable transform base."""
         return self._initial
 
@@ -168,11 +169,14 @@ class AffineTransformGeometry:
         pointer_origin: QPointF,
         pointer_position: QPointF,
         modifiers: TransformModifiers,
-    ) -> LayerTransform | None:
+    ) -> LayerMapping | None:
         """Return an exact preview transform for one pointer displacement."""
         if operation.kind is TransformOperationKind.MOVE:
             delta = pointer_position - pointer_origin
-            return self._initial.translated(delta.x(), delta.y())
+            return compose_layer_mappings(
+                self._initial,
+                LayerTransform(dx=delta.x(), dy=delta.y()),
+            )
         if operation.kind is TransformOperationKind.ROTATE:
             return self._rotation(pointer_origin, pointer_position, modifiers)
         if operation.handle is None:
@@ -197,7 +201,7 @@ class AffineTransformGeometry:
         pointer_origin: QPointF,
         pointer_position: QPointF,
         modifiers: TransformModifiers,
-    ) -> LayerTransform | None:
+    ) -> LayerMapping | None:
         """Scale local geometry about its opposite handle or center."""
         anchor = (
             self._bounds.center
@@ -239,7 +243,7 @@ class AffineTransformGeometry:
             dx=anchor.x() * (1.0 - scale_x),
             dy=anchor.y() * (1.0 - scale_y),
         )
-        candidate = local_scale.followed_by(self._initial)
+        candidate = compose_layer_mappings(local_scale, self._initial)
         return candidate if candidate.is_invertible else None
 
     def _rotation(
@@ -247,7 +251,7 @@ class AffineTransformGeometry:
         pointer_origin: QPointF,
         pointer_position: QPointF,
         modifiers: TransformModifiers,
-    ) -> LayerTransform | None:
+    ) -> LayerMapping | None:
         """Rotate scene geometry about the transformed content center."""
         pivot = self.scene_center()
         origin_vector = pointer_origin - pivot
@@ -276,7 +280,7 @@ class AffineTransformGeometry:
             dx=pivot.x() - cosine * pivot.x() + sine * pivot.y(),
             dy=pivot.y() - sine * pivot.x() - cosine * pivot.y(),
         )
-        candidate = self._initial.followed_by(rotation)
+        candidate = compose_layer_mappings(self._initial, rotation)
         return candidate if candidate.is_invertible else None
 
     def _skew(
@@ -285,7 +289,7 @@ class AffineTransformGeometry:
         pointer_origin: QPointF,
         pointer_position: QPointF,
         modifiers: TransformModifiers,
-    ) -> LayerTransform | None:
+    ) -> LayerMapping | None:
         """Skew one side in local space about the opposite side or center."""
         if handle in {
             TransformHandle.TOP_LEFT,
@@ -318,5 +322,5 @@ class AffineTransformGeometry:
                 return None
             shear = (desired_local.y() - handle_local.y()) / denominator
             local_skew = LayerTransform(m12=shear, dy=-shear * anchor.x())
-        candidate = local_skew.followed_by(self._initial)
+        candidate = compose_layer_mappings(local_skew, self._initial)
         return candidate if candidate.is_invertible else None

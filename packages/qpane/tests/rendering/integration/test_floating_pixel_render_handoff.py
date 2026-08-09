@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize
+from PySide6.QtCore import QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
 from qpane.rendering.transient_raster import TransientRasterHandoff
 from qpane.scene.affine import LayerTransform
@@ -226,8 +226,43 @@ def test_sampled_handoff_rejects_an_active_product_from_another_demand() -> None
     assert needs_redraw
 
 
-def test_sampled_handoff_uses_view_identity_not_image_equality() -> None:
-    """A stable view retains continuity pixels until its geometry changes."""
+def test_sampled_handoff_retains_equal_coverage_across_tile_repartition() -> None:
+    """Overview partition changes cannot displace exact held edit pixels."""
+    plan, item, contribution = _sampled_handoff_fixture()
+    first_image = QImage(32, 64, QImage.Format.Format_ARGB32_Premultiplied)
+    second_image = QImage(32, 64, QImage.Format.Format_ARGB32_Premultiplied)
+    first_image.fill(QColor(40, 80, 120, 255))
+    second_image.fill(QColor(40, 80, 120, 255))
+    partitioned = replace(
+        item,
+        tiles=(
+            SampledTileRenderData(
+                first_image,
+                QRectF(0.0, 0.0, 32.0, 64.0),
+                QRectF(first_image.rect()),
+            ),
+            SampledTileRenderData(
+                second_image,
+                QRectF(32.0, 0.0, 32.0, 64.0),
+                QRectF(second_image.rect()),
+            ),
+        ),
+    )
+
+    settled, needs_redraw = TransientRasterHandoff().settled_plan(
+        replace(
+            plan,
+            render_items=(partitioned,),
+            transient_raster=contribution,
+        )
+    )
+
+    assert settled.transient_raster is contribution
+    assert not needs_redraw
+
+
+def test_sampled_handoff_releases_after_the_committed_source_changes_again() -> None:
+    """The committed presentation remains exact until a later source revision."""
     plan, item, contribution = _sampled_handoff_fixture()
     handoff = TransientRasterHandoff()
     handoff.settled_plan(replace(plan, transient_raster=contribution))
@@ -248,20 +283,55 @@ def test_sampled_handoff_uses_view_identity_not_image_equality() -> None:
     durable, durable_redraw = handoff.settled_plan(
         replace(plan, render_items=(durable_item,))
     )
-    settled, needs_redraw = handoff.settled_plan(
-        replace(
-            plan,
-            current_pan=QPointF(1.0, 0.0),
-            render_items=(durable_item,),
-        )
+    later_descriptor = replace(
+        durable_descriptor,
+        source_revision=durable_descriptor.source_revision + 1,
     )
-
+    later_item = replace(durable_item, descriptor=later_descriptor)
+    later, later_redraw = handoff.settled_plan(
+        replace(plan, render_items=(later_item,))
+    )
     assert waiting.transient_raster is contribution
     assert not waiting_redraw
     assert durable.transient_raster is contribution
     assert not durable_redraw
-    assert settled.transient_raster is None
-    assert needs_redraw
+    assert later.transient_raster is None
+    assert later_redraw
+
+
+def test_sampled_handoff_retains_a_bounded_patch_without_hiding_other_tiles() -> None:
+    """A sparse transient patch must remain valid over a sampled source revision."""
+    plan, item, sampled = _sampled_handoff_fixture()
+    patch_image = QImage(8, 8, QImage.Format.Format_ARGB32_Premultiplied)
+    patch_image.fill(QColor(240, 30, 80, 255))
+    contribution = TransientRasterResolvedContribution(
+        session_id=sampled.session_id,
+        scene_id=sampled.scene_id,
+        layer_id=sampled.layer_id,
+        source_asset_key=sampled.source_asset_key,
+        source_image=patch_image,
+        source_bounds=RasterBounds(48, 48, 8, 8),
+    )
+    handoff = TransientRasterHandoff()
+    active, active_redraw = handoff.settled_plan(
+        replace(plan, transient_raster=contribution)
+    )
+    advanced_item = replace(
+        item,
+        descriptor=replace(
+            item.descriptor,
+            source_revision=item.descriptor.source_revision + 1,
+        ),
+    )
+    waiting, waiting_redraw = handoff.settled_plan(
+        replace(plan, render_items=(advanced_item,))
+    )
+
+    assert active.transient_raster is contribution
+    assert not active_redraw
+    assert waiting.transient_raster is contribution
+    assert not waiting_redraw
+    assert contribution.source_bounds == RasterBounds(48, 48, 8, 8)
 
 
 def test_handoff_discards_a_cancelled_transform_preview_immediately() -> None:

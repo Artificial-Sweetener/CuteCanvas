@@ -48,10 +48,10 @@ class MixedMaskStrokeCoordinator:
         self._undo_changed = undo_changed
 
     def begin(self, mask_id: uuid.UUID) -> bool:
-        """Flatten retained authorship provisionally for ordered brush pixels."""
+        """Flatten retained authorship without exposing the provisional authority."""
         if not self._assets.coverage_edits.begin_mixed_stroke(mask_id):
             return False
-        self._refresh(mask_id, reason="mixed_stroke_begin")
+        self._advance_epoch(mask_id, "mixed_stroke_begin")
         return True
 
     def active(self, mask_id: uuid.UUID) -> bool:

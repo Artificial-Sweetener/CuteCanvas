@@ -36,6 +36,7 @@ from qpane.scene.raster import RasterBounds
 from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SampledTileRenderData,
+    TransientRasterResolvedContribution,
     TransientSampledResolvedContribution,
 )
 from qpane.sdk.scene import LayerSourceReference
@@ -47,6 +48,7 @@ class _RecordingPresentations(PixelPresentationOwner):
     def __init__(self) -> None:
         """Initialize without any presentation calls."""
         self.calls: list[tuple[PixelSampleGeometry, ...]] = []
+        self.fallback_calls: list[QSize] = []
 
     def present_transition_samples(
         self,
@@ -71,9 +73,14 @@ class _RecordingPresentations(PixelPresentationOwner):
         pixel_format: RasterPixelFormat,
         pixels: np.ndarray,
         target_size: QSize | None = None,
-    ) -> None:
-        """Reject the fallback path because this owner supports exact sampling."""
-        del source, pixel_format, pixels, target_size
+    ) -> QImage:
+        """Return one bounded fallback patch and record its requested size."""
+        del source, pixel_format, pixels
+        size = target_size or QSize(1, 1)
+        self.fallback_calls.append(QSize(size))
+        image = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(QColor(255, 0, 0, 100))
+        return image
 
 
 def test_sampled_transition_reuses_overlap_and_resolves_new_or_refined_tiles() -> None:
@@ -132,6 +139,39 @@ def test_sampled_transition_reuses_overlap_and_resolves_new_or_refined_tiles() -
     assert refined_result.sample_geometry_key == refined_item.sample_geometry_key
     assert panned.tiles[0].image.cacheKey() == initial.tiles[1].image.cacheKey()
     assert refined_result.tiles[1].image.cacheKey() == panned.tiles[1].image.cacheKey()
+    assert presentations.fallback_calls == []
+
+
+def test_transition_outside_current_sampled_tiles_uses_a_bounded_patch() -> None:
+    """Incomplete demand must not publish a sampled batch that omits the edit."""
+    presentations = _RecordingPresentations()
+    compiler = RasterTransitionRenderCompiler(presentations)
+    first, _retained, _incoming = _sample_tiles()
+    item = _sampled_item((first,))
+    patch = RasterBounds(128, 8, 16, 16)
+    surface = RasterBounds(0, 0, 192, 64)
+    transition = RasterPixelTransition(
+        patch,
+        surface,
+        surface,
+        np.zeros((16, 16), dtype=np.uint8),
+        np.full((16, 16), 255, dtype=np.uint8),
+    )
+
+    result = compiler.compile(
+        session_id=uuid.uuid4(),
+        scene_id=item.descriptor.scene_id,
+        layer_id=item.descriptor.layer_id,
+        pixel_format=RasterPixelFormat.COVERAGE8,
+        transition=transition,
+        generation=1,
+        item=item,
+    )
+
+    assert isinstance(result, TransientRasterResolvedContribution)
+    assert result.source_bounds == patch
+    assert presentations.calls == []
+    assert presentations.fallback_calls == [QSize(16, 16)]
 
 
 def _sampled_item(
@@ -175,7 +215,7 @@ def _sample_tiles() -> tuple[
 
 def _transition() -> RasterPixelTransition:
     """Return one immutable coverage edit spanning the sampled surface."""
-    patch = RasterBounds(0, 0, 16, 16)
+    patch = RasterBounds(64, 0, 16, 16)
     surface = RasterBounds(0, 0, 192, 64)
     before = np.zeros((16, 16), dtype=np.uint8)
     after = np.full((16, 16), 255, dtype=np.uint8)

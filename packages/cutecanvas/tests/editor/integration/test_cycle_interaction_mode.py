@@ -37,6 +37,7 @@ def _cycle(qpane: CuteCanvas) -> None:
         CuteCanvas.CONTROL_MODE_PANZOOM,
         CuteCanvas.CONTROL_MODE_MOVE,
         CuteCanvas.CONTROL_MODE_TRANSFORM,
+        CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE,
     ]
     if mask_available:
         preferred_order.extend(
@@ -120,6 +121,8 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
         _cycle(qpane)
         assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_TRANSFORM
         _cycle(qpane)
+        assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE
+        _cycle(qpane)
         assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_DRAW_BRUSH
         _cycle(qpane)
         assert qpane.getControlMode() == CuteCanvas.CONTROL_MODE_ERASER
@@ -136,9 +139,11 @@ def test_cycle_order_matches_toolbar(monkeypatch, qapp):
             CuteCanvas.CONTROL_MODE_SELECT_RECTANGLE,
             CuteCanvas.CONTROL_MODE_SELECT_ELLIPSE,
             CuteCanvas.CONTROL_MODE_SELECT_LASSO,
+            CuteCanvas.CONTROL_MODE_SELECT_POLYGON,
             CuteCanvas.CONTROL_MODE_MASK_RECTANGLE,
             CuteCanvas.CONTROL_MODE_MASK_ELLIPSE,
             CuteCanvas.CONTROL_MODE_MASK_LASSO,
+            CuteCanvas.CONTROL_MODE_MASK_POLYGON,
             CuteCanvas.CONTROL_MODE_CLONE_STAMP,
             CuteCanvas.CONTROL_MODE_VECTOR_SHAPE,
             CuteCanvas.CONTROL_MODE_VECTOR_PATH,

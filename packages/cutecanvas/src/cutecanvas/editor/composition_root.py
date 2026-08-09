@@ -90,8 +90,9 @@ from ..scene.layer_effects import create_editor_layer_effects
 from ..scene.layer_geometry import LayerGeometryPolicy, LayerGeometryResolver
 from ..scene.layer_move import SceneLayerMoveController
 from ..scene.layer_selection import SceneLayerSelectionController
+from ..scene.mapping_mutations import LayerMappingMutationOwner
+from ..scene.mapping_preview import SceneLayerMappingPreview
 from ..scene.movement_interaction import SceneLayerMovementInteraction
-from ..scene.movement_mutations import LayerMovementMutationOwner
 from ..scene.mutations import SceneMutationCoordinator
 from ..scene.pixel_edits import LayerPixelContentChange, LayerPixelMutationCoordinator
 from ..scene.pixel_owners import LayerPixelOwnerRegistry
@@ -100,7 +101,6 @@ from ..scene.raster_mutations import (
     RasterLayerMutationCoordinator,
 )
 from ..scene.source_capabilities import EditorSourceCapabilities
-from ..scene.transform_preview import SceneLayerTransformPreview
 from ..scene.transform_session import SceneLayerTransformController
 from ..scene.viewport_selection import ViewportSceneSelection
 from ..selection import (
@@ -116,6 +116,7 @@ from ..ui import CursorBuilder
 from ..vector.conversion import VectorConversionCompletion
 from ..vector.install import VectorDomainComponents, VectorDomainInstaller
 from ..vector.tools import install_vector_tools
+from .affine_interactions import EditorAffineInteractions
 from .floating_layers import FloatingLayerPromotionRegistry
 from .interaction import EditorInteractionCoordinator
 from .layer_edge_modification import LayerEdgeModificationCoordinator
@@ -131,7 +132,6 @@ from .source_operations import (
     EditorSourceOperationRegistry,
     EditorSourceOperations,
 )
-from .transform_coordinator import EditorTransformCoordinator
 from .transform_install import create_editor_transform_interaction
 from .transform_interaction import SceneLayerTransformInteraction
 
@@ -191,7 +191,7 @@ class EditorRootInputs:
     cache_registry: CacheRegistry | None
     diagnostics: Diagnostics
     layer_selection: SceneLayerSelectionController
-    transform_preview: SceneLayerTransformPreview
+    mapping_preview: SceneLayerMappingPreview
     selection_projections: LayerSelectionProjectionCache
     floating_promotions: FloatingLayerPromotionRegistry
     editor_policy: EditorPolicyController
@@ -242,7 +242,7 @@ class EditorRootComponents:
     scene_movement: SceneLayerMoveController
     scene_transform: SceneLayerTransformController
     scene_movement_interaction: SceneLayerMovementInteraction
-    scene_transform_interaction: EditorTransformCoordinator
+    scene_transform_interaction: EditorAffineInteractions
     raster_mutations: RasterLayerMutationCoordinator
     pixel_owners: LayerPixelOwnerRegistry
     pixel_mutations: LayerPixelMutationCoordinator
@@ -266,7 +266,7 @@ class EditorCompositionRoot:
         """Construct one complete always-on editor collaboration graph."""
         callbacks = inputs.callbacks
         scene_providers = SceneProviderRegistry()
-        scene_providers.register_post_processor(inputs.transform_preview)
+        scene_providers.register_post_processor(inputs.mapping_preview)
         render_source_capabilities = LayerSourceCapabilities.create()
         editor_source_capabilities = EditorSourceCapabilities.create()
         layer_effects = create_editor_layer_effects()
@@ -388,11 +388,11 @@ class EditorCompositionRoot:
         )
         scene_transform = SceneLayerTransformController(
             inputs.layer_selection,
-            inputs.transform_preview,
+            inputs.mapping_preview,
             scene_mutations,
             layer_geometry,
         )
-        movement_mutations = LayerMovementMutationOwner(
+        mapping_mutations = LayerMappingMutationOwner(
             scene_provider=view.current_scene_descriptor,
             composition_id=callbacks.current_composition_id,
             layers=compositions.layers,
@@ -400,8 +400,8 @@ class EditorCompositionRoot:
         )
         scene_movement = SceneLayerMoveController(
             selection=inputs.layer_selection,
-            preview=inputs.transform_preview,
-            mutations=movement_mutations,
+            preview=inputs.mapping_preview,
+            mutations=mapping_mutations,
             geometry=layer_geometry,
             scene_provider=view.current_scene_descriptor,
         )
@@ -584,6 +584,8 @@ class EditorCompositionRoot:
             operations=operation_resolver,
             preview_changed=callbacks.pixel_move_preview_changed,
             transform_changed=callbacks.transform_state_changed,
+            preview=inputs.mapping_preview,
+            mutations=mapping_mutations,
         )
         coverage_shape_configuration = CoverageShapeConfiguration(
             callbacks.pixel_move_preview_changed
@@ -603,14 +605,16 @@ class EditorCompositionRoot:
             layer_edge_previews,
             view.current_scene_descriptor,
         )
-        view.presenter.set_transient_raster_provider(
+        inputs.qpane.destroyed.connect(
+            lambda _obj=None, coordinator=transient_rasters: coordinator.shutdown()
+        )
+        view.presenter.configure_transient_raster(
             lambda render_items: transient_rasters.compile(
                 selected_pixel_movement.raster_preview,
                 render_items,
-            )
-        )
-        view.presenter.set_transient_raster_target_provider(
-            lambda: transient_rasters.target(selected_pixel_movement.raster_preview)
+            ),
+            lambda: transient_rasters.target(selected_pixel_movement.raster_preview),
+            transient_rasters.admit,
         )
         active_mask_coordinates = ActiveMaskLayerCoordinates(
             active_mask_id=callbacks.active_mask_id,

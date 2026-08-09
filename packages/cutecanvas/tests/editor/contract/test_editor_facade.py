@@ -28,6 +28,7 @@ from cutecanvas_test_support.harness.timing import interaction_clock
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QImage, QTransform
 from qpane.sdk.rendering import PanelPoint, ScenePoint
+from qpane.sdk.scene import PiecewiseLayerTransform
 
 
 def test_canvas_emits_public_control_mode_changes(qapp) -> None:
@@ -112,6 +113,25 @@ def test_typed_handles_route_document_layer_tool_and_history_workflows(qapp) -> 
         assert canvas.editor.history.can_undo
         assert canvas.editor.history.undo()
         assert canvas.editor.history.can_redo
+        cage = PiecewiseLayerTransform(
+            (
+                QPointF(0.0, 0.0),
+                QPointF(80.0, 0.0),
+                QPointF(80.0, 30.0),
+                QPointF(80.0, 60.0),
+                QPointF(0.0, 60.0),
+            ),
+            (
+                QPointF(0.0, 0.0),
+                QPointF(85.0, 0.0),
+                QPointF(80.0, 30.0),
+                QPointF(80.0, 60.0),
+                QPointF(0.0, 60.0),
+            ),
+        )
+        assert layer.set_transform(cage)
+        assert layer.state.transform == cage
+        assert canvas.editor.history.undo()
 
         canvas.editor.tools.activate(canvas.CONTROL_MODE_MOVE)
         assert canvas.editor.tools.active == canvas.CONTROL_MODE_MOVE

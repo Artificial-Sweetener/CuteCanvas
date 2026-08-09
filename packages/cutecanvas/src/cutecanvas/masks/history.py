@@ -46,6 +46,7 @@ from .coverage_history import (
     MaskCoverageState,
     MaskRetainedCoverageCommand,
 )
+from .history_size import mask_command_bytes
 from .mask_undo import (
     MaskHistoryChange,
     MaskImageCommand,
@@ -58,6 +59,11 @@ from .raster_structure_history import MaskRasterStructureCommand
 from .surface_history import MaskSurfaceCommand
 
 logger = logging.getLogger(__name__)
+
+MaskCommandDecorator = Callable[
+    [uuid.UUID, MaskUndoCommand, int],
+    tuple[MaskUndoCommand, int],
+]
 
 
 class CoverageSurfaceLike(Protocol):
@@ -143,6 +149,7 @@ class MaskHistory:
         self._edits: CompositionEditController | None = None
         self._scope_for_mask: Callable[[uuid.UUID], uuid.UUID | None] = lambda _id: None
         self._completed: Callable[[MaskHistoryChange], None] | None = None
+        self._command_decorator: MaskCommandDecorator | None = None
 
     @property
     def undo_limit(self) -> int:
@@ -170,6 +177,10 @@ class MaskHistory:
             undo=self._undo_command,
             redo=self._redo_command,
         )
+
+    def set_command_decorator(self, decorator: MaskCommandDecorator) -> None:
+        """Replace the service-lifetime decorator for cross-domain mask edits."""
+        self._command_decorator = decorator
 
     def commit_coverage_item(
         self,
@@ -381,6 +392,13 @@ class MaskHistory:
 
     def _record(self, mask_id: uuid.UUID, command: MaskUndoCommand) -> bool:
         """Record one command when its mask resolves to a composition scope."""
+        retained_bytes = mask_command_bytes(command)
+        if self._command_decorator is not None:
+            command, retained_bytes = self._command_decorator(
+                mask_id,
+                command,
+                retained_bytes,
+            )
         scope_id = self._scope_for_mask(mask_id)
         if self._edits is None or scope_id is None:
             return True
@@ -389,7 +407,7 @@ class MaskHistory:
                 scope_id,
                 mask_id,
                 command,
-                _command_bytes(command),
+                retained_bytes,
                 self._completed,
             )
         )
@@ -518,44 +536,6 @@ class MaskHistory:
             return False
         command.command.redo()
         return True
-
-
-def _command_bytes(command: MaskUndoCommand) -> int:
-    """Estimate detached bytes retained exclusively by one mask command."""
-    if isinstance(command, MaskPatchCommand):
-        return sum(
-            patch.before.sizeInBytes() + patch.after.sizeInBytes() + patch.mask.nbytes
-            for patch in command.patches
-        )
-    if isinstance(command, MaskImageCommand):
-        return command.before.sizeInBytes() + command.after.sizeInBytes()
-    if isinstance(command, MaskSurfaceCommand):
-        return _state_bytes(command.before) + _state_bytes(command.after)
-    if isinstance(command, MaskRasterStructureCommand):
-        return _state_bytes(command.before.raster) + _state_bytes(command.after.raster)
-    if isinstance(command, MaskCoverageCommand):
-        return (
-            _state_bytes(command.before.raster)
-            + _state_bytes(command.after.raster)
-            + _document_bytes(command.before.retained)
-            + _document_bytes(command.after.retained)
-        )
-    if isinstance(command, MaskRetainedCoverageCommand):
-        return _document_bytes(command.before) + _document_bytes(command.after)
-    return 0
-
-
-def _document_bytes(document: CoverageDocument) -> int:
-    """Estimate retained semantic payload without forcing raster evaluation."""
-    segment_count = sum(len(getattr(item, "segments", ())) for item in document.items)
-    return len(document.items) * 512 + segment_count * 256
-
-
-def _state_bytes(snapshot: CoverageStateSnapshot) -> int:
-    """Return detached bytes retained by one dense or sparse state."""
-    if isinstance(snapshot, SparseRasterSnapshot):
-        return snapshot.retained_bytes
-    return snapshot.pixels.nbytes
 
 
 def _history_change(

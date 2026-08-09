@@ -23,7 +23,8 @@ from PySide6.QtCore import QObject, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF, QTransform
 
 from ..selection import PixelSelectionState, SelectionBoundaryBuilder
-from ..snapping import SnapAxis, SnapGuide
+from ..snapping import SnapAxis
+from ..snapping.edge_model import OrientedSnapGuide, SnapGuideValue
 
 
 class PixelSelectionOverlayRenderer(QObject):
@@ -126,7 +127,7 @@ class SmartGuideOverlayRenderer:
         self,
         painter: QPainter,
         scene_to_panel: QTransform | None,
-        guides: Sequence[SnapGuide],
+        guides: Sequence[SnapGuideValue],
     ) -> None:
         """Draw cosmetic magenta guide segments for applied snaps."""
         if scene_to_panel is None or not guides:
@@ -136,6 +137,12 @@ class SmartGuideOverlayRenderer:
         pen.setCosmetic(True)
         painter.setPen(pen)
         for guide in guides:
+            if isinstance(guide, OrientedSnapGuide):
+                painter.drawLine(
+                    scene_to_panel.map(guide.start),
+                    scene_to_panel.map(guide.end),
+                )
+                continue
             if guide.axis is SnapAxis.X:
                 begin = QPointF(guide.position, guide.span_start)
                 end = QPointF(guide.position, guide.span_end)
@@ -164,7 +171,7 @@ class EditorOverlayPresenter:
         painter: QPainter,
         scene_to_panel: QTransform | None,
         hovered_scene_corners: Sequence[QPointF],
-        snap_guides: Sequence[SnapGuide] = (),
+        snap_guides: Sequence[SnapGuideValue] = (),
     ) -> None:
         """Draw selection and move-hover feedback in panel coordinates."""
         self._selection.draw(painter, scene_to_panel)

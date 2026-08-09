@@ -1637,6 +1637,35 @@ Move only canonical numerical work, not presentation ownership.
 | `packages/cutecanvas/src/cutecanvas/resources/composition_rendering.py` | Eventually evaluate compiled Ferrastra composition roots instead of recursively rasterizing a QPane scene |
 | `packages/qpane/src/qpane/rendering/scene_region.py` | Retain mixed QPane scene rasterization until full Ferrastra composition DAG replaces canonical document composition |
 
+### 27.7 Deferred shared-edge resize migration
+
+The first Shared Edge Resize implementation remains within the current product
+boundaries. CuteCanvas owns edge eligibility, common-corner rail constraints,
+snapping policy, participant selection, the coupled transient mapping set,
+commands, persistence, and history. QPane owns generic affine, projective, and
+bounded piecewise mapping, immutable scene presentation, demand, hit testing,
+damage, and Qt rendering. The initial implementation does not depend on
+Ferrastra.
+
+After the corresponding native geometry and source-store contracts exist,
+Ferrastra absorbs only the source-neutral numerical work:
+
+- Robust finite-line projection, collinearity, overlap, and support-extent
+  analysis.
+- Source-neutral collinear-rail analysis, constrained endpoint projection,
+  boundary-vertex insertion, and deterministic finite-cage triangulation for
+  fixed-opposite-end pivots.
+- Revision-keyed straight-boundary products for native raster, coverage, and
+  vector sources.
+- Exact raster and coverage resampling for an explicit CuteCanvas bake,
+  rasterize, merge, or flatten command.
+
+Ferrastra never receives layer identities, snap priorities or thresholds, tool
+state, locks, participant-selection policy, preview ownership, or undo semantics.
+Each numerical migration characterizes the existing result, switches every
+consumer through its product-owned adapter, removes the replaced implementation,
+and activates an ownership check against duplicate numerical authority.
+
 ---
 
 ## 28. Responsibilities that remain outside Ferrastra
@@ -1656,6 +1685,8 @@ The following current paths should not be moved wholesale into Rust:
 
 - Document/resource/layer stores as semantic owners.
 - Tools and input interpretation.
+- Shared-edge eligibility, snapping policy, participant selection, and
+  coupled parallel-resize and endpoint-pivot constraints.
 - History and undo labels.
 - Operation availability policy and locks.
 - Persistence and migrations.
@@ -2306,6 +2337,12 @@ Ferrastra is **not feature complete** until every required item below is satisfi
 - [ ] Coverage-specific range-preserving resampling.
 - [ ] Multiresolution/pyramid source selection.
 - [ ] Seam and phase conformance across all samplers.
+- [ ] Source-neutral finite-line projection, collinearity, overlap, and
+  support-extent analysis for deferred shared-edge consumers.
+- [ ] Revision-keyed straight-boundary extraction for native raster and coverage
+  sources without tool or document semantics.
+- [ ] Coupled affine-boundary solver conformance independent of pointer, snap,
+  layer, preview, and history policy.
 
 ### 35.7 Required color, alpha, filter, coverage, and composition features
 
@@ -2329,6 +2366,7 @@ Ferrastra is **not feature complete** until every required item below is satisfi
 - [ ] Native vector product and store.
 - [ ] Spatial region queries and stable identities.
 - [ ] Path and parametric geometry.
+- [ ] Revision-keyed straight-boundary products for vector sources.
 - [ ] Transforms, bounds, and hit-test acceleration.
 - [ ] Stroke expansion and offset paths.
 - [ ] Boolean operations and intersections.
@@ -2351,6 +2389,9 @@ Ferrastra is **not feature complete** until every required item below is satisfi
 - [ ] Per-layer nondestructive effects use the same exact output for viewport and export.
 - [ ] Full layer/group/adjustment composition compiles into Ferrastra.
 - [ ] QPane consumes Ferrastra graph outputs through source-neutral public SDK contracts.
+- [ ] CuteCanvas Shared Edge Resize retains tool, snapping, participant,
+  preview, and history ownership while using Ferrastra only for migrated
+  source-neutral analysis and explicit bake products.
 - [ ] Current specialized hybrid evaluation has been compiled into ordinary Ferrastra operations or deliberately retained only for a documented unique responsibility.
 
 ### 35.10 Quality and performance

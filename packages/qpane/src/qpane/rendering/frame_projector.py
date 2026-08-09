@@ -22,8 +22,12 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QTransform
 
 from ..scene.affine import LayerTransform
+from ..scene.bilinear import BilinearLayerTransform
+from ..scene.mapping import compose_layer_mappings
 from ..scene.model import LayerDescriptor, SceneDescriptor
+from ..scene.piecewise import PiecewiseLayerTransform
 from .frame_geometry import RenderFrameGeometry
+from .panel_mapping import PanelLayerMapping, PiecewisePanelMapping
 from .viewport import Viewport
 
 
@@ -38,7 +42,7 @@ class SceneFrameProjector:
         self,
         scene: SceneDescriptor,
         frame: RenderFrameGeometry,
-    ) -> QTransform:
+    ) -> PanelLayerMapping:
         """Return the scene-local to panel transform for one frame."""
         scene_size = QSize(
             max(1, round(scene.bounds.width)),
@@ -58,7 +62,7 @@ class SceneFrameProjector:
         layer: LayerDescriptor,
         source_size: QSize,
         frame: RenderFrameGeometry,
-    ) -> QTransform:
+    ) -> PanelLayerMapping:
         """Map render-source pixels through exact layer geometry into the panel."""
         layer_transform = layer.transform
         if layer_transform is None or source_size.isEmpty():
@@ -73,8 +77,17 @@ class SceneFrameProjector:
                 dx=float(raster_bounds.x),
                 dy=float(raster_bounds.y),
             )
-        scene_relative = image_to_local.followed_by(layer_transform).translated(
-            -scene.bounds.x,
-            -scene.bounds.y,
+        local_to_scene = compose_layer_mappings(image_to_local, layer_transform)
+        scene_relative = compose_layer_mappings(
+            local_to_scene,
+            LayerTransform(dx=-scene.bounds.x, dy=-scene.bounds.y),
         )
-        return scene_relative.to_qtransform() * self.scene_to_panel(scene, frame)
+        scene_to_panel = self.scene_to_panel(scene, frame)
+        if isinstance(
+            scene_relative, (PiecewiseLayerTransform, BilinearLayerTransform)
+        ):
+            return PiecewisePanelMapping.from_layer_mapping(
+                scene_relative,
+                scene_to_panel,
+            )
+        return scene_relative.to_qtransform() * scene_to_panel

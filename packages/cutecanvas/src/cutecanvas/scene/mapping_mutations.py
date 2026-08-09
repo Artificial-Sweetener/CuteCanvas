@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Atomic durable mutation boundary for Move-tool layer sets."""
+"""Atomic durable mutation boundary for exact layer-mapping sets."""
 
 from __future__ import annotations
 
@@ -22,24 +22,24 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from qpane.sdk.scene import LayerTransform, SceneDescriptor
+from qpane.sdk.scene import LayerMapping, SceneDescriptor
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.layers import CompositionLayerStore
+from .mapping_edit import LayerMappingEdit, LayerMappingTransition
 from .mutations import SceneMutationResult, SceneMutationStatus
-from .transform_edit import LayerTransformEdit, LayerTransformTransition
 
 
 @dataclass(frozen=True, slots=True)
-class LayerMovementValue:
-    """Identify one requested exact layer transform."""
+class LayerMappingValue:
+    """Identify one requested exact layer mapping."""
 
     layer_id: uuid.UUID
-    transform: LayerTransform
+    mapping: LayerMapping
 
 
-class LayerMovementMutationOwner:
-    """Validate and atomically commit one Move-tool layer set."""
+class LayerMappingMutationOwner:
+    """Validate and atomically commit one exact layer-mapping set."""
 
     def __init__(
         self,
@@ -58,9 +58,9 @@ class LayerMovementMutationOwner:
     def commit(
         self,
         scene_id: uuid.UUID,
-        values: tuple[LayerMovementValue, ...],
+        values: tuple[LayerMappingValue, ...],
     ) -> SceneMutationResult:
-        """Apply valid changed transforms in one publication and history edit."""
+        """Apply valid changed mappings in one publication and history edit."""
         scene = self._scene_provider()
         if scene is None:
             return SceneMutationResult(SceneMutationStatus.NO_SCENE, scene_id=scene_id)
@@ -69,12 +69,12 @@ class LayerMovementMutationOwner:
                 SceneMutationStatus.SCENE_MISMATCH,
                 scene_id=scene_id,
             )
-        requested = {value.layer_id: value.transform for value in values}
+        requested = {value.layer_id: value.mapping for value in values}
         if not requested or len(requested) != len(values):
             return SceneMutationResult(
                 SceneMutationStatus.INVALID_REQUEST,
                 scene_id=scene_id,
-                message="movement values must be non-empty and unique",
+                message="mapping values must be non-empty and unique",
             )
         descriptors = {
             layer.layer_id: layer
@@ -109,14 +109,13 @@ class LayerMovementMutationOwner:
                 scene_id=scene_id,
             )
         transitions = tuple(
-            LayerTransformTransition(
+            LayerMappingTransition(
                 layer_id,
                 durable[layer_id].transform,
-                transform,
+                mapping,
             )
-            for layer_id, transform in requested.items()
-            if durable[layer_id] is not None
-            and durable[layer_id].transform != transform
+            for layer_id, mapping in requested.items()
+            if durable[layer_id] is not None and durable[layer_id].transform != mapping
         )
         if not transitions:
             return SceneMutationResult(
@@ -125,7 +124,7 @@ class LayerMovementMutationOwner:
             )
         changed = bool(
             composition_id is not None
-            and self._layers.update_transforms(
+            and self._layers.update_mappings(
                 composition_id,
                 tuple(
                     (transition.layer_id, transition.after)
@@ -137,12 +136,15 @@ class LayerMovementMutationOwner:
             return SceneMutationResult(
                 SceneMutationStatus.UNSUPPORTED,
                 scene_id=scene_id,
-                message="active composition rejected layer movement",
+                message="active composition rejected layer mappings",
             )
-        self._edits.record_applied(LayerTransformEdit(scene_id, transitions))
+        self._edits.record_applied(LayerMappingEdit(scene_id, transitions))
         return SceneMutationResult(
             SceneMutationStatus.APPLIED,
             scene_id=scene_id,
             layer_id=transitions[-1].layer_id,
-            owner="layer-movement",
+            owner="layer-mapping-set",
         )
+
+
+__all__ = ["LayerMappingMutationOwner", "LayerMappingValue"]

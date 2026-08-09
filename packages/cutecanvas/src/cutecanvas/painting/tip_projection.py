@@ -21,10 +21,18 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6.QtCore import QRect
-from qpane.sdk.scene import LayerTransform, RasterBounds
+from PySide6.QtCore import QPointF, QRect
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerTransform,
+    PiecewiseLayerTransform,
+    RasterBounds,
+)
+
+from cutecanvas.coverage.bilinear_coordinates import map_bilinear_source_grid
 
 from .model import BrushDab
+from .piecewise_tip_coordinates import map_piecewise_source_grid
 from .tip_cache import BrushTipCache
 from .tip_geometry import brush_dab_bounds
 
@@ -71,6 +79,8 @@ class BrushTipProjector:
             angle=dab.angle,
             opacity=opacity,
         )
+        if dab.tip_mapping is not None:
+            return _project_bounded_tip(dab, patch_bounds, tip)
         if dab.tip_transform != _IDENTITY_TRANSFORM:
             return _project_affine_tip(dab, patch_bounds, tip)
         left = math.floor(dab.center[0] - (tip.shape[1] - 1) / 2.0)
@@ -97,6 +107,54 @@ class BrushTipProjector:
                 clip_left - left : clip_right - left,
             ],
         )
+
+
+def _project_bounded_tip(
+    dab: BrushDab,
+    patch_bounds: QRect,
+    tip: np.ndarray,
+) -> ProjectedBrushTip | None:
+    """Sample one scene-space tip through its exact bounded mapping."""
+    mapping = dab.tip_mapping
+    if mapping is None:
+        raise ValueError("bounded tip projection requires a mapping")
+    destination = brush_dab_bounds(dab).intersection(
+        RasterBounds.from_qrect(patch_bounds)
+    )
+    if destination is None:
+        return None
+    local_x = np.arange(destination.x, destination.right, dtype=np.float64) + 0.5
+    local_y = np.arange(destination.y, destination.bottom, dtype=np.float64) + 0.5
+    if isinstance(mapping, BilinearLayerTransform):
+        scene_x, scene_y, valid = map_bilinear_source_grid(
+            mapping,
+            local_x,
+            local_y,
+        )
+    elif isinstance(mapping, PiecewiseLayerTransform):
+        scene_x, scene_y, valid = map_piecewise_source_grid(
+            mapping,
+            local_x,
+            local_y,
+        )
+    else:
+        raise TypeError("bounded tip mapping is unsupported")
+    scene_center = mapping.map_point(QPointF(*dab.center))
+    source_x = scene_x - scene_center.x() + (tip.shape[1] - 1) / 2.0
+    source_y = scene_y - scene_center.y() + (tip.shape[0] - 1) / 2.0
+    alpha = _bilinear_sample(tip, source_x, source_y)
+    alpha[~valid] = 0
+    return ProjectedBrushTip(
+        rows=slice(
+            destination.y - patch_bounds.top(),
+            destination.bottom - patch_bounds.top(),
+        ),
+        columns=slice(
+            destination.x - patch_bounds.left(),
+            destination.right - patch_bounds.left(),
+        ),
+        alpha=alpha,
+    )
 
 
 def _project_affine_tip(

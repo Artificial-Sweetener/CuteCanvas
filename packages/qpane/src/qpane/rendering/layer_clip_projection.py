@@ -21,7 +21,10 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainterPath, QTransform
 
 from ..scene.affine import LayerTransform
+from ..scene.bilinear import BilinearLayerTransform
+from ..scene.mapping import LayerMapping, compose_layer_mappings
 from ..scene.model import ClipCoordinateSpace, LayerClip
+from ..scene.piecewise import PiecewiseLayerTransform
 from ..scene.render_plan import SceneRenderItem, SceneRenderPlan
 
 
@@ -33,12 +36,18 @@ def source_clip_path(
     clip = item.clip
     if clip is None:
         return None
+    source_to_scene: LayerMapping | None = None
     if clip.coordinate_space in {
         ClipCoordinateSpace.NORMALIZED_SCENE,
         ClipCoordinateSpace.SCENE,
     }:
         scene_rect = scene_clip_rect(plan, clip)
-        inverse = scene_to_source_transform(item)
+        source_to_scene = _source_to_scene_mapping(item)
+        inverse = (
+            None
+            if isinstance(source_to_scene, BilinearLayerTransform)
+            else scene_to_source_transform(item)
+        )
     elif clip.coordinate_space in {
         ClipCoordinateSpace.NORMALIZED_VIEWPORT,
         ClipCoordinateSpace.VIEWPORT,
@@ -51,8 +60,15 @@ def source_clip_path(
         return None
     path = QPainterPath()
     if scene_rect is None or inverse is None:
+        if scene_rect is not None and isinstance(
+            source_to_scene, BilinearLayerTransform
+        ):
+            path.addRect(scene_rect)
+            return source_to_scene.inverse_map_path(path)
         return path
     path.addRect(scene_rect)
+    if isinstance(inverse, PiecewiseLayerTransform):
+        return inverse.map_path(path)
     return inverse.map(path)
 
 
@@ -90,8 +106,23 @@ def viewport_clip_rect(
     return None
 
 
-def scene_to_source_transform(item: SceneRenderItem) -> QTransform | None:
+def scene_to_source_transform(
+    item: SceneRenderItem,
+) -> QTransform | PiecewiseLayerTransform | None:
     """Return the exact scene-to-product transform for one render item."""
+    source_to_scene = _source_to_scene_mapping(item)
+    if source_to_scene is None or isinstance(source_to_scene, BilinearLayerTransform):
+        return None
+    inverse = source_to_scene.inverted()
+    if inverse is None:
+        return None
+    if isinstance(inverse, PiecewiseLayerTransform):
+        return inverse
+    return inverse.to_qtransform()
+
+
+def _source_to_scene_mapping(item: SceneRenderItem) -> LayerMapping | None:
+    """Return one product-to-scene mapping without requiring an inverse type."""
     source_size = item.source_size
     source_width = source_size.width()
     source_height = source_size.height()
@@ -110,7 +141,10 @@ def scene_to_source_transform(item: SceneRenderItem) -> QTransform | None:
                 dy=float(raster_bounds.y),
             )
         )
-        source_to_scene = source_to_local.followed_by(descriptor_transform)
+        source_to_scene = compose_layer_mappings(
+            source_to_local,
+            descriptor_transform,
+        )
     else:
         placement = item.placement
         if placement.width <= 0.0 or placement.height <= 0.0:
@@ -121,8 +155,7 @@ def scene_to_source_transform(item: SceneRenderItem) -> QTransform | None:
             dx=placement.x,
             dy=placement.y,
         )
-    inverse = source_to_scene.inverted()
-    return None if inverse is None else inverse.to_qtransform()
+    return source_to_scene
 
 
 __all__ = [

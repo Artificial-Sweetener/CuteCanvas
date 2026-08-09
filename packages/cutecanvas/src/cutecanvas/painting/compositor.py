@@ -20,6 +20,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor
+from qpane.sdk.scene import LayerTransform
 
 from .model import BrushDab, BrushOperation
 from .tip_cache import BrushTipCache
@@ -118,14 +119,26 @@ def _scaled_dab(dab: BrushDab, stride: int) -> BrushDab:
     """Return one dab projected into a stride-reduced preview patch."""
     if stride == 1:
         return dab
+    mapping = dab.tip_mapping
     return BrushDab(
         center=(dab.center[0] / stride, dab.center[1] / stride),
-        diameter=max(1.0, dab.diameter / stride),
+        diameter=(
+            dab.diameter if mapping is not None else max(1.0, dab.diameter / stride)
+        ),
         hardness=dab.hardness,
         opacity=dab.opacity,
         angle=dab.angle,
         texture_strength=dab.texture_strength,
-        texture_scale=max(0.25, dab.texture_scale / stride),
+        texture_scale=(
+            dab.texture_scale
+            if mapping is not None
+            else max(0.25, dab.texture_scale / stride)
+        ),
         texture_seed=dab.texture_seed,
         tip_transform=dab.tip_transform,
+        tip_mapping=(
+            None
+            if mapping is None
+            else mapping.preceded_by(LayerTransform(m11=stride, m22=stride))
+        ),
     )

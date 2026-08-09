@@ -1080,7 +1080,11 @@ def test_expanding_mask_live_preview_never_flashes_painted_pixels(
             harness.viewer.repaint()
 
         assert frames.frames
-        assert all(frame.mask_layer_count == 1 for frame in frames.frames)
+        assert all(frame.mask_layer_count == 1 for frame in frames.frames), tuple(
+            (index, frame.mask_layer_ids, frame.mask_item_states)
+            for index, frame in enumerate(frames.frames)
+            if frame.mask_layer_count != 1
+        )
         retained_measurement = harness.wait_for_mask_tint(
             retained_point,
             timeout_ms=1000,

@@ -273,10 +273,13 @@ change composition archives, alter exports, or copy layer pixels.
 - CuteCanvas.CONTROL_MODE_PANZOOM — Built-in pan/zoom mode for navigation.
 - CuteCanvas.CONTROL_MODE_MOVE — Built-in selection-aware mode that moves selected editable pixels first, or a selectable movable layer when no pixel selection exists.
 - CuteCanvas.CONTROL_MODE_TRANSFORM — Built-in affine transform mode with eight direct-manipulation handles for the selected movable layer.
+- CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE — Built-in atomic resize mode for every movable layer in a continuous coincident-edge group. Horizontal and vertical midpoints move the complete group; eligible endpoint points remain adjustable at any angle.
 - CuteCanvas.CONTROL_MODE_CLONE_STAMP — Built-in revision-stable Clone Stamp mode for editable RGBA layers.
+- CuteCanvas.CONTROL_MODE_SELECT_POLYGON — Point-by-point retained polygon authoring for the active pixel selection.
 - CuteCanvas.CONTROL_MODE_MASK_RECTANGLE — Retained rectangle authoring for the active mask target.
 - CuteCanvas.CONTROL_MODE_MASK_ELLIPSE — Retained ellipse authoring for the active mask target.
 - CuteCanvas.CONTROL_MODE_MASK_LASSO — Retained freeform authoring for the active mask target.
+- CuteCanvas.CONTROL_MODE_MASK_POLYGON — Point-by-point retained polygon authoring for the active mask target.
 - ControlMode.TRANSFORM — Enum value for the built-in affine transform mode.
 
 See also: [Configuration](configuration.md) and [Interaction Modes](interaction-modes.md).
@@ -359,7 +362,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- CompositionLayerEntry.visible — Current instance visibility.
 	- CompositionLayerEntry.opacity — Current instance opacity.
 	- CompositionLayerEntry.interaction — Host-controlled layer interaction policy.
-	- CompositionLayerEntry.transform — Detached exact local-to-scene affine transform.
+	- CompositionLayerEntry.transform — Detached exact local-to-scene affine, projective, or piecewise mapping.
 - cutecanvas.CompositionSnapshot — Structured composition browser state.
 	- CompositionSnapshot.compositions — Mapping of composition UUID to `CompositionEntry`.
 	- CompositionSnapshot.order — Composition UUIDs in browser order.
@@ -456,7 +459,7 @@ See also: [Configuration](configuration.md) and [Configuration Reference](config
 	- LayerSnapshot.source_kind — Project resource domain such as `imported-raster`, `linked-raster`, `raster`, `coverage`, `vector`, or `composition`.
 	- LayerSnapshot.source_id — Stable project resource UUID independent of the layer UUID.
 	- LayerSnapshot.placement — Conservative axis-aligned scene bound derived from the exact transform.
-	- LayerSnapshot.transform — Detached affine local-to-scene `QTransform` for the layer instance.
+	- LayerSnapshot.transform — Detached affine/projective `QTransform` or immutable piecewise mapping for the layer instance.
 	- LayerSnapshot.visible — Whether the layer renders and hit-tests.
 	- LayerSnapshot.opacity — Layer opacity from `0.0` to `1.0`.
 	- LayerSnapshot.tint — Detached optional presentation tint for layer types such as masks.
@@ -525,14 +528,14 @@ See also: [Project Resources](project-resources.md).
 - CuteCanvas.fillSceneRect — Return the smallest centered aspect-preserving scene rectangle covering a target rectangle; the result may extend outside the target.
 - CuteCanvas.currentScene — Return CuteCanvas's normalized public scene snapshot, or None.
 - CuteCanvas.sceneHitTest — Return topmost public scene-layer metadata for a widget-space point.
-- CuteCanvas.layerTransform — Return a detached exact affine transform for one active scene layer.
+- CuteCanvas.layerTransform — Return a detached exact affine/projective transform or immutable piecewise mapping for one active scene layer.
 - CuteCanvas.layerLocalBounds — Return detached intrinsic source-local bounds for one active scene layer when available.
 - CuteCanvas.registerSceneOverlay — Add a named scene overlay; order follows registration.
 - CuteCanvas.unregisterSceneOverlay — Remove a scene overlay; no-op if it is absent.
 - CuteCanvas.sceneOverlays — Return a read-only snapshot of registered scene overlays; use register/unregister helpers to change it.
 - CuteCanvas.setLayerInteractionPolicy — Replace selection and movement permissions for a layer through its scene owner.
 - CuteCanvas.setLayerPlacement — Set an absolute scene-space layer rectangle when movement policy permits it.
-- CuteCanvas.setLayerTransform — Set an invertible affine local-to-scene transform when movement policy permits it.
+- CuteCanvas.setLayerTransform — Set an invertible affine, projective, or piecewise local-to-scene mapping when movement policy permits it.
 - CuteCanvas.setLayerIndex — Move one active layer to a bottom-to-top render index as one undoable composition-stack edit.
 - CuteCanvas.selectedLayer — Return selected scene-layer identity independently of pixel coverage.
 - CuteCanvas.selectedLayers — Return the complete ordered layer selection with its active member last.
@@ -941,8 +944,8 @@ See also: [Documents and Layers](scenes.md), [Diagnostics](diagnostics.md), and 
 ## Manipulation geometry and snapping
 
 - `cutecanvas.LayerGeometryMode.CONTENT` is the default and derives bounds from nontransparent RGBA pixels, nonzero hybrid coverage, placed alpha, or exact vector paint geometry.
-- `LayerGeometryMode.STORAGE`, `SOURCE`, `CLIP`, `AUTHORED`, and `CUSTOM` preserve explicit host workflows independently of rendering clips and raster write extent.
-- `LayerGeometryPolicy` pairs the chosen manipulation mode with validated custom bounds when the host selects `CUSTOM`.
+- `LayerGeometryMode.STORAGE`, `SOURCE`, `CLIP`, `AUTHORED`, and `CUSTOM` preserve explicit host workflows independently of rendering clips and raster write extent. `BOUNDARY` retains an exact polygonal manipulation topology when raster painting adopts the result of a finite deformation.
+- `LayerGeometryPolicy` pairs the chosen manipulation mode with validated custom bounds for `CUSTOM` or finite polygon vertices for `BOUNDARY`.
 - `CuteCanvas.layerGeometryPolicy` and `CuteCanvas.setLayerGeometryPolicy` query or replace one layer's manipulation geometry. `CuteCanvas.layerLocalBounds` returns the resolved bounds actually used by move, transform, snapping, and editor overlays.
 - `CuteCanvas.setLayerVisible` changes composition-local rendering and hit testing as one undoable edit for every layer source. `LayerHandle.set_visible` provides the focused equivalent.
 - `CuteCanvas.setLayerOpacity` changes the final visual-only layer multiplier without rewriting authored pixels, scalar coverage, brush hardness, or paint opacity. `LayerHandle.set_opacity` provides the focused equivalent. Coverage sources keep their full scalar curve and apply this multiplier at composition.

@@ -13,7 +13,8 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Transient source-neutral layer transforms applied after scene assembly."""
+
+"""Transient source-neutral layer mappings applied after scene assembly."""
 
 from __future__ import annotations
 
@@ -24,48 +25,48 @@ from dataclasses import dataclass, replace
 from qpane.sdk.scene import (
     LayerClip,
     LayerDescriptor,
+    LayerMapping,
     LayerPlacement,
-    LayerTransform,
     SceneDescriptor,
 )
 
-TransformPreviewClipResolver = Callable[
+MappingPreviewClipResolver = Callable[
     [SceneDescriptor, LayerDescriptor, LayerPlacement], LayerClip | None
 ]
 
 
 @dataclass(frozen=True, slots=True)
-class LayerTransformPreview:
-    """Describe one non-durable exact transform override for rendering."""
+class LayerMappingPreview:
+    """Describe one non-durable exact layer-mapping override for rendering."""
 
     scene_id: uuid.UUID
     layer_id: uuid.UUID
-    transform: LayerTransform
+    mapping: LayerMapping
 
 
-class SceneLayerTransformPreview:
-    """Own and apply one transient transform set without source mutation."""
+class SceneLayerMappingPreview:
+    """Own and apply one transient layer-mapping set without source mutation."""
 
     def __init__(
         self,
-        resolve_clip: TransformPreviewClipResolver | None = None,
+        resolve_clip: MappingPreviewClipResolver | None = None,
     ) -> None:
         """Initialize with an optional source-owned presentation-clip policy."""
-        self._previews: tuple[LayerTransformPreview, ...] = ()
+        self._previews: tuple[LayerMappingPreview, ...] = ()
         self._revision = 0
         self._resolve_clip = resolve_clip or _preserve_clip
 
     @property
-    def previews(self) -> tuple[LayerTransformPreview, ...]:
-        """Return all active transient transform overrides."""
+    def previews(self) -> tuple[LayerMappingPreview, ...]:
+        """Return all active transient mapping overrides."""
         return self._previews
 
-    def transform_for(
+    def mapping_for(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-    ) -> LayerTransform | None:
-        """Return one active transform override by identity."""
+    ) -> LayerMapping | None:
+        """Return one active mapping override by identity."""
         preview = next(
             (
                 candidate
@@ -74,7 +75,7 @@ class SceneLayerTransformPreview:
             ),
             None,
         )
-        return None if preview is None else preview.transform
+        return None if preview is None else preview.mapping
 
     def revision(self) -> int:
         """Return the revision used to invalidate compiled instance geometry."""
@@ -84,13 +85,13 @@ class SceneLayerTransformPreview:
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-        transform: LayerTransform,
+        mapping: LayerMapping,
     ) -> bool:
-        """Set a transient transform override and report whether it changed."""
-        return self.set_many((LayerTransformPreview(scene_id, layer_id, transform),))
+        """Set a transient mapping override and report whether it changed."""
+        return self.set_many((LayerMappingPreview(scene_id, layer_id, mapping),))
 
-    def set_many(self, previews: tuple[LayerTransformPreview, ...]) -> bool:
-        """Set one coherent transient transform set."""
+    def set_many(self, previews: tuple[LayerMappingPreview, ...]) -> bool:
+        """Set one coherent transient mapping set."""
         identities = {(preview.scene_id, preview.layer_id) for preview in previews}
         if len(identities) != len(previews):
             raise ValueError("preview layer identities must be unique")
@@ -101,7 +102,7 @@ class SceneLayerTransformPreview:
         return True
 
     def clear(self) -> bool:
-        """Clear the transient override and report whether it changed."""
+        """Clear the transient overrides and report whether they changed."""
         if not self._previews:
             return False
         self._previews = ()
@@ -109,27 +110,27 @@ class SceneLayerTransformPreview:
         return True
 
     def process_scene(self, scene: SceneDescriptor) -> SceneDescriptor:
-        """Return scene with the matching transform and derived placement."""
-        transforms = {
-            preview.layer_id: preview.transform
+        """Return a scene with matching mappings and derived placements."""
+        mappings = {
+            preview.layer_id: preview.mapping
             for preview in self._previews
             if preview.scene_id == scene.scene_id
         }
-        if not transforms:
+        if not mappings:
             return scene
         changed = False
         layers = []
         for layer in scene.layers:
-            transform = transforms.get(layer.layer_id)
-            if transform is None or layer.raster_bounds is None:
+            mapping = mappings.get(layer.layer_id)
+            if mapping is None or layer.raster_bounds is None:
                 layers.append(layer)
                 continue
-            placement = transform.map_bounds(layer.raster_bounds)
+            placement = mapping.map_bounds(layer.raster_bounds)
             layers.append(
                 replace(
                     layer,
                     placement=placement,
-                    transform=transform,
+                    transform=mapping,
                     clip=self._resolve_clip(scene, layer, placement),
                 )
             )
@@ -144,3 +145,6 @@ def _preserve_clip(
 ) -> LayerClip | None:
     """Preserve descriptor clips when no source-specific policy is installed."""
     return layer.clip
+
+
+__all__ = ["LayerMappingPreview", "SceneLayerMappingPreview"]

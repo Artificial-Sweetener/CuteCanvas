@@ -19,22 +19,22 @@ next_extraction = "Extract cache and prefetch configuration values, coercion, an
 id = "QPANE-ARCH-002"
 owner = "QPane scene composition"
 paths = ["packages/qpane/src/qpane/rendering/item_compositor.py"]
-fingerprint = "sha256:1fef2614edf84edd796cd392cdbfb7149b17a1c8957f7ed11e3fcbff7d2e780f"
+fingerprint = "sha256:dd01f3d93fdeb8b0df2a49dd0830a3aa1059319c4c2a8a1af32ca809c8e1c29d"
 issue = "chore:QPANE-ARCH-002"
 review_by = 2026-12-15
 responsibilities = [
-  "scene item dispatch and raster, sampled, or vector composition",
-  "sampled-source and tile resolution",
-  "transient sampled-source and layer-isolation coordination",
-  "layer clipping, effects, and debug presentation",
+  "ordered scene item dispatch and panel bounds",
+  "direct and tiled raster composition, repair selection, and debug presentation",
+  "vector composition and sampled and piecewise collaborator coordination",
+  "transient raster, layer clipping, effects, and isolation coordination",
 ]
-next_extraction = "Extract sampled-source resolution and settled sampled replacement into a focused compositor that feeds the existing isolation and effect owners."
+next_extraction = "Extract direct and tiled raster drawing, repair selection, and tile debug presentation into a focused raster item compositor and migrate every caller."
 
 [[debts]]
 id = "QPANE-ARCH-003"
 owner = "QPane presentation"
 paths = ["packages/qpane/src/qpane/rendering/presenter.py"]
-fingerprint = "sha256:c9cb1a9315ace8f76ff2d948777c3dbdb081f92b3755ab29fb9a175780a5f61a"
+fingerprint = "sha256:523584f7fe8df9e761acca6691043a340eb3e2cac4b1d3db4ca3435e952ce79a"
 issue = "chore:QPANE-ARCH-003"
 review_by = 2026-12-15
 responsibilities = [
@@ -64,7 +64,7 @@ next_extraction = "Extract asynchronous generation, cancellation, and retry sche
 id = "QPANE-ARCH-005"
 owner = "QPane buffered rendering"
 paths = ["packages/qpane/src/qpane/rendering/render.py"]
-fingerprint = "sha256:c11cea64e57f72145066db99873a34a6d5242eb081f7d8852a8970b8e8860ddc"
+fingerprint = "sha256:3771f576ac8d68c84fa18eb54ce2ff470954e11558caaf50ca4b1af196a12fbd"
 issue = "chore:QPANE-ARCH-005"
 review_by = 2026-12-15
 responsibilities = [

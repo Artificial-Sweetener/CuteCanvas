@@ -76,9 +76,11 @@ class _ToolInputProbe:
         Tools.CONTROL_MODE_SELECT_RECTANGLE,
         Tools.CONTROL_MODE_SELECT_ELLIPSE,
         Tools.CONTROL_MODE_SELECT_LASSO,
+        Tools.CONTROL_MODE_SELECT_POLYGON,
         Tools.CONTROL_MODE_MASK_RECTANGLE,
         Tools.CONTROL_MODE_MASK_ELLIPSE,
         Tools.CONTROL_MODE_MASK_LASSO,
+        Tools.CONTROL_MODE_MASK_POLYGON,
     ),
 )
 def test_space_temporarily_navigates_from_every_compatible_tool(mode: str) -> None:

@@ -24,10 +24,7 @@ from PySide6.QtCore import (
     QRect,
     QRectF,
 )
-from PySide6.QtGui import (
-    QColor,
-    QTransform,
-)
+from PySide6.QtGui import QColor
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
 )
@@ -36,6 +33,7 @@ from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from cutecanvas.composition import CompositionRecord
 from cutecanvas.composition.layers import CompositionLayerInstance
+from cutecanvas.composition.public_layer_mapping import detached_public_layer_mapping
 from cutecanvas.composition.public_policy import (
     public_layer_policy,
 )
@@ -65,6 +63,7 @@ from cutecanvas.vector.conversion import (
     VectorConversionKind,
 )
 
+from .scene_interaction_sync import synchronize_scene_interactions
 from .viewport_activation import resolve_viewport_activation
 
 
@@ -154,15 +153,15 @@ class DocumentEventsMixin:
 
     def _emit_scene_changed(self) -> None:
         """Emit the current normalized scene snapshot."""
-        if self._editor_movement_interaction is not None:
-            self._editor_movement_interaction.synchronize_context()
-        if self._snapping is not None:
-            self._snapping.clear_interactions()
         resolved_scene = self.sceneMutationCoordinator().active_scene()
-        if self._scene_movement is not None:
-            self._scene_movement.synchronize_scene(resolved_scene)
-        if self._scene_transform is not None:
-            self._scene_transform.synchronize_scene(resolved_scene)
+        synchronize_scene_interactions(
+            resolved_scene,
+            movement_interaction=self._editor_movement_interaction,
+            snapping=self._snapping,
+            movement=self._scene_movement,
+            transform=self._scene_transform,
+            affine=self._scene_transform_interaction,
+        )
         self._scene_selection.validate(resolved_scene)
         self._reconcile_selected_paint_target()
         if self._vector_editor is not None:
@@ -403,11 +402,7 @@ class DocumentEventsMixin:
             source_kind=self.compositionService().source_kind(source),
             source_id=source.resource_id,
             label=layer.label,
-            transform=(
-                QTransform()
-                if durable_transform is None
-                else durable_transform.to_qtransform()
-            ),
+            transform=detached_public_layer_mapping(durable_transform),
         )
 
     def _handle_internal_scene_content_changed(

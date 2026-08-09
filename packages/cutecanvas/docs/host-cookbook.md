@@ -242,11 +242,12 @@ clears the complete set.
 `CuteCanvas.translateLayer()` moves a layer by an offset,
 `CuteCanvas.centerLayer()` aligns it with the composition, and
 `CuteCanvas.setLayerPlacement()` sets its scene rectangle. Use
-`CuteCanvas.setLayerTransform()` for an exact affine transform,
+`CuteCanvas.setLayerTransform()` for an exact affine, projective, or piecewise mapping,
 `CuteCanvas.setLayerIndex()` for stack order, `CuteCanvas.setLayerVisible()`
 for visibility, and `CuteCanvas.removeLayer()` for removal.
 
-`CuteCanvas.layerTransform()` returns exact placement geometry,
+`CuteCanvas.layerTransform()` returns exact placement geometry, preserving an
+immutable `PiecewiseLayerTransform` or `BilinearLayerTransform` for a finite cage,
 `CuteCanvas.layerLocalBounds()` returns intrinsic source bounds, and
 `CuteCanvas.layerGeometryPolicy()` returns the bounds used for manipulation.
 `CuteCanvas.setLayerGeometryPolicy()` changes that choice, while
@@ -458,6 +459,17 @@ gesture to use the unsnapped floating-point transform temporarily.
 Snapping follows the geometry chosen by each layer policy. Hosts can therefore
 align visible content, intrinsic source bounds, or a fixed application-defined
 rectangle without changing movement or transform tools.
+
+`CuteCanvas.CONTROL_MODE_SHARED_EDGE_RESIZE` provides coupled resizing for every
+movable layer in a continuous coincident-edge group. T junctions and rectangular
+grids are inferred directly from current geometry; the host does not maintain a
+persistent tiling model. Dragging a horizontal or vertical midpoint moves the
+complete seam group, keeps each opposite support fixed, and commits all
+nondestructive mappings as one history operation. Angled midpoints are disabled,
+while eligible endpoint points remain adjustable along their common rail at any
+angle. Hold Ctrl to suppress secondary snapping during an eligible drag. The
+active tool displays every valid seam with Transform-style handles and uses a
+native resize or forbidden cursor that reflects the focused handle.
 
 ## Add Effects, Overlays, and Tools
 

@@ -24,7 +24,9 @@ scene contracts without also depending on widget helpers or catalog policy.
 
 `SceneDescriptor` is the renderer's immutable compiled-scene input, while
 `SceneKind`, `LayerDescriptor`, and `LayerKind` describe its ordered contents.
-`LayerPlacement`, `LayerTransform`, and `RasterBounds` retain exact floating
+`LayerPlacement`, `LayerTransform`, `ProjectiveLayerTransform`,
+`PiecewiseLayerTransform`, `BilinearLayerTransform`, and
+`RasterBounds` retain exact floating
 placement and signed source-local extent; `BlendMode`, `LayerClip`, and
 `ClipCoordinateSpace` complete the presentation policy without mutating a
 source.

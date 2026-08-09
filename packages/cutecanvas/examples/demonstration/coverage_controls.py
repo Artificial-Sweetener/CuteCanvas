@@ -62,9 +62,11 @@ class CoverageControls(QObject):
             CuteCanvas.CONTROL_MODE_SELECT_RECTANGLE,
             CuteCanvas.CONTROL_MODE_SELECT_ELLIPSE,
             CuteCanvas.CONTROL_MODE_SELECT_LASSO,
+            CuteCanvas.CONTROL_MODE_SELECT_POLYGON,
             CuteCanvas.CONTROL_MODE_MASK_RECTANGLE,
             CuteCanvas.CONTROL_MODE_MASK_ELLIPSE,
             CuteCanvas.CONTROL_MODE_MASK_LASSO,
+            CuteCanvas.CONTROL_MODE_MASK_POLYGON,
         }
         bucket = mode == CuteCanvas.CONTROL_MODE_PAINT_BUCKET
         for item in self._shape_widgets:

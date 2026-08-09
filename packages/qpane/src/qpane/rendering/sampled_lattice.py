@@ -22,10 +22,11 @@ from dataclasses import dataclass
 from math import isclose
 
 from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QTransform
 
 from ..scene.model import LayerDescriptor
 from ..scene.raster import RasterBounds
+from .panel_mapping import PanelLayerMapping, PiecewisePanelMapping
+from .projective_visibility import visible_source_rect
 
 _SOURCE_LATTICE_SPAN = 512
 
@@ -46,14 +47,11 @@ def sampled_source_lattice(
     *,
     descriptor: LayerDescriptor,
     source_size: QSize,
-    source_to_panel: QTransform,
+    source_to_panel: PanelLayerMapping,
     panel_rect: QRectF,
 ) -> SampledSourceLattice | None:
     """Return the visible source region aligned to one global raster lattice."""
     if source_size.isEmpty() or panel_rect.isEmpty():
-        return None
-    panel_to_source, invertible = source_to_panel.inverted()
-    if not invertible:
         return None
     source_bounds = QRectF(
         0.0,
@@ -61,7 +59,11 @@ def sampled_source_lattice(
         float(source_size.width()),
         float(source_size.height()),
     )
-    visible_source = panel_to_source.mapRect(panel_rect).intersected(source_bounds)
+    visible_source = visible_source_rect(
+        source_to_panel,
+        panel_rect,
+        source_bounds,
+    )
     if visible_source.isEmpty():
         return None
     local_bounds = descriptor.raster_bounds or RasterBounds(
@@ -108,18 +110,24 @@ def sampled_source_lattice(
 
 
 def source_sampling_phase_is_fractional(
-    source_to_panel: QTransform,
+    source_to_panel: PanelLayerMapping,
     device_pixel_ratio: float,
 ) -> bool:
     """Return whether source axes do not map to integral physical-pixel steps."""
     if device_pixel_ratio <= 0.0:
         raise ValueError("device_pixel_ratio must be positive")
+    transforms = (
+        tuple(patch.transform for patch in source_to_panel.patches)
+        if isinstance(source_to_panel, PiecewisePanelMapping)
+        else (source_to_panel,)
+    )
     return any(
         not isclose(value, round(value), rel_tol=0.0, abs_tol=1e-9)
+        for transform in transforms
         for value in (
-            source_to_panel.m11() * device_pixel_ratio,
-            source_to_panel.m12() * device_pixel_ratio,
-            source_to_panel.m21() * device_pixel_ratio,
-            source_to_panel.m22() * device_pixel_ratio,
+            transform.m11() * device_pixel_ratio,
+            transform.m12() * device_pixel_ratio,
+            transform.m21() * device_pixel_ratio,
+            transform.m22() * device_pixel_ratio,
         )
     )
