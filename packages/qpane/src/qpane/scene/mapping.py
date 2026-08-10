@@ -188,7 +188,7 @@ def validate_layer_mapping(mapping: LayerMapping, bounds: RasterBounds) -> None:
     if isinstance(mapping, (PiecewiseLayerTransform, BilinearLayerTransform)):
         source = _boundary_rect(mapping.source_boundary)
         expected = QRectF(bounds.x, bounds.y, bounds.width, bounds.height)
-        if not expected.contains(source):
+        if not _contains_with_geometry_tolerance(expected, source):
             raise ValueError(
                 "bounded source boundary must stay inside layer raster bounds"
             )
@@ -317,6 +317,26 @@ def _boundary_rect(points: tuple[QPointF, ...]) -> QRectF:
     right = max(point.x() for point in points)
     bottom = max(point.y() for point in points)
     return QRectF(left, top, right - left, bottom - top)
+
+
+def _contains_with_geometry_tolerance(outer: QRectF, inner: QRectF) -> bool:
+    """Accept floating-point residue while retaining finite storage bounds."""
+    scale = max(
+        abs(outer.left()),
+        abs(outer.top()),
+        abs(outer.right()),
+        abs(outer.bottom()),
+        outer.width(),
+        outer.height(),
+        1.0,
+    )
+    tolerance = _GEOMETRY_EPSILON * scale
+    return (
+        inner.left() >= outer.left() - tolerance
+        and inner.top() >= outer.top() - tolerance
+        and inner.right() <= outer.right() + tolerance
+        and inner.bottom() <= outer.bottom() + tolerance
+    )
 
 
 __all__ = [

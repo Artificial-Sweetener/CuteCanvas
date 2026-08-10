@@ -50,6 +50,10 @@ def joined_edge_mapping(
     collapsed_edge = _single_joined_edge(target)
     if collapsed_edge is None:
         return None
+    if len(source) == 4 and len(target) == 4:
+        source_quad = _rotated_quad(source, collapsed_edge)
+        target_quad = _rotated_quad(target, collapsed_edge)
+        return BilinearLayerTransform(source_quad, target_quad)
     joined_indexes = {collapsed_edge, (collapsed_edge + 1) % len(target)}
     if moved_index not in joined_indexes:
         raise ValueError("joined mapping must identify the moved endpoint")
@@ -194,6 +198,15 @@ def _points_quad(
         vertices[2].point,
         vertices[3].point,
     )
+
+
+def _rotated_quad(
+    points: tuple[QPointF, ...],
+    start: int,
+) -> tuple[QPointF, QPointF, QPointF, QPointF]:
+    """Return four cyclic points beginning at ``start``."""
+    ordered = tuple(QPointF(points[(start + offset) % 4]) for offset in range(4))
+    return ordered[0], ordered[1], ordered[2], ordered[3]
 
 
 __all__ = ["joined_edge_mapping"]

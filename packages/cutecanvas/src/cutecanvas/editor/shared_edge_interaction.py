@@ -184,9 +184,16 @@ class SharedEdgeResizeInteraction:
     def update(self, panel_point: QPointF) -> bool:
         """Publish every mapping preview from the active constrained handle."""
         seam = self._valid_active_seam()
+        scene = self._active_scene()
         session = self._session
         scene_point = self._panel_to_scene(panel_point)
-        if seam is None or session is None or scene_point is None:
+        if (
+            seam is None
+            or scene is None
+            or scene.scene_id != seam.scene_id
+            or session is None
+            or scene_point is None
+        ):
             return False
         update = session.resolve(
             scene_point,
@@ -196,10 +203,11 @@ class SharedEdgeResizeInteraction:
         if update is None:
             return False
         changed = self._preview.set_many(
+            scene,
             tuple(
                 LayerMappingPreview(seam.scene_id, layer_id, mapping)
                 for layer_id, mapping in update.values
-            )
+            ),
         )
         self._feedback.publish(update.guides)
         if changed:

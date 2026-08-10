@@ -100,6 +100,7 @@ class SharedEdgeGestureSession:
                 threshold_device_pixels=6.0,
                 release_device_pixels=9.0,
                 grid=targets.grid,
+                fixed_point=pivot.fixed_point,
             )
             if pivot is not None and valid_targets and targets is not None
             else None

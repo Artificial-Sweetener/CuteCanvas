@@ -83,18 +83,35 @@ class SceneLayerMappingPreview:
 
     def set(
         self,
-        scene_id: uuid.UUID,
+        scene: SceneDescriptor,
         layer_id: uuid.UUID,
         mapping: LayerMapping,
     ) -> bool:
         """Set a transient mapping override and report whether it changed."""
-        return self.set_many((LayerMappingPreview(scene_id, layer_id, mapping),))
+        return self.set_many(
+            scene,
+            (LayerMappingPreview(scene.scene_id, layer_id, mapping),),
+        )
 
-    def set_many(self, previews: tuple[LayerMappingPreview, ...]) -> bool:
-        """Set one coherent transient mapping set."""
+    def set_many(
+        self,
+        scene: SceneDescriptor,
+        previews: tuple[LayerMappingPreview, ...],
+    ) -> bool:
+        """Admit and set one coherent transient mapping set."""
+        if not isinstance(scene, SceneDescriptor):
+            raise TypeError("scene must be a SceneDescriptor")
         identities = {(preview.scene_id, preview.layer_id) for preview in previews}
         if len(identities) != len(previews):
             raise ValueError("preview layer identities must be unique")
+        layers = {layer.layer_id: layer for layer in scene.layers}
+        if any(
+            preview.scene_id != scene.scene_id
+            or (layer := layers.get(preview.layer_id)) is None
+            or not _mapping_is_admitted(layer, preview.mapping)
+            for preview in previews
+        ):
+            return False
         if previews == self._previews:
             return False
         self._previews = previews
@@ -117,6 +134,15 @@ class SceneLayerMappingPreview:
             if preview.scene_id == scene.scene_id
         }
         if not mappings:
+            return scene
+        matching_layers = tuple(
+            layer for layer in scene.layers if layer.layer_id in mappings
+        )
+        if any(
+            not _mapping_is_admitted(layer, mappings[layer.layer_id])
+            for layer in matching_layers
+        ):
+            self.clear()
             return scene
         changed = False
         layers = []
@@ -145,6 +171,22 @@ def _preserve_clip(
 ) -> LayerClip | None:
     """Preserve descriptor clips when no source-specific policy is installed."""
     return layer.clip
+
+
+def _mapping_is_admitted(layer: LayerDescriptor, mapping: LayerMapping) -> bool:
+    """Return whether QPane admits one mapping for the layer's raster source."""
+    bounds = layer.raster_bounds
+    if bounds is None:
+        return False
+    try:
+        replace(
+            layer,
+            placement=mapping.map_bounds(bounds),
+            transform=mapping,
+        )
+    except ValueError:
+        return False
+    return True
 
 
 __all__ = ["LayerMappingPreview", "SceneLayerMappingPreview"]

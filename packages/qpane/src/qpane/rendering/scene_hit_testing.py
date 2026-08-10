@@ -51,7 +51,10 @@ class SceneRenderHitTester:
         inverse, invertible = item.transform.inverted()
         if not invertible:
             return None
-        source_point = inverse.map(panel_point)
+        try:
+            source_point = inverse.map(panel_point)
+        except ValueError:
+            return None
         source_width, source_height = self._source_size(item)
         source_rect = QRectF(0.0, 0.0, float(source_width), float(source_height))
         if not source_rect.contains(source_point):

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import pytest
 from cutecanvas.snapping.edge_model import OrientedEdge
 from cutecanvas.snapping.model import SnapGrid
 from cutecanvas.snapping.rail_resolution import RailSnapResolver
@@ -85,3 +86,130 @@ def test_rail_snaps_to_nearest_reachable_grid_crossing() -> None:
 
     assert result.point == QPointF(40.0, 20.0)
     assert result.guide is not None
+
+
+def test_rail_snaps_moving_edge_to_perfect_orientation() -> None:
+    """A moved seam endpoint must acquire and retain an exact 45-degree slant."""
+    resolver = RailSnapResolver(
+        QPointF(0.0, 0.0),
+        QPointF(100.0, 0.0),
+        (),
+        threshold_device_pixels=6.0,
+        release_device_pixels=9.0,
+        fixed_point=QPointF(50.0, 50.0),
+    )
+
+    acquired = resolver.resolve(
+        QPointF(96.0, 0.0),
+        scene_units_per_device_pixel=1.0,
+    )
+    retained = resolver.resolve(
+        QPointF(92.0, 0.0),
+        scene_units_per_device_pixel=1.0,
+    )
+
+    assert acquired.point == QPointF(100.0, 0.0)
+    assert acquired.guide is not None
+    assert acquired.guide.target_owner_id == "orientation:45"
+    assert retained.point == QPointF(100.0, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("rail_start", "rail_end", "fixed", "pointer", "expected", "owner"),
+    (
+        (
+            QPointF(0.0, 0.0),
+            QPointF(100.0, 0.0),
+            QPointF(50.0, 50.0),
+            QPointF(54.0, 0.0),
+            QPointF(50.0, 0.0),
+            "orientation:vertical",
+        ),
+        (
+            QPointF(0.0, 0.0),
+            QPointF(0.0, 100.0),
+            QPointF(50.0, 50.0),
+            QPointF(0.0, 54.0),
+            QPointF(0.0, 50.0),
+            "orientation:horizontal",
+        ),
+    ),
+)
+def test_rail_snaps_moving_edge_to_axis_orientation(
+    rail_start: QPointF,
+    rail_end: QPointF,
+    fixed: QPointF,
+    pointer: QPointF,
+    expected: QPointF,
+    owner: str,
+) -> None:
+    """Horizontal and vertical seams must receive exact orientation targets."""
+    resolver = RailSnapResolver(
+        rail_start,
+        rail_end,
+        (),
+        threshold_device_pixels=6.0,
+        release_device_pixels=9.0,
+        fixed_point=fixed,
+    )
+
+    result = resolver.resolve(pointer, scene_units_per_device_pixel=1.0)
+
+    assert result.point == expected
+    assert result.guide is not None
+    assert result.guide.target_owner_id == owner
+
+
+def test_rail_snaps_moving_edge_into_continuous_stationary_edge() -> None:
+    """A seam must snap to the extension of an edge meeting its fixed endpoint."""
+    target = OrientedEdge(
+        "target",
+        QPointF(50.0, 50.0),
+        QPointF(100.0, 100.0),
+        QPointF(75.0, 75.0),
+        priority=10,
+    )
+    resolver = RailSnapResolver(
+        QPointF(0.0, 0.0),
+        QPointF(100.0, 0.0),
+        (target,),
+        threshold_device_pixels=6.0,
+        release_device_pixels=9.0,
+        fixed_point=QPointF(50.0, 50.0),
+    )
+
+    result = resolver.resolve(
+        QPointF(4.0, 0.0),
+        scene_units_per_device_pixel=1.0,
+    )
+
+    assert result.point == QPointF(0.0, 0.0)
+    assert result.guide is not None
+    assert result.guide.target_owner_id == "target"
+
+
+def test_continuous_edge_snap_rejects_a_parallel_but_disconnected_line() -> None:
+    """A visually parallel edge must not attract a seam on another line."""
+    target = OrientedEdge(
+        "target",
+        QPointF(55.0, 12.5),
+        QPointF(105.0, 37.5),
+        QPointF(80.0, 25.0),
+        priority=10,
+    )
+    resolver = RailSnapResolver(
+        QPointF(0.0, 0.0),
+        QPointF(100.0, 0.0),
+        (target,),
+        threshold_device_pixels=6.0,
+        release_device_pixels=9.0,
+        fixed_point=QPointF(50.0, 50.0),
+    )
+
+    result = resolver.resolve(
+        QPointF(32.0, 0.0),
+        scene_units_per_device_pixel=1.0,
+    )
+
+    assert result.point == QPointF(32.0, 0.0)
+    assert result.guide is None

@@ -23,7 +23,11 @@ import uuid
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerMapping
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerMapping,
+    PiecewiseLayerTransform,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,13 +74,17 @@ def shared_boundary_with_points(
     tolerance: float,
 ) -> tuple[QPointF, ...]:
     """Insert seam endpoints into their containing ordered boundary edges."""
-    points = _coalesced_boundary(boundary, tolerance)
-    if len(points) < 3:
+    points = tuple(QPointF(point) for point in boundary)
+    if len(points) > 1 and _point_distance(points[0], points[-1]) <= tolerance:
+        points = points[:-1]
+    if len(_coalesced_boundary(points, tolerance)) < 3:
         raise ValueError("shared-edge participant boundary must be polygonal")
     result: list[QPointF] = []
     for index, start in enumerate(points):
         end = points[(index + 1) % len(points)]
         result.append(start)
+        if _point_distance(start, end) <= tolerance:
+            continue
         interior = sorted(
             (
                 (_segment_parameter(point, start, end), point)
@@ -96,6 +104,18 @@ def inverse_shared_boundary(
     boundary: tuple[QPointF, ...],
 ) -> tuple[QPointF, ...] | None:
     """Resolve scene boundary vertices back into authoritative local space."""
+    if isinstance(mapping, (PiecewiseLayerTransform, BilinearLayerTransform)) and (
+        len(boundary) == len(mapping.target_boundary)
+        and all(
+            _point_distance(actual, expected) <= 1e-9
+            for actual, expected in zip(
+                boundary,
+                mapping.target_boundary,
+                strict=True,
+            )
+        )
+    ):
+        return tuple(QPointF(point) for point in mapping.source_boundary)
     points = tuple(mapping.inverse_map(point) for point in boundary)
     if any(point is None for point in points):
         return None
@@ -108,18 +128,108 @@ def shared_endpoint_indexes(
     end: QPointF,
     tolerance: float,
 ) -> tuple[int, int]:
-    """Return the unique boundary indexes of both inserted seam endpoints."""
-    indexes: list[int] = []
-    for endpoint in (start, end):
-        matches = tuple(
+    """Return the shortest unambiguous boundary chain between seam endpoints."""
+    candidates = tuple(
+        tuple(
             index
             for index, point in enumerate(boundary)
             if _point_distance(point, endpoint) <= tolerance
         )
-        if len(matches) != 1:
-            raise ValueError("shared-edge endpoint must identify one boundary vertex")
-        indexes.append(matches[0])
-    return indexes[0], indexes[1]
+        for endpoint in (start, end)
+    )
+    if any(not matches for matches in candidates):
+        raise ValueError("shared-edge endpoint must identify one boundary vertex")
+    ranked: list[tuple[int, int, int]] = []
+    for start_index in candidates[0]:
+        for end_index in candidates[1]:
+            if start_index == end_index:
+                continue
+            forward = _chain_length(
+                boundary,
+                start_index,
+                end_index,
+                start,
+                end,
+                tolerance,
+            )
+            backward = _chain_length(
+                boundary,
+                end_index,
+                start_index,
+                end,
+                start,
+                tolerance,
+            )
+            lengths = tuple(value for value in (forward, backward) if value is not None)
+            if lengths:
+                ranked.append((min(lengths), start_index, end_index))
+    if not ranked:
+        raise ValueError("shared-edge endpoints must bound one boundary chain")
+    best_length = min(value[0] for value in ranked)
+    best = tuple(value for value in ranked if value[0] == best_length)
+    if len(best) != 1:
+        raise ValueError("shared-edge endpoint topology must be unambiguous")
+    return best[0][1], best[0][2]
+
+
+def shared_exterior_neighbor_index(
+    participant: SharedEdgeParticipant,
+    endpoint_position: int,
+    tolerance: float,
+) -> int | None:
+    """Return the retained exterior vertex adjacent to one seam endpoint."""
+    if endpoint_position not in {0, 1}:
+        raise ValueError("shared-edge endpoint position must be zero or one")
+    moving_index = participant.seam_indexes[endpoint_position]
+    fixed_index = participant.seam_indexes[1 - endpoint_position]
+    moving = participant.scene_boundary[moving_index]
+    fixed = participant.scene_boundary[fixed_index]
+    forward = _chain_length(
+        participant.scene_boundary,
+        moving_index,
+        fixed_index,
+        moving,
+        fixed,
+        tolerance,
+    )
+    backward = _chain_length(
+        participant.scene_boundary,
+        fixed_index,
+        moving_index,
+        fixed,
+        moving,
+        tolerance,
+    )
+    if (forward is None) == (backward is None):
+        return None
+    step = -1 if forward is not None else 1
+    return (moving_index + step) % len(participant.scene_boundary)
+
+
+def _chain_length(
+    boundary: tuple[QPointF, ...],
+    start_index: int,
+    end_index: int,
+    start: QPointF,
+    end: QPointF,
+    tolerance: float,
+) -> int | None:
+    """Return a monotonic collinear boundary-chain length when one exists."""
+    size = len(boundary)
+    index = start_index
+    previous_parameter = -float("inf")
+    for length in range(size):
+        point = boundary[index]
+        if not _point_on_segment(point, start, end, tolerance):
+            return None
+        parameter = _segment_parameter(point, start, end)
+        if parameter + tolerance < previous_parameter:
+            return None
+        previous_parameter = parameter
+        if index == end_index:
+            return length
+        index = (index + 1) % size
+    return None
 
 
 def shared_translation_indexes(
@@ -216,5 +326,6 @@ __all__ = [
     "inverse_shared_boundary",
     "shared_boundary_with_points",
     "shared_endpoint_indexes",
+    "shared_exterior_neighbor_index",
     "shared_translation_indexes",
 ]

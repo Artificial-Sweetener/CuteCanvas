@@ -61,6 +61,7 @@ class LayerTransformSession:
     layer_id: uuid.UUID
     bounds: TransformLocalBounds
     initial_transform: LayerMapping
+    scene: SceneDescriptor
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,9 +158,10 @@ class SceneLayerTransformController:
                 layer.layer_id,
                 bounds,
                 layer.transform,
+                scene,
             )
         self._gesture = None
-        return self._preview.set(layer.scene_id, layer.layer_id, transform)
+        return self._preview.set(scene, layer.layer_id, transform)
 
     def begin_move(self, hit: SceneLayerHitTestResult, scene_point: QPointF) -> bool:
         """Select one hit layer and begin a translation gesture."""
@@ -197,7 +199,7 @@ class SceneLayerTransformController:
         )
         return bool(
             transform is not None
-            and self._preview.set(session.scene_id, session.layer_id, transform)
+            and self._preview.set(session.scene, session.layer_id, transform)
         )
 
     def end_gesture(
@@ -323,6 +325,7 @@ class SceneLayerTransformController:
                 layer.layer_id,
                 bounds,
                 layer.transform,
+                scene,
             )
         base = (
             preview_transform

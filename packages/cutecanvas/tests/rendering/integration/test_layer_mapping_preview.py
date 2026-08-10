@@ -31,6 +31,7 @@ from qpane.sdk.scene import (
     LayerKind,
     LayerPlacement,
     LayerTransform,
+    PiecewiseLayerTransform,
     ProjectiveLayerTransform,
     RasterBounds,
     SceneDescriptor,
@@ -74,7 +75,10 @@ def test_mapping_preview_publishes_projective_geometry_without_mutating_scene() 
     )
     preview = SceneLayerMappingPreview()
 
-    assert preview.set_many((LayerMappingPreview(scene_id, layer_id, mapping),))
+    assert preview.set_many(
+        scene,
+        (LayerMappingPreview(scene_id, layer_id, mapping),),
+    )
     processed = preview.process_scene(scene)
 
     assert processed is not scene
@@ -83,4 +87,81 @@ def test_mapping_preview_publishes_projective_geometry_without_mutating_scene() 
     assert scene.layers[0].transform == LayerTransform()
     assert preview.revision() == 1
     assert preview.clear()
+    assert preview.process_scene(scene) is scene
+
+
+def test_mapping_preview_accepts_inverse_round_trip_boundary_residue() -> None:
+    """A finite gesture preview survives harmless source-boundary roundoff."""
+    scene_id = uuid.uuid4()
+    layer_id = uuid.uuid4()
+    bounds = RasterBounds(80, 80, 80, 100)
+    layer = LayerDescriptor(
+        scene_id=scene_id,
+        layer_id=layer_id,
+        kind=LayerKind.MASK,
+        source=ProjectResourceReference(uuid.uuid4()),
+        placement=LayerPlacement(80.0, 80.0, 80.0, 100.0),
+        raster_bounds=bounds,
+        transform=LayerTransform(),
+    )
+    scene = SceneDescriptor(
+        scene_id,
+        SceneKind.EXPLICIT,
+        LayerPlacement(0.0, 0.0, 400.0, 300.0),
+        (layer,),
+    )
+    source = (
+        QPointF(79.99999999999999, 80.0),
+        QPointF(160.0, 80.0),
+        QPointF(160.0, 180.0),
+        QPointF(79.99999999999999, 180.0),
+    )
+    mapping = PiecewiseLayerTransform(source, source)
+    preview = SceneLayerMappingPreview()
+    assert preview.set(scene, layer_id, mapping)
+
+    processed = preview.process_scene(scene)
+
+    assert processed.layers[0].transform == mapping
+    assert scene.layers[0].transform == LayerTransform()
+
+
+def test_mapping_preview_rejects_source_overflow_without_poisoning_scene() -> None:
+    """An invalid transient cage must never enter later scene assembly."""
+    scene_id = uuid.uuid4()
+    layer_id = uuid.uuid4()
+    bounds = RasterBounds(0, 0, 100, 80)
+    layer = LayerDescriptor(
+        scene_id=scene_id,
+        layer_id=layer_id,
+        kind=LayerKind.MASK,
+        source=ProjectResourceReference(uuid.uuid4()),
+        placement=LayerPlacement(0.0, 0.0, 100.0, 80.0),
+        raster_bounds=bounds,
+        transform=LayerTransform(),
+    )
+    scene = SceneDescriptor(
+        scene_id,
+        SceneKind.EXPLICIT,
+        LayerPlacement(0.0, 0.0, 100.0, 80.0),
+        (layer,),
+    )
+    invalid = PiecewiseLayerTransform(
+        (
+            QPointF(-1.0, 0.0),
+            QPointF(100.0, 0.0),
+            QPointF(100.0, 80.0),
+            QPointF(-1.0, 80.0),
+        ),
+        (
+            QPointF(0.0, 0.0),
+            QPointF(100.0, 0.0),
+            QPointF(100.0, 80.0),
+            QPointF(0.0, 80.0),
+        ),
+    )
+    preview = SceneLayerMappingPreview()
+
+    assert not preview.set(scene, layer_id, invalid)
+    assert not preview.previews
     assert preview.process_scene(scene) is scene

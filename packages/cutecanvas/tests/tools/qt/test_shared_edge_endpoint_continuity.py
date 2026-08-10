@@ -143,6 +143,71 @@ def test_endpoint_sweep_to_both_rail_limits_never_drops_a_mask(
         harness.close()
 
 
+def test_45_degree_snap_preview_and_commit_retain_both_masks(qapp) -> None:
+    """Perfect-slant snapping must never publish partial participant coverage."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(300, 200),
+        widget_size=QSize(800, 620),
+        mask_count=2,
+    )
+    viewer = harness.viewer
+    runtime = cast(_MountedViewerRuntime, viewer)
+    try:
+        first_id, second_id = harness.mask_ids
+        assert viewer.editor.coverage.rectangle(QRectF(0.0, 0.0, 150.0, 100.0))
+        harness.activate_mask(1)
+        assert viewer.editor.coverage.rectangle(QRectF(150.0, 0.0, 150.0, 100.0))
+        harness.activate_mask(0)
+        assert harness.wait_for_mask_render_idle()
+        assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
+        entries = {entry.mask_id: entry for entry in viewer.listMasksForComposition()}
+        first = entries[first_id]
+        second = entries[second_id]
+        assert first.scene_id is not None and first.layer_id is not None
+        assert second.layer_id is not None
+        policy = LayerPolicy(selectable=True, movable=True, pixel_editable=True)
+        viewer.setLayerInteractionPolicy(first.scene_id, first.layer_id, policy)
+        viewer.setLayerInteractionPolicy(first.scene_id, second.layer_id, policy)
+        assert viewer.setControlMode(viewer.CONTROL_MODE_SHARED_EDGE_RESIZE)
+        start = _panel_point(runtime, QPointF(150.0, 0.0))
+        near_perfect_slant = _panel_point(runtime, QPointF(52.0, 0.0))
+        retained = (
+            _panel_point(runtime, QPointF(50.0, 75.0)),
+            _panel_point(runtime, QPointF(250.0, 50.0)),
+        )
+
+        with harness.observe_presented_frames() as probe:
+            QTest.mouseMove(viewer, start)
+            QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
+            QTest.mouseMove(viewer, near_perfect_slant, delay=0)
+            QTest.mouseRelease(
+                viewer,
+                Qt.MouseButton.LeftButton,
+                pos=near_perfect_slant,
+            )
+            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+            assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
+            viewer.repaint()
+
+        first_mapping = viewer.layerTransform(first.scene_id, first.layer_id)
+        second_mapping = viewer.layerTransform(first.scene_id, second.layer_id)
+        assert first_mapping is not None and second_mapping is not None
+        assert first_mapping.map_point(QPointF(150.0, 0.0)) == QPointF(50.0, 0.0)
+        assert second_mapping.map_point(QPointF(150.0, 0.0)) == QPointF(50.0, 0.0)
+        assert probe.frames
+        assert all(frame.mask_layer_count == 2 for frame in probe.frames), tuple(
+            frame.mask_item_states for frame in probe.frames
+        )
+        assert all(
+            harness.is_mask_tint(frame.color_at(point))
+            for frame in probe.frames
+            for point in retained
+        )
+    finally:
+        harness.close()
+
+
 def _panel_point(viewer: _MountedViewerRuntime, scene_point: QPointF) -> QPoint:
     """Return an integer panel point for one visible scene position."""
     panel = viewer.view().scene_to_panel_point(scene_point)

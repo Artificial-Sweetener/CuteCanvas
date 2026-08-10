@@ -33,7 +33,10 @@ from cutecanvas.snapping.edge_model import OrientedEdge
 
 from .shared_edge_collapse import joined_edge_mapping
 from .shared_edge_geometry import SharedEdgeSeam
-from .shared_edge_participant import SharedEdgeParticipant
+from .shared_edge_participant import (
+    SharedEdgeParticipant,
+    shared_exterior_neighbor_index,
+)
 
 _DIRECTION_TOLERANCE = 1e-4
 
@@ -163,7 +166,7 @@ def _pivot_source(
     """Return the complete group or unique atomic span owning one endpoint."""
     moving = seam.start if handle is SharedEdgeHandle.START else seam.end
     if all(
-        _matching_corner(participant.scene_boundary, moving, tolerance) is not None
+        _participant_endpoint_index(participant, seam, handle, tolerance) is not None
         for participant in seam.participants
     ):
         return seam
@@ -185,39 +188,78 @@ def _pivot_at(
     handle: SharedEdgeHandle,
     tolerance: float,
 ) -> SharedEdgePivot | None:
-    """Resolve one endpoint's two opposite outgoing edges into a rail."""
+    """Resolve one endpoint's retained exterior edges into a finite rail."""
     moving = seam.start if handle is SharedEdgeHandle.START else seam.end
     fixed = seam.end if handle is SharedEdgeHandle.START else seam.start
     outgoing: list[QPointF] = []
+    rail_points: list[QPointF] = []
     corner_indexes: list[int] = []
+    has_collapsed_exterior = False
     for participant in seam.participants:
-        corner_index = _matching_corner(participant.scene_boundary, moving, tolerance)
-        fixed_corner_index = _matching_corner(
-            participant.scene_boundary,
-            fixed,
+        corner_index = _participant_endpoint_index(
+            participant,
+            seam,
+            handle,
+            tolerance,
+        )
+        fixed_corner_index = _participant_endpoint_index(
+            participant,
+            seam,
+            (
+                SharedEdgeHandle.END
+                if handle is SharedEdgeHandle.START
+                else SharedEdgeHandle.START
+            ),
             tolerance,
         )
         if corner_index is None or fixed_corner_index is None:
             return None
-        candidates = tuple(
-            other
-            for edge in edges
-            if edge.owner_id == str(participant.layer_id)
-            and (other := _other_endpoint(edge, moving, tolerance)) is not None
-            and not _parallel_vector(other - moving, seam.edge.tangent)
+        exterior_index = shared_exterior_neighbor_index(
+            participant,
+            0 if handle is SharedEdgeHandle.START else 1,
+            tolerance,
         )
-        if len(candidates) != 1:
+        if (
+            exterior_index is None
+            or _point_distance(
+                participant.source_boundary[corner_index],
+                participant.source_boundary[exterior_index],
+            )
+            <= tolerance
+        ):
             return None
         corner_indexes.append(corner_index)
-        outgoing.append(candidates[0])
+        exterior = participant.scene_boundary[exterior_index]
+        if _point_distance(exterior, moving) <= tolerance:
+            has_collapsed_exterior = True
+            rail_points.append(QPointF(moving))
+            continue
+        if not any(
+            edge.owner_id == str(participant.layer_id)
+            and _edge_connects(edge, moving, exterior, tolerance)
+            for edge in edges
+        ):
+            return None
+        if _parallel_vector(exterior - moving, seam.edge.tangent):
+            return None
+        outgoing.append(exterior)
+        rail_points.append(exterior)
+    if not outgoing:
+        return None
     first = outgoing[0] - moving
     if not all(_parallel_vector(first, point - moving) for point in outgoing[1:]):
         return None
-    projections = tuple(QPointF.dotProduct(first, point - moving) for point in outgoing)
-    if min(projections) >= 0.0 or max(projections) <= 0.0:
+    projections = tuple(
+        QPointF.dotProduct(first, point - moving) for point in rail_points
+    )
+    if not has_collapsed_exterior and (
+        min(projections) >= 0.0 or max(projections) <= 0.0
+    ):
         return None
-    rail_start = outgoing[projections.index(min(projections))]
-    rail_end = outgoing[projections.index(max(projections))]
+    if min(projections) == max(projections):
+        return None
+    rail_start = rail_points[projections.index(min(projections))]
+    rail_end = rail_points[projections.index(max(projections))]
     return SharedEdgePivot(
         handle,
         moving,
@@ -229,31 +271,22 @@ def _pivot_at(
     )
 
 
-def _matching_corner(
-    corners: tuple[QPointF, ...],
-    point: QPointF,
+def _participant_endpoint_index(
+    participant: SharedEdgeParticipant,
+    seam: SharedEdgeSeam,
+    handle: SharedEdgeHandle,
     tolerance: float,
 ) -> int | None:
-    """Return one unique manipulation-corner index near ``point``."""
-    matches = tuple(
+    """Return the retained topology index for one seam endpoint."""
+    position = 0 if handle is SharedEdgeHandle.START else 1
+    index = participant.seam_indexes[position]
+    expected = seam.start if position == 0 else seam.end
+    actual = participant.scene_boundary[index]
+    return (
         index
-        for index, corner in enumerate(corners)
-        if math.hypot(corner.x() - point.x(), corner.y() - point.y()) <= tolerance
+        if math.hypot(actual.x() - expected.x(), actual.y() - expected.y()) <= tolerance
+        else None
     )
-    return matches[0] if len(matches) == 1 else None
-
-
-def _other_endpoint(
-    edge: OrientedEdge,
-    point: QPointF,
-    tolerance: float,
-) -> QPointF | None:
-    """Return the opposite endpoint when one finite edge meets ``point``."""
-    if math.hypot(edge.start.x() - point.x(), edge.start.y() - point.y()) <= tolerance:
-        return edge.end
-    if math.hypot(edge.end.x() - point.x(), edge.end.y() - point.y()) <= tolerance:
-        return edge.start
-    return None
 
 
 def _parallel_vector(first: QPointF, second: QPointF) -> bool:
@@ -264,6 +297,22 @@ def _parallel_vector(first: QPointF, second: QPointF) -> bool:
         return False
     cross = first.x() * second.y() - first.y() * second.x()
     return abs(cross) <= _DIRECTION_TOLERANCE * first_length * second_length
+
+
+def _edge_connects(
+    edge: OrientedEdge,
+    first: QPointF,
+    second: QPointF,
+    tolerance: float,
+) -> bool:
+    """Return whether one indexed edge connects two retained vertices."""
+    return (
+        _point_distance(edge.start, first) <= tolerance
+        and _point_distance(edge.end, second) <= tolerance
+    ) or (
+        _point_distance(edge.end, first) <= tolerance
+        and _point_distance(edge.start, second) <= tolerance
+    )
 
 
 def _point_distance(first: QPointF, second: QPointF) -> float:

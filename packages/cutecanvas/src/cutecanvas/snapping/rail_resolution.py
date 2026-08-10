@@ -25,6 +25,7 @@ from PySide6.QtCore import QPointF
 
 from .edge_model import OrientedEdge, OrientedSnapGuide
 from .model import SnapGrid
+from .rail_targets import RailSnapTarget, alignment_targets
 
 _PARALLEL_EPSILON = 1e-9
 
@@ -41,17 +42,6 @@ class RailSnapResult:
         object.__setattr__(self, "point", QPointF(self.point))
 
 
-@dataclass(frozen=True, slots=True)
-class _RailTarget:
-    """Describe one frozen reachable intersection on the pivot rail."""
-
-    point: QPointF
-    owner_id: str
-    priority: int
-    guide_start: QPointF
-    guide_end: QPointF
-
-
 class RailSnapResolver:
     """Resolve one constrained pivot against frozen oriented targets."""
 
@@ -64,6 +54,7 @@ class RailSnapResolver:
         threshold_device_pixels: float,
         release_device_pixels: float,
         grid: SnapGrid | None = None,
+        fixed_point: QPointF | None = None,
     ) -> None:
         """Capture the finite rail, target intersections, and hysteresis policy."""
         self._start = QPointF(rail_start)
@@ -73,15 +64,28 @@ class RailSnapResolver:
         if self._length <= 1e-12:
             raise ValueError("snap rail must have positive length")
         self._direction = QPointF(delta.x() / self._length, delta.y() / self._length)
-        self._targets = tuple(
+        intersections = tuple(
             target
             for edge in targets
             if (target := self._intersection_target(edge)) is not None
         )
+        self._targets = (
+            intersections
+            if fixed_point is None
+            else (
+                *intersections,
+                *alignment_targets(
+                    self._start,
+                    self._end,
+                    fixed_point,
+                    targets,
+                ),
+            )
+        )
         self._threshold = float(threshold_device_pixels)
         self._release = float(release_device_pixels)
         self._grid = grid
-        self._lock: _RailTarget | None = None
+        self._lock: RailSnapTarget | None = None
 
     def resolve(
         self,
@@ -143,7 +147,7 @@ class RailSnapResolver:
         distance = QPointF.dotProduct(QPointF(point) - self._start, self._direction)
         return self._start + self._direction * min(self._length, max(0.0, distance))
 
-    def _intersection_target(self, edge: OrientedEdge) -> _RailTarget | None:
+    def _intersection_target(self, edge: OrientedEdge) -> RailSnapTarget | None:
         """Return the finite line intersection between the rail and one edge."""
         rail = self._end - self._start
         target = edge.end - edge.start
@@ -156,7 +160,7 @@ class RailSnapResolver:
         if not 0.0 <= rail_parameter <= 1.0 or not 0.0 <= edge_parameter <= 1.0:
             return None
         point = self._start + rail * rail_parameter
-        return _RailTarget(
+        return RailSnapTarget(
             point,
             edge.owner_id,
             edge.priority,
@@ -164,12 +168,12 @@ class RailSnapResolver:
             edge.end,
         )
 
-    def _grid_targets(self, point: QPointF) -> tuple[_RailTarget, ...]:
+    def _grid_targets(self, point: QPointF) -> tuple[RailSnapTarget, ...]:
         """Return nearest reachable horizontal and vertical grid crossings."""
         grid = self._grid
         if grid is None:
             return ()
-        targets: list[_RailTarget] = []
+        targets: list[RailSnapTarget] = []
         span = grid.guide_span
         if abs(self._direction.x()) > _PARALLEL_EPSILON:
             coordinate = (
@@ -179,7 +183,7 @@ class RailSnapResolver:
             target = self._point_at_x(coordinate)
             if target is not None:
                 targets.append(
-                    _RailTarget(
+                    RailSnapTarget(
                         target,
                         f"grid:rail:x:{coordinate:.12g}",
                         grid.priority,
@@ -195,7 +199,7 @@ class RailSnapResolver:
             target = self._point_at_y(coordinate)
             if target is not None:
                 targets.append(
-                    _RailTarget(
+                    RailSnapTarget(
                         target,
                         f"grid:rail:y:{coordinate:.12g}",
                         grid.priority,
@@ -224,7 +228,7 @@ class RailSnapResolver:
         )
 
     @staticmethod
-    def _result(target: _RailTarget) -> RailSnapResult:
+    def _result(target: RailSnapTarget) -> RailSnapResult:
         """Build presentation feedback for one applied target."""
         return RailSnapResult(
             target.point,

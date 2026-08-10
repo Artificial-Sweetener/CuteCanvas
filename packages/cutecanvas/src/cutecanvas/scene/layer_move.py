@@ -149,10 +149,12 @@ class SceneLayerMoveController:
     def update(self, scene_point: QPointF) -> bool:
         """Publish one coherent preview for the current translation delta."""
         session = self._session
-        if session is None:
+        scene = self._scene_provider()
+        if scene is None or session is None or scene.scene_id != session.scene_id:
             return False
         delta = scene_point - session.origin
         return self._preview.set_many(
+            scene,
             tuple(
                 LayerMappingPreview(
                     session.scene_id,
@@ -163,7 +165,7 @@ class SceneLayerMoveController:
                     ),
                 )
                 for target in session.targets
-            )
+            ),
         )
 
     def finish(self, scene_point: QPointF) -> SceneMutationResult | None:

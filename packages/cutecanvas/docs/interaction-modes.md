@@ -41,6 +41,8 @@ canvas.editor.tools.activate(canvas.CONTROL_MODE_TRANSFORM)
 print(canvas.editor.tools.active)
 ```
 
+## Resize Shared Edges
+
 Use `canvas.CONTROL_MODE_SHARED_EDGE_RESIZE` to drag the coincident straight
 manipulation edge shared by movable layers. CuteCanvas infers maximal continuous
 groups from current geometry, including T junctions and rectangular grids,
@@ -53,10 +55,16 @@ and midpoint handles. Drag a horizontal or vertical midpoint to move the
 complete group edge in parallel. Angled midpoints remain visible but disabled;
 their preserved parallel-translation geometry is not exposed. An eligible
 endpoint remains movable at any angle and follows the common straight rail of
-the participants that own that endpoint. When an endpoint lies inside one
-participant's longer side, CuteCanvas inserts the matching boundary vertex
-without changing the layer's appearance. Eligible endpoints use the Transform
-corner cursor. Disabled handles use the native forbidden cursor.
+the participants that own that endpoint. Endpoint movement snaps the shared edge
+to horizontal, vertical, and 45-degree orientations and to stationary edges it
+would extend continuously. When an endpoint lies inside one participant's
+longer side, CuteCanvas inserts the matching boundary vertex without changing
+the layer's appearance. Joining one endpoint to a participant corner retains
+the source cage required to move the opposite endpoint later. Eligible endpoints
+use the Transform corner cursor. Disabled handles use the native forbidden
+cursor.
+
+## Edit Polygon Selections and Masks
 
 Polygon Select and Polygon Mask place deliberate points rather than sampling a
 freehand path. Before closing the polygon, drag any placed point to revise it,
