@@ -224,7 +224,7 @@ path = "packages/cutecanvas/src/cutecanvas/runtime/lifecycle.py"
 kind = "remediation"
 justification = "Component construction, feature-manager attachment, viewport delegation, cursor, diagnostics, and cache lifecycles remain mixed pending feature lifecycle extraction."
 review_by = 2026-12-15
-max_lines = 745
+max_lines = 744
 next_limit = 540
 debt = "CUTECANVAS-ARCH-009"
 

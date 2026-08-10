@@ -23,7 +23,7 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 from cutecanvas import PixelSelectionMode, RasterExtentPolicy
-from cutecanvas.masks.stroke_constraints import PathStrokeConstraint
+from cutecanvas.coverage.spatial_constraint import PathCoverageConstraint
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QPainterPath
@@ -383,7 +383,7 @@ def test_large_canvas_aperture_samples_only_the_requested_dirty_region() -> None
     """A 16K canvas constraint must never materialize a 16K coverage image."""
     path = QPainterPath()
     path.addRect(0.0, 0.0, 16_384.0, 16_384.0)
-    constraint = PathStrokeConstraint(path)
+    constraint = PathCoverageConstraint(path)
 
     sampled = constraint.sample(RasterBounds(8_000, 8_000, 64, 48), stride=2)
 

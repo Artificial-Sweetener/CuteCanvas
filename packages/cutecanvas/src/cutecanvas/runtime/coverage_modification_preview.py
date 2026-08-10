@@ -22,7 +22,6 @@ import math
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
 
 from qpane.sdk.execution import (
     ExecutionHandle,
@@ -42,69 +41,16 @@ from cutecanvas.coverage import (
     CoverageSnapshot,
     build_coverage_edge_modification,
 )
+from cutecanvas.coverage.spatial_constraint import coverage_change_respects_constraint
 from cutecanvas.types import LayerEdgeOperation
 
+from .coverage_modification_contracts import (
+    CoverageModificationPreviewResult,
+    CoverageModificationPreviewTarget,
+)
 from .latest_requests import DocumentLatestRequestRegistry
 
 logger = logging.getLogger(__name__)
-
-
-class CoverageModificationPreviewTarget(Protocol):
-    """Adapt one authoritative coverage owner to the shared preview lifecycle."""
-
-    @property
-    def coverage(self) -> CoverageSnapshot:
-        """Return the immutable coverage captured when the session began."""
-        ...
-
-    def build_request(
-        self,
-        operation: LayerEdgeOperation,
-        radius: float,
-    ) -> CoverageEdgeModificationRequest:
-        """Build one detached transformation request from captured coverage."""
-        ...
-
-    def is_current(self) -> bool:
-        """Return whether preview products may still target this owner."""
-        ...
-
-    def present(
-        self,
-        session_id: uuid.UUID,
-        generation: int,
-        product: CoverageSnapshot | None,
-    ) -> bool:
-        """Publish one transient product without recording durable history."""
-        ...
-
-    def commit(self, product: CoverageSnapshot | None) -> bool:
-        """Commit the current product once through authoritative history."""
-        ...
-
-    def discard(self, session_id: uuid.UUID) -> None:
-        """Discard transient presentation and restore captured state when needed."""
-        ...
-
-    def release(self, session_id: uuid.UUID) -> None:
-        """Release transient presentation after a successful commit."""
-        ...
-
-    def diagnostic_context(self) -> str:
-        """Return concise target context for failure logs."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class CoverageModificationPreviewResult:
-    """Describe one terminal preview request independently of its target family."""
-
-    request_id: uuid.UUID
-    session_id: uuid.UUID
-    operation: LayerEdgeOperation
-    succeeded: bool
-    message: str
-    target: CoverageModificationPreviewTarget
 
 
 @dataclass(slots=True)
@@ -303,6 +249,13 @@ class CoverageModificationPreviewCoordinator:
         if not session.target.is_current():
             self._fail(session, "coverage target changed during filtering")
             return
+        if not coverage_change_respects_constraint(
+            session.target.coverage,
+            product,
+            session.target.spatial_constraint,
+        ):
+            self._fail(session, "coverage product escaped spatial constraint")
+            return
         if not session.target.present(
             session_id,
             session.generation,
@@ -452,6 +405,4 @@ def _validated_radius(operation: LayerEdgeOperation, radius: float) -> float:
 
 __all__ = [
     "CoverageModificationPreviewCoordinator",
-    "CoverageModificationPreviewResult",
-    "CoverageModificationPreviewTarget",
 ]

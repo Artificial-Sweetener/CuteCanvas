@@ -39,11 +39,11 @@ from qpane.sdk.execution import (
 )
 from qpane.sdk.scene import RasterBounds
 
+from ..coverage.spatial_constraint import CoverageSpatialConstraint
 from ..painting import BrushCompositor, BrushStrokeSegment
 from .mask import MaskAssetStore, MaskLayer
 from .mask_controller import MaskController
 from .mask_diagnostics import MaskStrokeDiagnostics
-from .stroke_constraints import MaskStrokeConstraint
 from .stroke_models import (
     MaskStrokeJobResult,
     MaskStrokeJobSpec,
@@ -86,7 +86,7 @@ class MaskStrokePipeline:
         update_region: Callable[..., None],
         diagnostics: MaskStrokeDiagnostics | None = None,
         selection_constraint: (
-            Callable[[UUID], MaskStrokeConstraint | None] | None
+            Callable[[UUID], CoverageSpatialConstraint | None] | None
         ) = None,
         compositor: BrushCompositor | None = None,
     ) -> None:
@@ -130,7 +130,7 @@ class MaskStrokePipeline:
 
     def set_selection_constraint(
         self,
-        provider: Callable[[UUID], MaskStrokeConstraint | None] | None,
+        provider: Callable[[UUID], CoverageSpatialConstraint | None] | None,
     ) -> None:
         """Replace the composition-owned mask stroke constraint provider."""
         self._selection_constraint = provider or (lambda _mask_id: None)
@@ -755,7 +755,7 @@ class MaskStrokePipeline:
     @staticmethod
     def _constraint_storage_region(
         mask_layer: MaskLayer,
-        constraint: MaskStrokeConstraint,
+        constraint: CoverageSpatialConstraint,
         storage_rect: QRect,
         stride: int,
     ) -> np.ndarray:

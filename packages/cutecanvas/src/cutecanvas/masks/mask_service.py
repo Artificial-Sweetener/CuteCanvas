@@ -35,6 +35,7 @@ from cutecanvas.coverage import CoverageItem, CoverageSnapshot
 from ..composition.layers import CompositionLayerInstance
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
+from ..coverage.spatial_constraint import CoverageSpatialConstraint
 from ..runtime.latest_requests import DocumentLatestRequestRegistry
 from ..types import DiagnosticsDomain
 from .activation import MaskActivationController
@@ -54,7 +55,6 @@ from .render_coordination import (
 )
 from .spatial_paint import MaskSpatialPaintNormalizer
 from .spatial_paint_history import MaskSpatialPaintHistory
-from .stroke_constraints import MaskStrokeConstraint
 from .stroke_interactions import MaskStrokeInteractionCoordinator
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 
@@ -346,7 +346,7 @@ class MaskService:
 
     def setStrokeConstraintProvider(
         self,
-        provider: Callable[[uuid.UUID], MaskStrokeConstraint | None] | None,
+        provider: Callable[[uuid.UUID], CoverageSpatialConstraint | None] | None,
     ) -> None:
         """Bind composition selection coverage used to constrain mask strokes."""
         self._stroke_pipeline.set_selection_constraint(provider)

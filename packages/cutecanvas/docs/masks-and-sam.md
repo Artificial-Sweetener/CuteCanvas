@@ -131,7 +131,10 @@ canvas.featherLayerEdges(mask.scene_id, mask.layer_id, 6.5)
 `CuteCanvas.featherLayerEdges` route through the adapter for the addressed
 layer kind. Coverage masks are supported directly. The mask-resource
 conveniences are `CuteCanvas.expandMaskEdges`, `CuteCanvas.contractMaskEdges`,
-and `CuteCanvas.featherMaskEdges`.
+and `CuteCanvas.featherMaskEdges`. Every preview and committed change is clipped
+to the composition canvas aperture in the layer's source space, including for
+expandable raster storage. Existing hidden source coverage outside the canvas is
+preserved unchanged.
 
 Interactive controls can keep one immutable base revision while values change:
 

@@ -34,14 +34,14 @@ from qpane.sdk.scene import (
 )
 
 from ..coverage import CoverageSnapshot
+from ..coverage.spatial_constraint import (
+    CoverageSpatialConstraint,
+    PathCoverageConstraint,
+    SnapshotCoverageConstraint,
+)
 from ..resources import ProjectResourceReference
 from ..selection import LayerCoverageProjector, PixelSelectionService
 from ..types import RasterExtentPolicy
-from .stroke_constraints import (
-    CoverageStrokeConstraint,
-    MaskStrokeConstraint,
-    PathStrokeConstraint,
-)
 
 
 class ActiveMaskCanvasAperture:
@@ -62,7 +62,10 @@ class ActiveMaskCanvasAperture:
         self._path_key: tuple[object, ...] | None = None
         self._source_path: QPainterPath | None = None
 
-    def stroke_constraint(self, mask_id: uuid.UUID) -> MaskStrokeConstraint | None:
+    def stroke_constraint(
+        self,
+        mask_id: uuid.UUID,
+    ) -> CoverageSpatialConstraint | None:
         """Project the canvas and optional pixel selection into mask-local space."""
         resolved = self._resolved_layer(mask_id)
         if resolved is None:
@@ -76,14 +79,22 @@ class ActiveMaskCanvasAperture:
         if selection is not None:
             clipped = selection.clipped_to(bounds)
             if clipped is None:
-                return CoverageStrokeConstraint(_empty_constraint())
+                return SnapshotCoverageConstraint(_empty_constraint())
             projected = self._coverage_projector.project_to_layer(
                 clipped,
                 transform,
             )
-            return None if projected is None else CoverageStrokeConstraint(projected)
+            return None if projected is None else SnapshotCoverageConstraint(projected)
+        return self.coverage_constraint(mask_id)
+
+    def coverage_constraint(
+        self,
+        mask_id: uuid.UUID | None = None,
+    ) -> CoverageSpatialConstraint | None:
+        """Return the exact canvas aperture for coverage-changing operations."""
+
         path = self.coverage_aperture_path(mask_id)
-        return None if path is None else PathStrokeConstraint(path)
+        return None if path is None else PathCoverageConstraint(path)
 
     def coverage_aperture_path(
         self,

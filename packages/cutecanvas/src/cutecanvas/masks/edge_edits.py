@@ -22,17 +22,22 @@ from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.editor.layer_edge_targets import LayerEdgeTargetSnapshot
 from cutecanvas.resources import ProjectResourceReference
-from cutecanvas.types import RasterExtentPolicy
 
+from .canvas_aperture import ActiveMaskCanvasAperture
 from .mask_service import MaskService
 
 
 class MaskLayerEdgeEditOwner:
     """Commit generic coverage products through mask transaction history."""
 
-    def __init__(self, masks: MaskService) -> None:
-        """Bind the authoritative mask domain service."""
+    def __init__(
+        self,
+        masks: MaskService,
+        canvas_aperture: ActiveMaskCanvasAperture,
+    ) -> None:
+        """Bind authoritative mask storage and canvas aperture owners."""
         self._masks = masks
+        self._canvas_aperture = canvas_aperture
 
     def capture(
         self,
@@ -49,18 +54,18 @@ class MaskLayerEdgeEditOwner:
         coverage = mask.coverage.snapshot()
         if coverage.bounds is None:
             return None
-        constraint = (
-            coverage.bounds
-            if coverage.extent_policy is RasterExtentPolicy.FIXED
-            else None
+        spatial_constraint = self._canvas_aperture.coverage_constraint(
+            source.resource_id
         )
+        if spatial_constraint is None:
+            return None
         return LayerEdgeTargetSnapshot(
-            scene.scene_id,
-            layer.layer_id,
-            source.resource_id,
-            mask.coverage.revision,
-            coverage,
-            constraint,
+            scene_id=scene.scene_id,
+            layer_id=layer.layer_id,
+            source_id=source.resource_id,
+            source_revision=mask.coverage.revision,
+            coverage=coverage,
+            spatial_constraint=spatial_constraint,
         )
 
     def is_current(self, target: LayerEdgeTargetSnapshot) -> bool:

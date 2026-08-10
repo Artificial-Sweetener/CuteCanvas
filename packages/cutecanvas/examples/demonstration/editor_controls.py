@@ -190,6 +190,14 @@ class EditorControls(QObject):
         self.feather_mask_action = self._action(
             "Feather Complete Mask...", self._feather_mask
         )
+        for action in (
+            self.expand_mask_action,
+            self.contract_mask_action,
+            self.feather_mask_action,
+        ):
+            action.setStatusTip(
+                "Modify mask coverage inside the composition canvas aperture."
+            )
         self.mask_opacity_action = self._action(
             "Set Mask Visual Opacity...", self._set_mask_opacity
         )

@@ -433,11 +433,10 @@ class CanvasLifecycleMixin:
 
         if self._layer_edge_targets is None:
             raise RuntimeError("layer edge target registry is unavailable")
-        self._layer_edge_targets.register(MaskLayerEdgeEditOwner(service))
+        aperture = self.activeMaskCanvasAperture()
+        self._layer_edge_targets.register(MaskLayerEdgeEditOwner(service, aperture))
         self.destroyed.connect(lambda _obj=None, attached=service: attached.shutdown())
-        service.setStrokeConstraintProvider(
-            self.activeMaskCanvasAperture().stroke_constraint
-        )
+        service.setStrokeConstraintProvider(aperture.stroke_constraint)
         factory = MaskLayerDescriptorFactory(
             assets=service.assets,
             renders=service.controller.renders,

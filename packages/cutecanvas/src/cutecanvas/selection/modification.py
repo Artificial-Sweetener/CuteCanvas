@@ -28,6 +28,7 @@ from cutecanvas.coverage import (
     CoverageSnapshot,
     build_coverage_edge_modification,
 )
+from cutecanvas.coverage.spatial_constraint import BoundsCoverageConstraint
 from cutecanvas.types import LayerEdgeOperation
 
 
@@ -66,10 +67,10 @@ def build_pixel_selection_modification(
     """Return one detached modified selection without mutating document state."""
     return build_coverage_edge_modification(
         CoverageEdgeModificationRequest(
-            request.coverage,
-            request.operation,
-            request.radius,
-            request.canvas_bounds,
+            coverage=request.coverage,
+            operation=request.operation,
+            radius=request.radius,
+            spatial_constraint=BoundsCoverageConstraint(request.canvas_bounds),
         ),
         cancelled=cancelled,
     )

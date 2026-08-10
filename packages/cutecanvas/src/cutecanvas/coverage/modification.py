@@ -27,17 +27,21 @@ from qpane.sdk.scene import RasterBounds
 from cutecanvas.types import LayerEdgeOperation
 
 from .filters import dilate_coverage, erode_coverage, feather_coverage
+from .spatial_constraint import (
+    CoverageSpatialConstraint,
+    constrain_coverage_change,
+)
 from .surface import CoverageSnapshot
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CoverageEdgeModificationRequest:
     """Describe one detached coverage transformation in source coordinates."""
 
     coverage: CoverageSnapshot
     operation: LayerEdgeOperation
     radius: float
-    constraint: RasterBounds | None = None
+    spatial_constraint: CoverageSpatialConstraint
 
     def __post_init__(self) -> None:
         """Validate immutable geometry and operation-specific radius rules."""
@@ -49,10 +53,11 @@ class CoverageEdgeModificationRequest:
             raise ValueError("coverage radius must be finite and non-negative")
         if operation is not LayerEdgeOperation.FEATHER and int(radius) != radius:
             raise ValueError("expand and contract radii must use whole pixels")
-        if self.constraint is not None and (
-            self.constraint.width <= 0 or self.constraint.height <= 0
-        ):
-            raise ValueError("coverage constraint must have positive dimensions")
+        bounds = self.spatial_constraint.bounds
+        if bounds is None or bounds.width <= 0 or bounds.height <= 0:
+            raise ValueError(
+                "coverage modification requires a finite spatial constraint"
+            )
         object.__setattr__(self, "operation", operation)
         object.__setattr__(self, "radius", radius)
 
@@ -65,22 +70,21 @@ def build_coverage_edge_modification(
     """Return detached modified coverage without mutating its source layer."""
     source_bounds = request.coverage.bounds
     assert source_bounds is not None
-    clipped_source = _intersection(source_bounds, request.constraint)
-    if clipped_source is None:
-        return None
+    constraint_bounds = request.spatial_constraint.bounds
+    assert constraint_bounds is not None
     margin = (
         math.ceil(request.radius * 3.0)
         if request.operation is LayerEdgeOperation.FEATHER
         else int(request.radius)
     )
     candidate = (
-        clipped_source
+        source_bounds
         if request.operation is LayerEdgeOperation.CONTRACT
-        else _padded_bounds(clipped_source, margin)
+        else _padded_bounds(source_bounds, margin)
     )
-    output_bounds = _intersection(candidate, request.constraint)
+    output_bounds = candidate.intersection(constraint_bounds)
     if output_bounds is None:
-        return None
+        return request.coverage
     projected = _project_coverage(request.coverage, output_bounds)
     if request.operation is LayerEdgeOperation.EXPAND:
         pixels = dilate_coverage(projected, int(request.radius), cancelled=cancelled)
@@ -88,21 +92,18 @@ def build_coverage_edge_modification(
         pixels = erode_coverage(projected, int(request.radius), cancelled=cancelled)
     else:
         pixels = feather_coverage(projected, request.radius, cancelled=cancelled)
-    return _trim_coverage(
+    raw_product = _trim_coverage(
         CoverageSnapshot._adopt_detached(
             output_bounds,
             request.coverage.extent_policy,
             pixels,
         )
     )
-
-
-def _intersection(
-    bounds: RasterBounds,
-    constraint: RasterBounds | None,
-) -> RasterBounds | None:
-    """Apply an optional finite output constraint."""
-    return bounds if constraint is None else bounds.intersection(constraint)
+    return constrain_coverage_change(
+        request.coverage,
+        raw_product,
+        request.spatial_constraint,
+    )
 
 
 def _padded_bounds(bounds: RasterBounds, margin: int) -> RasterBounds:

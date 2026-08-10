@@ -1011,7 +1011,9 @@ class CuteCanvas(QWidget):
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
-    ) -> uuid.UUID | None: ...
+    ) -> uuid.UUID | None:
+        """Begin a preview whose coverage changes stay inside the canvas aperture."""
+
     def updateLayerEdgePreview(
         self,
         session_id: uuid.UUID,
@@ -1025,19 +1027,25 @@ class CuteCanvas(QWidget):
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         pixels: int,
-    ) -> uuid.UUID | None: ...
+    ) -> uuid.UUID | None:
+        """Expand layer coverage only inside the canvas aperture."""
+
     def contractLayerEdges(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         pixels: int,
-    ) -> uuid.UUID | None: ...
+    ) -> uuid.UUID | None:
+        """Contract layer coverage only inside the canvas aperture."""
+
     def featherLayerEdges(
         self,
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
         radius: float,
-    ) -> uuid.UUID | None: ...
+    ) -> uuid.UUID | None:
+        """Feather layer coverage only inside the canvas aperture."""
+
     def setSelectedLayers(
         self,
         scene_id: uuid.UUID,

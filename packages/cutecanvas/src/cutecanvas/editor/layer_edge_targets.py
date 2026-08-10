@@ -21,12 +21,13 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
-from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
+from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.coverage.spatial_constraint import CoverageSpatialConstraint
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class LayerEdgeTargetSnapshot:
     """Capture immutable coverage and adoption guards for one layer target."""
 
@@ -35,7 +36,7 @@ class LayerEdgeTargetSnapshot:
     source_id: uuid.UUID
     source_revision: object
     coverage: CoverageSnapshot
-    constraint: RasterBounds | None = None
+    spatial_constraint: CoverageSpatialConstraint
 
 
 class LayerEdgeEditOwner(Protocol):

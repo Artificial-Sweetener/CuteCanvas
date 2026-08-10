@@ -26,9 +26,9 @@ from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.coverage import WritableCoverageRegion
 
+from ..coverage.spatial_constraint import CoverageSpatialConstraint
 from ..painting import BrushDabEngine, BrushDabRegionPlanner, BrushStrokeSegment
 from .mask import MaskLayer
-from .stroke_constraints import MaskStrokeConstraint
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +60,7 @@ class MaskStrokeRegionPlanner:
         mask_id: uuid.UUID,
         layer: MaskLayer,
         segment: BrushStrokeSegment,
-        constraint: MaskStrokeConstraint | None = None,
+        constraint: CoverageSpatialConstraint | None = None,
     ) -> PreparedMaskStrokeRegion | None:
         """Return storage-space geometry accepted for one semantic segment."""
         requested = self._requested_bounds(segment)

@@ -96,7 +96,7 @@ class LayerApiMixin:
         scene_id: uuid.UUID,
         layer_id: uuid.UUID,
     ) -> uuid.UUID | None:
-        """Begin a nonmodal edge preview from the layer's current revision."""
+        """Begin a canvas-bounded edge preview from the layer's current revision."""
         _validate_layer_ids(scene_id, layer_id)
         return self.layerEdgeModificationCoordinator().begin(
             self._resolve_public_scene_id(scene_id),
@@ -138,7 +138,7 @@ class LayerApiMixin:
         layer_id: uuid.UUID,
         pixels: int,
     ) -> uuid.UUID | None:
-        """Expand a supported layer as one asynchronous undoable edit."""
+        """Expand coverage inside the canvas as one asynchronous undoable edit."""
         return self._request_layer_edge_operation(
             scene_id,
             layer_id,
@@ -152,7 +152,7 @@ class LayerApiMixin:
         layer_id: uuid.UUID,
         pixels: int,
     ) -> uuid.UUID | None:
-        """Contract a supported layer as one asynchronous undoable edit."""
+        """Contract coverage inside the canvas as one asynchronous undoable edit."""
         return self._request_layer_edge_operation(
             scene_id,
             layer_id,
@@ -166,7 +166,7 @@ class LayerApiMixin:
         layer_id: uuid.UUID,
         radius: float,
     ) -> uuid.UUID | None:
-        """Feather a supported layer as one asynchronous undoable edit."""
+        """Feather coverage inside the canvas as one asynchronous undoable edit."""
         return self._request_layer_edge_operation(
             scene_id,
             layer_id,

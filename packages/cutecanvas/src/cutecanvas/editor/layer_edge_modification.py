@@ -25,9 +25,12 @@ from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.scene import SceneDescriptor
 
 from cutecanvas.coverage import CoverageEdgeModificationRequest, CoverageSnapshot
+from cutecanvas.coverage.spatial_constraint import CoverageSpatialConstraint
+from cutecanvas.runtime.coverage_modification_contracts import (
+    CoverageModificationPreviewResult,
+)
 from cutecanvas.runtime.coverage_modification_preview import (
     CoverageModificationPreviewCoordinator,
-    CoverageModificationPreviewResult,
 )
 from cutecanvas.runtime.latest_requests import DocumentLatestRequestRegistry
 from cutecanvas.scene.layer_edge_preview import LayerEdgePreviewStore
@@ -50,6 +53,12 @@ class _LayerEdgePreviewTarget:
 
         return self.resolved.snapshot.coverage
 
+    @property
+    def spatial_constraint(self) -> CoverageSpatialConstraint:
+        """Return the mandatory aperture captured with the layer revision."""
+
+        return self.resolved.snapshot.spatial_constraint
+
     def build_request(
         self,
         operation: LayerEdgeOperation,
@@ -59,10 +68,10 @@ class _LayerEdgePreviewTarget:
 
         snapshot = self.resolved.snapshot
         return CoverageEdgeModificationRequest(
-            snapshot.coverage,
-            operation,
-            radius,
-            snapshot.constraint,
+            coverage=snapshot.coverage,
+            operation=operation,
+            radius=radius,
+            spatial_constraint=snapshot.spatial_constraint,
         )
 
     def is_current(self) -> bool:
@@ -240,6 +249,9 @@ def _layer_message(message: str) -> str:
     return {
         "coverage target changed during filtering": "layer changed during filtering",
         "coverage target rejected preview product": "layer rejected preview product",
+        "coverage product escaped spatial constraint": (
+            "layer product escaped canvas aperture"
+        ),
         "coverage modification produced no change": (
             "layer edge modification produced no change"
         ),

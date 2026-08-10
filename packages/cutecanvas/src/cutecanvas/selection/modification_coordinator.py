@@ -29,9 +29,15 @@ from cutecanvas.coverage import (
     CoverageEdgeModificationRequest,
     CoverageSnapshot,
 )
+from cutecanvas.coverage.spatial_constraint import (
+    BoundsCoverageConstraint,
+    CoverageSpatialConstraint,
+)
+from cutecanvas.runtime.coverage_modification_contracts import (
+    CoverageModificationPreviewResult,
+)
 from cutecanvas.runtime.coverage_modification_preview import (
     CoverageModificationPreviewCoordinator,
-    CoverageModificationPreviewResult,
 )
 from cutecanvas.runtime.latest_requests import DocumentLatestRequestRegistry
 from cutecanvas.scene.canvas_bounds import scene_raster_bounds
@@ -58,6 +64,12 @@ class _PixelSelectionPreviewTarget:
 
         return self.base_coverage
 
+    @property
+    def spatial_constraint(self) -> CoverageSpatialConstraint:
+        """Return the finite canvas aperture for this selection session."""
+
+        return BoundsCoverageConstraint(self.canvas_bounds)
+
     def build_request(
         self,
         operation: LayerEdgeOperation,
@@ -66,10 +78,10 @@ class _PixelSelectionPreviewTarget:
         """Build one canvas-constrained edit from the original selection."""
 
         return CoverageEdgeModificationRequest(
-            self.base_coverage,
-            operation,
-            radius,
-            self.canvas_bounds,
+            coverage=self.base_coverage,
+            operation=operation,
+            radius=radius,
+            spatial_constraint=self.spatial_constraint,
         )
 
     def is_current(self) -> bool:
