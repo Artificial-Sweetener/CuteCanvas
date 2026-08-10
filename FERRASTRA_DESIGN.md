@@ -1,10 +1,9 @@
 # Ferrastra Native Graphics Engine
 
-- **Status:** Proposed implementation charter
-- **Intended repository location:** `/FERRASTRA_DESIGN.md`
-- **Applies to:** the QPane/CuteCanvas monorepo architecture represented by the August 2, 2026 source snapshot
+- **Status:** Normative implementation charter
+- **Applies to:** Ferrastra and its integration boundaries with QPane and CuteCanvas
 - **Audience:** engineers implementing Ferrastra, engineers migrating QPane or CuteCanvas behavior into Ferrastra, reviewers, and maintainers
-- **License intent:** GPL-3.0-or-later, unless the project adopts a different explicit policy before the first published artifact
+- **License:** GPL-3.0-or-later
 - **Minimum release targets:** Windows x64 (`x86_64-pc-windows-msvc`), Linux x64 (`x86_64-unknown-linux-gnu`), and Apple Silicon macOS (`aarch64-apple-darwin`)
 - **Authoring-language charter:** `RCANDY_DESIGN.md`
 
@@ -2202,62 +2201,56 @@ and native runtime work never waits on or depends on the parser.
 
 ---
 
-## 34. First implementation work packages
+## 34. Initial executable work packages
 
-The team can begin with the following ordered pull requests.
+Stage 0 establishes the workspace, architecture charter, verification, and
+enforced ownership boundaries. Native behavior begins with these
+dependency-ordered work packages:
 
-1. **`docs(ferrastra): adopt engine architecture charter`**
-   Add this file and ownership summaries to `AGENTS.md`.
-
-2. **`build(ferrastra): establish Rust workspace and verification`**
-   Add the initial crates, toolchain policy, formatting, Clippy, tests, license headers, and CI.
-
-3. **`test(architecture): enforce Ferrastra dependency and module boundaries`**
-   Add the architecture checker, invalid fixtures, line-count/waiver mechanism, and adapter-only import rules.
-
-4. **`feat(ferrastra-core): define products, regions, semantics, and operation contracts`**
+1. **`feat(ferrastra-core): define products, regions, semantics, and operation contracts`**
    Include typed values, units, descriptor exposure, diagnostics, and analysis;
    no kernel yet.
 
-5. **`feat(ferrastra-graph): add immutable typed graph and compiler baseline`**
+2. **`feat(ferrastra-graph): add immutable typed graph and compiler baseline`**
    Add canonical serialization, content identity, transactional patches, and
    unknown-record preservation; source and identity nodes only.
 
-6. **`feat(ferrastra-runtime): add regional evaluation, damage, identity, and trace`**
+3. **`feat(ferrastra-runtime): add regional evaluation, damage, identity, and trace`**
    No QPane integration yet.
 
-7. **`feat(ferrastra-raster): implement Lanczos3 scalar oracle`**
+4. **`feat(ferrastra-raster): implement Lanczos3 scalar oracle`**
    Full conformance tests before optimization.
 
-8. **`perf(ferrastra-raster): add optimized Lanczos3 CPU backend`**
+5. **`perf(ferrastra-raster): add optimized Lanczos3 CPU backend`**
    Same semantic ID; output must remain within the exact contract.
 
-9. **`feat(ferrastra-python): expose graph, source, cancellation, and resample contracts`**
+6. **`feat(ferrastra-python): expose graph, source, cancellation, and resample contracts`**
    Prove graph construction parity and add independent wheel and isolated tests.
 
-10. **`feat(qpane): adopt Ferrastra for exact pyramid generation`**
-    Add adapter, migrate every caller, delete the old exact Qt path, and preserve QPane lifecycle tests.
+7. **`feat(qpane): adopt Ferrastra for exact pyramid generation`**
+   Add adapter, migrate every caller, delete the old exact Qt path, and preserve QPane lifecycle tests.
 
-11. **`test(ownership): forbid exact Qt pyramid scaling`**
-    Convert the migration decision into a permanent architecture gate.
+8. **`test(ownership): forbid exact Qt pyramid scaling`**
+   Convert the migration decision into a permanent architecture gate.
 
-12. **`feat(ferrastra-raster): begin adaptive sampler framework`**
-    Use it as the foundation for NoHalo and LoHalo, not as a one-off second resampler.
+9. **`feat(ferrastra-raster): begin adaptive sampler framework`**
+   Use it as the foundation for NoHalo and LoHalo, not as a one-off second resampler.
 
-13. **`test(ferrastra-authoring): prove structured graph authoring workflows`**
-    Exercise catalog discovery, construction, patching, validation, analysis,
-    and preview admission before introducing textual syntax.
+10. **`test(ferrastra-authoring): prove structured graph authoring workflows`**
+   Exercise catalog discovery, construction, patching, validation, analysis,
+   and preview admission before introducing textual syntax.
 
-14. **`feat(ferrastra-rcandy): compile minimal typed effects`**
-    Add the crate only with executable parsing, resolution, lowering, source-map,
-    diagnostic, and formatting responsibilities; expose it through
-    `ferrastra.rcandy` with cross-frontend conformance.
+11. **`feat(ferrastra-rcandy): compile minimal typed effects`**
+   Add the crate only with executable parsing, resolution, lowering, source-map,
+   diagnostic, and formatting responsibilities; expose it through
+   `ferrastra.rcandy` with cross-frontend conformance.
 
-Do not begin broad operation migration before PRs 1–6 establish the architectural baseline.
+Broad operation migration begins only after the graph and runtime baseline is
+executable and verified.
 
 ---
 
-## 35. Feature-complete checklist for the original specification
+## 35. Feature-complete checklist
 
 Ferrastra is **not feature complete** until every required item below is satisfied. This is intentionally stricter than a first usable release.
 
@@ -2268,7 +2261,7 @@ Ferrastra is **not feature complete** until every required item below is satisfi
 - [ ] CuteCanvas depends on QPane and Ferrastra only through supported public contracts.
 - [ ] QPane depends on Ferrastra only through its focused adapter.
 - [ ] Crate and Python dependency directions are mechanically enforced.
-- [ ] Mixed-responsibility production files are absent or have approved temporary waivers with expiry.
+- [ ] Mixed-responsibility production files are absent; structural waivers apply only to justified cohesive owners.
 - [ ] Canonical numerical implementations have one owner.
 - [ ] Isolated wheels and crates pass tests outside the monorepo source tree.
 
@@ -2519,8 +2512,8 @@ If any answer is missing, implementation has not started at the correct level.
 
 ## 40. Final architectural statement
 
-Place the following summary in Ferrastra’s eventual `ARCHITECTURE.md` and package guidance:
+The repository architecture and package guidance use this permanent summary:
 
 > Ferrastra is a CPU-first, typed, spatial, revision-aware graphics product engine. It evaluates immutable raster, coverage, vector, mixed graphic, and analysis products through a demand-driven DAG. Every operation declares its semantic identity, typed products, backward input demand, forward damage, numerical behavior, memory needs, cancellation behavior, and quality tiers. Ferrastra contains no Qt, document, tool, undo, or presentation semantics. CuteCanvas owns authoring and history. QPane owns viewport demand and Qt presentation. Stateful tools use transactional native sessions that commit new source revisions; all derived effects remain nondestructive graph products. Exact results are immutable, cacheable, tile-equivalent, atomically published, explainable, and reproducible under their documented contract.
 
-That is the system the team is authorized to build.
+This boundary remains authoritative throughout implementation and migration.
