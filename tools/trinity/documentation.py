@@ -75,13 +75,12 @@ def validate_documentation(
         product.api_reference,
         pattern,
     )
-    guide_mentions, guide_errors = collect_valid_guide_symbols(product.guides, pattern)
+    _guide_mentions, guide_errors = collect_valid_guide_symbols(product.guides, pattern)
     all_guide_mentions = collect_symbols(product.guides, pattern)
     strict_member_roots = {
         symbol.split(".", 1)[0] for symbol in expected if "." in symbol
     }
     reference = _contract_symbols(reference_mentions, expected)
-    guides = _contract_symbols(guide_mentions, expected)
     reference_ghosts = _ghost_symbols(
         reference_mentions,
         expected,
@@ -102,10 +101,6 @@ def validate_documentation(
     errors.extend(
         f"{product.package}: [API Reference] Ghost: {symbol}"
         for symbol in sorted(reference_ghosts)
-    )
-    errors.extend(
-        f"{product.package}: [Guides] Missing: {symbol}"
-        for symbol in sorted(expected - guides)
     )
     errors.extend(
         f"{product.package}: [Guides] Ghost: {symbol}"

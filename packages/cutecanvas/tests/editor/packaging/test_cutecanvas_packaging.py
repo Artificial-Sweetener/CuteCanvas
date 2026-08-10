@@ -62,12 +62,13 @@ def test_cutecanvas_wheel_discovers_only_cutecanvas_packages() -> None:
 def test_cutecanvas_declares_a_bounded_qpane_dependency() -> None:
     """State the compatible QPane release series explicitly."""
     dependencies = _metadata()["project"]["dependencies"]
-    assert "qpane>=0.1.0,<0.2.0" in dependencies
+    assert "qpane>=3.0.0,<4.0.0" in dependencies
 
 
 def test_cutecanvas_versions_use_the_cutecanvas_release_tag_namespace() -> None:
     """Version CuteCanvas only from product-prefixed release tags."""
     metadata = _metadata()
+    assert metadata["tool"]["setuptools_scm"]["fallback_version"] == "1.0.0"
     assert metadata["tool"]["setuptools_scm"]["tag"]["regex"] == (
         "^cutecanvas-v(?P<version>.+)$"
     )

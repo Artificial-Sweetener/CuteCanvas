@@ -77,8 +77,8 @@ def test_api_reference_symbol_without_explainer_fails(tmp_path):
     assert any("Missing short explainer" in error for error in errors)
 
 
-def test_missing_guide_symbol_fails_even_when_reference_has_it(tmp_path, monkeypatch):
-    """Guide coverage remains mandatory in addition to API reference coverage."""
+def test_guides_do_not_repeat_the_complete_api_reference(tmp_path, monkeypatch):
+    """Let tutorials teach workflows without becoming duplicate symbol catalogs."""
     del monkeypatch
     product = _product(tmp_path)
     docs = product.docs
@@ -96,11 +96,11 @@ def test_missing_guide_symbol_fails_even_when_reference_has_it(tmp_path, monkeyp
         {"CuteCanvas.foo", "CuteCanvas.bar"},
     )
 
-    assert "example: [Guides] Missing: CuteCanvas.bar" in errors
+    assert errors == []
 
 
-def test_dataclass_field_missing_from_guides_fails(tmp_path, monkeypatch):
-    """Dataclass field symbols must be explained in guides too."""
+def test_reference_fields_do_not_require_guide_inventory(tmp_path, monkeypatch):
+    """Keep exhaustive field coverage in the reference instead of tutorials."""
     del monkeypatch
     product = _product(tmp_path)
     docs = product.docs
@@ -114,7 +114,7 @@ def test_dataclass_field_missing_from_guides_fails(tmp_path, monkeypatch):
         {"SceneSnapshot.title"},
     )
 
-    assert "example: [Guides] Missing: SceneSnapshot.title" in errors
+    assert errors == []
 
 
 def test_reference_section_symbols_do_not_count_for_guides(tmp_path):

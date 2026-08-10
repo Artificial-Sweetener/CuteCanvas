@@ -1,11 +1,20 @@
 <p align="center">
-  <img src="../../assets/logos/logo-black.png#gh-light-mode-only" alt="QPane" width="320">
-  <img src="../../assets/logos/logo-white.png#gh-dark-mode-only" alt="QPane" width="320">
+  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/logo-black.png#gh-light-mode-only" alt="QPane" width="320">
+  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/logo-white.png#gh-dark-mode-only" alt="QPane" width="320">
 </p>
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](../../LICENSE) [![semantic-release](https://img.shields.io/badge/semantic--release-angular-e10079?logo=semantic-release)](https://github.com/semantic-release/semantic-release) [![PyPI](https://img.shields.io/pypi/v/qpane.svg)](https://pypi.org/project/qpane/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/) [![PySide6](https://img.shields.io/badge/PySide6-6.7.3%2B-41CD52?logo=qt&logoColor=white)](https://pyside.org)
+<p align="center">
+  <a href="https://pypi.org/project/qpane/"><img src="https://img.shields.io/pypi/v/qpane?label=PyPI" alt="QPane on PyPI"></a>
+  <a href="https://github.com/Artificial-Sweetener/CuteCanvas/actions/workflows/verify.yml"><img src="https://img.shields.io/github/actions/workflow/status/Artificial-Sweetener/CuteCanvas/verify.yml?branch=main&amp;label=Tests" alt="Test status"></a>
+  <a href="https://pypi.org/project/qpane/"><img src="https://img.shields.io/pypi/dm/qpane?label=downloads" alt="PyPI downloads"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"></a>
+  <a href="https://pyside.org/"><img src="https://img.shields.io/badge/PySide6-6.7.3%2B-41CD52?logo=qt&amp;logoColor=white" alt="PySide6 6.7.3+"></a>
+  <a href="https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later license"></a>
+</p>
 
-**QPane** is a high-performance, **open-source (GPLv3 or later)** image viewer and raster/vector rendering SDK for PySide6.
+**QPane** is a high-performance, **open-source (GPLv3 or later)** image viewer and
+raster/vector rendering SDK for PySide6. It is published as its own package from
+the [CuteCanvas source repository](https://github.com/Artificial-Sweetener/CuteCanvas).
 
 It bridges the gap between a raw `QGraphicsView` and a full rendering engine, providing a drop-in widget for **interactive workflows** involving high-resolution image inspection, dataset curation, scene review, comparison, and custom visualization.
 
@@ -28,7 +37,7 @@ Whether you are building a simple photo viewer or a mission-critical imaging sys
 *   **Native High-DPI Support:** Automatically adapts to different monitor pixel densities and OS zoom levels for crisp rendering anywhere.
 
 <p align="center">
-  <img src="../../assets/videos/zoom.gif" alt="QPane zoom demo" width="852" height="480">
+  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/videos/zoom.gif" alt="QPane zoom demo" width="852" height="480">
 </p>
 <blockquote>
   <p>Deep-zoom navigation on a high-resolution Hubble composite. Note the cursor-anchored zooming and fluid responsiveness even at extreme magnification.</p>
@@ -117,7 +126,7 @@ QPane is designed to be the library I wish I had. It uses a **Facade Pattern** t
 *   **Typed Public SDK:** The facade exposes the complete supported viewer and rendering vocabulary without requiring private-module imports.
 
 <p align="center">
-  <img src="../../assets/videos/diagnostics.gif" alt="QPane diagnostics overlay demo" width="852" height="480">
+  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/videos/diagnostics.gif" alt="QPane diagnostics overlay demo" width="852" height="480">
 </p>
 <blockquote>
   <p>Real-time performance monitoring. The diagnostics overlay visualizes memory usage, render latency, and the active tile grid to help debug resource constraints.</p>
@@ -159,19 +168,19 @@ viewer.sceneChanged.connect(
 
 ## Documentation
 
-*   **[Getting Started](docs/getting-started.md):** A step-by-step guide to your first integration.
-*   **[Configuration](docs/configuration.md):** Learn how to tune the cache, execution policy, and interaction behavior.
-*   **[Configuration Reference](docs/configuration-reference.md):** The complete list of every field and default value.
-*   **[Catalog and Navigation](docs/catalog-and-navigation.md):** Managing image lists and linked views.
-*   **[Rendering SDK](docs/rendering-sdk.md):** Building layered raster/vector scenes, custom sources, hit tests, and effects.
-*   **[Advanced Renderer Integration](docs/integration-sdk.md):** Participating directly in QPane's scene, cache, scheduling, diagnostics, and renderer lifecycle.
-*   **[Viewer Workflows](docs/viewer-workflows.md):** Comparison, placeholders, clipboard operations, and host integration.
-*   **[Host Cookbook](docs/host-cookbook.md):** Connect the complete viewer, catalog, tool, diagnostics, and rendering surface in one application.
-*   **[Interaction Modes](docs/interaction-modes.md):** Switching between pan/zoom, cursor, and custom tools.
-*   **[Touch and Pen Input](docs/touch-and-pen.md):** Native touch navigation, gesture arbitration, and extension input.
-*   **[Diagnostics](docs/diagnostics.md):** How to observe runtime behavior and debug performance.
-*   **[Extensibility](docs/extensibility.md):** Registering custom overlays, cursors, and tools.
-*   **[API Reference](docs/api-reference.md):** A fast, linked index to the QPane facade.
+*   **[Getting Started](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/getting-started.md):** A step-by-step guide to your first integration.
+*   **[Configuration](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/configuration.md):** Learn how to tune the cache, execution policy, and interaction behavior.
+*   **[Configuration Reference](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/configuration-reference.md):** The complete list of every field and default value.
+*   **[Catalog and Navigation](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/catalog-and-navigation.md):** Managing image lists and linked views.
+*   **[Rendering SDK](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/rendering-sdk.md):** Building layered raster/vector scenes, custom sources, hit tests, and effects.
+*   **[Advanced Renderer Integration](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/integration-sdk.md):** Participating directly in QPane's scene, cache, scheduling, diagnostics, and renderer lifecycle.
+*   **[Viewer Workflows](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/viewer-workflows.md):** Comparison, placeholders, clipboard operations, and host integration.
+*   **[Host Cookbook](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/host-cookbook.md):** Connect the complete viewer, catalog, tool, diagnostics, and rendering surface in one application.
+*   **[Interaction Modes](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/interaction-modes.md):** Switching between pan/zoom, cursor, and custom tools.
+*   **[Touch and Pen Input](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/touch-and-pen.md):** Native touch navigation, gesture arbitration, and extension input.
+*   **[Diagnostics](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/diagnostics.md):** How to observe runtime behavior and debug performance.
+*   **[Extensibility](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/extensibility.md):** Registering custom overlays, cursors, and tools.
+*   **[API Reference](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/docs/api-reference.md):** A fast, linked index to the QPane facade.
 
 ## License & Philosophy
 

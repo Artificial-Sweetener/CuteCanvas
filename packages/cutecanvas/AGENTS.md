@@ -5,7 +5,7 @@ proof requirements.
 
 ## Product identity
 
-CuteCanvas is a performant embeddable raster/vector document editor. Its public
+CuteCanvas is a performant embeddable PySide6 graphics editor. Its public
 facade makes document, layer, and tool workflows coherent without concentrating
 behavior in one widget or service graph.
 

@@ -24,6 +24,31 @@ without CuteCanvas installed, then installs CuteCanvas against that exact QPane
 wheel with only declared dependencies. `verify_ferrastra_wheel.py` performs the
 equivalent direct-wheel and source-derived-wheel proof for Ferrastra.
 
+## Product releases
+
+Ferrastra, QPane, and CuteCanvas use independent semantic-version histories.
+Every successful `main` push runs the package-local Python Semantic Release
+configuration for each product. A Ferrastra release cascades through QPane and
+CuteCanvas; a QPane release cascades through CuteCanvas; and a CuteCanvas release
+remains local to CuteCanvas. A downstream product receives at least a patch
+release without replacing a larger semantic change of its own. CI verifies and
+versions the complete waterfall before publishing its tags in dependency order.
+Release CI calls these tools before and after trusted publication:
+
+```powershell
+.venv\Scripts\python tools\check_python_release.py qpane-v3.0.0
+.venv\Scripts\python tools\verify_python_release_artifacts.py qpane-v3.0.0 packages\qpane\dist
+.venv\Scripts\python tools\generate_release_notes.py qpane-v3.0.0 release-notes.md
+```
+
+`check_python_release.py --check-pypi` rejects immutable Python version reuse
+and requires a compatible public QPane release before CuteCanvas publication.
+`verify_python_release_artifacts.py` checks wheel and source-distribution names,
+versions, dependencies, repository metadata, Markdown portability, and product
+contents. `generate_release_notes.py` selects user-facing Conventional Commits
+that touch the released product since its preceding product tag. QPane's first
+product-prefixed release uses the legacy `v2.1.1` tag as its comparison base.
+
 ## Architecture governance
 
 `check_architecture.py` validates product dependency direction, protected
@@ -59,8 +84,9 @@ against them.
   symbol against its typed contract, including public class members.
 - **Demo Compliance:** Ensures each package's tutorial imports only its
   supported public facade and that both product demos are present.
-- **Documentation Completeness:** Requires same-block API explanations and
-  meaningful narrative guide coverage for every public symbol in each package.
+- **Documentation Quality:** Requires a same-block API-reference explanation for
+  every public symbol. Narrative guides teach real workflows, may mention only
+  supported symbols, and are rejected when they become duplicate API catalogs.
 - **Config Accuracy:** Compares each package's documented configuration mapping
   with the exact runtime defaults.
 - **Package Boundaries:** Enforces `CuteCanvas -> QPane`, rejects the reverse

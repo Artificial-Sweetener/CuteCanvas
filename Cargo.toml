@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.93.1"
 license = "GPL-3.0-or-later"
 authors = ["Artificial Sweetener <artificialsweetenerai@proton.me>"]
-repository = "https://github.com/Artificial-Sweetener/QPane"
+repository = "https://github.com/Artificial-Sweetener/CuteCanvas"
 
 [workspace.dependencies]
 pyo3 = { version = "=0.29.1", features = ["abi3-py310", "extension-module"] }

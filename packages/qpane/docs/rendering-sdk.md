@@ -5,7 +5,7 @@ scene is an immutable description of a canvas and the sources placed on it.
 QPane decides which parts are visible, chooses suitable raster or vector
 products, schedules background work, and presents complete frames.
 
-Most applications need only four values:
+Most applications begin with these values:
 
 * `RasterSource`, `VectorSource`, or `HybridSource` describes reusable content.
 * `RenderLayer` places one source in a scene.

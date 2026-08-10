@@ -31,6 +31,14 @@ sources = [
 ]
 proofs = ["contract"]
 
+[[areas]]
+name = "branding"
+sources = [
+  "README.md",
+  "assets/logos/**",
+]
+proofs = ["packaging"]
+
 [[boundaries]]
 name = "tooling"
 area = "tooling"

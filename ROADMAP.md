@@ -1,229 +1,138 @@
-# QPane Roadmap
+# CuteCanvas Roadmap
 
-This roadmap captures ideas on deck after the 1.0 release. It's not me making promises, but it's where I see Pane going the next time I dump a lot of time into it.
+This is where I keep the work on deck after the first CuteCanvas release. It is
+not a promise or a release calendar. It is the direction that lets the editor,
+viewer, and native engine grow without quietly turning into three copies of the
+same infrastructure.
 
-## Guiding Principles
+## The Current Foundation
 
-- Dependencies stay light. The core viewer remains PySide6-only, with `psutil` used
-  solely for reactive cache logic when enabled.
-- Editing workflows build on the Qt and NumPy runtime shared by the viewer.
-- Torch is always optional, reserved for SAM or other AI-backed tools, and never
-  required by the core viewer.
+CuteCanvas and QPane are separate products with separate public APIs, versions,
+packages, documentation, demos, and test suites. QPane is the PySide6 viewer and
+rendering SDK. CuteCanvas builds editable documents, layers, tools, masks,
+selections, painting, history, and persistence on that renderer.
 
-## Performance Hunting (Rendering Path)
+Ferrastra is at Stage 0. Its native package, stable-ABI Python boundary,
+architecture checks, and cross-platform build requirements exist, but it does
+not provide graphics behavior to either Python product yet. The detailed native
+work belongs to [FERRASTRA_DESIGN.md](FERRASTRA_DESIGN.md); R-Candy's language and
+structured-authoring work belongs to [RCANDY_DESIGN.md](RCANDY_DESIGN.md).
 
-Goal: keep tightening the hot paths anywhere they show up. This is a standing
-invite to optimize the rendering pipeline and adjacent systems when you find
-a real win.
+## First Native Slice
 
-Possible integration points
-- `qpane/rendering/`: tile composition, buffer reuse, dirty-region math.
-- `qpane/swap/`: scheduling, cache hit rate improvements, prefetch heuristics.
-- `qpane/cache/`: memory accounting or eviction logic improvements.
+The first Ferrastra behavior is deliberately small and complete instead of a
+wide collection of placeholder APIs.
 
-Key behaviors to define
-- Improvements must be measurable and not regress image fidelity.
+Phase 1 establishes the typed spatial graph, stable identities, validation,
+demand, damage, cancellation, memory admission, deterministic products, and
+equivalent Rust and Python graph construction. Its first executable graph is:
 
-Testing focus (when implemented)
-- Before/after benchmarks that capture visible wins (latency, memory, FPS).
+```text
+RasterSource -> Identity -> Output
+```
 
-## Prefetch 2.0 (Never Interrupt the User)
+Phase 2 adds one production operation, Lanczos3 resampling, and uses it for
+QPane pyramid generation. That vertical slice includes the scalar oracle,
+optimized CPU implementation, tile-seam equivalence, alpha and color contracts,
+Python binding, QPane adapter, isolated wheels, and deletion of the exact Qt
+pyramid-scaling path it replaces.
 
-Goal: prefetch the catalog over time without stealing cycles from navigation or
-inspection. User-path work should always win, with dedicated lanes for
-background prefetch that never interrupt the viewer.
+This is the first point where Ferrastra affects QPane at runtime. Until that
+slice lands, the existing Python and Qt implementations remain authoritative.
 
-Possible integration points
-- `qpane/concurrency/`: introduce dedicated worker lanes for user vs background work.
-- `qpane/swap/`: expand scheduling to support idle prefetch waves and priority rules.
-- `qpane/core/config.py`: host-configurable depth and caps for prefetch behavior.
+## Finish Exact Resampling Ownership
 
-Key behaviors to define
-- User actions always preempt background work.
-- Hosts can choose how aggressive prefetching should be.
+After the first slice proves the graph and runtime in production, migrate the
+remaining exact resampling work one owner at a time:
 
-Testing focus (when implemented)
-- No regressions in navigation responsiveness under heavy background work.
+- QPane affine raster projection and scaling conversions;
+- CuteCanvas coverage and floating-fragment projection;
+- placed-image rasterization;
+- sparse raster and coverage sampling; and
+- mask import resampling.
 
-## Add Input Mapping API
+Each migration characterizes the existing result, adds the native operation and
+adapter, migrates every caller, and deletes the implementation it replaces.
+Coverage receives coverage-appropriate sampling rather than inheriting a
+photographic filter by accident.
 
-Goal: let hosts define keybindings and interaction rules through a supported
-public API without reaching into tool internals.
+## Grow the Operation Library
 
-Possible integration points
-- `qpane/tools/`: add a keybinding dispatch path that preserves tool ownership
-  and keeps mapping policy out of `QPane`.
-- `qpane/core/` + `qpane/qpane.pyi`: introduce a public-facing input mapping surface that lets
-  hosts register shortcuts or replace default bindings without touching tool classes.
-- Trinity updates: evolve `qpane.pyi`, `qpane.py`, `docs/`, and `examples/` together for any new
-  input mapping API surface, with tutorialized demos that stick to the public API.
+With exact resampling owned in one place, Ferrastra can add the operations that
+make a nondestructive editor substantially more useful:
 
-Key behaviors to define
-- Host-configurable shortcuts for mode switching and "hold to pan" without custom event filters.
-- Conflict resolution between host mappings, tool bindings, and Qt-standard shortcuts.
-- Stable defaults when hosts do not provide custom mappings.
+- NoHalo and LoHalo transform sampling;
+- color-to-alpha and matte extraction;
+- raster and coverage morphology, blur, threshold, and compositing;
+- native source stores and bounded edit sessions;
+- a per-layer effect graph;
+- vector evaluation; and
+- the complete composition graph, including adjustment layers and backdrop
+  inputs.
 
-Testing focus (when implemented)
-- Default keyboard and pointer behavior remains unchanged without custom mappings.
-- Host mappings activate the intended actions across control modes.
-- Conflicting or invalid mappings fail predictably without disrupting input.
+Operations are versioned contracts with numerical or visual oracles, explicit
+alpha and color behavior, bounded memory, cancellation, and platform parity.
+They do not appear first as one-off convenience functions in QPane or
+CuteCanvas.
 
-## Expand SAM Model Support (CPU-First)
+## Bring R-Candy Along with the Graph
 
-Goal: support more SAM variants so hosts can choose the tradeoffs they want.
-MobileSAM stays the default because it is the fastest on CPU, but other models
-should be easy to swap in.
+R-Candy grows as a first-class Ferrastra authoring surface, not as a second
+engine. Phase 1 gives it the same canonical graph definitions, typed values,
+identities, diagnostics, patches, and unknown-operation preservation used by
+Rust, Python, and host adapters.
 
-Possible integration points
-- `qpane/sam/`: abstract model selection and model-specific metadata.
-- `qpane/core/config.py`: allow hosts to select a model and configure weights.
+The parser, formatter, structured editor, packages, and language tooling arrive
+only when their executable responsibilities begin. Source text and structured
+authoring both lower to the same graph, and neither one owns execution,
+documents, trust, undo, or publication policy.
 
-Key behaviors to define
-- CPU-first defaults remain unchanged.
-- Model selection is explicit and documented.
+## Keep Improving QPane
 
-Testing focus (when implemented)
-- Existing MobileSAM workflows remain stable.
+QPane remains useful as a standalone viewer and rendering SDK. Its ongoing work
+is focused on the viewer experience and on presenting immutable products well:
 
-## Split QPane Into a Core Viewer + Feature Packages
+- measurable reductions in render latency, memory traffic, and allocation;
+- stronger continuity under pan, zoom, resize, refinement, and cache pressure;
+- better host-defined input mapping without requiring event-filter workarounds;
+- source-neutral scene, hit-test, overlay, diagnostics, and presentation tools;
+  and
+- clean adoption of Ferrastra products without moving viewport, cache, or Qt
+  presentation ownership into the native engine.
 
-Goal: keep the core viewer lean and make masks/SAM their own packages so advanced
-features can evolve independently without bloating the base install.
+Performance work starts with a profile and ends with a benchmark or behavioral
+budget. A fast result that flickers, tears, publishes stale work, or changes
+pixels is not an optimization.
 
-Possible integration points
-- `qpane/`: keep the viewer-only facade with minimal dependencies.
-- `qpane/masks/` + `qpane/sam/`: move into feature packages with explicit extras.
-- Packaging: introduce optional installs that pull in masks/SAM separately.
+## Keep Improving CuteCanvas
 
-Key behaviors to define
-- Core viewer remains fully functional without masks/SAM.
-- Feature packages plug in cleanly through the public API without private hooks.
+CuteCanvas remains the owner of editable work and the workflows around it. The
+next editor capabilities should build on its existing document, policy, history,
+tool, and persistence boundaries rather than adding special paths to the
+renderer.
 
-Testing focus (when implemented)
-- Core viewer installs cleanly with only PySide6.
-- Feature packages integrate without changing existing host code.
+The larger items still on deck are:
 
-## Generalize Scene Layers (Rendering + Public Mutation)
+- adjustment layers backed by the canonical effect graph;
+- broader explicitly selected SAM model support while MobileSAM remains the
+  CPU-first default;
+- native acceleration for the numerical parts of painting, masks, selections,
+  and transforms as Ferrastra reaches the corresponding phases; and
+- eventual migration of Shared Edge Resize deformation math while CuteCanvas
+  retains snapping, participant selection, preview, policy, and undo ownership.
 
-Goal: build on QPane's existing scene/layer foundation so stored scene
-compositions can grow from catalog-backed image layouts into richer layered
-documents. The current scene model already handles catalog image layers, mask
-layers internally, opacity, clipping, hit testing, scene overlays, render-plan
-snapshots, and layer-scoped cache identity. The next step is making the parts
-hosts need to control explicit and polished without turning QPane into a full
-editor by default.
+Existing editor behavior remains supported during those migrations. A native
+implementation replaces an authoritative operation only when its complete
+vertical slice is tested and ready; it never creates a parallel editor model.
 
-Possible integration points
-- `qpane/scene/`: add new layer kinds and source descriptors only when a real
-  rendering owner exists for them.
-- `qpane/composition/`: keep stored scene compositions as the authoritative home
-  for host-created layered views, including browser order and active selection.
-- `qpane/rendering/`: extend the existing scene render-plan path for additional
-  layer strategies, blend modes, and cache invalidation rules.
-- `qpane/masks/`: keep mask behavior owned by the mask domain while exposing only
-  the scene-layer data needed for rendering and host inspection.
-- `qpane/swap/`: continue scheduling layer-scoped assets so navigation, pyramid
-  work, tile work, masks, and future layer assets share the same cancellation and
-  prefetch discipline.
-- `qpane/core/` + `qpane/qpane.pyi`: expose public layer mutation APIs where hosts
-  need them, such as visibility, opacity, ordering, and blend settings.
-- Trinity updates: evolve `qpane.pyi`, `qpane.py`, `docs/`, and `examples/`
-  together for any new public layer surface with tutorialized demos.
+## What Every Roadmap Item Owes the Project
 
-Key behaviors to define
-- Which layer mutations are public host controls and which remain owned by
-  feature domains.
-- Ordering, visibility, opacity, and blend semantics across catalog image layers,
-  mask layers, and future adjustment layers.
-- Whether multi-image layer stacks belong to catalog entries, stored scene
-  compositions, or a new document type.
-- How hit testing, overlays, comparison state, and active image selection behave
-  when several catalog images are visible in one scene.
-- Cache invalidation rules when layer parameters change without changing the
-  underlying catalog image.
+Every public capability updates its typed contract, implementation, API
+reference, narrative guide, and polished public demo together. Every structural
+migration characterizes behavior first, moves every caller, removes replaced
+code and temporary bridges, and activates the ownership check that prevents the
+old path from returning.
 
-Testing focus (when implemented)
-- Correct visual ordering for mixed catalog image, mask, and future adjustment
-  layers.
-- Public layer mutations update rendering, overlays, hit testing, and composition
-  snapshots consistently.
-- Navigation and prefetch stay responsive when multiple layer assets are active.
-- Viewer-only mode remains identical when hosts use only generated default image
-  compositions.
-
-## Extend Execution and Cache Backends
-
-Goal: keep QPane's public execution and cache SDKs small enough for host-owned
-physical backends while preserving one lifecycle owner for QPane and
-CuteCanvas work.
-
-Possible integration points
-- Add explicitly serializable process-work requests for Python-heavy operations
-  that benefit from process execution.
-- Add host diagnostic enrichment without making diagnostics a requirement for
-  submission.
-- Generalize cache consumer registration while preserving coordinated byte
-  budgets and source-neutral eviction.
-
-Key behaviors to define
-- Process-safe cancellation, serialization, and result-size limits.
-- Honest backend capability routing with no executor-inside-executor path.
-- Stable cache consumer identity and bounded admission for third-party sources.
-
-Testing focus (when implemented)
-- Host backend conformance and teardown under saturation.
-- Process crash, cancellation, and oversized-result containment.
-- Standalone QPane and shared CuteCanvas runtime performance.
-
-## Adjustment Layers (Non-Destructive Editing)
-
-Goal: introduce parameterized adjustment layers (levels, curves, color balance,
-exposure, LUT) that sit in the layer stack and render without altering base pixels.
-These should be composited alongside image/mask layers to power non-destructive
-workflows and future editing tools.
-
-Possible integration points
-- `qpane/rendering/`: extend the render pipeline to evaluate adjustment layers in
-  the ordered stack (CPU-first, tiling-aware, and cacheable).
-- `qpane/catalog/`: allow entries to store adjustment layers alongside image layers
-  so adjustments travel with catalog navigation.
-- `qpane/layers/` (or `qpane/masks/` until layers land): define a Layer interface
-  that supports parameterized transforms and visibility/opacity.
-- `qpane/concurrency/`: offload adjustment evaluation and caching to the executor
-  to keep the UI thread responsive.
-- Trinity updates: evolve `qpane.pyi`, `qpane.py`, `docs/`, and `examples/`
-  together for any new adjustment APIs and tutorialized demos.
-
-Key behaviors to define
-- Adjustment evaluation order, stacking semantics, and blend rules.
-- Cache invalidation strategy when adjustment parameters change.
-- Viewer-only mode remains unaffected when no adjustments are present.
-
-Testing focus (when implemented)
-- Visual correctness across zoom levels and pyramid resolutions.
-- Performance under repeated parameter tweaks (debounced updates).
-- Consistent output across platforms and DPI configurations.
-
-## Advanced Editing Tools (Layer-Backed)
-
-Goal: deliver pro-style editing workflows (cut/paste/move, transform, clone/stamp)
-powered by the Layer abstraction while keeping the core viewer experience unchanged.
-
-Possible integration points
-- `qpane/tools/` + `qpane/input/`: add opt-in tools with clear activation modes and
-  host-configurable shortcuts that do not override viewer defaults.
-- `qpane/layers/` (or `qpane/masks/` until layers land): represent editable regions
-  as layer content so edits remain non-destructive and reversible.
-- `qpane/rendering/` + `qpane/swap/`: ensure edited layers are composited and
-  cached without changing baseline image viewing performance.
-- Trinity updates: evolve `qpane.pyi`, `qpane.py`, `docs/`, and `examples/`
-  together for any new editing APIs and tutorialized demos.
-
-Key behaviors to define
-- Editing tools are feature-gated and safe to leave disabled.
-- Clone/stamp respects zoom, pan, and pixel alignment across DPI changes.
-- Cut/paste and move operate on layer content without mutating base image pixels.
-
-Testing focus (when implemented)
-- Editing tools do not regress pan/zoom/navigation in viewer-only mode.
-- Layer edits are undoable and stable across catalog navigation.
+Correctness, responsiveness, memory bounds, cancellation, teardown, undo and
+redo, persistence, packaging, and supported-platform behavior are part of the
+feature. They are not cleanup for later.

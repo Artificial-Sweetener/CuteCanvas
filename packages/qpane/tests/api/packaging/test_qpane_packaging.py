@@ -68,6 +68,7 @@ def test_qpane_never_depends_on_cutecanvas() -> None:
 def test_qpane_versions_use_the_qpane_release_tag_namespace() -> None:
     """Version QPane only from product-prefixed release tags."""
     metadata = _metadata()
+    assert metadata["tool"]["setuptools_scm"]["fallback_version"] == "3.0.0"
     assert metadata["tool"]["setuptools_scm"]["tag"]["regex"] == (
         "^qpane-v(?P<version>.+)$"
     )

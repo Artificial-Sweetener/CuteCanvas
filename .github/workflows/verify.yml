@@ -206,6 +206,30 @@ jobs:
       - name: Build and verify the independent wheel
         run: python tools/verify_ferrastra_wheel.py
 
+  python-wheels:
+    name: QPane and CuteCanvas wheel integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            packages/qpane/pyproject.toml
+            packages/cutecanvas/pyproject.toml
+
+      - name: Install wheel verification tools
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          python -m pip install build==1.5.0
+
+      - name: Verify the exact QPane and CuteCanvas wheel stack
+        run: python tools/verify_python_wheels.py
+
   gate:
     name: Gate
     if: always()
@@ -214,6 +238,7 @@ jobs:
       - tests
       - rust
       - ferrastra-wheel
+      - python-wheels
     runs-on: ubuntu-latest
     steps:
       - name: Require every verification job
@@ -222,8 +247,10 @@ jobs:
           TEST_RESULT: ${{ needs.tests.result }}
           RUST_RESULT: ${{ needs.rust.result }}
           FERRASTRA_WHEEL_RESULT: ${{ needs.ferrastra-wheel.result }}
+          PYTHON_WHEELS_RESULT: ${{ needs.python-wheels.result }}
         run: |
           test "$QUALITY_RESULT" = "success"
           test "$TEST_RESULT" = "success"
           test "$RUST_RESULT" = "success"
           test "$FERRASTRA_WHEEL_RESULT" = "success"
+          test "$PYTHON_WHEELS_RESULT" = "success"

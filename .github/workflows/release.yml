@@ -1,0 +1,100 @@
+name: Release changed products
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
+  version-ferrastra:
+    needs: verify
+    uses: ./.github/workflows/version-product.yml
+    with:
+      product: ferrastra
+      first_bump: "minor"
+      expected_head: ${{ github.sha }}
+    secrets: inherit
+
+  version-qpane:
+    needs: version-ferrastra
+    uses: ./.github/workflows/version-product.yml
+    with:
+      product: qpane
+      first_bump: "major"
+      legacy_anchor: "v2.1.1"
+      cascade_patch: ${{ needs.version-ferrastra.outputs.released == 'true' }}
+      expected_head: ${{ needs.version-ferrastra.outputs.head_sha }}
+    secrets: inherit
+
+  version-cutecanvas:
+    needs: version-qpane
+    uses: ./.github/workflows/version-product.yml
+    with:
+      product: cutecanvas
+      first_bump: "major"
+      cascade_patch: ${{ needs.version-qpane.outputs.released == 'true' }}
+      expected_head: ${{ needs.version-qpane.outputs.head_sha }}
+    secrets: inherit
+
+  publish-ferrastra:
+    needs:
+      - version-ferrastra
+      - version-qpane
+      - version-cutecanvas
+    if: needs.version-ferrastra.outputs.released == 'true'
+    uses: ./.github/workflows/publish.yml
+    with:
+      release_tag: ${{ needs.version-ferrastra.outputs.release_tag }}
+      verified: true
+    secrets: inherit
+
+  publish-qpane:
+    needs:
+      - version-ferrastra
+      - version-qpane
+      - version-cutecanvas
+      - publish-ferrastra
+    if: >-
+      always() &&
+      needs.version-ferrastra.result == 'success' &&
+      needs.version-qpane.result == 'success' &&
+      needs.version-cutecanvas.result == 'success' &&
+      needs.version-qpane.outputs.released == 'true' &&
+      (needs.publish-ferrastra.result == 'success' ||
+      needs.publish-ferrastra.result == 'skipped')
+    uses: ./.github/workflows/publish.yml
+    with:
+      release_tag: ${{ needs.version-qpane.outputs.release_tag }}
+      verified: true
+    secrets: inherit
+
+  publish-cutecanvas:
+    needs:
+      - version-ferrastra
+      - version-qpane
+      - version-cutecanvas
+      - publish-qpane
+    if: >-
+      always() &&
+      needs.version-ferrastra.result == 'success' &&
+      needs.version-qpane.result == 'success' &&
+      needs.version-cutecanvas.result == 'success' &&
+      needs.version-cutecanvas.outputs.released == 'true' &&
+      (needs.publish-qpane.result == 'success' ||
+      needs.publish-qpane.result == 'skipped')
+    uses: ./.github/workflows/publish.yml
+    with:
+      release_tag: ${{ needs.version-cutecanvas.outputs.release_tag }}
+      verified: true
+    secrets: inherit

@@ -7,8 +7,8 @@ This repository is a three-package monorepo:
 
 - **QPane** is the independently published PySide6 viewer, viewport, rendering
   engine, and declarative raster/vector SDK.
-- **CuteCanvas** is the independently published document editor built on
-  QPane.
+- **CuteCanvas** is the independently published PySide6 graphics editor built
+  on QPane.
 
 Every contribution must preserve `CuteCanvas -> QPane`, `CuteCanvas -> Ferrastra`,
 and `QPane -> Ferrastra`; reverse and lateral edges are forbidden. Read
@@ -231,4 +231,31 @@ All packages are released independently:
 - `qpane-vX.Y.Z` builds and publishes QPane;
 - `cutecanvas-vX.Y.Z` builds and publishes CuteCanvas.
 
-Do not combine package contents, versions, extras, or release tags.
+QPane's product-prefixed public lineage begins at `qpane-v3.0.0`, continuing
+the existing PyPI project after `2.1.1`. CuteCanvas's public lineage begins at
+`cutecanvas-v1.0.0`. Do not combine package contents, versions, extras, or
+release tags.
+
+Every successful push to `main` runs Python Semantic Release independently for
+Ferrastra, QPane, and CuteCanvas. Product-relative paths and Conventional Commit
+scopes determine each product's direct semantic change. Release planning then
+expands that change through the dependency waterfall:
+
+- a Ferrastra release also releases QPane and CuteCanvas;
+- a QPane release also releases CuteCanvas; and
+- a CuteCanvas release does not release either upstream product.
+
+A downstream product with no direct semantic change receives a patch release.
+Its own feature or breaking release takes precedence over that propagated patch.
+CI verifies the complete source tree and installs CuteCanvas against the exact
+QPane wheel built from that tree before creating product tags. It versions the
+entire waterfall before publishing its first artifact, then publishes the exact
+tags in the order Ferrastra, QPane, CuteCanvas. Directly pushed product tags and
+manual recovery runs enter the same verified publisher.
+
+Publication is immutable. CI rejects an existing version, an invalid or
+regressive product tag, unavailable public dependencies, mismatched artifact
+metadata, sibling-package wheel contents, and package READMEs that rely on
+repository-relative links. PyPI publication uses the protected `pypi`
+environment and Trusted Publishing; a successful Python publication creates
+package-scoped GitHub release notes from user-facing Conventional Commits.

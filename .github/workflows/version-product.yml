@@ -1,0 +1,141 @@
+name: Version one product
+
+on:
+  workflow_call:
+    inputs:
+      product:
+        description: Product directory and release-tag prefix
+        required: true
+        type: string
+      first_bump:
+        description: Semantic bump used to establish the first product tag
+        required: true
+        type: string
+      legacy_anchor:
+        description: Existing legacy tag used as the first lineage anchor
+        required: false
+        default: ""
+        type: string
+      cascade_patch:
+        description: Create a patch release when an upstream product released
+        required: false
+        default: false
+        type: boolean
+      expected_head:
+        description: Exact verified commit this release step must extend
+        required: true
+        type: string
+    outputs:
+      released:
+        description: Whether semantic-release created a product version
+        value: ${{ jobs.version.outputs.released }}
+      release_tag:
+        description: Product-prefixed tag created by semantic-release
+        value: ${{ jobs.version.outputs.release_tag }}
+      version:
+        description: Stable semantic version created by semantic-release
+        value: ${{ jobs.version.outputs.version }}
+      head_sha:
+        description: Commit the next product in the waterfall must extend
+        value: ${{ jobs.version.outputs.head_sha }}
+
+permissions:
+  contents: write
+
+env:
+  PIP_VERSION: "26.1.2"
+  PYTHON_SEMANTIC_RELEASE_VERSION: "10.6.1"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.outcome.outputs.released }}
+      release_tag: ${{ steps.outcome.outputs.release_tag }}
+      version: ${{ steps.outcome.outputs.version }}
+      head_sha: ${{ steps.outcome.outputs.head_sha }}
+    steps:
+      - name: Check out the latest main branch and all release tags
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the semantic-release engine
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          python -m pip install "python-semantic-release==${{ env.PYTHON_SEMANTIC_RELEASE_VERSION }}"
+
+      - name: Confirm the verified release lineage
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Establish release lineage state
+        id: lineage
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          LEGACY_ANCHOR: ${{ inputs.legacy_anchor }}
+        run: |
+          remote_tags="$(git ls-remote --tags origin "refs/tags/${PRODUCT}-v*")"
+          if [ -n "$remote_tags" ]; then
+            echo "initial=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "initial=true" >> "$GITHUB_OUTPUT"
+            if [ -n "$LEGACY_ANCHOR" ]; then
+              git rev-parse --verify "refs/tags/$LEGACY_ANCHOR"
+              git tag "${PRODUCT}-${LEGACY_ANCHOR}" "$LEGACY_ANCHOR"
+            fi
+          fi
+          previous="$(git tag --list "${PRODUCT}-v*" --sort=-version:refname | head -n 1)"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
+      - name: Create the semantic release commit and product tag
+        shell: bash
+        working-directory: packages/${{ inputs.product }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INITIAL: ${{ steps.lineage.outputs.initial }}
+          FIRST_BUMP: ${{ inputs.first_bump }}
+          CASCADE_PATCH: ${{ inputs.cascade_patch }}
+        run: |
+          git config user.name "semantic-release"
+          git config user.email "semantic-release@users.noreply.github.com"
+          arguments=(--no-vcs-release)
+          if [ "$INITIAL" = "true" ]; then
+            arguments+=("--$FIRST_BUMP")
+          elif [ "$CASCADE_PATCH" = "true" ]; then
+            DIRECT_VERSION="$(python -m semantic_release version --print)"
+            LAST_RELEASED_VERSION="$(python -m semantic_release version --print-last-released)"
+            if [ "$DIRECT_VERSION" = "$LAST_RELEASED_VERSION" ]; then
+              arguments+=("--patch")
+            fi
+          fi
+          python -m semantic_release -v version "${arguments[@]}"
+
+      - name: Report the created release
+        id: outcome
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          PREVIOUS: ${{ steps.lineage.outputs.previous }}
+        run: |
+          current="$(git tag --list "${PRODUCT}-v*" --sort=-version:refname | head -n 1)"
+          if [ -n "$current" ] && [ "$current" != "$PREVIOUS" ]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "release_tag=$current" >> "$GITHUB_OUTPUT"
+            echo "version=${current#${PRODUCT}-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

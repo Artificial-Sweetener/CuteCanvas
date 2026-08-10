@@ -1,69 +1,88 @@
-# CuteCanvas
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/cutecanvas-logo-on-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/cutecanvas-logo-on-light.svg">
+    <img alt="CuteCanvas — PySide6 Graphics Editor" src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/cutecanvas-logo.svg" width="760">
+  </picture>
+</h1>
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](../../LICENSE) [![semantic-release](https://img.shields.io/badge/semantic--release-angular-e10079?logo=semantic-release)](https://github.com/semantic-release/semantic-release) [![PyPI](https://img.shields.io/pypi/v/cutecanvas.svg)](https://pypi.org/project/cutecanvas/) [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/) [![PySide6](https://img.shields.io/badge/PySide6-6.7.3%2B-41CD52?logo=qt&logoColor=white)](https://pyside.org)
+<p align="center">
+  <a href="https://pypi.org/project/cutecanvas/"><img src="https://img.shields.io/pypi/v/cutecanvas?label=PyPI" alt="CuteCanvas on PyPI"></a>
+  <a href="https://github.com/Artificial-Sweetener/CuteCanvas/actions/workflows/verify.yml"><img src="https://img.shields.io/github/actions/workflow/status/Artificial-Sweetener/CuteCanvas/verify.yml?branch=main&amp;label=Tests" alt="Test status"></a>
+  <a href="https://pypi.org/project/cutecanvas/"><img src="https://img.shields.io/pypi/dm/cutecanvas?label=downloads" alt="PyPI downloads"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"></a>
+  <a href="https://pyside.org/"><img src="https://img.shields.io/badge/PySide6-6.7.3%2B-41CD52?logo=qt&amp;logoColor=white" alt="PySide6 6.7.3+"></a>
+  <a href="https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later license"></a>
+</p>
 
-**CuteCanvas** is an open-source layered image editor for PySide6. Add it to
-your application when users need to paint, select, arrange, transform, and save
-their work—not merely look at an image.
+**CuteCanvas** is an open-source graphics editor package for PySide6. It gives Python developers the complete document, layer, mask, selection, painting, transform, tool, history, persistence, and rendering infrastructure needed to build an editor for any purpose.
 
-It gives you real editable documents, raster and vector layers, masks,
-selections, non-destructive placed images, undo and redo, snapping, and a
-complete tool system in one embeddable `QWidget`. You decide which capabilities
-your application exposes and which layers users may change.
+CuteCanvas is the editor you put inside your own application. You decide what the work means, what the interface looks like, which tools are available, what users may change, and how the result fits into everything around it.
 
-CuteCanvas uses QPane for rendering, so large editable images receive the same
-tiled, CPU-first treatment as images in the QPane viewer.
+Underneath CuteCanvas is **[QPane](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/README.md)**, the independently useful image viewer and raster/vector rendering SDK in this repository. Integrate QPane directly as a high-performance viewer or use its rendering SDK to compose and interact with raster, vector, and hybrid visual content. CuteCanvas adds the complete editing system on top.
 
 ## Highlights
 
-* **A real editor in a Qt widget:** Put `CuteCanvas` in any layout and build the
-  surrounding application with ordinary Qt actions, docks, and signals.
-* **Independent compositions:** Start with an empty canvas or seed a composition
-  from an image. Every image in a composition is an ordinary layer.
-* **One document, many views:** Mount the same document in an editor, linked
-  native-size tabs, a responsive grid, or an independent-target comparison.
-* **Raster and vector layers:** Paint pixels, draw shapes and paths, edit text,
-  and keep each kind of content editable.
-* **Clone Stamp:** Retouch editable raster layers from one anchored layer, its
-  visible backdrop, or the complete visible composition.
-* **Masks and soft selections:** Paint or draw mask shapes, reuse mask coverage
-  as a selection, expand or contract selected regions or complete coverage
-  layers, feather their edges, and combine soft raster coverage with crisp
-  retained shapes.
-* **Move and transform:** Move whole layers or selected pixels, then scale,
-  rotate, skew, align, and snap content with direct manipulation.
-* **Linked and embedded images:** Place an image without changing its source,
-  refresh linked files, or rasterize a layer when direct pixel editing is the
-  right choice.
-* **One undo history:** Layer edits, painting, selections, transforms, and
-  floating pixels follow one chronological undo and redo path.
-* **Host-controlled behavior:** Keep a background fixed, allow only mask
-  editing, or expose the complete editor without changing the document model.
-* **Host-themed editor cursors:** Replace built-in cursor artwork by semantic
-  intent while retaining complete portable fallbacks for unhandled intents.
-* **Host-controlled drag-out:** Resolve a composition or layer into file URLs,
-  companion files, text, or custom MIME data without hard-coding storage into
-  the canvas.
-* **Optional AI-assisted selection:** The `sam` extra adds MobileSAM and its
-  model runtime. Every ordinary mask and selection feature ships with
-  CuteCanvas itself.
+* **A graphics editor you can import:** `CuteCanvas` is a `QWidget` with public documents, focused facades, Qt signals, and typed configuration for ordinary PySide6 integration.
+* **Real editable documents:** Keep raster pixels, vector objects, text, masks, selections, placed assets, nested compositions, transforms, canvas geometry, and policy as distinct durable state.
+* **Raster and vector authoring:** Paint and erase pixels, draw shapes and paths, edit text, fill regions, clone rendered content, and choose when retained content becomes directly editable pixels.
+* **Serious masking and selection tools:** Combine soft raster coverage with retained vector shapes, edit polygons before closing them, move selected nontransparent pixels, and optionally add MobileSAM-assisted selection.
+* **Direct manipulation that understands the document:** Move, scale, rotate, skew, align, snap, and reshape shared layer edges with coherent previews and atomic history.
+* **Host-owned behavior:** Build a complete editor, a mask-only workstation, a locked review surface, a domain-specific annotation tool, or a purpose-built visual product with rules entirely owned by the host.
+* **One history for the work:** Painting, masks, selections, layer operations, transforms, floating pixels, resources, and document changes undo and redo in the order the user performed them.
+* **More than one view of the same work:** Mount one editable document in editors, linked tabs, native-size views, responsive grids, comparisons, and host-defined presentations.
+* **Python outside, native performance underneath:** Python keeps product logic portable and expressive, Qt performs compiled graphics and image I/O, NumPy processes bulk pixels and coverage, and QPane renders the current viewport demand.
+* **True FOSS:** Every supported CuteCanvas and QPane capability ships as GPLv3-or-later software for every user.
+
+## Build the Editor Your Product Needs
+
+Every visual product brings its own purpose, data model, permissions, interface, and workflow. CuteCanvas supplies the difficult editing infrastructure while your application remains the product.
+
+Lock a source image and expose a focused mask-authoring surface with brushes, editable polygons, soft coverage, and optional model-assisted selection. Put two compositions into a linked comparison and let the user inspect the same region at each source's native scale. Combine refreshable linked images with editable text and vectors, then save the complete project graph or export the finished pixels.
+
+The same public surface can add a domain-specific tool and overlay, assign each layer the operations that make sense, arrange several views around one document, or hand rendered results to the rest of the application. CuteCanvas's shared document and rendering foundations support everything from a compact annotation step to a review workstation, a structured asset editor, or a complete creative environment.
+
+## CuteCanvas Is Built on QPane
+
+**QPane is a high-performance image viewer and raster/vector rendering SDK for PySide6.** It provides the viewport, fluid pan and zoom, large-image tiling, scene composition, comparison, hit testing, overlays, caching, and background rendering underneath CuteCanvas.
+
+CuteCanvas adds documents, editable layers, masks, selections, painting, transforms, tools, history, and persistence on top of that foundation.
+
+If CuteCanvas is more editor than your application needs, install QPane directly for a polished image viewer. You can also build on the same public rendering SDK CuteCanvas uses to create your own visualizations, review surfaces, comparison tools, compositors, and interactive graphics workflows.
+
+**[Read the QPane README →](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/qpane/README.md)**
+
+## Python on Top, Native Work Underneath
+
+Python owns the flexible control plane: documents, tools, policy, host integration, and workflow. Qt performs rasterization, compositing, transforms, image decoding, and image encoding in compiled code. NumPy performs bulk pixel and coverage operations on native arrays. QPane renders what the viewport demands, retains useful products, tracks damage, reuses unchanged presentation, and moves expensive work through bounded background execution while the GUI thread stays responsive.
+
+CuteCanvas follows the same model. Sparse raster layers allocate touched regions and keep empty space virtual. Immutable resources can be shared by several layer instances. Live previews publish the state needed for the interaction, and completed edits settle atomically into the document.
+
+The renderer is CPU-first by design. It remains useful in AI, scientific, and production applications where the GPU may already have a more important job than drawing the interface.
 
 ## Installation
 
-```bash
-# Complete editor
-pip install cutecanvas
+Install the complete editor:
 
-# Add AI-assisted selection
+```bash
+pip install cutecanvas
+```
+
+Masking, selections, painting, vectors, transforms, and persistence are part of the normal package. The optional `sam` extra adds AI-assisted selection:
+
+```bash
 pip install "cutecanvas[sam]"
 ```
 
-Installing CuteCanvas also installs QPane, its rendering dependency.
+CuteCanvas installs QPane as its rendering dependency. Install [QPane from PyPI](https://pypi.org/project/qpane/) directly when the application needs the viewer or rendering SDK:
 
-## Your First Canvas
+```bash
+pip install qpane
+```
 
-Create the widget after `QApplication`, make a document, and add it to your
-window like any other Qt widget:
+## Your First Editor
+
+Create a host-owned document, mount it in the widget, and put that widget anywhere a normal Qt widget can go:
 
 ```python
 import sys
@@ -90,14 +109,9 @@ window.show()
 app.exec()
 ```
 
-That document is ready for layers, tools, selections, and history. Mask
-editing is included in the normal package; `features=("mask",)` activates the
-mask tools for this widget.
+The application owns the document independently from the widget. The document can outlive a view, appear in several views, and remain the authoritative editable model through save and restore.
 
-## Add Something Editable
-
-An empty paint layer stores only the regions the user touches, so a large
-canvas does not require one equally large transparent allocation:
+Add an editable raster layer and activate the brush:
 
 ```python
 layer_id = canvas.createPaintLayer(label="Paint")
@@ -109,226 +123,134 @@ if scene is not None and layer_id is not None:
     canvas.setControlMode(canvas.CONTROL_MODE_DRAW_BRUSH)
 ```
 
-Use the normal Qt signals to keep your actions and panels synchronized:
+CuteCanvas exposes ordinary Qt signals and focused public facades for toolbars, layer trees, inspectors, save actions, and application state. Host code performs complete workflows through that supported boundary.
 
-```python
-canvas.sceneEditHistoryChanged.connect(
-    lambda can_undo, can_redo: print(can_undo, can_redo)
-)
-canvas.selectedLayerChanged.connect(lambda layer: print(layer))
-canvas.paintTargetChanged.connect(lambda target: print(target))
-```
+## Editable Documents and Flattened Exports
 
-## Documents and Layers
+A `CanvasDocument` owns reusable resources, independent compositions, layer stacks, selections, host policy, and one chronological history. A composition is one canvas-sized coordinate space inside that document.
 
-A `CanvasDocument` is a headless host-owned project. It owns reusable resources,
-independent compositions, layer stacks, selections, and one chronological edit
-history. It can exist before any widget and can be mounted by more than one
-view.
+A composition may begin empty or be seeded from an image. A seed image becomes an ordinary layer that policy may lock, move, transform, hide, reorder, or remove.
 
-A composition is one canvas-sized coordinate space inside that document. It
-can begin empty or be seeded from an image. Seeding is a convenience: the image
-becomes a normal layer that the host may lock, move, hide, reorder, or remove.
+Layers can reference editable raster content, vector artwork, text, hybrid coverage, embedded or linked images, and even another live composition. Several layers may share one immutable resource while retaining independent placement, visibility, opacity, effects, and policy. Fork the resource when one instance needs to become independent.
 
-`canvas.editor.compositions` returns lightweight handles for ordinary application
-code:
+Saving a `.cutecanvas` archive preserves that structure, including off-canvas material and the dependency graph required by nested compositions. Exporting an image produces the flattened result when that is what the workflow actually needs.
 
-```python
-from PySide6.QtCore import QPointF
+## Painting, Masks, and Selections
 
-composition = canvas.editor.compositions.current
-if composition is not None and composition.layers:
-    layer = composition.layers[-1]
-    layer.select()
-    layer.translate(QPointF(24.0, 0.0))
-    layer.center(vertically=False)
-```
+The shared brush engine paints RGBA layers, masks, and selections. A `BrushPreset` controls size, hardness, opacity, flow, spacing, smoothing, pressure, tilt, texture, and jitter. Eraser uses the same input and brush behavior while explicitly removing alpha or coverage.
 
-Handles keep stable identity and always ask the document for current state.
-They do not leave a stale private copy behind after undo, reordering, removal,
-or document restoration.
+Clone Stamp samples a stable rendered source from one layer, the visible backdrop below it, or the complete visible composition. Paint Bucket performs selection-constrained flood fill in the background and adopts the result as one edit.
 
-## Show the Same Work More Than One Way
+Pixel selections and masks support rectangle, ellipse, polygon, and lasso authoring. Polygon points can be moved, inserted, or removed before the polygon closes. Soft coverage remains soft, while retained shapes stay editable alongside painted coverage.
 
-`CanvasWorkspace` arranges independent composition views without flattening
-them into one artificial coordinate space. Its target canvases share one
-document runtime, including mutation freshness and bounded execution:
+Move lifts the selected nontransparent pixels into a reversible floating edit. The user can reposition them repeatedly, return them to the source, send them to another compatible layer, promote them to a new layer, or cancel and restore the original state.
 
-```python
-import uuid
+The optional SAM integration adds model-assisted selection to the same mask and selection workflows. Manual authoring remains available, and Torch stays out of the normal installation.
 
-from cutecanvas import CanvasInspectionGroup, CanvasWorkspace
+## Move, Transform, Snap, and Reshape
 
-workspace = CanvasWorkspace(document_runtime=canvas.documentRuntime())
-workspace.setInspectionGroups(
-    (CanvasInspectionGroup(uuid.uuid4(), document.composition_ids()),)
-)
-workspace.setTabbedPresentation(document.composition_ids())
-window.setCentralWidget(workspace)
-```
+Move works on selected pixels or complete layer sets. Free Transform provides direct translation, scale, rotation, skew, flips, and quarter-turn commands with one preview and one final history edit.
 
-Linked tabs preserve the inspected normalized region while each composition
-keeps its own native dimensions and local 100% zoom. The same workspace can
-show a responsive grid or a two-target comparison:
+Snapping is shared by movement, transforms, selections, masks, vector shapes, and vector paths. It can align visible content, authored geometry, canvas edges and centers, guides, and a configurable grid. Rotated scale handles follow and snap along their actual manipulation axes.
 
-```python
-workspace.setGridPresentation(document.composition_ids())
+Shared Edge Resize recognizes a straight boundary shared by several movable layers. Rectangular group boundaries move together, while eligible polygon endpoints move along the straight rail genuinely shared by their participants. Endpoint gestures snap to horizontal, vertical, 45-degree, and continuous stationary-edge alignments. The complete group previews and commits atomically, allowing tiled visual layouts to be adjusted with one gesture.
 
-first, second = document.composition_ids()[:2]
-workspace.setComparisonPresentation(first, second)
-```
+Canvas geometry remains explicit:
 
-Built-in multi-view presentations are read-only by default. Use
-`setInteractionMode()` when a host deliberately wants mask authoring or full
-editing in those views.
+* Resize canvas bounds around any of nine anchors while preserving the current sampling of every layer.
+* Resample the composition and every layer to a new pixel scale using Qt's smooth or nearest policy.
+* Crop layer content to the current canvas as a separate undoable operation.
 
-Outbound dragging is equally host-owned. Install one `OutboundMimeProvider` on
-the workspace and return file URLs, a compressed companion file, text, or
-application-specific MIME values for the stable content reference in each
-`DragSubject`.
+Bounds resizing preserves off-canvas work for later movement, export, cropping, or canvas expansion.
 
-When the payload needs freshly rendered pixels, ask the mounted canvas for a
-cancellable projection. It uses the same scene renderer as the visible canvas
-and refuses to publish a result if the referenced content changes while work
-is running:
+## Host Control Is Part of the Editor
 
-```python
-from PySide6.QtCore import QSize
+CuteCanvas is designed to belong to another application.
 
-reference = document.content_reference(first)
-canvas.projectionCompleted.connect(handle_projection)
-request = canvas.requestProjection(reference, pixel_size=QSize(1920, 1080))
-```
+An `EditorPolicy` controls which capabilities exist in a particular workflow. Layer and composition policy control what may be selected, moved, edited, reordered, removed, or rasterized. The same decision governs built-in tools, keyboard actions, and public host commands, so a disabled operation cannot be reached through a different path.
 
-## Selections, Masks, and Painting
+Hosts can:
 
-Layer selection answers “which layer am I editing?” Pixel selection answers
-“which part of it?” The rectangle, ellipse, and lasso tools build soft pixel
-selections. The Move tool moves selected nontransparent pixels when a pixel
-selection is active; otherwise it moves an eligible layer.
+* expose the complete editor or only a focused subset such as mask authoring;
+* keep source imagery locked while users edit approved layers;
+* provide their own toolbars, docks, trees, inspectors, shortcuts, and contextual controls;
+* register custom tools, overlays, cursors, rendered-content effects, and diagnostics;
+* choose what outbound dragging means, including files, companion documents, text, or custom MIME data;
+* share a bounded execution runtime across CuteCanvas editors and QPane viewers; and
+* drive host state from authoritative immutable snapshots and Qt signals.
 
-Masks use the same coverage tools. You can paint them, draw retained shapes,
-fill them, move and transform them as layers, or create exact proportional
-regions from host code. Export produces an ordinary grayscale mask for the
-document canvas while editable document saves preserve off-canvas content and
-retained shapes.
+Unavailable operations report stable reasons and, where possible, the valid next action. A vector or placed-image layer presents rasterization as an explicit route to direct pixel editing.
 
-Every layer has a final visual-only opacity multiplier that leaves authored
-pixels and scalar coverage untouched. Whole-layer edge edits use a generic
-layer route; mask coverage supports transient latest-value previews and settles
-the chosen result as one reversible baked edit.
+## One Document, Many Presentations
 
-The brush system is shared by mask and color painting. A `BrushPreset` controls
-size, hardness, opacity, flow, spacing, smoothing, pressure, tilt, texture, and
-jitter without creating separate brush behavior for each target.
-`ControlMode.ERASER` identifies the explicit erasing interaction. Hosts can use
-`CuteCanvas.CONTROL_MODE_ERASER` with `setControlMode()` to apply the same
-preset and input behavior while always removing coverage or alpha; Alt never
-inverts that explicit tool.
+The same editable document can appear in more than one place while retaining one authoritative state and history.
 
-Clone Stamp uses that same brush feel and history path. Alt-click chooses a
-rendered source independently from the paint destination. Each stroke samples
-the anchored layer, that layer and visible layers below it, or the complete
-visible composition. Overlapping strokes cannot feed their freshly written
-pixels back into themselves. Rotation, scale, and reflection are applied around
-the source anchor, with an on-canvas outline showing the exact sampled area.
+`CanvasWorkspace` can mount independent tabs, native-size views, responsive grids, and two-target comparisons over one shared document runtime. Linked inspection preserves the same normalized region across sources with different native dimensions. Each view keeps its own active target, viewport, tools, and transient interaction while durable content and history remain with the document.
 
-## Move, Transform, and Snap
+Cancellable projections render a document or layer for previews, exports, drag payloads, and other host workflows. Revision checks publish results that still match the referenced content.
 
-Move selected pixels without immediately rewriting their source. The lifted
-pixels remain temporary until the user anchors them, sends them to another
-compatible layer, promotes them to a new layer, or cancels the operation.
+## Developer Experience
 
-Free Transform provides corner and side handles for scale, rotation, skew, and
-translation. The shared snapping policy applies to Move and to geometric mask,
-pixel-selection, vector-shape, and vector-path authoring. By default, snapping
-follows visible painted content instead of transparent storage around it; hosts
-can choose another geometry policy when fixed bounds are meaningful. Freehand
-painting, lasso gestures, fills, and SAM region boxes remain unsnapped.
+CuteCanvas presents one obvious starting point and keeps the machinery behind it.
 
-## Save the Editable Work
+* `CuteCanvas` is the embeddable widget.
+* `CanvasDocument` is the headless owner of editable work.
+* `canvas.editor` provides focused composition, layer, history, selection, mask, resource, persistence, projection, and tool workflows.
+* Stable handles retain identity while always observing current document state.
+* Immutable snapshots and Qt signals provide authoritative state for host UI.
+* Typed configuration covers input, brush behavior, memory, autosave, diagnostics, and optional features.
+* Live diagnostics expose paint time, cache use, render activity, execution queues, mask work, and optional model activity.
+* Public tools and overlays extend the editor through its authoritative input, scene, selection, and history systems.
 
-A flattened image and an editable document solve different problems. Image
-export clips the visible result to the composition canvas. A `.cutecanvas` archive
-retains layers, transforms, masks, selections, linked-image information,
-policies, and off-canvas content:
-
-```python
-composition = canvas.editor.compositions.current
-if composition is not None:
-    canvas.editor.persistence.save(composition, "example.cutecanvas")
-```
-
-Restore validates the complete archive before changing the mounted document,
-so an invalid file cannot leave half-restored state behind.
+The complete public contract ships with type information for editors and static analysis.
 
 ## Try the Demo
 
-The repository includes one complete CuteCanvas example. It is both a usable
-small editor and a source-code tutorial for host applications:
+The repository includes one complete CuteCanvas example. It is both a usable small editor and a source-code guide to integrating the public API:
 
 ```powershell
 # From the repository root
 python packages\cutecanvas\examples\cutecanvas_demo.py
 ```
 
-The demo creates and opens compositions, manages a composition-and-layer tree,
-draws and edits raster, mask, vector, and placed-image layers, exercises Move
-and Transform, and saves complete editable documents using only public APIs.
+The demo creates and opens compositions, manages a composition-and-layer tree, draws and edits raster, mask, vector, and placed-image layers, exercises selection, painting, Move, Transform, and shared-edge workflows, and saves complete editable documents.
 
 ## Documentation
 
-* **[Getting Started](docs/getting-started.md):** Build the widget and your first
-  editable document.
-* **[Documents and Presentations](docs/documents-and-presentations.md):** Own
-  documents outside widgets; mount linked tabs, grids, and comparisons; and
-  provide drag-out MIME data.
-* **[Project Resources](docs/project-resources.md):** Share or fork content,
-  nest live documents, and persist the complete dependency graph.
-* **[Documents and Layers](docs/scenes.md):** Create documents, add layers, set
-  policies, arrange the stack, and inspect state.
-* **[Painting](docs/painting.md):** Create sparse raster layers, configure the
-  shared brush, choose targets, erase, and fill.
-* **[Placed Images](docs/placed-images.md):** Embed, link, refresh, duplicate,
-  and rasterize image assets.
-* **[Vector Layers](docs/vector-layers.md):** Author shapes, paths, and text;
-  edit objects; use vector coverage; and rasterize when needed.
-* **[Interaction and Tools](docs/interaction-modes.md):** Connect tool actions
-  and understand Move, Transform, snapping, and temporary navigation.
-* **[Pixel Selections](docs/pixel-selections.md):** Select, delete, fill, and
-  move part of a raster or mask.
-* **[Masks and AI Selection](docs/masks-and-sam.md):** Paint masks, draw exact
-  mask shapes, export coverage, configure autosave, and add MobileSAM.
-* **[Configuration](docs/configuration.md):** Tune memory, input, brush feel,
-  autosave, and background work.
-* **[Touch and Pen](docs/touch-and-pen.md):** Support fingers, pressure-sensitive
-  pens, palm rejection, and temporary navigation.
-* **[Extensibility](docs/extensibility.md):** Add tools, overlays, effects, and
-  host-owned presentation.
-* **[Host Cookbook](docs/host-cookbook.md):** Connect the complete command and
-  signal surface in a full editor application.
-* **[Host State](docs/host-state.md):** Understand snapshots, policies, enums,
-  and the values used to build application UI.
-* **[Diagnostics](docs/diagnostics.md):** Observe editor and renderer work.
-* **[API Reference](docs/api-reference.md):** Look up the complete public
-  surface.
+* **[Getting Started](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/getting-started.md):** Build the widget and the first editable document.
+* **[Documents and Presentations](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/documents-and-presentations.md):** Own documents outside widgets; resize canvases; mount linked tabs, grids, and comparisons; and provide drag-out data.
+* **[Project Resources](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/project-resources.md):** Share or fork content, nest live documents, and persist the complete dependency graph.
+* **[Documents and Layers](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/scenes.md):** Create documents, add layers, set policy, arrange the stack, and inspect state.
+* **[Painting](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/painting.md):** Create sparse raster layers, configure brushes, choose targets, erase, clone, and fill.
+* **[Placed Images](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/placed-images.md):** Embed, link, refresh, duplicate, and rasterize image assets.
+* **[Vector Layers](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/vector-layers.md):** Author shapes, paths, and text; edit objects; use vector coverage; and rasterize when needed.
+* **[Interaction and Tools](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/interaction-modes.md):** Connect tools and understand Move, Transform, snapping, shared edges, and temporary navigation.
+* **[Pixel Selections](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/pixel-selections.md):** Select, delete, fill, and move part of a raster or mask.
+* **[Masks and AI Selection](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/masks-and-sam.md):** Paint masks, draw exact shapes, export coverage, configure autosave, and add MobileSAM.
+* **[Configuration](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/configuration.md):** Tune memory, input, brush feel, autosave, and background work.
+* **[Touch and Pen](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/touch-and-pen.md):** Support fingers, pressure-sensitive pens, palm rejection, and temporary navigation.
+* **[Extensibility](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/extensibility.md):** Add tools, overlays, effects, and host-owned presentation.
+* **[Host Cookbook](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/host-cookbook.md):** Connect the complete command and signal surface in an editor application.
+* **[Building Host UI](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/host-ui.md):** Drive toolbars, trees, inspectors, and contextual controls from public commands, snapshots, and signals.
+* **[Diagnostics](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/diagnostics.md):** Observe editor and renderer work.
+* **[API Reference](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/packages/cutecanvas/docs/api-reference.md):** Look up the complete supported surface.
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/Artificial-Sweetener/CuteCanvas/blob/main/CONTRIBUTING.md) to set up the repository, run its ownership-driven tests, and work within the CuteCanvas and QPane package boundaries.
 
 ## License & Philosophy
 
-CuteCanvas is **Free and Open Source Software (FOSS)**, distributed under the
-**GNU General Public License v3.0 or later**.
+CuteCanvas is **Free and Open Source Software (FOSS)**, distributed under the **GNU General Public License v3.0 or later**.
 
-I believe robust creative infrastructure should be a public good, not a
-proprietary product. CuteCanvas is meant to give PySide6 developers a serious
-starting point for editors of their own, while keeping improvements to its
-rendering and editing foundations available to everyone.
+I believe robust editor infrastructure should be a public good. CuteCanvas gives Python developers a serious foundation for visual products of their own, and the GPL keeps improvements to that shared foundation available to the next developer.
 
 ## From the Developer 💖
 
-I hope CuteCanvas saves you the months of headache it takes to build a capable,
-responsive editor from scratch! If you'd like to support my work or see what
-else I'm up to, here are a few links:
+I built CuteCanvas to put documents, layers, tools, masks, transforms, history, persistence, and responsive rendering in your hands from the first day, so you can focus on the product you actually care about.
 
-- **Buy Me a Coffee**: You can help fuel more projects like this at my [Ko-fi page](https://ko-fi.com/artificial_sweetener).
-- **My Website & Socials**: See my art, poetry, and other dev updates at [artificialsweetener.ai](https://artificialsweetener.ai).
-- **If you like this project**, it would mean a lot to me if you gave me a star here on Github!! ⭐
+If CuteCanvas saves you that work and you would like to support mine:
+
+* **Buy Me a Coffee:** Help fuel more projects like this at my [Ko-fi page](https://ko-fi.com/artificial_sweetener).
+* **My Website & Socials:** See my art, poetry, and development updates at [artificialsweetener.ai](https://artificialsweetener.ai).
+* **Star the repository:** If you like the project, it would mean a lot to me if you gave it a star here on GitHub! ⭐
