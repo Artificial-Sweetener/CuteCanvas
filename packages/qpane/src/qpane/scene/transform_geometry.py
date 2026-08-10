@@ -18,117 +18,21 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from enum import Enum
 
 from PySide6.QtCore import QPointF
 
 from .affine import LayerTransform
+from .bilinear import BilinearLayerTransform
+from .bounded_affine import BoundedAffineFrame
 from .mapping import LayerMapping, compose_layer_mappings
-
-
-class TransformHandle(str, Enum):
-    """Identify one transform-box edit point."""
-
-    TOP_LEFT = "top-left"
-    TOP = "top"
-    TOP_RIGHT = "top-right"
-    RIGHT = "right"
-    BOTTOM_RIGHT = "bottom-right"
-    BOTTOM = "bottom"
-    BOTTOM_LEFT = "bottom-left"
-    LEFT = "left"
-
-
-class TransformOperationKind(str, Enum):
-    """Describe the affine operation selected by transform hit testing."""
-
-    MOVE = "move"
-    SCALE = "scale"
-    ROTATE = "rotate"
-    SKEW = "skew"
-
-
-@dataclass(frozen=True, slots=True)
-class TransformOperation:
-    """Pair one transform operation with its optional box handle."""
-
-    kind: TransformOperationKind
-    handle: TransformHandle | None = None
-
-    def __post_init__(self) -> None:
-        """Require handles exactly for scale and skew operations."""
-        requires_handle = self.kind in {
-            TransformOperationKind.SCALE,
-            TransformOperationKind.SKEW,
-        }
-        if requires_handle != (self.handle is not None):
-            raise ValueError("scale and skew operations require one transform handle")
-
-
-@dataclass(frozen=True, slots=True)
-class TransformModifiers:
-    """Describe the constraint policy active for one pointer update."""
-
-    proportional: bool = True
-    about_center: bool = False
-    snap_rotation: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class TransformLocalBounds:
-    """Store positive source-local content bounds without mutable Qt state."""
-
-    x: float
-    y: float
-    width: float
-    height: float
-
-    def __post_init__(self) -> None:
-        """Reject unusable transform target geometry."""
-        values = (self.x, self.y, self.width, self.height)
-        if not all(math.isfinite(value) for value in values):
-            raise ValueError("transform bounds must be finite")
-        if self.width <= 0.0 or self.height <= 0.0:
-            raise ValueError("transform bounds must have positive dimensions")
-
-    @property
-    def center(self) -> QPointF:
-        """Return the detached local center point."""
-        return QPointF(self.x + self.width * 0.5, self.y + self.height * 0.5)
-
-    def point(self, handle: TransformHandle) -> QPointF:
-        """Return the local corner or side midpoint for ``handle``."""
-        left = self.x
-        center_x = self.x + self.width * 0.5
-        right = self.x + self.width
-        top = self.y
-        center_y = self.y + self.height * 0.5
-        bottom = self.y + self.height
-        return {
-            TransformHandle.TOP_LEFT: QPointF(left, top),
-            TransformHandle.TOP: QPointF(center_x, top),
-            TransformHandle.TOP_RIGHT: QPointF(right, top),
-            TransformHandle.RIGHT: QPointF(right, center_y),
-            TransformHandle.BOTTOM_RIGHT: QPointF(right, bottom),
-            TransformHandle.BOTTOM: QPointF(center_x, bottom),
-            TransformHandle.BOTTOM_LEFT: QPointF(left, bottom),
-            TransformHandle.LEFT: QPointF(left, center_y),
-        }[handle]
-
-    def opposite(self, handle: TransformHandle) -> QPointF:
-        """Return the fixed opposite point for one scale handle."""
-        opposite = {
-            TransformHandle.TOP_LEFT: TransformHandle.BOTTOM_RIGHT,
-            TransformHandle.TOP: TransformHandle.BOTTOM,
-            TransformHandle.TOP_RIGHT: TransformHandle.BOTTOM_LEFT,
-            TransformHandle.RIGHT: TransformHandle.LEFT,
-            TransformHandle.BOTTOM_RIGHT: TransformHandle.TOP_LEFT,
-            TransformHandle.BOTTOM: TransformHandle.TOP,
-            TransformHandle.BOTTOM_LEFT: TransformHandle.TOP_RIGHT,
-            TransformHandle.LEFT: TransformHandle.RIGHT,
-        }
-        return self.point(opposite[handle])
+from .piecewise import PiecewiseLayerTransform
+from .transform_contracts import (
+    TransformHandle,
+    TransformLocalBounds,
+    TransformModifiers,
+    TransformOperation,
+    TransformOperationKind,
+)
 
 
 class AffineTransformGeometry:
@@ -144,6 +48,14 @@ class AffineTransformGeometry:
             raise ValueError("initial transform must be invertible")
         self._bounds = bounds
         self._initial = initial_transform
+        self._bounded_frame = (
+            BoundedAffineFrame(bounds, initial_transform)
+            if isinstance(
+                initial_transform,
+                (PiecewiseLayerTransform, BilinearLayerTransform),
+            )
+            else None
+        )
 
     @property
     def bounds(self) -> TransformLocalBounds:
@@ -157,10 +69,14 @@ class AffineTransformGeometry:
 
     def scene_point(self, handle: TransformHandle) -> QPointF:
         """Return one handle center in scene coordinates."""
+        if self._bounded_frame is not None:
+            return self._bounded_frame.point(handle)
         return self._initial.map_point(self._bounds.point(handle))
 
     def scene_center(self) -> QPointF:
         """Return the transform reference center in scene coordinates."""
+        if self._bounded_frame is not None:
+            return self._bounded_frame.center()
         return self._initial.map_point(self._bounds.center)
 
     def transform_for_drag(
@@ -203,11 +119,19 @@ class AffineTransformGeometry:
         modifiers: TransformModifiers,
     ) -> LayerMapping | None:
         """Scale local geometry about its opposite handle or center."""
+        if self._bounded_frame is not None:
+            return self._bounded_frame.scale_for_drag(
+                handle,
+                pointer_origin,
+                pointer_position,
+                modifiers,
+            )
         anchor = (
             self._bounds.center
             if modifiers.about_center
             else self._bounds.opposite(handle)
         )
+        anchor_scene = self._initial.map_point(anchor)
         handle_local = self._bounds.point(handle)
         handle_scene = self._initial.map_point(handle_local)
         desired_scene = handle_scene + (pointer_position - pointer_origin)
@@ -228,7 +152,6 @@ class AffineTransformGeometry:
         )
         corner = denominator_x != 0.0 and denominator_y != 0.0
         if corner and modifiers.proportional:
-            anchor_scene = self._initial.map_point(anchor)
             initial_vector = handle_scene - anchor_scene
             desired_vector = desired_scene - anchor_scene
             magnitude = QPointF.dotProduct(initial_vector, initial_vector)
@@ -244,7 +167,7 @@ class AffineTransformGeometry:
             dy=anchor.y() * (1.0 - scale_y),
         )
         candidate = compose_layer_mappings(local_scale, self._initial)
-        return candidate if candidate.is_invertible else None
+        return candidate if candidate is not None and candidate.is_invertible else None
 
     def _rotation(
         self,
@@ -291,6 +214,13 @@ class AffineTransformGeometry:
         modifiers: TransformModifiers,
     ) -> LayerMapping | None:
         """Skew one side in local space about the opposite side or center."""
+        if self._bounded_frame is not None:
+            return self._bounded_frame.skew_for_drag(
+                handle,
+                pointer_origin,
+                pointer_position,
+                modifiers,
+            )
         if handle in {
             TransformHandle.TOP_LEFT,
             TransformHandle.TOP_RIGHT,
@@ -323,4 +253,4 @@ class AffineTransformGeometry:
             shear = (desired_local.y() - handle_local.y()) / denominator
             local_skew = LayerTransform(m12=shear, dy=-shear * anchor.x())
         candidate = compose_layer_mappings(local_skew, self._initial)
-        return candidate if candidate.is_invertible else None
+        return candidate if candidate is not None and candidate.is_invertible else None

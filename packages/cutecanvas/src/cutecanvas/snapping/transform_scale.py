@@ -53,6 +53,16 @@ _FRAME_CORNERS = (
     TransformHandle.BOTTOM_RIGHT,
     TransformHandle.BOTTOM_LEFT,
 )
+_OPPOSITE_HANDLE = {
+    TransformHandle.TOP_LEFT: TransformHandle.BOTTOM_RIGHT,
+    TransformHandle.TOP: TransformHandle.BOTTOM,
+    TransformHandle.TOP_RIGHT: TransformHandle.BOTTOM_LEFT,
+    TransformHandle.RIGHT: TransformHandle.LEFT,
+    TransformHandle.BOTTOM_RIGHT: TransformHandle.TOP_LEFT,
+    TransformHandle.BOTTOM: TransformHandle.TOP,
+    TransformHandle.BOTTOM_LEFT: TransformHandle.TOP_RIGHT,
+    TransformHandle.LEFT: TransformHandle.RIGHT,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +160,8 @@ class TransformScaleSnapSession:
         if raw_transform is None or handle is None:
             return TransformSnapResult(raw_point)
         scale = max(1e-9, float(scene_units_per_device_pixel))
-        raw_handle = raw_transform.map_point(self._box.bounds.point(handle))
+        raw_geometry = AffineTransformGeometry(self._box.bounds, raw_transform)
+        raw_handle = raw_geometry.scene_point(handle)
         oriented = (
             None
             if self._oriented is None
@@ -215,12 +226,11 @@ class TransformScaleSnapSession:
                 if lock is not None
             )
             return independent, locks
-        anchor_local = (
-            self._box.bounds.center
+        anchor = (
+            self._geometry.scene_center()
             if modifiers.about_center
-            else self._box.bounds.opposite(handle)
+            else self._geometry.scene_point(_OPPOSITE_HANDLE[handle])
         )
-        anchor = self._box.transform.map_point(anchor_local)
         vector = self._initial_handle - anchor
         choices = self._constraint_choices(raw_handle, vector, x_lock, y_lock)
         if not choices:
@@ -278,10 +288,8 @@ class TransformScaleSnapSession:
         transform: LayerMapping,
     ) -> tuple[SnapGuide, ...]:
         """Build guides spanning the resolved frame and stationary target."""
-        corners = tuple(
-            transform.map_point(self._box.bounds.point(handle))
-            for handle in _FRAME_CORNERS
-        )
+        geometry = AffineTransformGeometry(self._box.bounds, transform)
+        corners = tuple(geometry.scene_point(handle) for handle in _FRAME_CORNERS)
         return tuple(
             _scale_guide(str(self._box.layer_id), axis, lock, corners)
             for axis, lock in locks
