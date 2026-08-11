@@ -40,6 +40,7 @@ from .model import (
     ExecutionRejectionReason,
     ExecutionRequirements,
     ExecutionResource,
+    ExecutionUrgency,
 )
 
 
@@ -83,7 +84,7 @@ class DefaultExecutionBackend:
         self._policy = policy or DefaultExecutionPolicy()
         self._pending: list[_PendingJob] = []
         self._accepted_bytes: dict[uuid.UUID, int] = {}
-        self._running: set[uuid.UUID] = set()
+        self._running: dict[uuid.UUID, ExecutionRequirements] = {}
         self._active_resources: dict[tuple[ExecutionResource, str | None], int] = {}
         self._active_exclusive: set[str] = set()
         self._sequence = 0
@@ -252,6 +253,12 @@ class DefaultExecutionBackend:
 
         requirements = job.requirements
         if (
+            requirements.urgency is not ExecutionUrgency.INTERACTIVE
+            and self._noninteractive_running_count()
+            >= self._policy.noninteractive_worker_limit
+        ):
+            return False
+        if (
             requirements.exclusive_key is not None
             and requirements.exclusive_key in self._active_exclusive
         ):
@@ -268,7 +275,7 @@ class DefaultExecutionBackend:
         """Reserve worker-visible resource capacity."""
 
         requirements = job.requirements
-        self._running.add(job.task_id)
+        self._running[job.task_id] = requirements
         key = (requirements.resource, requirements.resource_id)
         self._active_resources[key] = self._active_resources.get(key, 0) + 1
         if requirements.exclusive_key is not None:
@@ -285,7 +292,7 @@ class DefaultExecutionBackend:
 
         requirements = job.requirements
         with self._condition:
-            self._running.discard(job.task_id)
+            self._running.pop(job.task_id, None)
             key = (requirements.resource, requirements.resource_id)
             remaining = self._active_resources.get(key, 0) - 1
             if remaining > 0:
@@ -299,6 +306,14 @@ class DefaultExecutionBackend:
                 self._active_exclusive.discard(requirements.exclusive_key)
             self._condition.notify_all()
             self._notify_locked()
+
+    def _noninteractive_running_count(self) -> int:
+        """Return active jobs that may not consume reserved input capacity."""
+
+        return sum(
+            requirements.urgency is not ExecutionUrgency.INTERACTIVE
+            for requirements in self._running.values()
+        )
 
     def _cancel_pending(self, task_id: uuid.UUID, *, reason: str) -> bool:
         """Remove and terminalize one pending task."""

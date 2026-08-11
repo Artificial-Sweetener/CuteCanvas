@@ -161,7 +161,7 @@ class IncrementalFrameRefiner(QObject):
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,
                 resource_id=f"{scope.owner_id}:navigation-frame",
-                urgency=ExecutionUrgency.INTERACTIVE,
+                urgency=ExecutionUrgency.FOREGROUND,
                 maximum_concurrency=1,
                 estimated_retained_bytes=max(
                     0,

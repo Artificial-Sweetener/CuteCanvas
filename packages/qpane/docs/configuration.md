@@ -229,9 +229,15 @@ viewer = QPane(
     execution_policy=DefaultExecutionPolicy(
         max_workers=4,
         max_accepted=256,
+        reserve_interactive_worker=True,
     )
 )
 ```
+
+The default reserve keeps one worker available for direct input while
+foreground rendering, decoding, and refinement are active. Set
+`reserve_interactive_worker=False` only when throughput matters more than
+interactive latency.
 
 Execution policy is a runtime concern, not persistent viewer configuration.
 Several viewers can share one runtime, and a larger application can supply an

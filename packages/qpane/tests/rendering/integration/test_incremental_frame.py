@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QRect, QSize
 from qpane import QtOwnerDispatcher
+from qpane.execution import ExecutionUrgency
 from qpane.rendering.incremental_frame import IncrementalFrameRefiner
 from qpane_test_support.execution_backend import ControlledExecution
 from qpane_test_support.render_plan import make_render_plan
@@ -51,6 +52,9 @@ def test_cancel_retires_result_already_queued_for_owner_adoption(qapp) -> None:
         physical_size=QSize(64, 64),
         device_pixel_ratio=1.0,
         overscan_physical_px=0,
+    )
+    assert (
+        execution.pending_jobs()[0].requirements.urgency is ExecutionUrgency.FOREGROUND
     )
     execution.run_operation("render.navigation_frame")
     assert refiner.pending

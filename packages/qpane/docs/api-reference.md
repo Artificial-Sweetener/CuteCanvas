@@ -298,7 +298,8 @@ root facade and declarative SDK above.
   `QtOwnerDispatcher` posts to a living receiver and acknowledges delivery
   discarded during teardown.
 - `DefaultExecutionPolicy` configures the bounded runtime returned by
-  `create_default_execution_runtime`. `create_native_execution_runtime`
+  `create_default_execution_runtime`, including its direct-input worker reserve.
+  `create_native_execution_runtime`
   returns a disjoint runtime for stable thread-affine native work.
 - `ExecutionSnapshot` is a detached utilization sample.
   `ExecutionDiagnosticsProvider` exposes current samples, and

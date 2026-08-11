@@ -41,6 +41,7 @@ class DefaultExecutionPolicy:
         (ExecutionResource.NATIVE_CPU, 4),
         (ExecutionResource.DEVICE, 1),
     )
+    reserve_interactive_worker: bool = True
 
     def __post_init__(self) -> None:
         """Reject policies that could not form a bounded scheduler."""
@@ -67,6 +68,14 @@ class DefaultExecutionPolicy:
         for candidate, limit in self.resource_limits:
             if candidate == resource:
                 return limit
+        return self.max_workers
+
+    @property
+    def noninteractive_worker_limit(self) -> int:
+        """Return capacity available without consuming the input-response lane."""
+
+        if self.reserve_interactive_worker and self.max_workers > 1:
+            return self.max_workers - 1
         return self.max_workers
 
 

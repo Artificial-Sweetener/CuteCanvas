@@ -532,6 +532,73 @@ def test_default_backend_rejects_without_blocking_when_saturated() -> None:
     runtime.shutdown(wait=True)
 
 
+def test_default_backend_reserves_capacity_for_interactive_work() -> None:
+    """Foreground jobs must leave one worker available for direct input."""
+
+    runtime = create_default_execution_runtime(DefaultExecutionPolicy(max_workers=2))
+    scope = runtime.open_scope(owner_id="interactive-reserve")
+    first_started = Event()
+    second_started = Event()
+    interactive_started = Event()
+    release_first = Event()
+    release_second = Event()
+    release_interactive = Event()
+
+    def blocking_work(started: Event, release: Event) -> int:
+        """Occupy one worker until the test releases it."""
+
+        started.set()
+        release.wait(timeout=5)
+        return 1
+
+    try:
+        foreground = ExecutionRequirements(urgency=ExecutionUrgency.FOREGROUND)
+        interactive = ExecutionRequirements(urgency=ExecutionUrgency.INTERACTIVE)
+        first = scope.submit(
+            ExecutionRequest(
+                operation="foreground-first",
+                requirements=foreground,
+                work=lambda _context: blocking_work(first_started, release_first),
+            )
+        )
+        second = scope.submit(
+            ExecutionRequest(
+                operation="foreground-second",
+                requirements=foreground,
+                work=lambda _context: blocking_work(second_started, release_second),
+            )
+        )
+        assert first_started.wait(timeout=2)
+        assert not second_started.wait(timeout=0.05)
+
+        direct = scope.submit(
+            ExecutionRequest(
+                operation="interactive",
+                requirements=interactive,
+                work=lambda _context: blocking_work(
+                    interactive_started,
+                    release_interactive,
+                ),
+            )
+        )
+        assert interactive_started.wait(timeout=2)
+        assert not second_started.is_set()
+
+        release_interactive.set()
+        _wait_terminal(direct)
+        assert not second_started.wait(timeout=0.05)
+        release_first.set()
+        _wait_terminal(first)
+        assert second_started.wait(timeout=2)
+        release_second.set()
+        _wait_terminal(second)
+    finally:
+        release_first.set()
+        release_second.set()
+        release_interactive.set()
+        runtime.shutdown(wait=True)
+
+
 def test_runtime_diagnostics_subscription_aggregates_backend_changes() -> None:
     """Publish backend changes without exposing backend-specific observers."""
 

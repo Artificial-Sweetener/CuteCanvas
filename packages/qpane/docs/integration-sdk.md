@@ -179,7 +179,9 @@ discarded callbacks so teardown still settles every accepted task.
 The standalone runtime uses `DefaultExecutionPolicy` and remains bounded by
 accepted-task count and retained bytes. Its default backend applies semantic
 urgency with aging, resource limits, immediate structured rejection, and
-multi-observer `ExecutionSnapshot` diagnostics. Thread-affine native work is
+runs at most `max_workers - 1` noninteractive jobs so direct input retains one
+worker when capacity permits. Multi-observer `ExecutionSnapshot` diagnostics
+report the resulting lifecycle. Thread-affine native work is
 routed to the affinity backend; an adoption-held exclusive lease can keep a
 native resource serialized through GUI-thread adoption.
 
