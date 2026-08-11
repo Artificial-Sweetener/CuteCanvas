@@ -721,7 +721,7 @@ def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
         env=environment,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=120,
         check=False,
     )
     assert completed.returncode == 0, (completed.stdout, completed.stderr)

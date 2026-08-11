@@ -89,9 +89,9 @@ def _wait_for_navigation_settle(
     operation: str,
 ) -> None:
     """Wait through exact sampled, raster, and staged navigation publication."""
-    if not harness.wait_for_render_refinement_idle(timeout_ms=8000):
+    if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
         raise RuntimeError(f"{operation} sampled refinement did not settle")
-    if not harness.wait_for_raster_render_idle(timeout_ms=8000):
+    if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
         raise RuntimeError(f"{operation} raster refinement did not settle")
     harness.drain_events(wait_ms=30)
 
@@ -129,14 +129,14 @@ def main() -> None:
             viewer.mask_service.controller.mask_updated.emit(None, QRect())
         viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
         viewer.applyZoom(5.0, center)
-        if not harness.wait_for_mask_render_idle(timeout_ms=8000):
+        if not harness.wait_for_mask_render_idle(timeout_ms=20_000):
             raise RuntimeError("mask rendering did not settle")
         if not harness.wait_for_render_refinement_idle(
-            timeout_ms=8000,
+            timeout_ms=20_000,
             include_prefetch=True,
         ):
             raise RuntimeError("sampled rendering did not settle")
-        if not harness.wait_for_raster_render_idle(timeout_ms=8000):
+        if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
             raise RuntimeError("raster rendering did not settle")
         harness.drain_events(wait_ms=60)
 

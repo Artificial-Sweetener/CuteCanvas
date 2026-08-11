@@ -17,9 +17,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from time import monotonic
 
 import pytest
 from PySide6.QtCore import QSize
@@ -30,6 +28,7 @@ from qpane.rendering.raster_tile_grid import (
     resolve_raster_tile_grid,
 )
 from qpane.rendering.raster_tile_grid_runtime import RasterTileGridRuntime
+from qpane_test_support.qt_events import wait_until
 
 
 @pytest.mark.parametrize(
@@ -171,7 +170,11 @@ def test_runtime_debounces_resize_storm_to_latest_bucket(
         assert runtime.pending
         assert consumer.replacements == []
 
-        _wait_until(qapp, lambda: not runtime.pending)
+        wait_until(
+            qapp,
+            lambda: not runtime.pending,
+            failure_message="raster tile-grid debounce did not settle",
+        )
 
         assert not runtime.pending
         assert consumer.replacements == [RasterTileGrid(4096, 8)]
@@ -196,7 +199,11 @@ def test_runtime_strict_override_is_immediate_and_non_adaptive(
     try:
         runtime.apply_config(Config(tile_size=1536, tile_overlap=12))
         runtime.observe_viewport(QSize(7680, 4320))
-        _wait_until(qapp, lambda: not runtime.pending)
+        wait_until(
+            qapp,
+            lambda: not runtime.pending,
+            failure_message="raster tile-grid debounce did not settle",
+        )
 
         assert consumer.grid == RasterTileGrid(1536, 12)
         assert consumer.replacements == [RasterTileGrid(1536, 12)]
@@ -205,16 +212,3 @@ def test_runtime_strict_override_is_immediate_and_non_adaptive(
     finally:
         runtime.shutdown()
         runtime.deleteLater()
-
-
-def _wait_until(
-    application: QApplication,
-    predicate: Callable[[], bool],
-    *,
-    timeout_seconds: float = 1.0,
-) -> None:
-    """Process Qt work until one observable condition becomes true."""
-    deadline = monotonic() + timeout_seconds
-    while not predicate() and monotonic() < deadline:
-        application.processEvents()
-    assert predicate()

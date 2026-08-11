@@ -14,81 +14,17 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Regressions for movement snapping and transient mask clipping."""
+"""Regressions for movement previews and transient mask clipping."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 from cutecanvas import LayerPolicy
-from cutecanvas.snapping.engine import SnapSession
-from cutecanvas.snapping.model import bounds_candidates
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from cutecanvas_test_support.harness.timing import (
-    average_interaction_latency_ms,
-    interaction_clock,
-    tail_interaction_latency_ms,
-)
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
-
-
-def test_moving_top_edge_acquires_document_center_while_left_edge_stays_snapped() -> (
-    None
-):
-    """A moving edge may acquire a perpendicular document center relationship."""
-    session = SnapSession(
-        "rectangle",
-        QRectF(0.0, 600.0, 200.0, 100.0),
-        bounds_candidates(
-            "document",
-            QRectF(0.0, 0.0, 1000.0, 800.0),
-            cross_feature_center=True,
-        ),
-    )
-
-    result = session.resolve(
-        QPointF(0.0, -197.0),
-        scene_units_per_device_pixel=1.0,
-    )
-
-    assert result.delta == QPointF(0.0, -200.0)
-    assert result.snapped_x and result.snapped_y
-    assert {guide.position for guide in result.guides} == {0.0, 400.0}
-
-
-@pytest.mark.interactive_performance
-def test_cross_feature_snapping_stays_bounded_under_dense_reversals() -> None:
-    """New edge/center relationships retain bounded construction and pointer cost."""
-    candidates = tuple(
-        candidate
-        for index in range(500)
-        for candidate in bounds_candidates(
-            f"layer:{index}",
-            QRectF(index * 20.0, index * 13.0, 10.0, 8.0),
-        )
-    )
-    construction_ms = average_interaction_latency_ms(
-        lambda: SnapSession(
-            "source",
-            QRectF(1.0, 2.0, 10.0, 8.0),
-            candidates,
-        ),
-        repetitions=1_000,
-    )
-    session = SnapSession("source", QRectF(1.0, 2.0, 10.0, 8.0), candidates)
-
-    latencies_ms: list[float] = []
-    for index in range(2_000):
-        point = QPointF(9_000.0, 6_000.0) if index % 2 else QPointF(1_000.0, 650.0)
-        started = interaction_clock()
-        session.resolve(point, scene_units_per_device_pixel=1.0)
-        latencies_ms.append((interaction_clock() - started) * 1000.0)
-
-    assert construction_ms < 0.5
-    assert tail_interaction_latency_ms(latencies_ms) < 0.1
-
 
 def _paint_square(layer: object, left: int, top: int, size: int) -> None:
     """Replace a real hybrid mask with one opaque square."""

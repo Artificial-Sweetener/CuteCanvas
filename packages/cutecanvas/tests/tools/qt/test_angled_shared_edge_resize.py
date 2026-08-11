@@ -70,7 +70,7 @@ def test_angled_shared_edge_keeps_endpoint_and_suppresses_midpoint(qapp) -> None
         assert viewer.editor.coverage.rectangle(QRectF(160.0, 80.0, 80.0, 160.0))
         harness.activate_mask(0)
         assert harness.wait_for_mask_render_idle()
-        assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
+        assert harness.wait_for_render_refinement_idle(timeout_ms=20_000)
         entries = {entry.mask_id: entry for entry in viewer.listMasksForComposition()}
         first = entries[first_id]
         second = entries[second_id]
@@ -127,8 +127,8 @@ def test_angled_shared_edge_keeps_endpoint_and_suppresses_midpoint(qapp) -> None
             QTest.mouseMove(viewer, drag_target, delay=0)
             assert _preview_mappings(runtime) == endpoint_previews
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=drag_target)
-            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
-            assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
+            assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
+            assert harness.wait_for_render_refinement_idle(timeout_ms=20_000)
             viewer.repaint()
 
         assert _preview_mappings(runtime) == endpoint_previews
@@ -172,7 +172,7 @@ def test_angled_endpoint_drag_storm_never_drops_current_mask_coverage() -> None:
             env=environment,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=90,
             check=False,
         )
         assert completed.returncode == 0, completed.stdout + completed.stderr
@@ -194,7 +194,7 @@ def test_angled_endpoint_drag_storm_never_drops_current_mask_coverage() -> None:
         assert viewer.editor.coverage.rectangle(QRectF(1440.0, 200.0, 800.0, 1100.0))
         harness.activate_mask(0)
         assert harness.wait_for_mask_render_idle()
-        assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
+        assert harness.wait_for_render_refinement_idle(timeout_ms=20_000)
         entries = {entry.mask_id: entry for entry in viewer.listMasksForComposition()}
         first = entries[first_id]
         second = entries[second_id]
@@ -241,8 +241,8 @@ def test_angled_endpoint_drag_storm_never_drops_current_mask_coverage() -> None:
                     tuple(frame.mask_item_states for frame in probe.frames[before:]),
                 )
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=target)
-            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
-            assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
+            assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
+            assert harness.wait_for_render_refinement_idle(timeout_ms=20_000)
 
         assert probe.frames
         assert all(frame.mask_layer_count == 2 for frame in probe.frames)

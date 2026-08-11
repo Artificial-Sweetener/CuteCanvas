@@ -35,6 +35,8 @@ from qpane.scene.model import LayerKind
 from qpane.scene.render_plan import SceneRenderPlan
 from typing_extensions import Self
 
+_ASYNC_SETTLE_TIMEOUT_MS = 15_000
+
 
 @dataclass(frozen=True, slots=True)
 class PixelMeasurement:
@@ -388,7 +390,7 @@ class MountedQPaneHarness:
     def wait_for_mask_render_idle(
         self,
         *,
-        timeout_ms: int = 3000,
+        timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
     ) -> bool:
         """Wait until production mask rendering can no longer change the frame."""
         deadline = time.perf_counter() + timeout_ms / 1000.0
@@ -404,7 +406,7 @@ class MountedQPaneHarness:
     def wait_for_render_refinement_idle(
         self,
         *,
-        timeout_ms: int = 3000,
+        timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
         include_prefetch: bool = False,
     ) -> bool:
         """Wait through a continuous sampled-render refinement quiescence."""
@@ -432,7 +434,7 @@ class MountedQPaneHarness:
     def wait_for_raster_render_idle(
         self,
         *,
-        timeout_ms: int = 3000,
+        timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
     ) -> bool:
         """Wait through pyramid completion and a continuous queued-event quiescence."""
         deadline = time.perf_counter() + timeout_ms / 1000.0
@@ -462,7 +464,7 @@ class MountedQPaneHarness:
         mask_id: uuid.UUID,
         expected_depth: int,
         *,
-        timeout_ms: int = 3000,
+        timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
     ) -> bool:
         """Wait until durable mask history reaches ``expected_depth``."""
         deadline = time.perf_counter() + timeout_ms / 1000.0

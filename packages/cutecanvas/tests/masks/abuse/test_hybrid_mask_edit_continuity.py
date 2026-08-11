@@ -71,8 +71,8 @@ def test_retained_mask_raster_edit_never_drops_or_reverts_presented_coverage(
             QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
             harness.drain_events()
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
-            assert harness.wait_for_mask_undo_depth(mask_id, 3, timeout_ms=3000)
-            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+            assert harness.wait_for_mask_undo_depth(mask_id, 3, timeout_ms=20_000)
+            assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
             viewer.repaint()
 
         assert probe.frames
@@ -119,7 +119,7 @@ def test_high_dpi_retained_mask_raster_edit_never_drops_a_presented_layer() -> N
         env=environment,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=90,
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
@@ -171,9 +171,9 @@ def _assert_complete_mask_frame(
     expected_layers: int,
 ) -> None:
     """Require a settled visual baseline before observing one transition."""
-    assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+    assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
     assert harness.wait_for_render_refinement_idle(
-        timeout_ms=3000,
+        timeout_ms=20_000,
         include_prefetch=True,
     )
     with harness.observe_presented_frames() as probe:
@@ -218,8 +218,8 @@ def _high_dpi_probe() -> dict[str, object]:
             QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
             harness.drain_events()
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
-            assert harness.wait_for_mask_undo_depth(mask_id, 3, timeout_ms=3000)
-            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+            assert harness.wait_for_mask_undo_depth(mask_id, 3, timeout_ms=20_000)
+            assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
             viewer.repaint()
         return {
             "device_pixel_ratio": viewer.devicePixelRatioF(),

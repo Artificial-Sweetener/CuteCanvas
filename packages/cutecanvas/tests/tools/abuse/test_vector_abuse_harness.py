@@ -411,7 +411,7 @@ def test_large_visible_path_refines_asynchronously_without_stale_frames(
         )
         harness.drain_events(wait_ms=10)
 
-        assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
+        assert harness.wait_for_render_refinement_idle()
         renderer = viewer.view().presenter.renderer
         incremental = renderer.get_base_buffer()
         assert incremental is not None

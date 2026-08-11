@@ -39,6 +39,7 @@ from qpane.vector.model import VectorDocument, VectorObject
 from qpane.vector.public import VectorObjectKind, VectorShapeKind, VectorStyle
 from qpane.vector.tile_source import VectorRenderTileSource
 from qpane_test_support.execution_backend import ControlledExecution
+from qpane_test_support.qt_events import wait_until
 
 
 def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
@@ -351,7 +352,11 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
         assert initial_tile_count > 1
         _run_all_refinement(executor, qapp)
         assert request_at(0.0).exact
-        QTest.qWait(200)
+        wait_until(
+            qapp,
+            lambda: executor.pending_count > 0 or not coordinator.prefetch_pending,
+            failure_message="settled vector guard prefetch did not become runnable",
+        )
         _run_all_refinement(executor, qapp)
 
         first_exposed = request_at(-520.0)
@@ -365,7 +370,11 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
         assert coordinator.pending_tile_count == 0
         assert not executor.cancelled
 
-        QTest.qWait(200)
+        wait_until(
+            qapp,
+            lambda: executor.pending_count > 0 or not coordinator.prefetch_pending,
+            failure_message="settled vector guard prefetch did not become runnable",
+        )
         _run_all_refinement(executor, qapp)
         third_exposed = request_at(-1560.0)
         assert third_exposed.exact

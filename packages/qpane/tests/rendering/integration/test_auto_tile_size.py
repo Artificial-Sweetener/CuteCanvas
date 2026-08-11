@@ -18,9 +18,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtTest import QTest
 from qpane import Config, QPane
 from qpane.rendering.raster_tile_grid import RasterTileGrid
+from qpane_test_support.qt_events import wait_until
 
 
 def _active_grid(pane: QPane) -> RasterTileGrid:
@@ -34,8 +34,13 @@ def test_default_grid_adapts_after_high_resolution_resize(qapp) -> None:
     try:
         pane.show()
         pane.resize(3840, 2160)
-        qapp.processEvents()
-        QTest.qWait(150)
+        wait_until(
+            qapp,
+            lambda: _active_grid(pane) == RasterTileGrid(1024, 8),
+            failure_message=(
+                "automatic raster tile grid did not adapt to the physical 4K viewport"
+            ),
+        )
 
         assert _active_grid(pane) == RasterTileGrid(1024, 8)
     finally:
@@ -51,7 +56,6 @@ def test_strict_grid_does_not_adapt_after_high_resolution_resize(qapp) -> None:
         pane.show()
         pane.resize(3840, 2160)
         qapp.processEvents()
-        QTest.qWait(150)
 
         assert _active_grid(pane) == RasterTileGrid(1536, 12)
     finally:

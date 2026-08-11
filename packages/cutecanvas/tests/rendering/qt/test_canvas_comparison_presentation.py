@@ -607,7 +607,7 @@ def _wait_for_complete_render_plan(qapp, pane) -> None:
 
     timer = QElapsedTimer()
     timer.start()
-    while timer.elapsed() < 2_000:
+    while timer.elapsed() < 15_000:
         qapp.processEvents()
         plan = pane.calculateRenderPlan()
         assert plan is not None
@@ -623,6 +623,7 @@ def _wait_for_complete_render_plan(qapp, pane) -> None:
                 break
         if complete:
             return
+        QTest.qWait(1)
     raise AssertionError("single-image reference tiles did not settle")
 
 

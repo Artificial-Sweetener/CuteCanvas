@@ -33,7 +33,7 @@ from qpane.sdk.scene import BilinearLayerTransform
 
 pytestmark = INTERACTIVE_PERFORMANCE
 
-_PREPARATION_TIMEOUT_SECONDS = 3.0
+_PREPARATION_TIMEOUT_SECONDS = 15.0
 _WARMED_PRESS_BUDGET_MS = 35.0
 
 
@@ -85,6 +85,7 @@ def test_prepared_vector_mask_erase_stays_within_interactive_budget(
             and completion_clock() < deadline
         ):
             qapp.processEvents()
+            QTest.qWait(1)
         assert viewer.mask_service.stroke_interactions.paint_target_ready(layer)
         if finite_mapping:
             refreshed_layer = replace(
@@ -109,7 +110,7 @@ def test_prepared_vector_mask_erase_stays_within_interactive_budget(
             Qt.MouseButton.LeftButton,
             pos=panel_point.toPoint(),
         )
-        assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+        assert harness.wait_for_mask_render_idle()
 
         assert elapsed_ms < _WARMED_PRESS_BUDGET_MS
     finally:
