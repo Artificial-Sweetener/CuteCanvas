@@ -199,6 +199,10 @@ jobs:
     needs:
       - select
       - publish
+    if: >-
+      always() &&
+      needs.select.result == 'success' &&
+      needs.publish.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write

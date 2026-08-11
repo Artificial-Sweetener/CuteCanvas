@@ -169,6 +169,8 @@ def test_publish_workflow_creates_package_scoped_release_notes_after_pypi() -> N
     workflow = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
     release_job = workflow.index("  release-product:")
     assert workflow.index("      - publish", release_job) > release_job
+    assert "always()" in workflow[release_job:]
+    assert "needs.publish.result == 'success'" in workflow[release_job:]
     assert "python tools/generate_release_notes.py" in workflow[release_job:]
     assert 'gh release create "$RELEASE_TAG" --verify-tag' in workflow
     assert "needs.select.outputs.package != 'ferrastra'" not in workflow[release_job:]
