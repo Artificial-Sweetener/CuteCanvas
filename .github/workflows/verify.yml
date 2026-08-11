@@ -184,9 +184,14 @@ jobs:
           - os: macos-15
             platform: macos-arm64
             python: "3.14"
+    env:
+      RUSTUP_TOOLCHAIN: "1.93.1"
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.93.1 --profile minimal
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -221,6 +226,11 @@ jobs:
           cache-dependency-path: |
             packages/qpane/pyproject.toml
             packages/cutecanvas/pyproject.toml
+
+      - name: Install Linux Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libegl1
 
       - name: Install wheel verification tools
         run: |
