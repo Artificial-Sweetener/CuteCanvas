@@ -101,7 +101,7 @@ class ViewerImageLoadCoordinator(QObject):
             finished=finished,
         )
         for path in path_batch:
-            request = ExecutionRequest[ViewerImageProduct, object](
+            request = ExecutionRequest(
                 operation="demo.viewer.image.decode",
                 work=partial(_decode_viewer_image, path),
                 requirements=ExecutionRequirements(

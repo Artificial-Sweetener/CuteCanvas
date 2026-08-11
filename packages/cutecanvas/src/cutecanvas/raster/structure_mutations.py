@@ -185,7 +185,7 @@ class EditableRasterStructureMutationOwner:
         ):
             self._pending.pop(request_id, None)
             return request_id
-        request = ExecutionRequest[RasterReframeProduct, object](
+        request = ExecutionRequest(
             operation="editor.raster.reframe",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

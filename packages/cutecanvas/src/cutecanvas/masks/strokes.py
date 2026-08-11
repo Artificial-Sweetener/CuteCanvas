@@ -332,7 +332,7 @@ class MaskStrokePipeline:
             job_token=job_token,
             commit=commit,
         )
-        request = ExecutionRequest[MaskStrokeJobResult, object](
+        request = ExecutionRequest(
             operation="editor.mask.stroke",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

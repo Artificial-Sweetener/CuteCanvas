@@ -180,7 +180,7 @@ class MaskRasterMutationOwner:
         ):
             self._pending.pop(request_id, None)
             return request_id
-        request = ExecutionRequest[RasterReframeProduct, object](
+        request = ExecutionRequest(
             operation="editor.mask.reframe",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

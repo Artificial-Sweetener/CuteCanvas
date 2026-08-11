@@ -156,7 +156,7 @@ class IncrementalFrameRefiner(QObject):
             overscan_physical_px,
         )
         started = time.perf_counter()
-        request = ExecutionRequest[_FrameResult, object](
+        request = ExecutionRequest(
             operation="render.navigation_frame",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

@@ -319,7 +319,7 @@ class VectorConversionService:
             self._pending.pop(request_id, None)
             self._lifetime.release(retained_source, ResourceLeaseKind.SESSION)
             return request_id
-        request = ExecutionRequest[VectorConversionProduct, object](
+        request = ExecutionRequest(
             operation=f"editor.vector.convert.{kind.value}",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

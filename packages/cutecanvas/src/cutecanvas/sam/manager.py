@@ -295,7 +295,7 @@ class SamManager(QObject):
             self.maskReady.emit(None, normalized_bbox, erase_mode, context)
             return False
         request_id = uuid.uuid4()
-        request = ExecutionRequest[SamMaskProduct, object](
+        request = ExecutionRequest(
             operation="editor.sam.infer_box",
             requirements=self._native_requirements(
                 urgency=ExecutionUrgency.INTERACTIVE
@@ -394,7 +394,7 @@ class SamManager(QObject):
         if not self._session_may_own_native_resources:
             self._close_execution_scopes(reason="sam_shutdown_empty")
             return None
-        request = ExecutionRequest[SamCacheMutationProduct, object](
+        request = ExecutionRequest(
             operation="editor.sam.session.close",
             requirements=self._native_requirements(
                 urgency=ExecutionUrgency.MAINTENANCE
@@ -424,7 +424,7 @@ class SamManager(QObject):
         request_id = uuid.uuid4()
         estimate = self._estimate_predictor_bytes(payload.image)
         pending = _PendingPreparation(request_id, estimate)
-        request = ExecutionRequest[SamPreparationProduct, object](
+        request = ExecutionRequest(
             operation="editor.sam.prepare",
             requirements=self._native_requirements(
                 urgency=ExecutionUrgency.FOREGROUND,
@@ -541,7 +541,7 @@ class SamManager(QObject):
         adopt,
     ) -> bool:
         """Submit one serialized native cache mutation."""
-        request = ExecutionRequest[SamCacheMutationProduct, object](
+        request = ExecutionRequest(
             operation=operation,
             requirements=self._native_requirements(urgency=ExecutionUrgency.FOREGROUND),
             work=work,

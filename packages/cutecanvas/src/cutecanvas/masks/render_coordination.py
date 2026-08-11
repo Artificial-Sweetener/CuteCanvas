@@ -234,7 +234,7 @@ class MaskRenderWorkCoordinator:
         )
         pending = _PrefetchHandle(request_id, None, mask_revisions)
         self._prefetch_handles[image_id] = pending
-        request = ExecutionRequest[MaskPrefetchProduct, object](
+        request = ExecutionRequest(
             operation="editor.mask.prefetch",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,
@@ -504,7 +504,7 @@ class MaskRenderWorkCoordinator:
         request_id = uuid.uuid4()
         pending = _SnippetHandle(request_id, render_revision)
         self._snippet_handles[mask_id] = pending
-        request = ExecutionRequest[MaskSnippetProduct, object](
+        request = ExecutionRequest(
             operation="editor.mask.snippet",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

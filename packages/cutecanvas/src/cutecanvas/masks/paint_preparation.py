@@ -57,7 +57,7 @@ class MaskPaintPreparationCache:
         if key == self._ready_key or key == self._pending_key:
             return True
         self.discard()
-        request = ExecutionRequest[CoverageSnapshot | None, object](
+        request = ExecutionRequest(
             operation="editor.mask.paint.prepare",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

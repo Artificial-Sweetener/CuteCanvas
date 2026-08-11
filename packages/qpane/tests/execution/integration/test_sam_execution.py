@@ -40,7 +40,7 @@ def test_native_affinity_requests_reuse_one_stable_thread() -> None:
     identities: list[int] = []
     handles = [
         scope.submit(
-            ExecutionRequest[int, object](
+            ExecutionRequest(
                 operation="test.sam.affinity",
                 requirements=ExecutionRequirements(
                     resource=ExecutionResource.THREAD_AFFINE_NATIVE,

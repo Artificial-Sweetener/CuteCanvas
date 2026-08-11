@@ -145,7 +145,7 @@ class CanvasResamplingService:
                 "canvas already has the requested dimensions",
             )
             return request_id
-        request = ExecutionRequest[CanvasResampleProduct, object](
+        request = ExecutionRequest(
             operation="editor.canvas.resample",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

@@ -108,7 +108,7 @@ class HeadroomMonitor:
         if self._provider_missing:
             self._apply_fallback()
             return
-        request = ExecutionRequest[SystemHeadroomSample, object](
+        request = ExecutionRequest(
             operation="cache.headroom.sample",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.BLOCKING_IO,

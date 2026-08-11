@@ -87,7 +87,7 @@ class DocumentSaveCoordinator(QObject):
 
         try:
             self._execution_scope.submit(
-                ExecutionRequest[DocumentSaveResult, object](
+                ExecutionRequest(
                     operation="demo.document.save",
                     work=write,
                     requirements=ExecutionRequirements(

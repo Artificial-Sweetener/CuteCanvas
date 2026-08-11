@@ -334,7 +334,7 @@ class PyramidManager(QObject, CacheMetricsMixin):
                 return handle
             source_image = QImage(pyr.full_resolution_image)
             min_view_size_px = int(self._config.min_view_size_px)
-            request = ExecutionRequest[ImagePyramid, object](
+            request = ExecutionRequest(
                 operation="render.pyramid",
                 requirements=ExecutionRequirements(
                     resource=ExecutionResource.NATIVE_CPU,

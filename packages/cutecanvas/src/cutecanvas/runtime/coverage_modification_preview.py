@@ -132,7 +132,7 @@ class CoverageModificationPreviewCoordinator:
             normalized_operation,
             normalized_radius,
         )
-        execution_request = ExecutionRequest[CoverageSnapshot | None, object](
+        execution_request = ExecutionRequest(
             operation=f"editor.{self._owner_id}.{normalized_operation.value}",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

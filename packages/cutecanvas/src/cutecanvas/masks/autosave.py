@@ -256,7 +256,7 @@ class AutosaveManager(QObject):
         ) -> ExecutionHandle[bytes, object]:
             """Submit the retained blank encode payload."""
             retained_mask_id, retained_size, retained_path = payload
-            request = ExecutionRequest[bytes, object](
+            request = ExecutionRequest(
                 operation="editor.mask.autosave.encode_blank",
                 requirements=ExecutionRequirements(
                     resource=ExecutionResource.NATIVE_CPU,
@@ -336,7 +336,7 @@ class AutosaveManager(QObject):
         ) -> ExecutionHandle[Path, object]:
             """Submit the retained image and target path."""
             retained_payload, retained_path = retained
-            request = ExecutionRequest[Path, object](
+            request = ExecutionRequest(
                 operation="editor.mask.autosave.save",
                 requirements=ExecutionRequirements(
                     resource=ExecutionResource.BLOCKING_IO,

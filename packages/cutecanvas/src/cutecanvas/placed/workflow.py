@@ -322,7 +322,7 @@ class PlacedAssetWorkflow:
         """Submit one typed decode and retain its lifecycle handle."""
         pending = _PendingDecode(Path(path), None, new_layer, reload)
         self._pending[request_id] = pending
-        request = ExecutionRequest[PlacedAssetDecode, object](
+        request = ExecutionRequest(
             operation="editor.placed.decode",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.BLOCKING_IO,

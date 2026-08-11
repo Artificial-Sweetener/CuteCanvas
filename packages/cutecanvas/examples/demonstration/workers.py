@@ -99,7 +99,7 @@ class ImageLoadCoordinator(QObject):
             finished=finished,
         )
         for path in path_batch:
-            request = ExecutionRequest[_DecodedImage, object](
+            request = ExecutionRequest(
                 operation="demo.image.decode",
                 work=partial(_decode_image, path),
                 requirements=ExecutionRequirements(

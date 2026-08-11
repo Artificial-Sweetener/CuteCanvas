@@ -208,7 +208,7 @@ class CanvasProjectionService:
         request_id = uuid.uuid4()
         pending = _PendingProjection(request)
         self._pending[request_id] = pending
-        execution_request = ExecutionRequest[QImage, object](
+        execution_request = ExecutionRequest(
             operation="editor.canvas.project",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

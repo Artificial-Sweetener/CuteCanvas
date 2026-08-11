@@ -354,7 +354,7 @@ class TileManager(QObject, CacheMetricsMixin):
             """Submit one detached tile request through the manager scope."""
             detached_image = QImage(image)
             self._mark_submitting(key, payload_key=payload_key)
-            request = ExecutionRequest[Tile, object](
+            request = ExecutionRequest(
                 operation="render.tile.prefetch" if prefetch else "render.tile.visible",
                 requirements=ExecutionRequirements(
                     resource=ExecutionResource.NATIVE_CPU,

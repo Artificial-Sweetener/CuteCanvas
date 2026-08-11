@@ -69,7 +69,7 @@ class CheckpointAcquisition(QObject):
     ) -> bool:
         """Submit one transfer or validation request."""
         self.cancel()
-        request = ExecutionRequest[Path, CheckpointProgress](
+        request = ExecutionRequest(
             operation="editor.sam.checkpoint.acquire",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.BLOCKING_IO,

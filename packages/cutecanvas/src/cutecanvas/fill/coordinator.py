@@ -145,7 +145,7 @@ class PaintBucketCoordinator:
             CoverageCombineMode(mode),
         )
         self._pending = pending
-        execution_request = ExecutionRequest[CoverageSnapshot, object](
+        execution_request = ExecutionRequest(
             operation="editor.paint.bucket",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.PYTHON_CPU,

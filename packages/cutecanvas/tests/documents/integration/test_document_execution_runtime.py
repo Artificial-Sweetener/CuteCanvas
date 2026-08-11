@@ -68,7 +68,7 @@ def test_independent_views_share_document_runtime_without_owning_it(qapp) -> Non
         qapp.processEvents()
 
         handle = document_runtime.execution_scope.submit(
-            ExecutionRequest[int, object](
+            ExecutionRequest(
                 operation="test.document.after-view-close",
                 work=lambda _context: 7,
             ),
@@ -100,7 +100,7 @@ def test_host_runtime_without_affinity_gets_disjoint_native_fallback(qapp) -> No
     try:
         native_scope = document_runtime.native_execution_scope()
         handle = native_scope.submit(
-            ExecutionRequest[int, object](
+            ExecutionRequest(
                 operation="test.document.native-fallback",
                 requirements=ExecutionRequirements(
                     resource=ExecutionResource.THREAD_AFFINE_NATIVE,

@@ -141,7 +141,7 @@ class CompositionResourceRasterizationService:
         ):
             self._pending.pop(request_id, None)
             return None
-        request = ExecutionRequest[QImage, object](
+        request = ExecutionRequest(
             operation="editor.composition.rasterize",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

@@ -139,7 +139,7 @@ class PlacedAssetRasterizationService:
             self._pending.pop(request_id, None)
             return None
         source_image = snapshot.image
-        request = ExecutionRequest[QImage, object](
+        request = ExecutionRequest(
             operation="editor.placed.rasterize",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,

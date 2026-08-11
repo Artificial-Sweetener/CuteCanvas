@@ -531,7 +531,7 @@ class RenderTileWorkCoordinator:
             lane=lane,
         )
         self._pending[identity] = pending
-        request = ExecutionRequest[tuple[RenderTileProduct, ...], object](
+        request = ExecutionRequest(
             operation=f"render.refinement.{lane.value}",
             requirements=ExecutionRequirements(
                 resource=ExecutionResource.NATIVE_CPU,
