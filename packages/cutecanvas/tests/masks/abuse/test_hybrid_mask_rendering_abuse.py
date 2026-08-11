@@ -779,7 +779,13 @@ def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
     assert result["scroll_hits"] >= result["scroll_attempts"]
     assert result["scroll_misses"] == 0
     assert result["scroll_repairs"] >= 8
-    assert result["full_redraws"] == 0
+    redraws = {
+        "pan": result["pan_full_redraws"],
+        "zoom": result["zoom_full_redraws"],
+        "total": result["full_redraws"],
+    }
+    assert redraws["pan"] == 0, redraws
+    assert redraws["zoom"] == 0, redraws
     assert result["staged_maximum_step_ms"] < 16.0
     assert result["staged_maximum_publish_ms"] < 16.0
     if result["absolute_latency_isolated"]:
