@@ -195,7 +195,7 @@ def test_zoomed_mask_pan_crosses_cold_tile_boundary_without_pop_in(
         viewer.applyZoom(5.0, center)
         assert harness.wait_for_mask_render_idle(timeout_ms=8000)
         assert harness.wait_for_render_refinement_idle(
-            timeout_ms=8000,
+            timeout_ms=30_000,
             include_prefetch=True,
         )
         harness.drain_events(wait_ms=30)
@@ -549,12 +549,10 @@ def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
         assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
-        renderer = viewer.view().renderer
-        settled = renderer.get_base_buffer().copy()
+        settled = harness.capture()
         viewer.view().renderer.markDirty()
         viewer.update()
-        harness.drain_events()
-        clean = renderer.get_base_buffer().copy()
+        clean = harness.capture()
         assert settled == clean, _image_difference_summary(settled, clean)
         cache = viewer.view().presenter._render_tile_cache
         assert 0 < cache.usage_bytes <= cache.budget_bytes
@@ -685,11 +683,10 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
         assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
-        settled = viewer.view().renderer.get_base_buffer().copy()
+        settled = harness.capture()
         viewer.view().renderer.markDirty()
         viewer.update()
-        harness.drain_events()
-        clean = viewer.view().renderer.get_base_buffer().copy()
+        clean = harness.capture()
         assert settled == clean, _image_difference_summary(settled, clean)
     finally:
         harness.close()

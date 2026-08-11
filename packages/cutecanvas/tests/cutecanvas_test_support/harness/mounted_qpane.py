@@ -59,9 +59,10 @@ class PresentedMaskFrame:
 
     def color_at(self, point: QPoint) -> QColor:
         """Return the backing-buffer color presented at a widget point."""
+        device_pixel_ratio = self.image.devicePixelRatio()
         return self.image.pixelColor(
-            point.x() + self.overscan_margin,
-            point.y() + self.overscan_margin,
+            round(point.x() * device_pixel_ratio) + self.overscan_margin,
+            round(point.y() * device_pixel_ratio) + self.overscan_margin,
         )
 
 
@@ -486,7 +487,12 @@ class MountedQPaneHarness:
 
     def color_at(self, point: QPoint) -> QColor:
         """Sample one pixel from the mounted widget composition."""
-        return self.capture().pixelColor(point)
+        image = self.capture()
+        device_pixel_ratio = image.devicePixelRatio()
+        return image.pixelColor(
+            round(point.x() * device_pixel_ratio),
+            round(point.y() * device_pixel_ratio),
+        )
 
     def wait_for_mask_tint(
         self,
@@ -519,7 +525,7 @@ class MountedQPaneHarness:
         color = QColor()
         while time.perf_counter() < deadline:
             self.qapp.processEvents()
-            color = self.viewer.grab().toImage().pixelColor(point)
+            color = self.color_at(point)
             if predicate(color):
                 return PixelMeasurement(
                     latency_ms=(time.perf_counter() - started_at) * 1000.0,
