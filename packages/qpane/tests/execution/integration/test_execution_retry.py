@@ -128,7 +128,7 @@ def test_retry_coalesces_latest_payload_and_resubmits_once() -> None:
 
 
 def test_retry_policy_is_deterministic_and_bounded() -> None:
-    """Keep delay, jitter, attempt, and elapsed limits stable for host tests."""
+    """Keep generic construction and retry bounds stable on supported Python."""
     policy = RetryPolicy[str](
         base_ms=10,
         max_ms=25,
@@ -136,7 +136,7 @@ def test_retry_policy_is_deterministic_and_bounded() -> None:
         attempt_limit=3,
         elapsed_limit_ms=100,
     )
-    context = RetryContext(operation="decode", key="same")
+    context = RetryContext[str](operation="decode", key="same")
 
     assert policy.delay_ms(1, context) == policy.delay_ms(1, context)
     assert 10 <= policy.delay_ms(1, context) <= 15

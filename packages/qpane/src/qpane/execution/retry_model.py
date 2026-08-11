@@ -32,7 +32,7 @@ class RetrySchedulingError(RuntimeError):
     """Report that a retry delay could not be scheduled."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RetryContext(Generic[K]):
     """Describe one producer retry without retaining its payload."""
 
@@ -41,7 +41,7 @@ class RetryContext(Generic[K]):
     payload_size: int | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RetryPolicy(Generic[K]):
     """Compute bounded exponential delays and optional termination."""
 
