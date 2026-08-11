@@ -102,7 +102,7 @@ path = "packages/cutecanvas/src/cutecanvas/masks/mask_service.py"
 kind = "remediation"
 justification = "Mask integration retains stroke, asset, activation, rendering, autosave, and diagnostics ownership pending stroke-service extraction."
 review_by = 2026-12-15
-max_lines = 718
+max_lines = 672
 next_limit = 600
 debt = "CUTECANVAS-ARCH-003"
 

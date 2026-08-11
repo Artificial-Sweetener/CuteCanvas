@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections import deque
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
@@ -56,6 +55,7 @@ from .render_coordination import (
 from .spatial_paint import MaskSpatialPaintNormalizer
 from .spatial_paint_history import MaskSpatialPaintHistory
 from .stroke_interactions import MaskStrokeInteractionCoordinator
+from .status_diagnostics import MaskStatusDiagnostics
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
@@ -98,15 +98,15 @@ class MaskService:
             edits=mask_controller.edits,
             renders=mask_controller.renders,
         )
+        self._status = MaskStatusDiagnostics()
         self._autosave = MaskAutosaveCoordinator(
             qpane=qpane,
             mask_controller=mask_controller,
             execution_scope=document_execution_scope,
             latest_requests=latest_requests,
             snapshot_provider=self._projection.deferred,
-            publish_status=self._record_status,
+            publish_status=self._status.record,
         )
-        self._status_messages: deque[tuple[str, str]] = deque(maxlen=8)
         self._layers = MaskLayerCoordinator(
             layers=qpane.compositionService().layers,
             layer_edits=qpane.compositionService().layer_edits,
@@ -127,6 +127,7 @@ class MaskService:
             controller=mask_controller,
             history=self._spatial_paint_history,
             current_composition_id=qpane.currentCompositionID,
+            execution_scope=view_execution_scope,
         )
         self._render_work = MaskRenderWorkCoordinator(
             assets=mask_assets,
@@ -140,7 +141,7 @@ class MaskService:
                 self._activation.should_defer(active_id, next_id)
             ),
             is_mask_busy=lambda mask_id: self._stroke_pipeline.is_mask_busy(mask_id),
-            publish_status=self._record_status,
+            publish_status=self._status.record,
         )
         self._mask_controller.renders.set_async_handler(
             self._render_work.request_async_colorize,
@@ -153,7 +154,7 @@ class MaskService:
             invalidate_jobs=self._invalidate_pending_mask_jobs,
             prefetch=self._render_work.prefetch,
             prefetch_pending=self._render_work.is_prefetch_pending,
-            publish_status=self._record_status,
+            publish_status=self._status.record,
             resume=lambda _image_id=None: qpane.resumeOverlays(),
             resume_and_update=lambda _image_id=None: qpane.resumeOverlaysAndUpdate(),
         )
@@ -179,6 +180,9 @@ class MaskService:
             spatial_paint=self._spatial_paint,
             spatial_history=self._spatial_paint_history,
             refresh_coordinates=qpane.view().coordinate_scene_descriptor,
+            active_scene=qpane.sceneMutationCoordinator().active_scene,
+            assets=mask_assets,
+            execution_scope=view_execution_scope,
         )
         self._stroke_pipeline.set_idle_callback(self._stroke_interactions.handle_idle)
         self._layer_workflow = MaskLayerWorkflow(
@@ -191,7 +195,7 @@ class MaskService:
             reset_strokes=self._reset_pending_strokes,
             invalidate_jobs=self._invalidate_pending_mask_jobs,
             commit_image=self._commit_mask_image,
-            publish_status=self._record_status,
+            publish_status=self._status.record,
         )
         qpane.diagnosticsDomainToggled.connect(self._handle_diagnostics_domain_toggled)
         if stroke_diagnostics is not None:
@@ -353,6 +357,7 @@ class MaskService:
 
     def shutdown(self) -> None:
         """Stop view-local mask workers during widget teardown."""
+        self._stroke_interactions.shutdown()
         self._stroke_pipeline.shutdown()
         self._render_work.shutdown()
 
@@ -585,14 +590,7 @@ class MaskService:
 
     def get_latest_status_message(self, *labels: str) -> tuple[str, str] | None:
         """Return the most recent status message filtered by labels when provided."""
-        if not self._status_messages:
-            return None
-        if labels:
-            label_set = set(labels)
-            for label, message in reversed(self._status_messages):
-                if label in label_set:
-                    return label, message
-        return self._status_messages[-1]
+        return self._status.latest(*labels)
 
     def _commit_mask_image(
         self, mask_id: uuid.UUID, image: QImage, *, before: QImage | None = None
@@ -686,57 +684,12 @@ class MaskService:
             request_redraw=request_redraw,
         )
 
-    def _diagnostics_provider(self, _: CuteCanvas) -> Sequence[DiagnosticRecord]:
-        """Surface recent mask service status messages for diagnostics overlays."""
-        records: list[DiagnosticRecord] = []
-        suppressed_labels = {"Mask", "Mask Autosave"}
-        filtered: list[tuple[str, str]] = []
-        if self._status_messages:
-            filtered = [
-                (label, message)
-                for label, message in self._status_messages
-                if label not in suppressed_labels
-            ]
-        label_counts: dict[str, int] = {}
-        latest_messages: dict[str, str] = {}
-        ordered_labels: list[str] = []
-        for label, message in filtered:
-            if label in ordered_labels:
-                ordered_labels.remove(label)
-            ordered_labels.append(label)
-            label_counts[label] = label_counts.get(label, 0) + 1
-            latest_messages[label] = message
-        prefetch_messages = [
-            message for label, message in filtered if label == "Mask Prefetch"
-        ]
-        display_labels = [label for label in ordered_labels if label != "Mask Prefetch"]
-        for label in display_labels[-3:]:
-            message = latest_messages[label]
-            count = label_counts.get(label, 0)
-            if count > 1:
-                message = f"{message} (+{count - 1} earlier)"
-            records.append(DiagnosticRecord(label, message))
-        stats = self._render_work.stats
-        summary_line = self._render_work.diagnostics_summary()
-        detail_parts = []
-        if stats.scheduled or stats.completed or stats.skipped or stats.failed:
-            detail_parts.append(
-                f"scheduled={stats.scheduled} completed={stats.completed} "
-                f"skipped={stats.skipped} failed={stats.failed}"
-            )
-        hidden_events = max(len(prefetch_messages) - 1, 0)
-        if hidden_events:
-            plural = "s" if hidden_events > 1 else ""
-            detail_parts.append(f"{hidden_events} earlier event{plural} hidden")
-        value = summary_line
-        if detail_parts:
-            value = f"{summary_line} | {' | '.join(detail_parts)}"
-        records.append(DiagnosticRecord("Mask|Prefetch", value))
-        return tuple(records)
-
-    def _record_status(self, message: str, *, label: str) -> None:
-        """Cache a status update so diagnostics surfaces the latest mask activity."""
-        self._status_messages.append((label, message))
+    def diagnostics_records(self) -> tuple[DiagnosticRecord, ...]:
+        """Return current mask-service diagnostics for presentation."""
+        return self._status.records(
+            self._render_work.stats,
+            self._render_work.diagnostics_summary(),
+        )
 
     def loadMaskFromPath(
         self,

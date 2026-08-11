@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from qpane.sdk.scene import (
+    LayerDescriptor,
     RasterBounds,
     RasterLayerRenderItem,
     SampledLayerRenderItem,
@@ -41,6 +42,7 @@ from ..scene.pixel_transitions import RasterPixelTransition
 from ..scene.source_capabilities import EditorSourceCapabilities
 from .floating_pixels import FloatingPixelRenderCompiler
 from .layer_edge_preview import LayerEdgePreviewRenderCompiler
+from .mapped_mask_transitions import transition_for_retained_mapping
 from .raster_transitions import RasterTransitionRenderCompiler, raster_item_asset_key
 
 
@@ -116,11 +118,12 @@ class MaskLivePreviewRenderCompiler:
             resource_id = getattr(descriptor.source, "resource_id", None)
             if not isinstance(resource_id, uuid.UUID):
                 continue
+            candidate_asset_key = raster_item_asset_key(candidate)
+            current_layer = self._current_layer(descriptor.layer_id)
+            current_asset_key = self._asset_key(current_layer)
             preview = self._preview(resource_id)
             if preview is not None:
-                self._observed_asset_keys[resource_id] = raster_item_asset_key(
-                    candidate
-                )
+                self._observed_asset_keys[resource_id] = candidate_asset_key
             settlement = self._settling.get(resource_id)
             retained_source_key: SceneLayerAssetKey | None = None
             settlement_uses_current_asset = False
@@ -132,8 +135,7 @@ class MaskLivePreviewRenderCompiler:
             ):
                 previous_key = settlement.previous_asset_key
                 settlement_uses_current_asset = (
-                    previous_key is None
-                    or raster_item_asset_key(candidate) != previous_key
+                    previous_key is None or candidate_asset_key != previous_key
                 )
                 if not settlement_uses_current_asset:
                     retained_source_key = previous_key
@@ -146,22 +148,47 @@ class MaskLivePreviewRenderCompiler:
             patch_bounds = patch_bounds.intersection(surface_bounds)
             if patch_bounds is None:
                 continue
-            snapshot = self._capabilities.coverage.coverage_snapshot(
-                descriptor.source,
-                patch_bounds,
+            coordinates_match = bool(
+                current_layer is not None
+                and descriptor.transform == current_layer.transform
+                and descriptor.raster_bounds == current_layer.raster_bounds
             )
-            if snapshot is None or snapshot.bounds != patch_bounds:
+            if candidate_asset_key == current_asset_key or coordinates_match:
+                snapshot_source = (
+                    descriptor.source if current_layer is None else current_layer.source
+                )
+                snapshot = self._capabilities.coverage.coverage_snapshot(
+                    snapshot_source,
+                    patch_bounds,
+                )
+                if snapshot is None or snapshot.bounds != patch_bounds:
+                    continue
+                before = snapshot.pixels
+                after = np.array(before, copy=True, order="C")
+                preview.apply_to(patch_bounds, after)
+                transition = RasterPixelTransition(
+                    patch_bounds,
+                    surface_bounds,
+                    surface_bounds,
+                    before,
+                    after,
+                )
+            elif current_layer is not None:
+                transition = transition_for_retained_mapping(
+                    current=current_layer,
+                    retained=descriptor,
+                    preview=preview,
+                    snapshot=lambda bounds, source=current_layer.source: (
+                        self._capabilities.coverage.coverage_snapshot(
+                            source,
+                            bounds,
+                        )
+                    ),
+                )
+                if transition is None:
+                    continue
+            else:
                 continue
-            before = snapshot.pixels
-            after = np.array(before, copy=True, order="C")
-            preview.apply_to(patch_bounds, after)
-            transition = RasterPixelTransition(
-                patch_bounds,
-                surface_bounds,
-                surface_bounds,
-                before,
-                after,
-            )
             retain_until_durable = (
                 preview.retain_until_durable and not settlement_uses_current_asset
             )
@@ -174,6 +201,7 @@ class MaskLivePreviewRenderCompiler:
                 generation=(preview.revision, retain_until_durable),
                 item=candidate,
                 retain_until_durable=retain_until_durable,
+                use_sampled_products=candidate_asset_key == current_asset_key,
             )
             if contribution is None:
                 return None
@@ -185,6 +213,36 @@ class MaskLivePreviewRenderCompiler:
             self._last_contributions[resource_id] = contribution
             return contribution
         return None
+
+    def _current_layer(self, layer_id: uuid.UUID) -> LayerDescriptor | None:
+        """Return the current descriptor for one rendered layer."""
+        scene = self._current_scene()
+        if scene is None:
+            return None
+        return next(
+            (candidate for candidate in scene.layers if candidate.layer_id == layer_id),
+            None,
+        )
+
+    @staticmethod
+    def _asset_key(layer: LayerDescriptor | None) -> SceneLayerAssetKey | None:
+        """Return the source identity carried by one current descriptor."""
+        source = None if layer is None else layer.source
+        source_id = getattr(source, "resource_id", None)
+        source_kind = getattr(source, "kind", None)
+        if (
+            layer is None
+            or not isinstance(source_id, uuid.UUID)
+            or not isinstance(source_kind, str)
+        ):
+            return None
+        return SceneLayerAssetKey(
+            scene_id=layer.scene_id,
+            layer_id=layer.layer_id,
+            source_id=source_id,
+            source_kind=source_kind,
+            source_revision=layer.source_revision,
+        )
 
     def admit(self, contribution: TransientRasterContribution) -> None:
         """Release a settlement after QPane admits its exact handoff product."""

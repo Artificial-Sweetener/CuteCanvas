@@ -45,7 +45,7 @@ class RasterTransitionRenderCompiler:
         self._presentations = presentations
         self._sampled_tiles = SampledTransitionTileCompiler(presentations)
         self._resolved_key: (
-            tuple[uuid.UUID, SceneLayerAssetKey, object, object, bool] | None
+            tuple[uuid.UUID, SceneLayerAssetKey, object, object, bool, bool] | None
         ) = None
         self._resolved: (
             TransientRasterResolvedContribution
@@ -64,6 +64,7 @@ class RasterTransitionRenderCompiler:
         generation: object,
         item: RasterLayerRenderItem | SampledLayerRenderItem,
         retain_until_durable: bool = True,
+        use_sampled_products: bool = True,
     ) -> (
         TransientRasterResolvedContribution
         | TransientSampledResolvedContribution
@@ -80,10 +81,11 @@ class RasterTransitionRenderCompiler:
             generation,
             sample_batch_key,
             retain_until_durable,
+            use_sampled_products,
         )
         if key == self._resolved_key:
             return self._resolved
-        if isinstance(item, SampledLayerRenderItem):
+        if isinstance(item, SampledLayerRenderItem) and use_sampled_products:
             resolved = self._compile_sampled(
                 session_id=session_id,
                 scene_id=scene_id,

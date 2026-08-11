@@ -30,7 +30,7 @@ sources = [
   "packages/cutecanvas/src/cutecanvas/runtime/**",
   "packages/cutecanvas/src/cutecanvas/ui/**",
 ]
-proofs = ["abuse", "contract", "integration", "packaging", "qt"]
+proofs = ["abuse", "contract", "integration", "packaging", "qt", "unit"]
 
 [[areas]]
 name = "masks"
@@ -38,7 +38,7 @@ sources = [
   "packages/cutecanvas/src/cutecanvas/coverage/**",
   "packages/cutecanvas/src/cutecanvas/masks/**",
 ]
-proofs = ["abuse", "integration", "qt"]
+proofs = ["abuse", "integration", "performance", "qt"]
 
 [[areas]]
 name = "painting"

@@ -23,10 +23,19 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 
-from qpane.sdk.scene import LayerDescriptor
+from qpane.sdk.execution import ExecutionScope
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerDescriptor,
+    PiecewiseLayerTransform,
+    SceneDescriptor,
+)
 
 from ..painting import BrushStrokeSegment
+from ..resources import ProjectResourceReference
+from .mask import MaskAssetStore
 from .mask_controller import MaskController
+from .paint_preparation import RetainedMaskPaintPreparation
 from .render_coordination import MaskRenderWorkCoordinator
 from .spatial_paint import MaskSpatialPaintNormalizer
 from .spatial_paint_history import MaskSpatialPaintHistory
@@ -47,6 +56,9 @@ class MaskStrokeInteractionCoordinator:
         spatial_paint: MaskSpatialPaintNormalizer,
         spatial_history: MaskSpatialPaintHistory,
         refresh_coordinates: Callable[[], object],
+        active_scene: Callable[[], SceneDescriptor | None],
+        assets: MaskAssetStore,
+        execution_scope: ExecutionScope,
     ) -> None:
         """Bind stroke, render, spatial, and scene-coordinate collaborators."""
         self._pipeline = pipeline
@@ -55,6 +67,11 @@ class MaskStrokeInteractionCoordinator:
         self._spatial_paint = spatial_paint
         self._spatial_history = spatial_history
         self._refresh_coordinates = refresh_coordinates
+        self._active_scene = active_scene
+        self._retained_paint = RetainedMaskPaintPreparation(
+            assets,
+            execution_scope,
+        )
         self._history_actions: dict[uuid.UUID, deque[Callable[[], None]]] = {}
 
     def apply(self, segment: BrushStrokeSegment) -> None:
@@ -65,10 +82,60 @@ class MaskStrokeInteractionCoordinator:
         self._pipeline.apply_stroke_segment(segment)
 
     def prepare_brush(self) -> None:
-        """Stop derived render work that could compete with direct input."""
+        """Prioritize input and prepare current mask coverage in background."""
         mask_id = self._controller.get_active_mask_id()
         if mask_id is not None:
             self._render_work.prioritize_interaction(mask_id)
+            scene = self._active_scene()
+            layer = (
+                None
+                if scene is None
+                else next(
+                    (
+                        candidate
+                        for candidate in scene.layers
+                        if isinstance(candidate.source, ProjectResourceReference)
+                        and candidate.source.resource_id == mask_id
+                    ),
+                    None,
+                )
+            )
+            if layer is not None:
+                if isinstance(
+                    layer.transform,
+                    (BilinearLayerTransform, PiecewiseLayerTransform),
+                ):
+                    self._spatial_paint.warm(layer)
+                else:
+                    self._retained_paint.warm(mask_id)
+
+    def paint_target_ready(self, layer: LayerDescriptor) -> bool:
+        """Return whether exact current coverage is ready for immediate input."""
+        if isinstance(
+            layer.transform,
+            (BilinearLayerTransform, PiecewiseLayerTransform),
+        ):
+            return self._spatial_paint.ready(layer)
+        source = layer.source
+        return not isinstance(
+            source,
+            ProjectResourceReference,
+        ) or self._retained_paint.ready(source.resource_id)
+
+    def begin_stroke(self, layer: LayerDescriptor) -> bool:
+        """Begin one stroke with any exact retained preparation available."""
+        source = layer.source
+        if not isinstance(source, ProjectResourceReference):
+            return False
+        prepared = (
+            None
+            if isinstance(
+                layer.transform,
+                (BilinearLayerTransform, PiecewiseLayerTransform),
+            )
+            else self._retained_paint.take(source.resource_id)
+        )
+        return self._controller.edits.begin_stroke(prepared)
 
     def prepare_spatial_target(self, layer: LayerDescriptor) -> bool:
         """Normalize finite mask geometry before pointer resolution."""
@@ -88,6 +155,11 @@ class MaskStrokeInteractionCoordinator:
     def cancel_spatial_target(self, mask_id: uuid.UUID) -> bool:
         """Restore finite mapping when a prepared gesture is cancelled."""
         return self._spatial_history.restore_if_pending(mask_id)
+
+    def shutdown(self) -> None:
+        """Release view-local paint preparation workers."""
+        self._retained_paint.shutdown()
+        self._spatial_paint.shutdown()
 
     def reset(
         self,

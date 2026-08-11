@@ -70,7 +70,8 @@ class MaskCoveragePaintTargetOwner:
         if self._active_mask_id is not None:
             self._service.stroke_interactions.reset(self._active_mask_id)
         self._service.activateMask(source.resource_id)
-        self._service.pushActiveMaskState()
+        if not self._service.stroke_interactions.begin_stroke(layer):
+            return False
         self._active_mask_id = source.resource_id
         return True
 

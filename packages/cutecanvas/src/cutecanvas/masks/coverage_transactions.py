@@ -125,7 +125,11 @@ class MaskCoverageTransactions:
         self._changed(mask_id)
         return True
 
-    def begin_mixed_stroke(self, mask_id: uuid.UUID) -> bool:
+    def begin_mixed_stroke(
+        self,
+        mask_id: uuid.UUID,
+        prepared: CoverageSnapshot | None = None,
+    ) -> bool:
         """Flatten retained work provisionally before a raster brush stroke."""
         layer = self._layer(mask_id)
         if (
@@ -135,6 +139,11 @@ class MaskCoverageTransactions:
         ):
             return False
         self._stroke_before[mask_id] = self._state(layer)
+        if prepared is not None:
+            layer.coverage.raster.replace_with_snapshot(prepared)
+            layer.coverage.restore_retained(layer.coverage.retained.clear())
+            layer.coverage.compact_raster_storage()
+            return True
         if layer.coverage.rasterize():
             return True
         self._stroke_before.pop(mask_id, None)

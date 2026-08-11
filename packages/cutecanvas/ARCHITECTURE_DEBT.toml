@@ -19,7 +19,7 @@ next_extraction = "Extract brush, clone, fill, color, and paint-target workflows
 id = "CUTECANVAS-ARCH-002"
 owner = "CuteCanvas mask editing"
 paths = ["packages/cutecanvas/src/cutecanvas/masks/edit_service.py"]
-fingerprint = "sha256:e84b70b2f2316e2f9144c0a8d50b29309a2b3888f4aa805fff827f504d319856"
+fingerprint = "sha256:da5588d3eeba1e38f5ee917dcd82632f4e1d2c97376b82272d7964dd2c44eef9"
 issue = "chore:CUTECANVAS-ARCH-002"
 review_by = 2026-12-15
 responsibilities = [
@@ -34,16 +34,16 @@ next_extraction = "Move direct stroke sessions, coverage application, and raster
 id = "CUTECANVAS-ARCH-003"
 owner = "CuteCanvas mask integration"
 paths = ["packages/cutecanvas/src/cutecanvas/masks/mask_service.py"]
-fingerprint = "sha256:7b280f3659c396e90821e709f83d7b9c5d35e10d1873ea19f33cbc59849297de"
+fingerprint = "sha256:938ce390ef4aeb34458fc6bde5511e97ad0513bce2b5290d1191132be1280122"
 issue = "chore:CUTECANVAS-ARCH-003"
 review_by = 2026-12-15
 responsibilities = [
   "mask component graph assembly and facade delegation",
   "asset, layer, activation, and edit workflow integration",
   "render cache, prefetch, invalidation, and generated-mask routing",
-  "autosave, configuration, file workflow, status, and diagnostics integration",
+  "autosave, configuration, file workflow, and diagnostics delegation",
 ]
-next_extraction = "Extract diagnostics registration, status publication, stroke metrics, and configuration updates into a focused mask diagnostics integration service."
+next_extraction = "Extract mask component construction, lifecycle wiring, and shutdown into a focused composition root while leaving this service to facade delegation."
 
 [[debts]]
 id = "CUTECANVAS-ARCH-004"

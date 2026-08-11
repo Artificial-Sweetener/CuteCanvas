@@ -351,7 +351,7 @@ class Masks:
         if service is None:
             return self._cached_mask_service_records
         try:
-            records = tuple(service._diagnostics_provider(qpane))
+            records = service.diagnostics_records()
         except Exception:  # pragma: no cover - defensive guard
             logger.exception("Mask service diagnostics provider failed")
             return self._cached_mask_service_records

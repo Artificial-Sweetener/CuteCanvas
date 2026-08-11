@@ -526,13 +526,13 @@ class MaskEditService:
         """Redo the previously undone mask change for the active layer."""
         return self._apply_history_operation(self._assets.redo_mask)
 
-    def begin_stroke(self):
+    def begin_stroke(self, prepared: CoverageSnapshot | None = None) -> bool:
         """Prepare the patch accumulator for the next undoable stroke."""
         mask_id = self._active_mask_id()
         if mask_id is None:
             return False
         self._stroke_history.begin(mask_id)
-        self._mixed_strokes.begin(mask_id)
+        self._mixed_strokes.begin(mask_id, prepared)
         return True
 
     def update_stroke_image(

@@ -22,6 +22,8 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QRect
 
+from cutecanvas.coverage import CoverageSnapshot
+
 from .mask import MaskAssetStore
 from .render_cache import MaskRenderCache
 
@@ -47,9 +49,16 @@ class MixedMaskStrokeCoordinator:
         self._mask_changed = mask_changed
         self._undo_changed = undo_changed
 
-    def begin(self, mask_id: uuid.UUID) -> bool:
+    def begin(
+        self,
+        mask_id: uuid.UUID,
+        prepared: CoverageSnapshot | None = None,
+    ) -> bool:
         """Flatten retained authorship without exposing the provisional authority."""
-        if not self._assets.coverage_edits.begin_mixed_stroke(mask_id):
+        if not self._assets.coverage_edits.begin_mixed_stroke(
+            mask_id,
+            prepared,
+        ):
             return False
         self._advance_epoch(mask_id, "mixed_stroke_begin")
         return True
