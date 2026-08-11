@@ -35,9 +35,11 @@ from cutecanvas.presentation import CanvasWorkspace
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
 from PySide6.QtTest import QSignalSpy, QTest
+from PySide6.QtWidgets import QWidget
 from qpane.sdk.execution import create_default_execution_runtime
 from qpane.sdk.layout import ResponsiveGridPolicy, ResponsiveGridTopology
 from qpane.sdk.types import ComparisonOrientation
+from shiboken6 import isValid
 
 
 def _document() -> tuple[CanvasDocument, tuple]:
@@ -56,6 +58,33 @@ def _document() -> tuple[CanvasDocument, tuple]:
         )
     )
     return document, identifiers
+
+
+def test_parent_deletion_closes_workspace_owners_before_qt_children(qapp) -> None:
+    """A host may delete its container without manually sequencing children."""
+    document, identifiers = _document()
+    parent = QWidget()
+    validity_at_close: list[bool] = []
+
+    class ObservedWorkspace(CanvasWorkspace):
+        """Record whether Qt still owns this workspace during owner shutdown."""
+
+        def _close_owners(self) -> None:
+            """Capture native validity before running production cleanup."""
+            validity_at_close.append(isValid(self))
+            super()._close_owners()
+
+    workspace = ObservedWorkspace(document=document, features=(), parent=parent)
+    workspace.setSinglePresentation(identifiers[0])
+    qapp.processEvents()
+
+    parent.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+    assert validity_at_close == [True]
+    assert not isValid(workspace)
+    document.close()
 
 
 def test_workspace_switches_presentations_without_mutating_document(qapp) -> None:

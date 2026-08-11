@@ -52,6 +52,7 @@ from .native_comparison import NativeCanvasComparison
 from .surfaces import TabbedCanvasSurface
 from .target_mount import CanvasTargetMount
 from .target_pool import CanvasTargetPool, CanvasViewKey
+from .widget_lifetime import WidgetOwnerLifetimeGuard
 
 
 class CanvasWorkspace(QWidget):
@@ -145,7 +146,7 @@ class CanvasWorkspace(QWidget):
         self._document_unsubscribe = self._document.events.subscribe(
             lambda _change: self._reconcile_document()
         )
-        self.destroyed.connect(lambda _obj=None: self._close_owners())
+        self._lifetime_guard = WidgetOwnerLifetimeGuard(self, self._close_owners)
 
     @property
     def document(self) -> CanvasDocument:
@@ -689,10 +690,6 @@ class CanvasWorkspace(QWidget):
                 if target_id not in available:
                     self._session.inspection.discard(target_id)
         self._session.reconcile(available_ids)
-        self._retire_unavailable_targets(available)
-
-    def _retire_unavailable_targets(self, available: set[uuid.UUID]) -> None:
-        """Close and release renderer mounts for compositions removed from the document."""
         self._targets.retire_unavailable(available)
 
     def _available_ids(self) -> tuple[uuid.UUID, ...]:
@@ -708,6 +705,7 @@ class CanvasWorkspace(QWidget):
         if self._closed:
             return
         self._closed = True
+        self._lifetime_guard.detach()
         self._session_unsubscribe()
         self._document_unsubscribe()
         self._targets.close()
