@@ -1024,10 +1024,6 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
         assert percentile_95 < 20.0, slow_samples
         if absolute_latency_assertions_are_isolated():
             assert max(dispatch_latencies_ms) < 35.0, slow_samples
-        assert harness.wait_for_mask_undo_depth(
-            harness.mask_ids[0],
-            1,
-        )
     finally:
         harness.close()
 

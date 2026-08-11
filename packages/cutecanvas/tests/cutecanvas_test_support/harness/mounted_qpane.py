@@ -318,12 +318,13 @@ class MountedQPaneHarness:
             if document.state.policy.removable:
                 document.remove()
         self.drain_events(wait_ms=25)
+        execution_runtime.shutdown(wait=True)
+        self.qapp.processEvents()
         self.host.close()
         self.viewer.deleteLater()
         self.host.deleteLater()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.qapp.processEvents()
-        execution_runtime.shutdown(wait=True)
 
     def activate_mask(self, index: int) -> uuid.UUID:
         """Activate and return the mask at ``index``."""
