@@ -133,7 +133,6 @@ def main() -> None:
             raise RuntimeError("mask rendering did not settle")
         if not harness.wait_for_render_refinement_idle(
             timeout_ms=20_000,
-            include_prefetch=True,
         ):
             raise RuntimeError("sampled rendering did not settle")
         if not harness.wait_for_raster_render_idle(timeout_ms=20_000):

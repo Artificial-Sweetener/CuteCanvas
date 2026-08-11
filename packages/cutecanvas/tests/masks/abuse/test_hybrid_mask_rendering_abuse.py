@@ -636,10 +636,13 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
         viewer.mask_service.controller.mask_updated.emit(None, QRect())
         viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
         viewer.applyZoom(2.0, center)
-        assert harness.wait_for_mask_render_idle(timeout_ms=8000)
         _settle_sampled_render_for_latency(harness)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
+        assert _wait_for_presented_mask_layers(
+            harness,
+            expected_layers=mask_count,
+        )
 
         positions = tuple(
             center + QPoint(step * 8, ((step % 5) - 2) * 5) for step in range(1, 31)
@@ -705,7 +708,6 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
             < 30.0
         ), stable_zoom
         assert max(stable_latency_samples(zoom_probe.durations_ms)) < 2.0
-        assert harness.wait_for_mask_render_idle(timeout_ms=8000)
         _settle_sampled_render_for_latency(harness)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
