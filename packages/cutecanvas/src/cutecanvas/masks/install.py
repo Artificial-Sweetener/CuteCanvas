@@ -21,6 +21,9 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QRect
+from shiboken6 import isValid
+
 from ..core.config_features import require_mask_config
 from .autosave_coordination import should_enable_mask_autosave
 from .live_preview_geometry import MaskPreviewSceneGeometryTracker
@@ -82,8 +85,15 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
     live_source_modes: dict[uuid.UUID, bool] = {}
     preview_geometry = MaskPreviewSceneGeometryTracker(mask_manager, live_previews)
 
-    def _handle_render_dirty(mask_id, rect=None):
+    def _view_is_alive() -> bool:
+        """Return whether mask presentation can still target this canvas view."""
+
+        return bool(isValid(qpane))
+
+    def _handle_render_dirty(mask_id: object, rect: QRect | None = None) -> None:
         """Apply presentation damage that is already in panel coordinates."""
+        if not _view_is_alive():
+            return
         if isinstance(mask_id, uuid.UUID):
             live_source = controller.renders.uses_local_live_preview(mask_id)
             if live_source_modes.get(mask_id, False) != live_source:
@@ -101,8 +111,10 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
             qpane.markDirty(dirty_rect=rect)
         qpane.update()
 
-    def _handle_mask_updated(mask_id, rect=None):
+    def _handle_mask_updated(mask_id: object, rect: QRect | None = None) -> None:
         """Recompile durable state while preserving render-owned local damage."""
+        if not _view_is_alive():
+            return
         if isinstance(mask_id, uuid.UUID):
             live_source = controller.renders.uses_local_live_preview(mask_id)
             live_source_modes[mask_id] = live_source
@@ -114,8 +126,10 @@ def install_mask_feature(qpane: CuteCanvas) -> None:
         qpane.markDirty()
         qpane.update()
 
-    def _handle_shared_preview_changed(mask_id, rect):
+    def _handle_shared_preview_changed(mask_id: uuid.UUID, rect: QRect) -> None:
         """Damage one view after its document-shared transient mask changes."""
+        if not _view_is_alive():
+            return
         if preview_geometry.changed(mask_id):
             controller.renders.advance_preview_geometry(mask_id)
             qpane._handle_raster_structure_changed()

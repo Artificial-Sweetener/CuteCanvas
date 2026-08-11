@@ -21,6 +21,7 @@ import time
 import uuid
 from unittest.mock import patch
 
+import pytest
 from cutecanvas import (
     CanvasDocument,
     CanvasDocumentRuntime,
@@ -32,8 +33,40 @@ from cutecanvas import (
     PixelSelectionMode,
     VectorShapeKind,
 )
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
 from PySide6.QtTest import QSignalSpy, QTest
+from shiboken6 import delete
+
+
+def test_mask_signals_ignore_a_destroyed_view(
+    qapp,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Document-owned mask signals must stop targeting a destroyed canvas view."""
+
+    document = CanvasDocument()
+    runtime = CanvasDocumentRuntime(document)
+    editor = CuteCanvas(
+        document=document,
+        document_runtime=runtime,
+        features=("mask",),
+    )
+    masks = editor._masks_controller
+    service = masks.mask_service()
+    assert service is not None
+    controller = service.controller
+    live_previews = runtime._mask_live_preview_store
+    delete(editor)
+
+    controller.render_dirty.emit(None, QRect())
+    controller.mask_updated.emit(None, QRect())
+    live_previews.changed.emit(uuid.uuid4(), QRect())
+    qapp.processEvents()
+    captured = capsys.readouterr()
+
+    runtime.close()
+    document.close()
+    assert "Internal C++ object" not in captured.err
 
 
 def test_live_brush_contact_updates_neutral_shared_mask_view(qapp) -> None:
