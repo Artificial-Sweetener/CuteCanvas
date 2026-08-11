@@ -97,7 +97,10 @@ def _wait_for_navigation_settle(
     operation: str,
 ) -> None:
     """Finish every staged navigation owner before measuring another gesture."""
-    if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
+    if not harness.wait_for_render_refinement_idle(
+        timeout_ms=20_000,
+        include_prefetch=True,
+    ):
         raise RuntimeError(f"{operation} navigation refinement did not settle")
     if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
         raise RuntimeError(f"{operation} raster refinement did not settle")
