@@ -9,6 +9,7 @@ permissions:
 
 env:
   PIP_VERSION: "26.1.2"
+  RUSTUP_TOOLCHAIN: "1.93.1"
 
 jobs:
   quality:
@@ -34,6 +35,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libegl1
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.93.1 --profile minimal
 
       - name: Install development dependencies
         run: |
@@ -104,6 +108,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libegl1
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.93.1 --profile minimal
 
       - name: Install development dependencies
         run: |
@@ -184,8 +191,6 @@ jobs:
           - os: macos-15
             platform: macos-arm64
             python: "3.14"
-    env:
-      RUSTUP_TOOLCHAIN: "1.93.1"
     steps:
       - name: Check out source
         uses: actions/checkout@v6
