@@ -150,6 +150,20 @@ def test_publish_workflow_is_called_directly_after_automated_tagging() -> None:
     assert "tags:" in workflow
 
 
+def test_publish_builds_survive_the_intentionally_skipped_verification_job() -> None:
+    """Let verified waterfall calls build after their local verify job is skipped."""
+    workflow = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
+    python_build = workflow[
+        workflow.index("  build-python:") : workflow.index("  build-ferrastra:")
+    ]
+    ferrastra_build = workflow[
+        workflow.index("  build-ferrastra:") : workflow.index("  publish:")
+    ]
+    for build in (python_build, ferrastra_build):
+        assert "always()" in build
+        assert "needs.select.result == 'success'" in build
+
+
 def test_publish_workflow_creates_package_scoped_release_notes_after_pypi() -> None:
     """Create one product release only after its immutable upload succeeds."""
     workflow = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
