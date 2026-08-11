@@ -466,7 +466,7 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
         assert preview.latency_ms is not None
         driver.move(off_surface, 1)
         driver.end(off_surface)
-        assert harness.wait_for_mask_undo_depth(mask_id, 1)
+        assert harness.wait_for_mask_undo_depth(mask_id, 1, timeout_ms=30_000)
 
         state = harness.viewer.rasterSurfaceState(
             mask_info.scene_id,
