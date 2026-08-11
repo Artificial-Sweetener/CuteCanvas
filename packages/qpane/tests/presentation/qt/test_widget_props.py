@@ -22,13 +22,12 @@ import numpy as np
 import pytest
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 from qpane import QPane
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.ui.widget_props import apply_widget_defaults
+from qpane_test_support.qt_events import wait_until
 from qpane_test_support.render_compare import checker_image
-from qpane_test_support.timing import completion_clock
 
 
 def test_widget_defaults_preserve_host_background_composition(
@@ -274,11 +273,12 @@ def test_settled_pan_and_zoom_keep_staged_canvas_background_transparent(
 
     def wait_for_navigation_refinement() -> None:
         """Drain the exact-frame lifecycle without accepting a latent timer."""
-        deadline = completion_clock() + 8.0
-        while presenter.navigation_refinement_pending and completion_clock() < deadline:
-            qapp.processEvents()
-            QTest.qWait(1)
-        assert not presenter.navigation_refinement_pending
+        wait_until(
+            qapp,
+            lambda: not presenter.navigation_refinement_pending,
+            failure_message="navigation refinement did not settle",
+            timeout_seconds=8.0,
+        )
 
     def assert_parent_has_no_black_pixels() -> None:
         """Reject opaque-black pixels from the transparent navigation surface."""

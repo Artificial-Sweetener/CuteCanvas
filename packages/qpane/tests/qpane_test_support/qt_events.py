@@ -18,9 +18,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from time import monotonic
+from math import ceil
 
-from PySide6.QtTest import QTest
+from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 
@@ -31,10 +31,28 @@ def wait_until(
     failure_message: str,
     timeout_seconds: float = 5.0,
 ) -> None:
-    """Process Qt events until one observable condition becomes true."""
-    deadline = monotonic() + timeout_seconds
-    while not predicate() and monotonic() < deadline:
-        application.processEvents()
-        QTest.qWait(1)
+    """Run Qt delivery until one observable condition becomes true."""
+    if timeout_seconds <= 0.0:
+        raise ValueError("timeout_seconds must be positive")
+    if predicate():
+        return
+    loop = QEventLoop()
+    poll = QTimer()
+    deadline = QTimer()
+    deadline.setSingleShot(True)
+
+    def inspect() -> None:
+        """Quit once the observed condition resolves."""
+        if predicate():
+            loop.quit()
+
+    poll.setInterval(1)
+    poll.timeout.connect(inspect)
+    deadline.timeout.connect(loop.quit)
+    poll.start()
+    deadline.start(ceil(timeout_seconds * 1000.0))
+    loop.exec()
+    poll.stop()
+    deadline.stop()
     if not predicate():
         raise AssertionError(failure_message)
