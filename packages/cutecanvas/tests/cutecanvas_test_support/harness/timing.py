@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from math import ceil
-from time import perf_counter, process_time, thread_time
+from time import perf_counter, thread_time
 
 import pytest
 
@@ -35,9 +35,7 @@ def interaction_clock() -> float:
 
 
 def completion_clock() -> float:
-    """Measure asynchronous completion without counting xdist scheduling delay."""
-    if os.environ.get("PYTEST_XDIST_WORKER"):
-        return process_time()
+    """Return a monotonic wall clock for bounded asynchronous waits."""
     return perf_counter()
 
 

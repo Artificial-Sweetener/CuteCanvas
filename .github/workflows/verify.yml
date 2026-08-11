@@ -118,7 +118,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Run test suite
-        run: python -m pytest -n 1
+        run: python -m pytest
 
       - name: Run mounted CuteCanvas abuse profile
         env:

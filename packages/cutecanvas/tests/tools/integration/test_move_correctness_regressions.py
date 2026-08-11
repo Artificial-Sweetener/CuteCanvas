@@ -22,9 +22,10 @@ import numpy as np
 import pytest
 from cutecanvas import LayerPolicy
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
+
 
 def _paint_square(layer: object, left: int, top: int, size: int) -> None:
     """Replace a real hybrid mask with one opaque square."""

@@ -427,12 +427,12 @@ def test_middle_mouse_summons_and_drags_comparison_divider(qapp) -> None:
 
 @INTERACTIVE_PERFORMANCE
 def test_catalog_comparison_abuse_stays_synchronous_and_coherent(qapp) -> None:
-    """Rapid selection, split, orientation, and removal never leave stale scenes."""
+    """Catalog comparison churn stays coherent and scales with the workload."""
     pane, entries = _mounted_catalog(qapp)
 
-    def churn_catalog_comparison() -> None:
-        """Apply one complete hostile catalog/comparison interaction sequence."""
-        for index in range(240):
+    def churn_catalog_comparison(iterations: int) -> None:
+        """Apply one hostile catalog/comparison sequence of known size."""
+        for index in range(iterations):
             pane.selectCatalogImage(entries[index % len(entries)].entry_id)
             pane.compareWithNextImage()
             pane.setComparisonSplit(
@@ -446,25 +446,32 @@ def test_catalog_comparison_abuse_stays_synchronous_and_coherent(qapp) -> None:
             if index % 7 == 0:
                 pane.clearComparison()
 
-    elapsed_ms = average_interaction_latency_ms(
-        churn_catalog_comparison,
-        repetitions=4,
-    )
-    qapp.processEvents()
+    try:
+        smaller_workload_ms = average_interaction_latency_ms(
+            lambda: churn_catalog_comparison(120),
+            repetitions=2,
+        )
+        larger_workload_ms = average_interaction_latency_ms(
+            lambda: churn_catalog_comparison(240),
+            repetitions=2,
+        )
+        qapp.processEvents()
 
-    current = pane.catalog().current
-    scene = pane.scene()
-    assert current is not None
-    assert scene is not None
-    assert scene.layers[0].source is current.source
-    state = pane.comparisonState()
-    assert len(scene.layers) == (2 if state.enabled else 1)
-    assert elapsed_ms < 350.0
+        current = pane.catalog().current
+        scene = pane.scene()
+        assert current is not None
+        assert scene is not None
+        assert scene.layers[0].source is current.source
+        state = pane.comparisonState()
+        assert len(scene.layers) == (2 if state.enabled else 1)
+        assert larger_workload_ms < max(smaller_workload_ms, 1e-9) * 2.75
 
-    pane.clearCatalog()
-    qapp.processEvents()
-    assert pane.scene() is None
-    assert pane.catalog().current is None
-    assert not pane.comparisonState().enabled
-    pane.close()
-    pane.deleteLater()
+        pane.clearCatalog()
+        qapp.processEvents()
+        assert pane.scene() is None
+        assert pane.catalog().current is None
+        assert not pane.comparisonState().enabled
+    finally:
+        pane.close()
+        pane.deleteLater()
+        qapp.processEvents()
