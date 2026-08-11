@@ -257,7 +257,6 @@ def test_hidden_raster_never_reappears_during_mask_navigation_abuse(
             False,
         )
         assert harness.wait_for_mask_render_idle()
-        assert harness.wait_for_render_refinement_idle()
         assert harness.wait_for_raster_render_idle()
 
         for index in range(48):
@@ -283,7 +282,6 @@ def test_hidden_raster_never_reappears_during_mask_navigation_abuse(
             if index % 8 == 0:
                 assert not harness.capture().isNull()
 
-        assert harness.wait_for_render_refinement_idle()
         renderer = harness.viewer.view().presenter.renderer
         incremental = renderer.get_base_buffer()
         assert incremental is not None

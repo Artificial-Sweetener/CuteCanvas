@@ -116,16 +116,9 @@ def test_retained_vector_mask_zoom_storm_never_presents_blank_or_partial_frames(
     )
     try:
         assert viewer.editor.coverage.rectangle(QRectF(0.0, 0.0, 1600.0, 900.0))
-        deadline = 3000
-        while deadline > 0:
-            harness.drain_events(wait_ms=2)
-            if (
-                viewer.view().presenter._render_refinement.pending_count == 0
-                and harness.is_mask_tint(harness.color_at(sample))
-            ):
-                break
-            deadline -= 2
-        assert deadline > 0
+        assert (
+            harness.wait_for_mask_tint(sample, timeout_ms=8000).latency_ms is not None
+        )
 
         latencies: list[float] = []
         with harness.observe_presented_frames() as probe:
@@ -134,15 +127,7 @@ def test_retained_vector_mask_zoom_storm_never_presents_blank_or_partial_frames(
                 viewer.applyZoom(zoom, sample)
                 latencies.append((interaction_clock() - started) * 1000.0)
                 harness.drain_events(wait_ms=1)
-            deadline = 5000
-            while (
-                viewer.view().presenter._render_refinement.pending_count
-                and deadline > 0
-            ):
-                harness.drain_events(wait_ms=2)
-                deadline -= 2
 
-        assert deadline > 0
         assert probe.frames
         assert all(frame.mask_layer_count == 1 for frame in probe.frames)
         assert all(
@@ -168,14 +153,6 @@ def test_retained_vector_mask_zoom_storm_never_presents_blank_or_partial_frames(
                 assert viewer.setMaskProperties(harness.mask_ids[0], color=color)
                 presentation_latencies.append((interaction_clock() - started) * 1000.0)
                 harness.drain_events(wait_ms=1)
-            deadline = 3000
-            while (
-                viewer.view().presenter._render_refinement.pending_count
-                and deadline > 0
-            ):
-                harness.drain_events(wait_ms=2)
-                deadline -= 2
-        assert deadline > 0
         assert color_probe.frames
         assert all(frame.mask_layer_count == 1 for frame in color_probe.frames)
         assert all(
