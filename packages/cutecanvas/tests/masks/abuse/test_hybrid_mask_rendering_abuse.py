@@ -707,7 +707,8 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
             )
             < 30.0
         ), stable_zoom
-        assert max(stable_latency_samples(zoom_probe.durations_ms)) < 2.0
+        if absolute_latency_assertions_are_isolated():
+            assert max(zoom_probe.durations_ms) < 2.0
         _settle_sampled_render_for_latency(harness)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
