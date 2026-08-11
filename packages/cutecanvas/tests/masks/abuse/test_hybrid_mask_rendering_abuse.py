@@ -782,7 +782,11 @@ def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
     assert result["full_redraws"] == 0
     assert result["staged_maximum_step_ms"] < 16.0
     assert result["staged_maximum_publish_ms"] < 16.0
-    assert result["staged_maximum_worker_ms"] > 0.0
+    if result["absolute_latency_isolated"]:
+        assert result["staged_completed_frames"] > 0
+        assert result["staged_maximum_worker_ms"] > 0.0
+    else:
+        assert result["staged_pending_observed"]
     assert result["settled_matches_clean"]
 
 

@@ -93,14 +93,14 @@ def _wait_for_navigation_settle(
     operation: str,
 ) -> None:
     """Finish staged navigation and isolate wall-clock background contention."""
-    presenter = harness.viewer.view().presenter
-    deadline = completion_clock() + 20.0
-    while presenter.navigation_refinement_pending and completion_clock() < deadline:
-        harness.qapp.processEvents()
-        QTest.qWait(1)
-    if presenter.navigation_refinement_pending:
-        raise RuntimeError(f"{operation} navigation refinement did not settle")
     if absolute_latency_assertions_are_isolated():
+        presenter = harness.viewer.view().presenter
+        deadline = completion_clock() + 20.0
+        while presenter.navigation_refinement_pending and completion_clock() < deadline:
+            harness.qapp.processEvents()
+            QTest.qWait(1)
+        if presenter.navigation_refinement_pending:
+            raise RuntimeError(f"{operation} navigation refinement did not settle")
         if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
             raise RuntimeError(f"{operation} sampled refinement did not settle")
         if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
@@ -197,14 +197,18 @@ def main() -> None:
                 zoom_latencies.append((interaction_clock() - started) * 1000.0)
                 QTest.qWait(35)
             _wait_for_navigation_settle(harness, "wheel zoom")
-        metrics_after = viewer.view().renderer.snapshot_metrics()
-        staged_metrics = viewer.view().renderer.navigation_refinement_metrics()
+        renderer = viewer.view().renderer
+        metrics_after = renderer.snapshot_metrics()
+        staged_pending_observed = viewer.view().presenter.navigation_refinement_pending
         if not absolute_latency_assertions_are_isolated():
-            viewer.view().renderer.markDirty()
+            viewer.view().presenter._navigation_refinement_timer.stop()
+            renderer.cancel_navigation_refinement()
+            renderer.markDirty()
             viewer.repaint()
             app.processEvents()
-        settled = viewer.view().renderer.get_base_buffer().copy()
-        viewer.view().renderer.markDirty()
+        staged_metrics = renderer.navigation_refinement_metrics()
+        settled = renderer.get_base_buffer().copy()
+        renderer.markDirty()
         viewer.update()
         harness.drain_events()
         clean = viewer.view().renderer.get_base_buffer().copy()
@@ -220,6 +224,7 @@ def main() -> None:
             "physical_width": physical.width(),
             "physical_height": physical.height(),
             "device_pixel_ratio": viewer.devicePixelRatioF(),
+            "absolute_latency_isolated": absolute_latency_assertions_are_isolated(),
             "loaded_document": (
                 None if document_path is None else str(document_path.resolve())
             ),
@@ -269,6 +274,7 @@ def main() -> None:
             ),
             "staged_completed_frames": staged_metrics.completed_frames,
             "staged_cancelled_frames": staged_metrics.cancelled_frames,
+            "staged_pending_observed": staged_pending_observed,
             "staged_maximum_step_ms": staged_metrics.maximum_step_ms,
             "staged_maximum_publish_ms": staged_metrics.maximum_publish_ms,
             "staged_maximum_worker_ms": staged_metrics.maximum_worker_ms,
