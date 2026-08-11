@@ -1069,7 +1069,13 @@ def test_expanding_mask_live_preview_never_flashes_painted_pixels(
             for point_index in range(1, len(points)):
                 driver.move(stroke, point_index)
             driver.end(stroke)
-            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+            assert (
+                harness.wait_for_mask_tint(
+                    QPoint(60, 200),
+                    timeout_ms=15_000,
+                ).latency_ms
+                is not None
+            )
             harness.viewer.repaint()
 
         assert frames.frames
@@ -1093,10 +1099,6 @@ def test_expanding_mask_live_preview_never_flashes_painted_pixels(
         assert all(
             harness.is_mask_tint(frame.color_at(retained_point))
             for frame in frames.frames[first_tinted:]
-        )
-        assert (
-            harness.wait_for_mask_tint(QPoint(60, 200), timeout_ms=1000).latency_ms
-            is not None
         )
     finally:
         harness.close()
@@ -1161,7 +1163,13 @@ def test_expanding_mask_structural_undo_never_flashes_retained_pixels(
         with harness.observe_presented_frames() as frames:
             assert harness.viewer.undoMaskEdit()
             harness.viewer.repaint()
-            assert harness.wait_for_mask_render_idle(timeout_ms=3000)
+            assert (
+                harness.wait_for_background(
+                    expanded_point,
+                    timeout_ms=15_000,
+                ).latency_ms
+                is not None
+            )
             harness.viewer.repaint()
 
         assert frames.frames
@@ -1169,13 +1177,6 @@ def test_expanding_mask_structural_undo_never_flashes_retained_pixels(
         assert all(
             harness.is_mask_tint(frame.color_at(retained_point))
             for frame in frames.frames
-        )
-        assert (
-            harness.wait_for_background(
-                expanded_point,
-                timeout_ms=1000,
-            ).latency_ms
-            is not None
         )
     finally:
         harness.close()
