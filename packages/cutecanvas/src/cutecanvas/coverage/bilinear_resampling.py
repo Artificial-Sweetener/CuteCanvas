@@ -32,7 +32,7 @@ from .bilinear_coordinates import (
     inverse_bilinear_source_row,
 )
 
-_PROJECTION_ROW_CHUNK = 128
+_PROJECTION_ROW_CHUNK = 8
 
 
 def project_bilinear_coverage(

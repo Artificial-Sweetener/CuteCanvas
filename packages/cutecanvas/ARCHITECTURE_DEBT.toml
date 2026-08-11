@@ -34,16 +34,16 @@ next_extraction = "Move direct stroke sessions, coverage application, and raster
 id = "CUTECANVAS-ARCH-003"
 owner = "CuteCanvas mask integration"
 paths = ["packages/cutecanvas/src/cutecanvas/masks/mask_service.py"]
-fingerprint = "sha256:d0deb37e7d6e18fb2f9b7cabc176e138767aa85cf03cba9593576cdb6c3b637a"
+fingerprint = "sha256:89b5477ed2610b64d78739904e9dc7e83c856476e3f2031e263edcd81c81ef29"
 issue = "chore:CUTECANVAS-ARCH-003"
 review_by = 2026-12-15
 responsibilities = [
-  "mask component graph assembly and facade delegation",
-  "asset, layer, activation, and edit workflow integration",
-  "render cache, prefetch, invalidation, and generated-mask routing",
+  "asset, layer, activation, and edit workflow facade delegation",
+  "render cache, prefetch, and invalidation routing",
+  "generated-mask application and projection delegation",
   "autosave, configuration, file workflow, and diagnostics delegation",
 ]
-next_extraction = "Extract mask component construction, lifecycle wiring, and shutdown into a focused composition root while leaving this service to facade delegation."
+next_extraction = "Extract render scheduling, invalidation, prefetch, and generated-mask delegation into a focused mask presentation service."
 
 [[debts]]
 id = "CUTECANVAS-ARCH-004"

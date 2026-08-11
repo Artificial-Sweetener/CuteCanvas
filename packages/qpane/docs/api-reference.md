@@ -250,6 +250,8 @@ root facade and declarative SDK above.
 ### Renderer, cache, and scheduling
 
 - `View`, `Renderer`, `RenderingPresenter`, and `ViewportZoomMode` coordinate viewport state and frame publication.
+- `View.prioritize_interaction` yields derived frame work to latency-sensitive
+  host input and schedules refinement after the interaction receives priority.
 - `PanelPoint`, `ScenePoint`, `LayerLocalPoint`, and `LayerSourcePoint` identify
   non-interchangeable coordinate domains.
 - `SceneCoordinateSystem` projects typed points through current viewport,

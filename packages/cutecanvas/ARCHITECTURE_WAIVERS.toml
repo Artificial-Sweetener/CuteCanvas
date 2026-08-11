@@ -94,19 +94,6 @@ next_limit = 480
 debt = "CUTECANVAS-ARCH-002"
 
 [[waivers]]
-id = "CUTECANVAS-WAIVER-009"
-issue = "chore:CUTECANVAS-WAIVER-009"
-owner = "CuteCanvas mask integration"
-rule = "STRUCT003"
-path = "packages/cutecanvas/src/cutecanvas/masks/mask_service.py"
-kind = "remediation"
-justification = "Mask integration retains stroke, asset, activation, rendering, autosave, and diagnostics ownership pending stroke-service extraction."
-review_by = 2026-12-15
-max_lines = 672
-next_limit = 600
-debt = "CUTECANVAS-ARCH-003"
-
-[[waivers]]
 id = "CUTECANVAS-WAIVER-010"
 issue = "chore:CUTECANVAS-WAIVER-010"
 owner = "CuteCanvas mask presentation cache"

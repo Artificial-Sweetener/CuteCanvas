@@ -130,6 +130,10 @@ owner instead of reconstructing viewport or layer transforms. The coordinate
 values retain scene and layer identity so stale or cross-layer projections
 fail without producing plausible coordinates.
 
+Call `View.prioritize_interaction()` before latency-sensitive host input that
+competes with derived rendering work. QPane cancels incomplete refinement, yields
+worker capacity to the interaction, and schedules one settled frame afterward.
+
 Advanced hosts should still prefer the `QPane` widget when they do not need to
 own this lifecycle. Constructing these collaborators directly means accepting
 their cancellation, teardown, and cache contracts as one unit.

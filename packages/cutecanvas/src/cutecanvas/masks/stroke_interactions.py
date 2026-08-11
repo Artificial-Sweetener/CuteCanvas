@@ -57,6 +57,7 @@ class MaskStrokeInteractionCoordinator:
         spatial_history: MaskSpatialPaintHistory,
         refresh_coordinates: Callable[[], object],
         active_scene: Callable[[], SceneDescriptor | None],
+        prioritize_rendering: Callable[[], None],
         assets: MaskAssetStore,
         execution_scope: ExecutionScope,
     ) -> None:
@@ -68,6 +69,7 @@ class MaskStrokeInteractionCoordinator:
         self._spatial_history = spatial_history
         self._refresh_coordinates = refresh_coordinates
         self._active_scene = active_scene
+        self._prioritize_rendering = prioritize_rendering
         self._retained_paint = RetainedMaskPaintPreparation(
             assets,
             execution_scope,
@@ -83,6 +85,7 @@ class MaskStrokeInteractionCoordinator:
 
     def prepare_brush(self) -> None:
         """Prioritize input and prepare current mask coverage in background."""
+        self._prioritize_rendering()
         mask_id = self._controller.get_active_mask_id()
         if mask_id is not None:
             self._render_work.prioritize_interaction(mask_id)
@@ -124,6 +127,7 @@ class MaskStrokeInteractionCoordinator:
 
     def begin_stroke(self, layer: LayerDescriptor) -> bool:
         """Begin one stroke with any exact retained preparation available."""
+        self._prioritize_rendering()
         source = layer.source
         if not isinstance(source, ProjectResourceReference):
             return False

@@ -147,7 +147,7 @@ def test_should_defer_activation_signals_for_small_ratio(canvas_core):
     service, manager, _ = _build_service(canvas_core)
     prev_id = manager.create_mask(QImage(100, 100, QImage.Format_Grayscale8))
     next_id = manager.create_mask(QImage(10, 10, QImage.Format_Grayscale8))
-    assert service._activation.should_defer(prev_id, next_id) is True
+    assert service._components.activation.should_defer(prev_id, next_id) is True
 
 
 @pytest.mark.usefixtures("qapp")
@@ -156,7 +156,7 @@ def test_should_defer_activation_signals_skips_when_sizes_grow(canvas_core):
     service, manager, _ = _build_service(canvas_core)
     prev_id = manager.create_mask(QImage(10, 10, QImage.Format_Grayscale8))
     next_id = manager.create_mask(QImage(100, 100, QImage.Format_Grayscale8))
-    assert service._activation.should_defer(prev_id, next_id) is False
+    assert service._components.activation.should_defer(prev_id, next_id) is False
 
 
 @pytest.mark.usefixtures("qapp")
@@ -177,14 +177,14 @@ def test_consume_prefetch_results_stashes_when_busy(canvas_core):
         ((mask_id, controller.renders.render_revision(mask_id)),),
     )
     controller.renders._async_pending[mask_id] = overlay.render_revision
-    service._stroke_pipeline.is_mask_busy = lambda _mid: True
+    service._components.stroke_pipeline.is_mask_busy = lambda _mid: True
     service.render_work.consume_prefetch_results(
         request_id=request_id,
         product=MaskPrefetchProduct(image_id, (overlay,), (), 12.5),
     )
     assert mask_id in service.render_work._deferred_overlays
     assert controller.renders.has_pending_async(mask_id)
-    service._stroke_pipeline.is_mask_busy = lambda _mid: False
+    service._components.stroke_pipeline.is_mask_busy = lambda _mid: False
     applied = service.render_work.apply_deferred(mask_id)
     assert applied is True
     assert not controller.renders.has_pending_async(mask_id)
@@ -384,7 +384,7 @@ def test_snippet_result_is_discarded_while_stroke_preview_is_active(
     mask_id = manager.create_mask(QImage(32, 32, QImage.Format_Grayscale8))
     updates: list[object] = []
     monkeypatch.setattr(
-        service._stroke_pipeline,
+        service._components.stroke_pipeline,
         "is_mask_busy",
         lambda candidate: candidate == mask_id,
     )
@@ -463,7 +463,7 @@ def test_schedule_activation_signals_warms_and_resumes(monkeypatch, canvas_core)
     service, manager, controller = _build_service(canvas_core)
     mask_id = manager.create_mask(QImage(12, 12, QImage.Format_Grayscale8))
     image_id = uuid.uuid4()
-    service._activation._pending_compositions.add(image_id)
+    service._components.activation._pending_compositions.add(image_id)
     warm_calls: list[uuid.UUID | None] = []
     emit_calls: list[uuid.UUID | None] = []
     pending_calls: list[uuid.UUID | None] = []
@@ -487,7 +487,7 @@ def test_schedule_activation_signals_warms_and_resumes(monkeypatch, canvas_core)
         lambda _ms, callback: callback(),
     )
 
-    service._activation._schedule_signals(
+    service._components.activation._schedule_signals(
         mask_id,
         warm_cache=True,
         composition_id=image_id,
@@ -498,17 +498,20 @@ def test_schedule_activation_signals_warms_and_resumes(monkeypatch, canvas_core)
     assert emit_calls == [mask_id]
     assert resume_update_calls == [image_id]
     assert resume_calls == []
-    assert image_id not in service._activation._pending_compositions
+    assert image_id not in service._components.activation._pending_compositions
 
 
 @pytest.mark.usefixtures("qapp")
 def test_mask_service_diagnostics_provider_aggregates_recent_messages(canvas_core):
     """Diagnostics should summarize recent status entries and prefetch stats."""
     service, _, controller = _build_service(canvas_core)
-    service._status.record("Hidden", label="Mask")
-    service._status.record("Prefetch warmed 1 mask(s)", label="Mask Prefetch")
-    service._status.record("First issue", label="Mask Error")
-    service._status.record("Second issue", label="Mask Error")
+    service._components.status.record("Hidden", label="Mask")
+    service._components.status.record(
+        "Prefetch warmed 1 mask(s)",
+        label="Mask Prefetch",
+    )
+    service._components.status.record("First issue", label="Mask Error")
+    service._components.status.record("Second issue", label="Mask Error")
     controller.renders.record_prefetch_request(2)
     controller.renders.record_prefetch_completion(
         completed=1,

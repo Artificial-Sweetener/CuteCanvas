@@ -1016,7 +1016,11 @@ def test_cancelled_preview_restores_only_its_durable_region(qapp, monkeypatch):
                 force_async_colorize=force_async_colorize,
             )
 
-        monkeypatch.setattr(service._stroke_pipeline, "_update_region", track_update)
+        monkeypatch.setattr(
+            service._components.stroke_pipeline,
+            "_update_region",
+            track_update,
+        )
 
         service.stroke_interactions.cancel()
 
@@ -1226,7 +1230,7 @@ def test_mask_stroke_finalize_drops_stale_token(qapp, monkeypatch):
     tools = qpane._tools_manager
     refreshes: list[QRect] = []
     monkeypatch.setattr(
-        service._stroke_pipeline,
+        service._components.stroke_pipeline,
         "_update_region",
         lambda dirty_rect, _layer, **_kwargs: refreshes.append(QRect(dirty_rect)),
     )
@@ -1505,7 +1509,7 @@ def test_handle_generated_mask_routes_canvas_pixels_through_generated_edit_owner
         return mask_id, True
 
     monkeypatch.setattr(
-        service._generated_edits,
+        service._components.generated_edits,
         "apply",
         apply_generated,
     )
@@ -1973,10 +1977,16 @@ def test_mask_activation_deferral_ratio(qpane_with_mask):
     small_image.fill(255)
     large_mask_id = mask_manager.create_mask(large_image)
     small_mask_id = mask_manager.create_mask(small_image)
-    assert service._activation.should_defer(large_mask_id, small_mask_id) is True
-    assert service._activation.should_defer(small_mask_id, large_mask_id) is False
-    assert service._activation.should_defer(None, large_mask_id) is False
-    assert service._activation.should_defer(large_mask_id, None) is False
+    assert (
+        service._components.activation.should_defer(large_mask_id, small_mask_id)
+        is True
+    )
+    assert (
+        service._components.activation.should_defer(small_mask_id, large_mask_id)
+        is False
+    )
+    assert service._components.activation.should_defer(None, large_mask_id) is False
+    assert service._components.activation.should_defer(large_mask_id, None) is False
 
 
 def test_mask_activation_signal_timing(qapp, qpane_with_mask):
@@ -2093,7 +2103,11 @@ def test_activation_prefetch_runs_when_pending(qapp, qpane_with_mask, monkeypatc
         calls.append((image_id_arg, reason, tuple(scales or ())))
         return True
 
-    monkeypatch.setattr(service._activation, "_prefetch", recording_prefetch)
+    monkeypatch.setattr(
+        service._components.activation,
+        "_prefetch",
+        recording_prefetch,
+    )
     try:
         result = service.ensureActiveMaskForComposition(small_image_id)
         assert result is True
@@ -2129,7 +2143,7 @@ def test_mask_activation_schedule_usage(qapp, qpane_with_mask, monkeypatch):
         calls.append((mask_id, warm_cache))
 
     monkeypatch.setattr(
-        service._activation,
+        service._components.activation,
         "_schedule_signals",
         capture_schedule,
     )
@@ -2163,17 +2177,17 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
         scheduled.append((mask_id, warm_cache, composition_id))
 
     monkeypatch.setattr(
-        service._activation,
+        service._components.activation,
         "_schedule_signals",
         capture_schedule,
     )
     monkeypatch.setattr(
-        service._activation,
+        service._components.activation,
         "_resume_overlays_cb",
         lambda image_id: resumed.append(image_id),
     )
     pending_image_id = uuid.uuid4()
-    service._activation._pending_compositions.add(pending_image_id)
+    service._components.activation._pending_compositions.add(pending_image_id)
     assert service.ensureActiveMaskForComposition(pending_image_id) is False
     assert scheduled == [(None, False, pending_image_id)]
     assert resumed == []
@@ -2182,8 +2196,8 @@ def test_mask_activation_resumes_when_image_has_no_masks(qpane_with_mask, monkey
     assert service.ensureActiveMaskForComposition(maskless_image_id) is False
     assert scheduled == []
     assert resumed == [maskless_image_id]
-    service._activation._pending_compositions.discard(pending_image_id)
-    service._activation._pending_compositions.discard(maskless_image_id)
+    service._components.activation._pending_compositions.discard(pending_image_id)
+    service._components.activation._pending_compositions.discard(maskless_image_id)
 
 
 def test_mask_prefetch_warms_masks(qapp):
@@ -2401,7 +2415,7 @@ def test_prefetch_deferred_while_mask_busy(qpane_with_mask):
     qpane, mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
     controller = service.controller
-    pipeline = service._stroke_pipeline
+    pipeline = service._components.stroke_pipeline
     mask_id = service.createBlankMask(_current_image_size(qpane))
     assert mask_id is not None
     layer = mask_manager.get_layer(mask_id)
@@ -2601,7 +2615,11 @@ def test_ensure_top_mask_defers_when_prefetch_active(monkeypatch, qpane_with_mas
     ):
         scheduled_calls.append((mask_id_arg, warm_cache))
 
-    monkeypatch.setattr(service._activation, "_schedule_signals", tracking_schedule)
+    monkeypatch.setattr(
+        service._components.activation,
+        "_schedule_signals",
+        tracking_schedule,
+    )
     try:
         assert service.ensureActiveMaskForComposition(image_id) is True
     finally:
@@ -2696,14 +2714,16 @@ def test_document_mask_activation_pending_flag_toggles(qapp, monkeypatch):
             called.append((mask_id, warm_cache, composition_id))
 
         monkeypatch.setattr(
-            service._activation,
+            service._components.activation,
             "_schedule_signals",
-            MethodType(fake_schedule, service._activation),
+            MethodType(fake_schedule, service._components.activation),
         )
         assert service.ensureActiveMaskForComposition(small_composition_id) is True
         assert service.isActivationPending(small_composition_id) is True
         assert called and called[0][2] == small_composition_id
-        service._activation._pending_compositions.discard(small_composition_id)
+        service._components.activation._pending_compositions.discard(
+            small_composition_id
+        )
         masks.handle_activation_ready(
             small_composition_id,
             resumed_with_update=False,

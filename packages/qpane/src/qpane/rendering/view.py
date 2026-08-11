@@ -205,6 +205,12 @@ class View:
         """Let rendering handle a viewport change when a fast path is available."""
         return self.presenter.handle_viewport_changed()
 
+    def prioritize_interaction(self) -> None:
+        """Yield derived rendering work to latency-sensitive host interaction."""
+        self.presenter.begin_navigation_interaction()
+        self.renderer.cancel_navigation_refinement()
+        self.presenter.finish_navigation_interaction()
+
     def ensure_view_alignment(self, *, force: bool = False) -> None:
         """Keep the viewport aligned via the presenter helper."""
         self.presenter.ensure_view_alignment(force=force)
