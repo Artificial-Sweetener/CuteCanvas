@@ -22,6 +22,7 @@ from qpane.raster.image_conversion import (
     numpy_to_qimage_argb32,
     qimage_to_numpy_grayscale8,
     qimage_to_numpy_view_grayscale8,
+    qimage_to_numpy_writable_view_grayscale8,
 )
 
 
@@ -57,3 +58,15 @@ def test_qimage_to_numpy_view_grayscale8_returns_view():
     assert array.flags.writeable is False
     backing.setPixelColor(1, 1, QColor(200, 200, 200))
     assert array[1, 1] == 200
+
+
+def test_qimage_to_numpy_writable_view_grayscale8_updates_backing_image():
+    """The writable view publishes mutations through its returned backing image."""
+    image = QImage(2, 2, QImage.Format_Grayscale8)
+    image.fill(0)
+
+    array, backing = qimage_to_numpy_writable_view_grayscale8(image)
+    array[1, 1] = 200
+
+    assert array.flags.writeable is True
+    assert backing.pixelColor(1, 1).red() == 200

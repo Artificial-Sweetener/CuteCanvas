@@ -18,26 +18,18 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRect, Qt
-from PySide6.QtGui import (
-    QBrush,
-    QColor,
-    QImage,
-    QPainter,
-    QPainterPath,
-    QRadialGradient,
-    QTransform,
-)
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QColor, QImage
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_argb32,
-    qimage_to_numpy_grayscale8,
 )
 
 from .compositor import BrushCompositor
 from .dab_engine import BrushDabEngine
 from .model import BrushDab, BrushOperation, BrushStrokeSegment
+from .qt_dab_painter import paint_color_dabs, paint_coverage_dabs_pixels
 
 _DABS = BrushDabEngine()
 _DEFAULT_COMPOSITOR = BrushCompositor()
@@ -67,30 +59,42 @@ def render_coverage_stroke(
                 dabs=_DABS.segment_dabs(segment),
                 operation=segment.operation,
             )
-        image = numpy_to_qimage_grayscale8(after)
     else:
-        image = numpy_to_qimage_grayscale8(np.array(before, copy=True))
-        _paint_segments(image, dirty_rect.topLeft(), segments, stride=1)
-        after = qimage_to_numpy_grayscale8(image)
+        ordered_dabs = tuple(
+            (segment.operation, dab)
+            for segment in segments
+            for dab in _DABS.segment_dabs(segment)
+        )
+        after = np.array(before, copy=True)
+        paint_coverage_dabs_pixels(
+            after,
+            dirty_rect.topLeft(),
+            ordered_dabs,
+            stride=1,
+        )
     if constraint is not None:
         after = apply_coverage_constraint(before, after, constraint)
-        image = numpy_to_qimage_grayscale8(after)
+    image = numpy_to_qimage_grayscale8(after)
     stride = max(1, int(preview_stride))
     if stride == 1:
-        return after, image.copy()
+        return after, image
     if projected_tips:
         return after, numpy_to_qimage_grayscale8(after[::stride, ::stride])
     preview_before = np.array(before[::stride, ::stride], copy=True)
-    preview = numpy_to_qimage_grayscale8(preview_before)
-    _paint_segments(preview, dirty_rect.topLeft(), segments, stride=stride)
+    preview_after = np.array(preview_before, copy=True)
+    paint_coverage_dabs_pixels(
+        preview_after,
+        dirty_rect.topLeft(),
+        ordered_dabs,
+        stride=stride,
+    )
     if constraint is not None:
         preview_after = apply_coverage_constraint(
             preview_before,
-            qimage_to_numpy_grayscale8(preview),
+            preview_after,
             constraint[::stride, ::stride],
         )
-        preview = numpy_to_qimage_grayscale8(preview_after)
-    return after, preview.copy()
+    return after, numpy_to_qimage_grayscale8(preview_after)
 
 
 def apply_coverage_constraint(
@@ -101,67 +105,16 @@ def apply_coverage_constraint(
     """Blend a painted result through 8-bit selection coverage exactly once."""
     if before.shape != painted.shape or before.shape != constraint.shape:
         raise ValueError("stroke constraint must match the rendered slice")
+    if np.all(constraint == 255):
+        return painted
+    if not np.any(constraint):
+        return np.array(before, copy=True)
     coverage = constraint.astype(np.uint16)
     inverse = 255 - coverage
     blended = (
         before.astype(np.uint16) * inverse + painted.astype(np.uint16) * coverage + 127
     ) // 255
     return blended.astype(np.uint8)
-
-
-def paint_coverage_segment(
-    painter: QPainter,
-    origin: QPoint,
-    segment: BrushStrokeSegment,
-    *,
-    stride: int = 1,
-) -> None:
-    """Paint one segment into grayscale target pixels."""
-    stride_value = max(1, int(stride))
-    erasing = segment.operation is BrushOperation.ERASE
-    painter.setCompositionMode(
-        QPainter.CompositionMode_DestinationOut
-        if erasing
-        else QPainter.CompositionMode_SourceOver
-    )
-    painter.setPen(Qt.PenStyle.NoPen)
-    for dab in _DABS.segment_dabs(segment):
-        alpha = max(0, min(255, round(255.0 * dab.opacity)))
-        dab_color = QColor(255, 255, 255, alpha)
-        nonlinear_path = _nonlinear_dab_path(dab)
-        if nonlinear_path is not None and dab.hardness >= 1.0:
-            scale = 1.0 / stride_value
-            local_to_output = QTransform(
-                scale,
-                0.0,
-                0.0,
-                scale,
-                -origin.x() * scale,
-                -origin.y() * scale,
-            )
-            painter.setBrush(QBrush(dab_color))
-            painter.drawPath(local_to_output.map(nonlinear_path))
-            continue
-        center = QPointF(
-            (dab.center[0] - origin.x()) / stride_value,
-            (dab.center[1] - origin.y()) / stride_value,
-        )
-        radius = max(0.5, (dab.diameter / 2.0) / stride_value)
-        painter.save()
-        painter.translate(center)
-        _concatenate_tip_transform(painter, dab)
-        if dab.hardness >= 1.0:
-            painter.setBrush(QBrush(dab_color))
-        else:
-            gradient = QRadialGradient(QPointF(), radius)
-            gradient.setColorAt(0.0, dab_color)
-            gradient.setColorAt(max(0.0, min(1.0, dab.hardness)), dab_color)
-            edge = QColor(dab_color)
-            edge.setAlpha(0)
-            gradient.setColorAt(1.0, edge)
-            painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(QPointF(), radius, radius)
-        painter.restore()
 
 
 def render_color_stroke(
@@ -226,116 +179,5 @@ def render_color_dabs(
             color=color,
         )
     image = numpy_to_qimage_argb32(np.array(before, copy=True, order="C"))
-    painter = QPainter(image)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    try:
-        _paint_color_dabs(
-            painter,
-            patch_bounds.topLeft(),
-            dabs,
-            operation,
-            color,
-        )
-    finally:
-        painter.end()
+    paint_color_dabs(image, patch_bounds.topLeft(), dabs, operation, color)
     return qimage_to_numpy_argb32(image)
-
-
-def _paint_color_dabs(
-    painter: QPainter,
-    origin: QPoint,
-    dabs: tuple[BrushDab, ...],
-    operation: BrushOperation,
-    color: QColor,
-) -> None:
-    """Composite resolved dabs through one color-target operation."""
-    erasing = operation is BrushOperation.ERASE
-    painter.setCompositionMode(
-        QPainter.CompositionMode_DestinationOut
-        if erasing
-        else QPainter.CompositionMode_SourceOver
-    )
-    painter.setPen(Qt.PenStyle.NoPen)
-    for dab in dabs:
-        center = QPointF(dab.center[0] - origin.x(), dab.center[1] - origin.y())
-        radius = dab.diameter / 2.0
-        alpha = max(0, min(255, round(255.0 * dab.opacity)))
-        dab_color = QColor(255, 255, 255, alpha) if erasing else QColor(color)
-        if not erasing:
-            dab_color.setAlpha(round(dab_color.alpha() * alpha / 255.0))
-        nonlinear_path = _nonlinear_dab_path(dab)
-        if nonlinear_path is not None and dab.hardness >= 1.0:
-            local_to_output = QTransform(
-                1.0,
-                0.0,
-                0.0,
-                1.0,
-                -origin.x(),
-                -origin.y(),
-            )
-            painter.setBrush(QBrush(dab_color))
-            painter.drawPath(local_to_output.map(nonlinear_path))
-            continue
-        painter.save()
-        painter.translate(center)
-        _concatenate_tip_transform(painter, dab)
-        if dab.hardness >= 1.0:
-            painter.setBrush(QBrush(dab_color))
-        else:
-            gradient = QRadialGradient(QPointF(), radius)
-            gradient.setColorAt(0.0, dab_color)
-            gradient.setColorAt(max(0.0, min(1.0, dab.hardness)), dab_color)
-            edge = QColor(dab_color)
-            edge.setAlpha(0)
-            gradient.setColorAt(1.0, edge)
-            painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(QPointF(), radius, radius)
-        painter.restore()
-
-
-def _concatenate_tip_transform(painter: QPainter, dab: BrushDab) -> None:
-    """Apply one target-local brush-tip affine without moving its center."""
-    transform = dab.tip_transform
-    painter.setTransform(
-        QTransform(
-            transform.m11,
-            transform.m12,
-            transform.m21,
-            transform.m22,
-            0.0,
-            0.0,
-        ),
-        True,
-    )
-
-
-def _nonlinear_dab_path(dab: BrushDab) -> QPainterPath | None:
-    """Return one exact source-local footprint for a scene-circular tip."""
-    mapping = dab.tip_mapping
-    if mapping is None:
-        return None
-    local_center = QPointF(float(dab.center[0]), float(dab.center[1]))
-    scene_center = mapping.map_point(local_center)
-    radius = dab.diameter / 2.0
-    scene_path = QPainterPath()
-    scene_path.addEllipse(scene_center, radius, radius)
-    source_path = mapping.inverse_map_path(scene_path)
-    return None if source_path.isEmpty() else source_path
-
-
-def _paint_segments(
-    image: QImage,
-    origin: QPoint,
-    segments: tuple[BrushStrokeSegment, ...],
-    *,
-    stride: int,
-) -> None:
-    """Paint semantic segments into one target image."""
-    if not segments:
-        return
-    painter = QPainter(image)
-    try:
-        for segment in segments:
-            paint_coverage_segment(painter, origin, segment, stride=stride)
-    finally:
-        painter.end()

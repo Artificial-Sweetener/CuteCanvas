@@ -47,7 +47,11 @@ from cutecanvas.painting import (
     BrushTipCache,
 )
 from cutecanvas.painting.clone_compositor import CloneStampCompositor
-from cutecanvas.painting.rendering import render_color_stroke, render_coverage_stroke
+from cutecanvas.painting.rendering import (
+    apply_coverage_constraint,
+    render_color_stroke,
+    render_coverage_stroke,
+)
 from cutecanvas.raster.color_surface import ColorRasterSurface
 from cutecanvas.raster.revision_reader import RasterRevisionReader
 from PySide6.QtCore import QPointF, QRect, QRectF
@@ -65,6 +69,25 @@ def _transparent_image(width: int, height: int) -> QImage:
     image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(0, 0, 0, 0))
     return image
+
+
+@pytest.mark.parametrize(("coverage", "expected"), ((0, 17), (255, 203)))
+def test_uniform_coverage_constraint_returns_its_authoritative_input(
+    coverage: int,
+    expected: int,
+) -> None:
+    """Uniform selection coverage bypasses blending without aliasing its input."""
+    before = np.full((4, 5), 17, dtype=np.uint8)
+    painted = np.full((4, 5), 203, dtype=np.uint8)
+    constraint = np.full((4, 5), coverage, dtype=np.uint8)
+
+    result = apply_coverage_constraint(before, painted, constraint)
+
+    assert np.all(result == expected)
+    if coverage == 255:
+        assert result is painted
+    else:
+        assert not np.shares_memory(result, before)
 
 
 def test_dab_engine_is_deterministic_for_dynamic_segments() -> None:

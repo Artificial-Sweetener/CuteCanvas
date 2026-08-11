@@ -341,7 +341,9 @@ read-only zero-copy view and its normalized backing image.
 only channel values, rather than premultiplication, matter.
 `qimage_to_numpy_view_argb32` provides a writable scoped zero-copy view.
 `qimage_to_numpy_view_grayscale8` provides a read-only scoped zero-copy view.
-Both require the caller to honor the image lifetime.
+`qimage_to_numpy_writable_view_grayscale8` provides the corresponding writable
+grayscale view. Each view requires the caller to retain its returned backing
+image for the view's lifetime.
 
 For the reverse direction, `numpy_to_qimage_argb32` and
 `numpy_to_qimage_grayscale8` preserve the array's intrinsic size, while

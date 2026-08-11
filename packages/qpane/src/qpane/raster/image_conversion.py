@@ -61,6 +61,13 @@ def qimage_to_numpy_view_grayscale8(image: QImage) -> tuple[np.ndarray, QImage]:
     return array, normalized
 
 
+def qimage_to_numpy_writable_view_grayscale8(
+    image: QImage,
+) -> tuple[np.ndarray, QImage]:
+    """Return a writable grayscale view and its normalized backing image."""
+    return _qimage_to_numpy_writable_view_grayscale8(image)
+
+
 def qimage_to_numpy_argb32(image: QImage) -> np.ndarray:
     """Return detached BGRA memory-order pixels for a premultiplied ARGB image."""
     array, _backing = qimage_to_numpy_const_view_argb32(image)

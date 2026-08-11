@@ -345,7 +345,8 @@ root facade and declarative SDK above.
 - `qimage_to_numpy_argb32` and `qimage_to_numpy_grayscale8` return detached arrays.
 - `qimage_to_numpy_const_view_argb32` exposes normalized premultiplied BGRA pixels; `qimage_to_numpy_const_view_bgra32` preserves compatible 32-bit storage to avoid needless large-image conversion.
 - `qimage_to_numpy_view_argb32` exposes a writable scoped zero-copy view;
-  `qimage_to_numpy_view_grayscale8` exposes a read-only scoped zero-copy view.
+  `qimage_to_numpy_view_grayscale8` exposes a read-only scoped zero-copy view;
+  `qimage_to_numpy_writable_view_grayscale8` exposes a writable grayscale view.
 - `present_hybrid_pixels` applies the same color and optional outline
   presentation used by sampled hybrid layers.
 - `present_hybrid_sample` evaluates and presents one hybrid document over an

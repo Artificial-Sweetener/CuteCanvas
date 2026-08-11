@@ -32,7 +32,8 @@ from qpane.sdk.raster import (
 
 from ..coverage.spatial_constraint import CoverageSpatialConstraint
 from ..painting import BrushCompositor, BrushDab, BrushDabEngine, BrushStrokeSegment
-from ..painting.rendering import apply_coverage_constraint, paint_coverage_segment
+from ..painting.qt_dab_painter import paint_coverage_segments
+from ..painting.rendering import apply_coverage_constraint
 from .mask_controller import MaskController
 from .stroke_models import (
     MaskStrokeJobSpec,
@@ -235,17 +236,12 @@ class DecimatedStrokePreview:
         if any(segment.texture_strength > 0.0 for segment in segments):
             self._paint_textured_preview(preview, dirty_rect, segments)
             return
-        painter = QPainter(preview)
-        try:
-            for segment in segments:
-                paint_coverage_segment(
-                    painter,
-                    dirty_rect.topLeft(),
-                    segment,
-                    stride=max(1, self.stride),
-                )
-        finally:
-            painter.end()
+        paint_coverage_segments(
+            preview,
+            dirty_rect.topLeft(),
+            tuple(segments),
+            stride=max(1, self.stride),
+        )
 
     def _paint_textured_preview(
         self,

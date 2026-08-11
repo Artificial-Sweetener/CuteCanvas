@@ -23,6 +23,7 @@ from .image_conversion import (
     qimage_to_numpy_grayscale8,
     qimage_to_numpy_view_argb32,
     qimage_to_numpy_view_grayscale8,
+    qimage_to_numpy_writable_view_grayscale8,
 )
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "qimage_to_numpy_grayscale8",
     "qimage_to_numpy_view_argb32",
     "qimage_to_numpy_view_grayscale8",
+    "qimage_to_numpy_writable_view_grayscale8",
 ]

@@ -43,3 +43,6 @@ from ..raster.image_conversion import (
 from ..raster.image_conversion import (
     qimage_to_numpy_view_grayscale8 as qimage_to_numpy_view_grayscale8,
 )
+from ..raster.image_conversion import (
+    qimage_to_numpy_writable_view_grayscale8 as qimage_to_numpy_writable_view_grayscale8,
+)

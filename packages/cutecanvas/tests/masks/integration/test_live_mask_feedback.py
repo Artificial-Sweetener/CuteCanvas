@@ -407,12 +407,14 @@ def test_fractional_zoom_mask_pixels_do_not_change_when_stroke_settles(
     )
     start = QPoint(300, 300)
     end = QPoint(500, 300)
+    expected_undo_depth = 1
     pressed = False
     try:
         if with_retained_coverage:
             assert probe.viewer.editor.coverage.rectangle(
                 QRectF(1800.0, 1800.0, 256.0, 256.0)
             )
+            expected_undo_depth = 2
             assert probe.wait_for_mask_render_idle()
             assert probe.wait_for_render_refinement_idle()
         probe.viewer.setZoom1To1()
@@ -444,7 +446,10 @@ def test_fractional_zoom_mask_pixels_do_not_change_when_stroke_settles(
                 end,
             )
             pressed = False
-            assert probe.wait_for_mask_undo_depth(probe.mask_ids[0], 1)
+            assert probe.wait_for_mask_undo_depth(
+                probe.mask_ids[0],
+                expected_undo_depth,
+            )
             assert probe.wait_for_mask_render_idle()
             assert probe.wait_for_raster_render_idle()
             assert probe.wait_for_render_refinement_idle()
