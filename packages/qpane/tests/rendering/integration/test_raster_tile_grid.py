@@ -17,12 +17,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from time import monotonic
 
 import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QApplication
-from pytestqt.qtbot import QtBot
 from qpane import Config
 from qpane.rendering.raster_tile_grid import (
     RasterTileGrid,
@@ -151,10 +152,8 @@ class _GridConsumer:
 
 def test_runtime_debounces_resize_storm_to_latest_bucket(
     qapp: QApplication,
-    qtbot: QtBot,
 ) -> None:
     """A resize storm should invalidate once for its final physical viewport."""
-    del qapp
     consumer = _GridConsumer(RasterTileGrid(512, 8))
     changes: list[RasterTileGrid] = []
     runtime = RasterTileGridRuntime(
@@ -172,7 +171,7 @@ def test_runtime_debounces_resize_storm_to_latest_bucket(
         assert runtime.pending
         assert consumer.replacements == []
 
-        qtbot.waitUntil(lambda: not runtime.pending, timeout=1000)
+        _wait_until(qapp, lambda: not runtime.pending)
 
         assert not runtime.pending
         assert consumer.replacements == [RasterTileGrid(4096, 8)]
@@ -184,10 +183,8 @@ def test_runtime_debounces_resize_storm_to_latest_bucket(
 
 def test_runtime_strict_override_is_immediate_and_non_adaptive(
     qapp: QApplication,
-    qtbot: QtBot,
 ) -> None:
     """A host-selected integer should remain exact across viewport changes."""
-    del qapp
     consumer = _GridConsumer(RasterTileGrid(512, 8))
     runtime = RasterTileGridRuntime(
         config=Config(tile_size="auto"),
@@ -199,7 +196,7 @@ def test_runtime_strict_override_is_immediate_and_non_adaptive(
     try:
         runtime.apply_config(Config(tile_size=1536, tile_overlap=12))
         runtime.observe_viewport(QSize(7680, 4320))
-        qtbot.waitUntil(lambda: not runtime.pending, timeout=1000)
+        _wait_until(qapp, lambda: not runtime.pending)
 
         assert consumer.grid == RasterTileGrid(1536, 12)
         assert consumer.replacements == [RasterTileGrid(1536, 12)]
@@ -208,3 +205,16 @@ def test_runtime_strict_override_is_immediate_and_non_adaptive(
     finally:
         runtime.shutdown()
         runtime.deleteLater()
+
+
+def _wait_until(
+    application: QApplication,
+    predicate: Callable[[], bool],
+    *,
+    timeout_seconds: float = 1.0,
+) -> None:
+    """Process Qt work until one observable condition becomes true."""
+    deadline = monotonic() + timeout_seconds
+    while not predicate() and monotonic() < deadline:
+        application.processEvents()
+    assert predicate()
