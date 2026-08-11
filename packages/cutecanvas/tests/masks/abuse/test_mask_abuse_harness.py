@@ -1497,12 +1497,8 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
             driver.begin(stroke)
             driver.move(stroke, 1)
             driver.end(stroke)
-            assert harness.wait_for_mask_undo_depth(
-                mask_id,
-                expected_depth,
-                timeout_ms=5000,
-            )
-            tint = harness.wait_for_mask_tint(probe_point, timeout_ms=5000)
+            assert harness.wait_for_mask_undo_depth(mask_id, expected_depth)
+            tint = harness.wait_for_mask_tint(probe_point)
             assert tint.latency_ms is not None
             harness.drain_events(wait_ms=5)
 
