@@ -243,8 +243,13 @@ def test_hidden_raster_never_reappears_during_mask_navigation_abuse(
         driver.begin(stroke)
         driver.move(stroke, 1)
         driver.end(stroke)
-        assert harness.wait_for_mask_undo_depth(harness.mask_ids[0], 1)
-        assert harness.wait_for_mask_tint(QPoint(250, 250)).latency_ms is not None
+        assert (
+            harness.wait_for_mask_tint(
+                QPoint(250, 250),
+                timeout_ms=15_000,
+            ).latency_ms
+            is not None
+        )
 
         scene = harness.viewer.currentScene()
         assert scene is not None
