@@ -2223,7 +2223,7 @@ def test_mask_prefetch_warms_masks(qapp):
             assert scaled_pixmap.size() == controller.renders.target_scaled_size(
                 layer.mask_image.size(), scale_key
             )
-        records = service._diagnostics_provider(qpane)
+        records = service.diagnostics_records()
         prefetch_rows = [
             record for record in records if record.label == "Mask|Prefetch"
         ]
@@ -2265,7 +2265,7 @@ def test_mask_prefetch_diagnostics_available_by_default(qapp):
     qpane.resize(16, 16)
     try:
         service = qpane.mask_service
-        records = service._diagnostics_provider(qpane)
+        records = service.diagnostics_records()
         prefetch_rows = [
             record for record in records if record.label == "Mask|Prefetch"
         ]

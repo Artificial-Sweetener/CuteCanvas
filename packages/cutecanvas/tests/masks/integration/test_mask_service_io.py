@@ -55,7 +55,6 @@ from qpane.scene.raster import RasterBounds
 def test_mask_service_load_mask_records_success(qpane_with_mask, tmp_path):
     qpane, _mask_manager, image_id = qpane_with_mask
     service = _mask_service(qpane)
-    service._status_messages.clear()
     grayscale = QImage(8, 8, QImage.Format_Grayscale8)
     grayscale.fill(Qt.white)
     mask_path = tmp_path / "mask.png"
@@ -63,7 +62,9 @@ def test_mask_service_load_mask_records_success(qpane_with_mask, tmp_path):
     mask_id = service.loadMaskFromPath(str(mask_path))
     assert mask_id is not None
     assert mask_id in service.mask_ids_for_composition(image_id)
-    label, message = service._status_messages[-1]
+    status = service.get_latest_status_message("Mask")
+    assert status is not None
+    label, message = status
     assert label == "Mask"
     assert str(mask_path) in message
 
@@ -74,7 +75,6 @@ def test_mask_service_load_mask_uses_active_composition_canvas(
 ):
     qpane, _, _ = qpane_with_mask
     service = _mask_service(qpane)
-    service._status_messages.clear()
     qpane.original_image = QImage()
     grayscale = QImage(8, 8, QImage.Format_Grayscale8)
     grayscale.fill(Qt.white)
@@ -83,7 +83,9 @@ def test_mask_service_load_mask_uses_active_composition_canvas(
     result = service.loadMaskFromPath(str(mask_path))
     assert result is not None
     assert service.layer_instance_for_mask(result) is not None
-    label, message = service._status_messages[-1]
+    status = service.get_latest_status_message("Mask")
+    assert status is not None
+    label, message = status
     assert label == "Mask"
     assert str(mask_path) in message
 
@@ -91,7 +93,6 @@ def test_mask_service_load_mask_uses_active_composition_canvas(
 def test_mask_service_update_mask_missing_layer(qpane_with_mask, tmp_path):
     qpane, _, _ = qpane_with_mask
     service = _mask_service(qpane)
-    service._status_messages.clear()
     grayscale = QImage(8, 8, QImage.Format_Grayscale8)
     grayscale.fill(Qt.white)
     mask_path = tmp_path / "update_mask.png"
@@ -99,7 +100,9 @@ def test_mask_service_update_mask_missing_layer(qpane_with_mask, tmp_path):
     unknown_id = uuid.uuid4()
     result = service.updateMaskFromPath(unknown_id, str(mask_path))
     assert result is False
-    label, message = service._status_messages[-1]
+    status = service.get_latest_status_message("Mask Error")
+    assert status is not None
+    label, message = status
     assert label == "Mask Error"
     assert str(unknown_id) in message
 

@@ -28,7 +28,9 @@ from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self
+from typing import Any
+
+from typing_extensions import Self
 
 
 def _configure_qt_before_imports(arguments: list[str]) -> None:

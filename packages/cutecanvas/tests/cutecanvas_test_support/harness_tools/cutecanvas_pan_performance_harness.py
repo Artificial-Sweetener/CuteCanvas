@@ -32,7 +32,9 @@ from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self
+from typing import Any
+
+from typing_extensions import Self
 
 if __name__ == "__main__":
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

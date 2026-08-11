@@ -53,7 +53,7 @@ def test_unicode_text_shapes_exact_outlines_carets_and_bounded_cache(qapp) -> No
             1.15,
         ),
     )
-    cache = SemanticTextLayoutCache(32 * 1024)
+    cache = SemanticTextLayoutCache()
     product = cache.product(content, QRectF(0.0, 0.0, 180.0, 160.0))
 
     assert not product.picture.isNull()
@@ -62,8 +62,8 @@ def test_unicode_text_shapes_exact_outlines_carets_and_bounded_cache(qapp) -> No
     assert all(rect.height() > 0.0 for rect in product.cursor_rects)
     assert len(product.font_resolutions) == 2
     assert cache.product(content, QRectF(0.0, 0.0, 180.0, 160.0)) is product
-    assert cache.usage_bytes <= 32 * 1024
-    cache.set_budget(0)
+    assert cache.usage_bytes == product.retained_bytes
+    cache.set_budget(product.retained_bytes - 1)
     assert cache.entry_count == 0
     assert cache.usage_bytes == 0
 

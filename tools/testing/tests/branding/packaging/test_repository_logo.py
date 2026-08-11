@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from xml.etree import ElementTree
 
 from tools.testing.policy import repository_root
@@ -27,42 +28,51 @@ _PRODUCT_LOGOS = (
     ("cutecanvas", "0 0 1752 635"),
     ("ferrastra", "0 0 1183 292"),
 )
+_REMOTE_LOGO_PATTERN = re.compile(
+    r"https://raw\.githubusercontent\.com/Artificial-Sweetener/"
+    r"CuteCanvas/(?:main|[0-9a-f]{7,40})/assets/logos/(?P<product>[a-z]+)-logo"
+)
 
 
 def test_root_readme_mounts_public_theme_specific_cutecanvas_vectors() -> None:
     """Keep the canonical guide branded on GitHub and package indexes."""
     readme = (_ROOT / "README.md").read_text("utf-8")
-    base = (
-        "https://raw.githubusercontent.com/Artificial-Sweetener/"
-        "CuteCanvas/main/assets/logos/cutecanvas-logo"
-    )
+    base = _remote_logo_base(readme, "cutecanvas")
     assert '<source media="(prefers-color-scheme: dark)"' in readme
     assert f'srcset="{base}-on-dark.svg"' in readme
     assert '<source media="(prefers-color-scheme: light)"' in readme
     assert f'srcset="{base}-on-light.svg"' in readme
     assert 'alt="CuteCanvas — PySide6 Graphics Editor"' in readme
     assert f'src="{base}.svg"' in readme
-    assert 'width="760"' in readme
+    assert 'width="640"' in readme
 
 
 def test_package_readmes_mount_their_absolute_theme_specific_vectors() -> None:
     """Keep published product guides branded without repository-relative URLs."""
     products = (
-        ("cutecanvas", "CuteCanvas — PySide6 Graphics Editor", 760),
+        ("cutecanvas", "CuteCanvas — PySide6 Graphics Editor", 640),
         ("ferrastra", "Ferrastra — oxidized image processing", 720),
     )
     for product, alt_text, width in products:
         readme = (_ROOT / f"packages/{product}/README.md").read_text("utf-8")
-        base = (
-            "https://raw.githubusercontent.com/Artificial-Sweetener/"
-            f"CuteCanvas/main/assets/logos/{product}-logo"
-        )
+        base = _remote_logo_base(readme, product)
         assert readme.startswith('<h1 align="center">\n  <picture>')
         assert f'srcset="{base}-on-dark.svg"' in readme
         assert f'srcset="{base}-on-light.svg"' in readme
         assert f'src="{base}.svg"' in readme
         assert f'alt="{alt_text}"' in readme
         assert f'width="{width}"' in readme
+
+
+def _remote_logo_base(readme: str, product: str) -> str:
+    """Return one absolute repository logo base from a published guide."""
+    matches = {
+        match.group(0)
+        for match in _REMOTE_LOGO_PATTERN.finditer(readme)
+        if match.group("product") == product
+    }
+    assert len(matches) == 1
+    return matches.pop()
 
 
 def test_product_logo_variants_are_scalable_transparent_paths() -> None:

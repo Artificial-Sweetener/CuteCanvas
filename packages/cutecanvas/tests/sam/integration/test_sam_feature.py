@@ -287,7 +287,7 @@ def test_install_sam_feature_respects_config(monkeypatch, qapp):
             and callable(getattr(torch.cuda, "is_available", None))
             and torch.cuda.is_available()
         )
-    except (AttributeError, RuntimeError):
+    except (AttributeError, ImportError, RuntimeError):
         cuda_available = False
     expected_device = "cuda" if cuda_available else "cpu"
     assert manager._device == expected_device

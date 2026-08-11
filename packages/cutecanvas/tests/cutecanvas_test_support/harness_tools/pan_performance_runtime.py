@@ -25,7 +25,9 @@ from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Any, Self
+from typing import Any
+
+from typing_extensions import Self
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 

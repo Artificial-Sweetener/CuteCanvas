@@ -505,11 +505,10 @@ def test_schedule_activation_signals_warms_and_resumes(monkeypatch, canvas_core)
 def test_mask_service_diagnostics_provider_aggregates_recent_messages(canvas_core):
     """Diagnostics should summarize recent status entries and prefetch stats."""
     service, _, controller = _build_service(canvas_core)
-    service._status_messages.clear()
-    service._status_messages.append(("Mask", "Hidden"))
-    service._status_messages.append(("Mask Prefetch", "Prefetch warmed 1 mask(s)"))
-    service._status_messages.append(("Mask Error", "First issue"))
-    service._status_messages.append(("Mask Error", "Second issue"))
+    service._status.record("Hidden", label="Mask")
+    service._status.record("Prefetch warmed 1 mask(s)", label="Mask Prefetch")
+    service._status.record("First issue", label="Mask Error")
+    service._status.record("Second issue", label="Mask Error")
     controller.renders.record_prefetch_request(2)
     controller.renders.record_prefetch_completion(
         completed=1,
@@ -519,7 +518,7 @@ def test_mask_service_diagnostics_provider_aggregates_recent_messages(canvas_cor
     service.render_work._last_message = "Prefetch warmed 1 mask(s)"
     service.render_work._last_duration_ms = 10.0
 
-    records = service._diagnostics_provider(canvas_core)
+    records = service.diagnostics_records()
     assert all(isinstance(record, DiagnosticRecord) for record in records)
     labels = [record.label for record in records]
     assert "Mask" not in labels

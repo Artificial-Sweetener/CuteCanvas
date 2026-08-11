@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 
 import pytest
 from PySide6.QtCore import QSize
-from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+from pytestqt.qtbot import QtBot
 from qpane import Config
 from qpane.rendering.raster_tile_grid import (
     RasterTileGrid,
@@ -148,7 +149,10 @@ class _GridConsumer:
         self.cache_configs += 1
 
 
-def test_runtime_debounces_resize_storm_to_latest_bucket(qapp) -> None:
+def test_runtime_debounces_resize_storm_to_latest_bucket(
+    qapp: QApplication,
+    qtbot: QtBot,
+) -> None:
     """A resize storm should invalidate once for its final physical viewport."""
     del qapp
     consumer = _GridConsumer(RasterTileGrid(512, 8))
@@ -168,7 +172,7 @@ def test_runtime_debounces_resize_storm_to_latest_bucket(qapp) -> None:
         assert runtime.pending
         assert consumer.replacements == []
 
-        QTest.qWait(150)
+        qtbot.waitUntil(lambda: not runtime.pending, timeout=1000)
 
         assert not runtime.pending
         assert consumer.replacements == [RasterTileGrid(4096, 8)]
@@ -178,7 +182,10 @@ def test_runtime_debounces_resize_storm_to_latest_bucket(qapp) -> None:
         runtime.deleteLater()
 
 
-def test_runtime_strict_override_is_immediate_and_non_adaptive(qapp) -> None:
+def test_runtime_strict_override_is_immediate_and_non_adaptive(
+    qapp: QApplication,
+    qtbot: QtBot,
+) -> None:
     """A host-selected integer should remain exact across viewport changes."""
     del qapp
     consumer = _GridConsumer(RasterTileGrid(512, 8))
@@ -192,7 +199,7 @@ def test_runtime_strict_override_is_immediate_and_non_adaptive(qapp) -> None:
     try:
         runtime.apply_config(Config(tile_size=1536, tile_overlap=12))
         runtime.observe_viewport(QSize(7680, 4320))
-        QTest.qWait(150)
+        qtbot.waitUntil(lambda: not runtime.pending, timeout=1000)
 
         assert consumer.grid == RasterTileGrid(1536, 12)
         assert consumer.replacements == [RasterTileGrid(1536, 12)]
