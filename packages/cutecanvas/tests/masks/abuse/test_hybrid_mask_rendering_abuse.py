@@ -725,8 +725,8 @@ def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
     """The 4K physical, 175%-DPR, 5x workflow must reuse every warm frame."""
     root = repository_root()
     environment = os.environ.copy()
-    # The parent fixture already excludes every other xdist worker while this
-    # subprocess runs, so its absolute wall clock is isolated and authoritative.
+    # The subprocess owns Qt independently while retaining the hosted CPU-clock
+    # policy when CI executes other jobs on the same runner.
     environment.pop("PYTEST_XDIST_WORKER", None)
     environment.update(
         {

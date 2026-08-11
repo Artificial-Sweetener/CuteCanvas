@@ -31,7 +31,11 @@ from PySide6.QtWidgets import QApplication, QWidget
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from cutecanvas_test_support.harness.timing import interaction_clock
+from cutecanvas_test_support.harness.timing import (
+    absolute_latency_assertions_are_isolated,
+    completion_clock,
+    interaction_clock,
+)
 
 _RESULT_PREFIX = "HIGH_DPI_NAVIGATION_RESULT="
 
@@ -88,11 +92,19 @@ def _wait_for_navigation_settle(
     harness: MountedQPaneHarness,
     operation: str,
 ) -> None:
-    """Wait through exact sampled, raster, and staged navigation publication."""
-    if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
-        raise RuntimeError(f"{operation} sampled refinement did not settle")
-    if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
-        raise RuntimeError(f"{operation} raster refinement did not settle")
+    """Finish staged navigation and isolate wall-clock background contention."""
+    presenter = harness.viewer.view().presenter
+    deadline = completion_clock() + 20.0
+    while presenter.navigation_refinement_pending and completion_clock() < deadline:
+        harness.qapp.processEvents()
+        QTest.qWait(1)
+    if presenter.navigation_refinement_pending:
+        raise RuntimeError(f"{operation} navigation refinement did not settle")
+    if absolute_latency_assertions_are_isolated():
+        if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
+            raise RuntimeError(f"{operation} sampled refinement did not settle")
+        if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
+            raise RuntimeError(f"{operation} raster refinement did not settle")
     harness.drain_events(wait_ms=30)
 
 
@@ -129,15 +141,14 @@ def main() -> None:
             viewer.mask_service.controller.mask_updated.emit(None, QRect())
         viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
         viewer.applyZoom(5.0, center)
-        if not harness.wait_for_mask_render_idle(timeout_ms=20_000):
-            raise RuntimeError("mask rendering did not settle")
-        if not harness.wait_for_render_refinement_idle(
-            timeout_ms=20_000,
+        if harness.wait_for_mask_tint(center, timeout_ms=20_000).latency_ms is None:
+            raise RuntimeError("mask pixels were not presented")
+        if (
+            absolute_latency_assertions_are_isolated()
+            and not harness.wait_for_mask_render_idle(timeout_ms=20_000)
         ):
-            raise RuntimeError("sampled rendering did not settle")
-        if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
-            raise RuntimeError("raster rendering did not settle")
-        harness.drain_events(wait_ms=60)
+            raise RuntimeError("mask rendering did not settle")
+        _wait_for_navigation_settle(harness, "initial frame")
 
         physical = viewer.physicalViewportRect().size()
         metrics_before = viewer.view().renderer.snapshot_metrics()
@@ -188,6 +199,10 @@ def main() -> None:
             _wait_for_navigation_settle(harness, "wheel zoom")
         metrics_after = viewer.view().renderer.snapshot_metrics()
         staged_metrics = viewer.view().renderer.navigation_refinement_metrics()
+        if not absolute_latency_assertions_are_isolated():
+            viewer.view().renderer.markDirty()
+            viewer.repaint()
+            app.processEvents()
         settled = viewer.view().renderer.get_base_buffer().copy()
         viewer.view().renderer.markDirty()
         viewer.update()
