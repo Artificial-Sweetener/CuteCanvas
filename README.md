@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/cutecanvas/"><img src="https://img.shields.io/pypi/v/cutecanvas?label=PyPI" alt="CuteCanvas on PyPI"></a>
-  <a href="https://github.com/Artificial-Sweetener/CuteCanvas/actions/workflows/verify.yml"><img src="https://img.shields.io/github/actions/workflow/status/Artificial-Sweetener/CuteCanvas/verify.yml?branch=main&amp;label=Tests" alt="Test status"></a>
+  <a href="https://github.com/Artificial-Sweetener/CuteCanvas/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/Artificial-Sweetener/CuteCanvas/release.yml?branch=main&amp;label=Tests" alt="Test status"></a>
   <a href="https://pypi.org/project/cutecanvas/"><img src="https://img.shields.io/pypi/dm/cutecanvas?label=downloads" alt="PyPI downloads"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+"></a>
   <a href="https://pyside.org/"><img src="https://img.shields.io/badge/PySide6-6.7.3%2B-41CD52?logo=qt&amp;logoColor=white" alt="PySide6 6.7.3+"></a>
