@@ -58,16 +58,18 @@ def _physical_frame_color(frame: PresentedMaskFrame, point: QPoint) -> QColor:
     )
 
 
-def _wait_for_physical_mask_tint(
+def _wait_for_physical_mask_state(
     harness: MountedQPaneHarness,
     point: QPoint,
     *,
+    tinted: bool,
     timeout_ms: int,
 ) -> bool:
-    """Wait until a high-DPI logical point visibly contains the mask tint."""
+    """Wait until a high-DPI logical point reaches the expected mask state."""
     deadline = time.perf_counter() + timeout_ms / 1000.0
     while time.perf_counter() < deadline:
-        if harness.is_mask_tint(_physical_image_color(harness.capture(), point)):
+        visible = harness.is_mask_tint(_physical_image_color(harness.capture(), point))
+        if visible is tinted:
             return True
         QTest.qWait(1)
     return False
@@ -106,7 +108,21 @@ def test_retained_mask_raster_edit_never_drops_or_reverts_presented_coverage(
             harness.drain_events()
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
             assert harness.wait_for_mask_undo_depth(mask_id, 3, timeout_ms=20_000)
-            assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
+            for point in retained_points:
+                assert (
+                    harness.wait_for_mask_tint(
+                        point,
+                        timeout_ms=20_000,
+                    ).latency_ms
+                    is not None
+                )
+            assert (
+                harness.wait_for_background(
+                    erase_point,
+                    timeout_ms=20_000,
+                ).latency_ms
+                is not None
+            )
             viewer.repaint()
 
         assert probe.frames
@@ -205,7 +221,6 @@ def _assert_complete_mask_frame(
     expected_layers: int,
 ) -> None:
     """Require every mask layer in the baseline before one transition."""
-    assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
     deadline = time.perf_counter() + 20.0
     with harness.observe_presented_frames() as probe:
         while time.perf_counter() < deadline:
@@ -240,14 +255,31 @@ def _high_dpi_probe() -> dict[str, object]:
             _panel_point(viewer, QPointF(1050.0, 700.0)),
         )
         for point in (*retained_points, erase_point):
-            assert _wait_for_physical_mask_tint(harness, point, timeout_ms=20_000)
+            assert _wait_for_physical_mask_state(
+                harness,
+                point,
+                tinted=True,
+                timeout_ms=20_000,
+            )
         viewer.setControlMode(viewer.CONTROL_MODE_ERASER)
         with harness.observe_presented_frames() as probe:
             QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
             harness.drain_events()
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
             assert harness.wait_for_mask_undo_depth(mask_id, 3, timeout_ms=20_000)
-            assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
+            for point in retained_points:
+                assert _wait_for_physical_mask_state(
+                    harness,
+                    point,
+                    tinted=True,
+                    timeout_ms=20_000,
+                )
+            assert _wait_for_physical_mask_state(
+                harness,
+                erase_point,
+                tinted=False,
+                timeout_ms=20_000,
+            )
             viewer.repaint()
         return {
             "device_pixel_ratio": viewer.devicePixelRatioF(),

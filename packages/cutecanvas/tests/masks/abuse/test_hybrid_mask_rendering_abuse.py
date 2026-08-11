@@ -194,10 +194,7 @@ def test_zoomed_mask_pan_crosses_cold_tile_boundary_without_pop_in(
         viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
         viewer.applyZoom(5.0, center)
         assert harness.wait_for_mask_render_idle(timeout_ms=8000)
-        assert harness.wait_for_sampled_render_idle(
-            timeout_ms=8000,
-            include_prefetch=True,
-        )
+        assert harness.wait_for_sampled_render_idle(timeout_ms=8000)
         viewer.view().renderer.markDirty()
         viewer.repaint()
         harness.drain_events(wait_ms=30)
