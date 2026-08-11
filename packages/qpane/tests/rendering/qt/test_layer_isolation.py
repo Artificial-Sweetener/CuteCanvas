@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
 from qpane.rendering.layer_isolation import LayerIsolationCompositor
 
 
@@ -94,3 +94,30 @@ def test_transformed_partial_composite_maps_outer_clip_to_device_space(qapp) -> 
 
     assert output.pixelColor(2, 2).alpha() == 0
     assert output.pixelColor(10, 2) == QColor("blue")
+
+
+def test_scaled_subpixel_damage_clip_survives_layer_isolation(qapp) -> None:
+    """A narrow device-space repair must not collapse during source scaling."""
+    del qapp
+    output = QImage(128, 32, QImage.Format.Format_ARGB32_Premultiplied)
+    output.fill(Qt.GlobalColor.transparent)
+    isolation = LayerIsolationCompositor()
+    painter = QPainter(output)
+    try:
+        damage = QPainterPath()
+        damage.addRect(QRectF(1.0, 0.0, 2.0, 32.0))
+        painter.setClipPath(damage)
+        painter.scale(32.0, 32.0)
+        isolation.composite(
+            painter,
+            opacity=1.0,
+            paint_layer=lambda layer: layer.fillRect(
+                QRectF(0.0, 0.0, 4.0, 1.0),
+                QColor("blue"),
+            ),
+        )
+    finally:
+        painter.end()
+
+    assert output.pixelColor(2, 2) == QColor("blue")
+    assert output.pixelColor(8, 2).alpha() == 0

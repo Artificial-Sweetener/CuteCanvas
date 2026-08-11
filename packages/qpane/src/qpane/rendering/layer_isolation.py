@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF, QSize, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage, QPainter, QPainterPath
 
 
 class LayerIsolationCompositor:
@@ -40,20 +40,25 @@ class LayerIsolationCompositor:
         paint_layer: Callable[[QPainter], None],
     ) -> None:
         """Render a complete layer independently, then blend it over the backdrop."""
+        logical_clip = painter.clipPath() if painter.hasClipping() else None
         composite_clip = (
-            painter.worldTransform().map(painter.clipRegion())
-            if painter.hasClipping()
+            painter.worldTransform().map(logical_clip)
+            if logical_clip is not None
             else None
         )
         depth = self._depth
         self._depth += 1
         try:
-            buffer = self._prepare_buffer(painter, depth=depth)
+            buffer = self._prepare_buffer(
+                painter,
+                depth=depth,
+                logical_clip=logical_clip,
+            )
             layer_painter = QPainter(buffer)
             try:
                 layer_painter.setWorldTransform(painter.worldTransform())
-                if painter.hasClipping():
-                    layer_painter.setClipRegion(painter.clipRegion())
+                if logical_clip is not None:
+                    layer_painter.setClipPath(logical_clip)
                 paint_layer(layer_painter)
             finally:
                 layer_painter.end()
@@ -61,7 +66,7 @@ class LayerIsolationCompositor:
             try:
                 painter.resetTransform()
                 if composite_clip is not None:
-                    painter.setClipRegion(
+                    painter.setClipPath(
                         composite_clip,
                         Qt.ClipOperation.ReplaceClip,
                     )
@@ -73,7 +78,13 @@ class LayerIsolationCompositor:
         finally:
             self._depth -= 1
 
-    def _prepare_buffer(self, painter: QPainter, *, depth: int) -> QImage:
+    def _prepare_buffer(
+        self,
+        painter: QPainter,
+        *,
+        depth: int,
+        logical_clip: QPainterPath | None,
+    ) -> QImage:
         """Return a cleared reusable surface matching the current paint device."""
         device = painter.device()
         size = QSize(device.width(), device.height())
@@ -88,13 +99,13 @@ class LayerIsolationCompositor:
             buffer.setDevicePixelRatio(dpr)
             self._set_buffer_at_depth(depth, buffer)
             buffer.fill(Qt.transparent)
-        elif painter.hasClipping():
+        elif logical_clip is not None:
             clear = QPainter(buffer)
             try:
                 clear.setWorldTransform(painter.worldTransform())
-                clear.setClipRegion(painter.clipRegion())
+                clear.setClipPath(logical_clip)
                 clear.setCompositionMode(QPainter.CompositionMode_Source)
-                clear.fillRect(painter.clipBoundingRect(), Qt.transparent)
+                clear.fillRect(logical_clip.boundingRect(), Qt.transparent)
             finally:
                 clear.end()
         else:
