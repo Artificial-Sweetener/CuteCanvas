@@ -28,9 +28,13 @@ from typing import Protocol, cast
 import pytest
 from cutecanvas import LayerPolicy
 from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
+from cutecanvas_test_support.harness.mounted_qpane import (
+    MountedQPaneHarness,
+    PresentedMaskFrame,
+)
 from cutecanvas_test_support.repository import repository_root
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane.rendering.view import View
@@ -229,7 +233,7 @@ def test_angled_endpoint_drag_storm_never_drops_current_mask_coverage() -> None:
                     ),
                 )
                 assert all(
-                    harness.is_mask_tint(frame.color_at(point))
+                    harness.is_mask_tint(_physical_frame_color(frame, point))
                     for frame in probe.frames[before:]
                     for point in current_points
                 ), (
@@ -261,6 +265,16 @@ def _preview_mappings(
         preview.layer_id: preview.mapping
         for preview in viewer._scene_mapping_preview.previews
     }
+
+
+def _physical_frame_color(frame: PresentedMaskFrame, point: QPoint) -> QColor:
+    """Sample one logical panel point from a physical backing frame."""
+    image = frame.image
+    device_pixel_ratio = image.devicePixelRatio()
+    return image.pixelColor(
+        round(point.x() * device_pixel_ratio) + frame.overscan_margin,
+        round(point.y() * device_pixel_ratio) + frame.overscan_margin,
+    )
 
 
 if __name__ == "__main__":

@@ -194,8 +194,8 @@ def test_zoomed_mask_pan_crosses_cold_tile_boundary_without_pop_in(
         viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
         viewer.applyZoom(5.0, center)
         assert harness.wait_for_mask_render_idle(timeout_ms=8000)
-        assert harness.wait_for_render_refinement_idle(
-            timeout_ms=30_000,
+        assert harness.wait_for_sampled_render_idle(
+            timeout_ms=8000,
             include_prefetch=True,
         )
         harness.drain_events(wait_ms=30)
@@ -449,7 +449,7 @@ def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
         harness.activate_mask(0)
         viewer.applyZoom(initial_zoom, center)
         assert harness.wait_for_mask_render_idle(timeout_ms=8000)
-        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_sampled_render_idle(timeout_ms=8000)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=30)
 
@@ -472,7 +472,7 @@ def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
         assert all(
             not harness.is_background(frame.color_at(center)) for frame in probe.frames
         ), center_colors
-        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_sampled_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=30)
 
         pan_latencies: list[float] = []
@@ -499,7 +499,7 @@ def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
                 viewer.setPan(pan)
                 harness.drain_events()
                 pan_latencies.append((interaction_clock() - started) * 1000.0)
-        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_sampled_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=30)
         for _ in range(3):
             for zoom in measured_zooms:
@@ -546,7 +546,7 @@ def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
         assert max(stable_pan) < _NAVIGATION_STALL_BUDGET_MS
         assert max(stable_zoom) < _NAVIGATION_STALL_BUDGET_MS
         assert harness.wait_for_mask_render_idle(timeout_ms=8000)
-        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_sampled_render_idle(timeout_ms=8000)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
         settled = harness.capture()
@@ -611,7 +611,7 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
         viewer.setControlMode(viewer.CONTROL_MODE_PANZOOM)
         viewer.applyZoom(2.0, center)
         assert harness.wait_for_mask_render_idle(timeout_ms=8000)
-        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_sampled_render_idle(timeout_ms=8000)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
 
@@ -680,7 +680,7 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
         ), stable_zoom
         assert max(stable_latency_samples(zoom_probe.durations_ms)) < 2.0
         assert harness.wait_for_mask_render_idle(timeout_ms=8000)
-        assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_sampled_render_idle(timeout_ms=8000)
         assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=60)
         settled = harness.capture()

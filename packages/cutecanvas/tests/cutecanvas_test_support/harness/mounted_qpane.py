@@ -59,10 +59,9 @@ class PresentedMaskFrame:
 
     def color_at(self, point: QPoint) -> QColor:
         """Return the backing-buffer color presented at a widget point."""
-        device_pixel_ratio = self.image.devicePixelRatio()
         return self.image.pixelColor(
-            round(point.x() * device_pixel_ratio) + self.overscan_margin,
-            round(point.y() * device_pixel_ratio) + self.overscan_margin,
+            point.x() + self.overscan_margin,
+            point.y() + self.overscan_margin,
         )
 
 
@@ -412,7 +411,7 @@ class MountedQPaneHarness:
         timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
         include_prefetch: bool = False,
     ) -> bool:
-        """Wait through a continuous sampled-render refinement quiescence."""
+        """Wait until sampled and navigation refinement both remain quiescent."""
         deadline = time.perf_counter() + timeout_ms / 1000.0
         idle_since: float | None = None
         while time.perf_counter() < deadline:
@@ -423,6 +422,31 @@ class MountedQPaneHarness:
                 coordinator.pending_count == 0
                 and not presenter.navigation_refinement_pending
                 and (not include_prefetch or not coordinator.prefetch_pending)
+            )
+            now = time.perf_counter()
+            idle_since = now if idle and idle_since is None else idle_since
+            if not idle:
+                idle_since = None
+            if idle_since is not None and now - idle_since >= 0.025:
+                self.qapp.processEvents()
+                return True
+            QTest.qWait(1)
+        return False
+
+    def wait_for_sampled_render_idle(
+        self,
+        *,
+        timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
+        include_prefetch: bool = False,
+    ) -> bool:
+        """Wait until sampled source refinement reaches continuous quiescence."""
+        deadline = time.perf_counter() + timeout_ms / 1000.0
+        idle_since: float | None = None
+        while time.perf_counter() < deadline:
+            self.qapp.processEvents()
+            coordinator = self.viewer.view().presenter._render_refinement
+            idle = coordinator.pending_count == 0 and (
+                not include_prefetch or not coordinator.prefetch_pending
             )
             now = time.perf_counter()
             idle_since = now if idle and idle_since is None else idle_since
@@ -487,12 +511,7 @@ class MountedQPaneHarness:
 
     def color_at(self, point: QPoint) -> QColor:
         """Sample one pixel from the mounted widget composition."""
-        image = self.capture()
-        device_pixel_ratio = image.devicePixelRatio()
-        return image.pixelColor(
-            round(point.x() * device_pixel_ratio),
-            round(point.y() * device_pixel_ratio),
-        )
+        return self.capture().pixelColor(point)
 
     def wait_for_mask_tint(
         self,
@@ -525,7 +544,7 @@ class MountedQPaneHarness:
         color = QColor()
         while time.perf_counter() < deadline:
             self.qapp.processEvents()
-            color = self.color_at(point)
+            color = self.viewer.grab().toImage().pixelColor(point)
             if predicate(color):
                 return PixelMeasurement(
                     latency_ms=(time.perf_counter() - started_at) * 1000.0,

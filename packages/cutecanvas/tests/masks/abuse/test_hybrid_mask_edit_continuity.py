@@ -27,13 +27,50 @@ from pathlib import Path
 
 import pytest
 from cutecanvas import CuteCanvas
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
+from cutecanvas_test_support.harness.mounted_qpane import (
+    MountedQPaneHarness,
+    PresentedMaskFrame,
+)
 from cutecanvas_test_support.repository import repository_root
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 _HIGH_DPI_RESULT_PREFIX = "HYBRID_MASK_EDIT_CONTINUITY="
+
+
+def _physical_image_color(image: QImage, point: QPoint) -> QColor:
+    """Sample a logical panel point from one physical image."""
+    device_pixel_ratio = image.devicePixelRatio()
+    return image.pixelColor(
+        round(point.x() * device_pixel_ratio),
+        round(point.y() * device_pixel_ratio),
+    )
+
+
+def _physical_frame_color(frame: PresentedMaskFrame, point: QPoint) -> QColor:
+    """Sample a logical panel point from one physical backing frame."""
+    device_pixel_ratio = frame.image.devicePixelRatio()
+    return frame.image.pixelColor(
+        round(point.x() * device_pixel_ratio) + frame.overscan_margin,
+        round(point.y() * device_pixel_ratio) + frame.overscan_margin,
+    )
+
+
+def _wait_for_physical_mask_tint(
+    harness: MountedQPaneHarness,
+    point: QPoint,
+    *,
+    timeout_ms: int,
+) -> bool:
+    """Wait until a high-DPI logical point visibly contains the mask tint."""
+    deadline = time.perf_counter() + timeout_ms / 1000.0
+    while time.perf_counter() < deadline:
+        if harness.is_mask_tint(_physical_image_color(harness.capture(), point)):
+            return True
+        QTest.qWait(1)
+    return False
 
 
 def test_retained_mask_raster_edit_never_drops_or_reverts_presented_coverage(
@@ -203,10 +240,7 @@ def _high_dpi_probe() -> dict[str, object]:
             _panel_point(viewer, QPointF(1050.0, 700.0)),
         )
         for point in (*retained_points, erase_point):
-            assert (
-                harness.wait_for_mask_tint(point, timeout_ms=20_000).latency_ms
-                is not None
-            )
+            assert _wait_for_physical_mask_tint(harness, point, timeout_ms=20_000)
         viewer.setControlMode(viewer.CONTROL_MODE_ERASER)
         with harness.observe_presented_frames() as probe:
             QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=erase_point)
@@ -223,11 +257,14 @@ def _high_dpi_probe() -> dict[str, object]:
             "mask_layer_counts": [frame.mask_layer_count for frame in probe.frames],
             "mask_item_states": [frame.mask_item_states for frame in probe.frames],
             "retained_point_states": [
-                [harness.is_mask_tint(frame.color_at(point)) for frame in probe.frames]
+                [
+                    harness.is_mask_tint(_physical_frame_color(frame, point))
+                    for frame in probe.frames
+                ]
                 for point in retained_points
             ],
             "erased_point_states": [
-                harness.is_mask_tint(frame.color_at(erase_point))
+                harness.is_mask_tint(_physical_frame_color(frame, erase_point))
                 for frame in probe.frames
             ],
         }
