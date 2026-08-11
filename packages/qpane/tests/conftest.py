@@ -42,7 +42,15 @@ def qapp() -> Iterator[QApplication]:
     """Provide one offscreen application for mounted viewer tests."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication([])
-    yield app
+    try:
+        yield app
+    finally:
+        for widget in tuple(app.topLevelWidgets()):
+            widget.close()
+            widget.deleteLater()
+        flush_deferred_qt_lifetime(app)
+        app.quit()
+        flush_deferred_qt_lifetime(app)
 
 
 @pytest.fixture(autouse=True)

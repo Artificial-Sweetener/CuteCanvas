@@ -132,7 +132,10 @@ def run_isolated_groups(
             for proof in area.proofs:
                 group = TestGroup(product, area.name, proof)
                 path = group_paths(frozenset({group}), policies)[0]
-                print(f"Running isolated test group: {product}/{area.name}/{proof}")
+                print(
+                    f"Running isolated test group: {product}/{area.name}/{proof}",
+                    flush=True,
+                )
                 result = active_runner(
                     (sys.executable, "-m", "pytest", path),
                     root,
