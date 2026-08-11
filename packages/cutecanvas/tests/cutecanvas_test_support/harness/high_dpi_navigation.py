@@ -151,7 +151,13 @@ def main() -> None:
         _wait_for_navigation_settle(harness, "initial frame")
 
         physical = viewer.physicalViewportRect().size()
-        metrics_before = viewer.view().renderer.snapshot_metrics()
+        renderer = viewer.view().renderer
+        renderer.markDirty()
+        viewer.repaint()
+        app.processEvents()
+        if harness.wait_for_mask_tint(center, timeout_ms=20_000).latency_ms is None:
+            raise RuntimeError("warm navigation baseline omitted mask pixels")
+        metrics_before = renderer.snapshot_metrics()
         pan_positions = tuple(
             center
             + QPoint(
@@ -197,7 +203,6 @@ def main() -> None:
                 zoom_latencies.append((interaction_clock() - started) * 1000.0)
                 QTest.qWait(35)
             _wait_for_navigation_settle(harness, "wheel zoom")
-        renderer = viewer.view().renderer
         metrics_after = renderer.snapshot_metrics()
         staged_pending_observed = viewer.view().presenter.navigation_refinement_pending
         if not absolute_latency_assertions_are_isolated():
