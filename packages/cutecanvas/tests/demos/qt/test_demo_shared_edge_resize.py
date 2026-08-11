@@ -60,6 +60,7 @@ def test_demo_shared_edge_mode_enables_both_adjacent_mask_layers(qapp) -> None:
         QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewer, end, delay=0)
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         harness.drain_events()
 
         first, second = _mask_layers(viewer, first_id, second_id)

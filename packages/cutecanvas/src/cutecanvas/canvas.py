@@ -16,7 +16,6 @@
 
 """CuteCanvas widget facade coordinating document rendering and editor APIs."""
 
-import logging
 import uuid
 from collections.abc import Iterable
 from typing import cast
@@ -136,8 +135,6 @@ from .vector.facade import VectorHostFacade
 from .vector.interaction import VectorInteractionController
 from .vector.node_edit import VectorNodeEditController
 from .vector.text_edit import VectorTextEditController
-
-logger = logging.getLogger(__name__)
 
 __all__ = ["CuteCanvas"]
 
@@ -263,6 +260,7 @@ class CuteCanvas(
     """Emit request, scene, layer, conversion kind, success, and message."""
     floatingPixelEditChanged: Signal = Signal(object)
     editorTransformChanged: Signal = Signal(object)
+    editSessionChanged: Signal = Signal(object)
     """Emit unresolved floating-pixel state or ``None`` after it changes."""
     selectedLayerChanged: Signal = Signal(object)
     """Emit selected scene-layer identity or ``None`` after it changes."""

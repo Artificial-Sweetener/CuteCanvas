@@ -189,7 +189,8 @@ if selection is not None and selection.has_selection:
 canvas.editor.selection.clear()
 ```
 
-Undo and redo follow the document's single edit history:
+Undo and redo first follow a tool's bounded in-progress checkpoints, then the
+document's chronological history after the tool session resolves:
 
 ```python
 if canvas.editor.history.can_undo:
@@ -206,17 +207,19 @@ editors need:
 * `selectedLayerChanged` updates layer-specific controls.
 * `pixelSelectionChanged` updates selection commands.
 * `sceneEditHistoryChanged` updates Undo and Redo.
+* `editSessionChanged` updates in-progress Undo, Redo, Apply, and Cancel.
 * `controlModeChanged` updates tool actions.
 * `paintTargetChanged` updates brush controls.
 * `maskSaved` reports a completed mask autosave.
 
 ```python
-def update_history_actions(can_undo, can_redo):
-    undo_action.setEnabled(can_undo)
-    redo_action.setEnabled(can_redo)
+def update_history_actions(*_args):
+    undo_action.setEnabled(canvas.editorUndoAvailable())
+    redo_action.setEnabled(canvas.editorRedoAvailable())
 
 
 canvas.sceneEditHistoryChanged.connect(update_history_actions)
+canvas.editSessionChanged.connect(update_history_actions)
 ```
 
 The signals carry public values suitable for application UI. Request a fresh

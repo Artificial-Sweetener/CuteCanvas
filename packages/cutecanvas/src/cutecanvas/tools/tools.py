@@ -30,6 +30,12 @@ from qpane import (
     ToolManagerSignals as ViewerToolManagerSignals,
 )
 
+from cutecanvas.edit_sessions import (
+    EditorToolDescriptor,
+    EditSessionKind,
+    ToolEditSessionDeclaration,
+)
+
 from .move import MoveTool
 from .paint_bucket import PaintBucketTool
 from .polygon_coverage import PolygonCoverageTool
@@ -87,6 +93,7 @@ class Tools(ToolManager):
         super().__init__(parent, signals=signals)
         self.signals: ToolManagerSignals = signals
         self._activation_ports = ToolActivationPorts()
+        self._descriptors: dict[str, EditorToolDescriptor] = {}
         from ..painting.tools import (
             BrushTool,
             CloneStampTool,
@@ -98,20 +105,33 @@ class Tools(ToolManager):
         self.registerTool(self.CONTROL_MODE_PANZOOM, PanZoomTool)
         self.registerTool(self.CONTROL_MODE_CURSOR, CursorTool)
         self.registerTool(self.CONTROL_MODE_MOVE, MoveTool)
-        self.registerTool(self.CONTROL_MODE_TRANSFORM, TransformTool)
+        self.registerTool(
+            self.CONTROL_MODE_TRANSFORM,
+            TransformTool,
+            edit_session=ToolEditSessionDeclaration(EditSessionKind.TRANSFORM),
+        )
         self.registerTool(
             self.CONTROL_MODE_SHARED_EDGE_RESIZE,
             SharedEdgeResizeTool,
+            edit_session=ToolEditSessionDeclaration(EditSessionKind.SHARED_EDGE_RESIZE),
         )
         self.registerTool(self.CONTROL_MODE_PAINT_BUCKET, PaintBucketTool)
         self.registerTool(self.CONTROL_MODE_SELECT_RECTANGLE, RectangleSelectionTool)
         self.registerTool(self.CONTROL_MODE_SELECT_ELLIPSE, EllipseSelectionTool)
         self.registerTool(self.CONTROL_MODE_SELECT_LASSO, LassoSelectionTool)
-        self.registerTool(self.CONTROL_MODE_SELECT_POLYGON, PolygonCoverageTool)
+        self.registerTool(
+            self.CONTROL_MODE_SELECT_POLYGON,
+            PolygonCoverageTool,
+            edit_session=ToolEditSessionDeclaration(EditSessionKind.POLYGON_SELECTION),
+        )
         self.registerTool(self.CONTROL_MODE_MASK_RECTANGLE, RectangleSelectionTool)
         self.registerTool(self.CONTROL_MODE_MASK_ELLIPSE, EllipseSelectionTool)
         self.registerTool(self.CONTROL_MODE_MASK_LASSO, LassoSelectionTool)
-        self.registerTool(self.CONTROL_MODE_MASK_POLYGON, PolygonCoverageTool)
+        self.registerTool(
+            self.CONTROL_MODE_MASK_POLYGON,
+            PolygonCoverageTool,
+            edit_session=ToolEditSessionDeclaration(EditSessionKind.POLYGON_MASK),
+        )
         self.registerTool(
             self.CONTROL_MODE_DRAW_BRUSH,
             BrushTool,
@@ -136,6 +156,7 @@ class Tools(ToolManager):
         mode: str,
         factory: Callable[[], ViewerTool],
         *,
+        edit_session: ToolEditSessionDeclaration | None = None,
         on_connect: ToolSignalBinder | None = None,
         on_disconnect: ToolSignalBinder | None = None,
     ) -> None:
@@ -147,12 +168,25 @@ class Tools(ToolManager):
             on_connect=on_connect,
             on_disconnect=on_disconnect,
         )
+        self._descriptors[mode] = EditorToolDescriptor(mode, edit_session)
 
     def unregisterTool(self, mode: str) -> None:
         """Remove an inactive editor tool while protecting Pan/Zoom."""
         if mode == self.CONTROL_MODE_PANZOOM:
             raise ValueError("Pan/zoom tool cannot be unregistered")
         self.unregister(mode)
+        self._descriptors.pop(mode, None)
+
+    def descriptor(self, mode: str) -> EditorToolDescriptor:
+        """Return detached declarative behavior for one registered tool."""
+        try:
+            return self._descriptors[mode]
+        except KeyError as error:
+            raise ValueError(f"Unknown control mode: {mode}") from error
+
+    def descriptors(self) -> tuple[EditorToolDescriptor, ...]:
+        """Return every registered tool descriptor in registration order."""
+        return tuple(self._descriptors.values())
 
     def set_mode(
         self,

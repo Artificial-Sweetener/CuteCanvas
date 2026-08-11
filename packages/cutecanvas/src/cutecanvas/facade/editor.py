@@ -26,6 +26,7 @@ from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage
 from qpane.sdk.vector import VectorShapeKind
 
+from ..edit_sessions import EditorToolDescriptor
 from ..types import (
     CoverageCoordinateSpace,
     LayerEdgeOperation,
@@ -55,6 +56,14 @@ class EditorCommandHost(EditorHandleHost, CloneStampHost, Protocol):
 
     def setControlMode(self, mode: str) -> bool:
         """Activate one registered tool mode."""
+        ...
+
+    def toolDescriptor(self, mode: str) -> EditorToolDescriptor:
+        """Return declarative behavior for one registered tool."""
+        ...
+
+    def toolDescriptors(self) -> tuple[EditorToolDescriptor, ...]:
+        """Return declarative behavior for every registered tool."""
         ...
 
     def pixelSelectionState(self) -> PixelSelectionSnapshot | None:
@@ -104,6 +113,22 @@ class EditorCommandHost(EditorHandleHost, CloneStampHost, Protocol):
 
     def sceneEditRedoAvailable(self) -> bool:
         """Return whether redo is available in the active document."""
+        ...
+
+    def editorUndoAvailable(self) -> bool:
+        """Return whether unified editor Undo can act now."""
+        ...
+
+    def editorRedoAvailable(self) -> bool:
+        """Return whether unified editor Redo can act now."""
+        ...
+
+    def undoEditorEdit(self) -> bool:
+        """Undo the active provisional or durable edit."""
+        ...
+
+    def redoEditorEdit(self) -> bool:
+        """Redo the active provisional or durable edit."""
         ...
 
     def undoSceneEdit(self) -> bool:
@@ -168,6 +193,15 @@ class ToolFacade:
         """Select one registered tool mode and report acceptance."""
         return self._host.setControlMode(mode)
 
+    def descriptor(self, mode: str) -> EditorToolDescriptor:
+        """Return declarative behavior for one registered tool."""
+        return self._host.toolDescriptor(mode)
+
+    @property
+    def descriptors(self) -> tuple[EditorToolDescriptor, ...]:
+        """Return declarative behavior for every registered tool."""
+        return self._host.toolDescriptors()
+
 
 class HistoryFacade:
     """Expose the active document's one chronological edit history."""
@@ -179,20 +213,20 @@ class HistoryFacade:
     @property
     def can_undo(self) -> bool:
         """Return whether one edit can be undone now."""
-        return self._host.sceneEditUndoAvailable()
+        return self._host.editorUndoAvailable()
 
     @property
     def can_redo(self) -> bool:
         """Return whether one edit can be redone now."""
-        return self._host.sceneEditRedoAvailable()
+        return self._host.editorRedoAvailable()
 
     def undo(self) -> bool:
         """Undo one chronological edit in the active document."""
-        return self._host.undoSceneEdit()
+        return self._host.undoEditorEdit()
 
     def redo(self) -> bool:
         """Redo one chronological edit in the active document."""
-        return self._host.redoSceneEdit()
+        return self._host.redoEditorEdit()
 
 
 class SelectionFacade:

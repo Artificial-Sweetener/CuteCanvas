@@ -289,7 +289,7 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
             assert max(feedback_ms) < 100.0
             assert max(dispatch_ms) < 100.0
             assert commit_ms < 100.0
-        assert window.tools.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.history.undo_action.isEnabled()
         assert (
             _rgb_distance(
                 window.qpane.grab().toImage().pixelColor(center),
@@ -315,8 +315,8 @@ def test_demo_first_mask_stroke_is_immediate_and_ctrl_z_undoes(
                 break
             QTest.qWait(1)
         assert _rgb_distance(restored, before_contact) <= 5
-        assert window.tools.editor_controls.undo_action.isEnabled()
-        assert window.tools.editor_controls.redo_action.isEnabled()
+        assert window.tools.editor_controls.history.undo_action.isEnabled()
+        assert window.tools.editor_controls.history.redo_action.isEnabled()
         assert "Undid the last editor change" in window.status.currentMessage()
     finally:
         window.close()
@@ -426,12 +426,12 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
         moved_x = 60 + floating_state.offset.x()
         moved_y = 60 + floating_state.offset.y()
         assert moved_x != 60
-        assert window.tools.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.history.undo_action.isEnabled()
         QTest.keyClick(window.qpane, Qt.Key_D, Qt.ControlModifier)
         qapp.processEvents()
         assert window.qpane.floatingPixelEditState() is None
         assert not window.qpane.pixelSelectionState().has_selection
-        assert window.tools.editor_controls.undo_action.isEnabled()
+        assert window.tools.editor_controls.history.undo_action.isEnabled()
         layer_instance = window.qpane.compositionService().layers.layer(
             composition_id,
             layer_id,
@@ -472,8 +472,8 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
             40,
             255,
         )
-        assert window.tools.editor_controls.undo_action.isEnabled()
-        assert window.tools.editor_controls.redo_action.isEnabled()
+        assert window.tools.editor_controls.history.undo_action.isEnabled()
+        assert window.tools.editor_controls.history.redo_action.isEnabled()
 
         QTest.keyClick(window.qpane, Qt.Key_Z, Qt.ControlModifier)
         qapp.processEvents()
@@ -499,14 +499,14 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
             )
             == initial_history_depth
         )
-        assert window.tools.editor_controls.undo_action.isEnabled()
-        assert window.tools.editor_controls.redo_action.isEnabled()
+        assert window.tools.editor_controls.history.undo_action.isEnabled()
+        assert window.tools.editor_controls.history.redo_action.isEnabled()
         assert any(
             layer.layer_id == layer_id for layer in window.qpane.currentScene().layers
         )
 
         for _step in range(3):
-            window.tools.editor_controls.redo_action.trigger()
+            window.tools.editor_controls.history.redo_action.trigger()
             qapp.processEvents()
 
         assert any(
@@ -522,7 +522,7 @@ def test_demo_repeated_ctrl_z_replays_committed_raster_move_chronologically(
             40,
             255,
         )
-        assert not window.tools.editor_controls.redo_action.isEnabled()
+        assert not window.tools.editor_controls.history.redo_action.isEnabled()
     finally:
         window.close()
         window.deleteLater()

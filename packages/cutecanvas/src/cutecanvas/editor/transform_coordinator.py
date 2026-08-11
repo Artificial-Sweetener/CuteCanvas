@@ -17,13 +17,12 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
-    LayerTransform,
+    LayerMapping,
     TransformHandle,
     TransformModifiers,
     TransformOperation,
@@ -44,6 +43,9 @@ from .operation_contracts import (
 )
 from .operation_resolution import EditorOperationResolver
 from .pixel_movement import SelectedPixelMovementController
+from .session_coordination import EditSessionCoordinator
+from .transform_commands import command_label, command_transform, operation_label
+from .transform_history import TransformProvisionalSession
 from .transform_interaction import (
     SceneLayerTransformInteraction,
     TransformBoxPresentation,
@@ -60,6 +62,7 @@ class EditorTransformCoordinator:
         layers: SceneLayerTransformInteraction,
         operations: EditorOperationResolver,
         snapping: TransformSnapCoordinator,
+        sessions: EditSessionCoordinator,
         changed: Callable[[], None],
     ) -> None:
         """Bind focused target adapters to one target-neutral lifecycle."""
@@ -71,6 +74,14 @@ class EditorTransformCoordinator:
         self._requested_target: EditorTransformTarget | None = None
         self._active_target: EditorTransformTarget | None = None
         self._gesture_active = False
+        self._gesture_label = "Transform"
+        self._provisional = TransformProvisionalSession(
+            sessions=sessions,
+            restore=self._restore_checkpoint,
+            apply_transform=self._commit_current,
+            cancel_transform=self._cancel_current,
+            suspend_transform=self._suspend_current,
+        )
 
     @property
     def target(self) -> EditorTransformTarget | None:
@@ -147,14 +158,20 @@ class EditorTransformCoordinator:
             else self._layers.begin_scene(operation, scene_point)
         )
         if started:
+            self._active_target = target
+            if box is None or not self._provisional.begin(box.transform):
+                self._cancel_target(target)
+                self._active_target = None
+                return False
             self._snapping.begin(
                 box,
                 operation,
                 scene_point,
                 exclude_selection=target is EditorTransformTarget.SELECTION_CONTENT,
             )
-            self._active_target = target
+            self._gesture_label = operation_label(operation)
             self._gesture_active = True
+            self._provisional.begin_gesture()
             self._changed()
         return started
 
@@ -192,6 +209,7 @@ class EditorTransformCoordinator:
             return False
         self._snapping.clear()
         self._gesture_active = False
+        self._settle_current(self._gesture_label)
         self._changed()
         return changed
 
@@ -203,8 +221,12 @@ class EditorTransformCoordinator:
         state = None if target is None else self._box_state(target)
         if target is None or state is None:
             return False
+        self._active_target = target
+        if not self._provisional.begin(state.transform):
+            self._active_target = None
+            return False
         center = AffineTransformGeometry(state.bounds, state.transform).scene_center()
-        delta = _command_transform(normalized, center)
+        delta = command_transform(normalized, center)
         transform = state.transform.followed_by(delta)
         changed = (
             self._pixels.preview_scene_transform(transform)
@@ -212,12 +234,24 @@ class EditorTransformCoordinator:
             else self._layers.preview_scene_transform(transform)
         )
         if changed:
-            self._active_target = target
+            self._settle_current(command_label(normalized))
             self._changed()
         return changed
 
     def commit(self) -> bool:
         """Commit the cumulative target preview as one chronological edit."""
+        return self._provisional.apply() if self._provisional.active else False
+
+    def cancel(self) -> bool:
+        """Discard the cumulative target preview and restore source state."""
+        return self._provisional.cancel() if self._provisional.active else False
+
+    def suspend(self) -> bool:
+        """Release pointer ownership without resolving cumulative preview."""
+        return self._provisional.suspend() if self._provisional.active else False
+
+    def _commit_current(self) -> bool:
+        """Commit the active target after provisional history resolves."""
         self._snapping.clear()
         target = self._active_target or self.target
         had_context = target is not None
@@ -237,8 +271,8 @@ class EditorTransformCoordinator:
             self._changed()
         return changed or had_context
 
-    def cancel(self) -> bool:
-        """Discard the cumulative target preview and restore source state."""
+    def _cancel_current(self) -> bool:
+        """Cancel the active target after provisional history resolves."""
         self._snapping.clear()
         target = self._active_target or self.target
         had_context = target is not None
@@ -258,8 +292,8 @@ class EditorTransformCoordinator:
             self._changed()
         return changed or had_context
 
-    def suspend(self) -> bool:
-        """Release pointer ownership without resolving cumulative preview."""
+    def _suspend_current(self) -> bool:
+        """Suspend active target input while retaining provisional history."""
         self._snapping.clear()
         gesture_active = self._gesture_active
         self._gesture_active = False
@@ -272,6 +306,33 @@ class EditorTransformCoordinator:
         if gesture_active:
             self._changed()
         return changed or gesture_active
+
+    def _settle_current(self, label: str) -> bool:
+        """Retain one settled affine mapping and publish new history state."""
+        target = self._active_target
+        state = None if target is None else self._box_state(target)
+        return state is not None and self._provisional.settle(state.transform, label)
+
+    def _restore_checkpoint(self, transform: LayerMapping) -> bool:
+        """Publish one retained mapping through the active target adapter."""
+        target = self._active_target
+        if target is None:
+            return False
+        changed = (
+            self._pixels.preview_scene_transform(transform)
+            if target is EditorTransformTarget.SELECTION_CONTENT
+            else self._layers.preview_scene_transform(transform)
+        )
+        self._changed()
+        return changed
+
+    def _cancel_target(self, target: EditorTransformTarget) -> bool:
+        """Cancel one target adapter without resolving coordinator state."""
+        return (
+            self._pixels.cancel()
+            if target is EditorTransformTarget.SELECTION_CONTENT
+            else self._layers.cancel()
+        )
 
     def _resolve(
         self,
@@ -311,32 +372,6 @@ class EditorTransformCoordinator:
             if target is EditorTransformTarget.SELECTION_CONTENT
             else self._layers.box_state()
         )
-
-
-def _command_transform(
-    command: EditorTransformCommand,
-    center: QPointF,
-) -> LayerTransform:
-    """Build one scene-space affine delta around a detached frame center."""
-    if command is EditorTransformCommand.FLIP_HORIZONTAL:
-        linear = (-1.0, 0.0, 0.0, 1.0)
-    elif command is EditorTransformCommand.FLIP_VERTICAL:
-        linear = (1.0, 0.0, 0.0, -1.0)
-    else:
-        angle = -90.0 if command is EditorTransformCommand.ROTATE_LEFT_90 else 90.0
-        radians = math.radians(angle)
-        cosine = round(math.cos(radians), 15)
-        sine = round(math.sin(radians), 15)
-        linear = (cosine, sine, -sine, cosine)
-    m11, m12, m21, m22 = linear
-    return LayerTransform(
-        m11,
-        m12,
-        m21,
-        m22,
-        center.x() - (m11 * center.x() + m21 * center.y()),
-        center.y() - (m12 * center.x() + m22 * center.y()),
-    )
 
 
 __all__ = ["EditorTransformCoordinator"]

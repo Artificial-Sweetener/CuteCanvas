@@ -33,8 +33,8 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 
-def test_mouse_drag_commits_one_coupled_session() -> None:
-    """Primary press, motion, and release must use one atomic interaction path."""
+def test_mouse_drag_retains_one_coupled_checkpoint() -> None:
+    """Primary press, motion, and release must retain one interaction checkpoint."""
     calls: list[str] = []
     tool = SharedEdgeResizeTool()
     tool.activate(_port(calls))
@@ -75,7 +75,7 @@ def test_escape_and_deactivation_clear_transient_state() -> None:
     )
     tool.deactivate()
 
-    assert calls == ["begin", "cancel", "cancel"]
+    assert calls == ["begin", "cancel"]
 
 
 @pytest.mark.parametrize("device", (PointerDeviceKind.PEN, PointerDeviceKind.TOUCH))
@@ -196,7 +196,9 @@ def _port(calls: list[str]) -> SharedEdgeResizePort:
         begin=lambda _point: calls.append("begin") or True,
         update=lambda _point: calls.append("update") or True,
         finish=lambda _point: calls.append("finish") or True,
+        apply=lambda: calls.append("apply") or True,
         cancel=lambda: calls.append("cancel") or True,
+        suspend=lambda: calls.append("suspend") or True,
     )
 
 

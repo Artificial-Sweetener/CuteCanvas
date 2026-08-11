@@ -40,6 +40,7 @@ from .polygon_coverage_overlay import (
 )
 from .polygon_coverage_publication import PolygonCoveragePublication
 from .polygon_coverage_session import PolygonCoverageSession
+from .polygon_edit_session import PolygonCoverageEditSession
 from .ports import AuthoringSnapPort, PixelSelectionInteractionPort
 
 _DRAG_THRESHOLD = 2.0
@@ -57,6 +58,7 @@ class PolygonCoverageTool(BaseTool):
         super().__init__()
         self._reset_dependencies()
         self._session: PolygonCoverageSession | None = None
+        self._edit_session: PolygonCoverageEditSession | None = None
         self._selected_id = None
         self._drag_id = None
         self._press_panel: QPointF | None = None
@@ -65,6 +67,7 @@ class PolygonCoverageTool(BaseTool):
         self._hover_vertex_id: uuid.UUID | None = None
         self._hover_edge_index: int | None = None
         self._combine_mode = CoverageCombineMode.REPLACE
+        self._gesture_label = "Move Polygon Point"
 
     @property
     def authoring(self) -> bool:
@@ -89,11 +92,20 @@ class PolygonCoverageTool(BaseTool):
             constrain=dependencies.constrain_coverage_item,
             feather_radius=dependencies.get_shape_feather_radius,
         )
+        self._edit_sessions = dependencies.edit_sessions
+        self._edit_session_kind = dependencies.edit_session_kind
+        self._edit_session_tool_mode = dependencies.edit_session_tool_mode
 
     def deactivate(self) -> None:
-        """Discard unfinished geometry and release every collaborator."""
-        self._cancel()
+        """Release collaborators while retaining an unresolved polygon session."""
+        if self._edit_session is not None:
+            self._edit_session.suspend()
         self._reset_dependencies()
+
+    def suspend_for_temporary_navigation(self) -> None:
+        """Suspend vertex input while preserving provisional polygon history."""
+        if self._edit_session is not None:
+            self._edit_session.suspend()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Place, select, or insert a vertex on a primary-button press."""
@@ -194,6 +206,9 @@ class PolygonCoverageTool(BaseTool):
         vertex_id = self._presentation.vertex_at(session, panel_point)
         if session is not None and vertex_id is not None:
             self._begin_drag(vertex_id, panel_point)
+            self._gesture_label = "Move Polygon Point"
+            if self._edit_session is not None:
+                self._edit_session.begin_gesture()
             self._close_candidate = (
                 vertex_id == session.vertex_ids[0] and session.can_finish
             )
@@ -207,9 +222,13 @@ class PolygonCoverageTool(BaseTool):
         if target is None:
             return False
         if session is None:
-            session = PolygonCoverageSession()
-            self._session = session
             self._combine_mode = self._resolve_combine_mode(modifiers)
+            edit_session = self._begin_edit_session()
+            if edit_session is None:
+                return False
+            self._edit_session = edit_session
+            session = edit_session.topology
+            self._session = session
         edge_index = self._presentation.edge_at(session, panel_point)
         try:
             vertex_id = (
@@ -220,6 +239,11 @@ class PolygonCoverageTool(BaseTool):
         except ValueError:
             return False
         self._begin_drag(vertex_id, panel_point)
+        self._gesture_label = (
+            "Add Polygon Point" if edge_index is None else "Insert Polygon Point"
+        )
+        if self._edit_session is not None:
+            self._edit_session.begin_gesture()
         self._pointer_panel = QPointF(snapped)
         self._publish_overlay()
         return True
@@ -274,8 +298,12 @@ class PolygonCoverageTool(BaseTool):
         self._press_panel = None
         self._close_candidate = False
         if close:
+            if self._edit_session is not None:
+                self._edit_session.settle("Close Polygon")
             self._finish()
         else:
+            if self._edit_session is not None:
+                self._edit_session.settle(self._gesture_label)
             self._update_hover(panel_point, modifiers)
 
     def _finish(self) -> bool:
@@ -283,22 +311,17 @@ class PolygonCoverageTool(BaseTool):
         session = self._session
         if session is None or not session.can_finish:
             return False
-        if not self._publication.publish(session.points, self._combine_mode):
-            return False
-        self._clear()
-        return True
+        return self._edit_session is not None and self._edit_session.apply()
 
     def _cancel(self) -> bool:
         """Discard the entire unfinished polygon without publishing coverage."""
-        if self._session is None:
-            return False
-        self._clear()
-        return True
+        return self._edit_session is not None and self._edit_session.cancel()
 
     def _clear(self) -> None:
         """Return the tool to idle and release snapping hysteresis."""
         self._snapping.clear()
         self._session = None
+        self._edit_session = None
         self._selected_id = None
         self._drag_id = None
         self._press_panel = None
@@ -317,8 +340,12 @@ class PolygonCoverageTool(BaseTool):
         session.remove(endpoint)
         self._selected_id = session.open_endpoint_id
         if not session.vertex_ids:
-            self._clear()
+            if self._edit_session is not None:
+                self._edit_session.settle("Remove Polygon Point")
+            self._publish_overlay()
         else:
+            if self._edit_session is not None:
+                self._edit_session.settle("Remove Polygon Point")
             self._publish_overlay()
         return True
 
@@ -331,10 +358,32 @@ class PolygonCoverageTool(BaseTool):
             return False
         self._selected_id = session.open_endpoint_id
         if not session.vertex_ids:
-            self._clear()
+            if self._edit_session is not None:
+                self._edit_session.settle("Remove Polygon Point")
+            self._publish_overlay()
         else:
+            if self._edit_session is not None:
+                self._edit_session.settle("Remove Polygon Point")
             self._publish_overlay()
         return True
+
+    def _begin_edit_session(self) -> PolygonCoverageEditSession | None:
+        """Claim bounded history for the configured polygon target."""
+        sessions = self._edit_sessions
+        kind = self._edit_session_kind
+        mode = self._edit_session_tool_mode
+        if sessions is None or kind is None or mode is None:
+            return None
+        return PolygonCoverageEditSession.begin(
+            sessions=sessions,
+            kind=kind,
+            tool_mode=mode,
+            publish=lambda points: self._publication.publish(
+                points, self._combine_mode
+            ),
+            changed=self._publish_overlay,
+            closed=self._clear,
+        )
 
     def _update_hover(
         self,
@@ -395,6 +444,9 @@ class PolygonCoverageTool(BaseTool):
             constrain=lambda item: item,
             feather_radius=lambda: 0.0,
         )
+        self._edit_sessions = None
+        self._edit_session_kind = None
+        self._edit_session_tool_mode = None
 
 
 __all__ = ["PolygonCoverageTool"]

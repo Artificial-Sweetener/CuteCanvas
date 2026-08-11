@@ -23,10 +23,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-import numpy as np
 from PySide6.QtGui import QImage
-from qpane.sdk.raster import qimage_to_numpy_view_grayscale8
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.coverage import (
     CoverageAsset,
@@ -47,11 +44,11 @@ from .coverage_history import (
     MaskRetainedCoverageCommand,
 )
 from .history_size import mask_command_bytes
+from .mask_patch_history import MaskPatchHistory, PatchMaskLayer
 from .mask_undo import (
     MaskHistoryChange,
     MaskImageCommand,
     MaskPatch,
-    MaskPatchCommand,
     MaskUndoCommand,
     MaskUndoState,
 )
@@ -81,20 +78,12 @@ class CoverageSurfaceLike(Protocol):
         """Return whether the surface has no pixels."""
         ...
 
-    def mutate_storage_region(
-        self,
-        region: RasterBounds,
-        mutator: Callable[[np.ndarray, QImage], None],
-    ) -> None:
-        """Apply an in-place pixel mutation to one storage patch."""
-        ...
-
     def replace_with_state_snapshot(self, snapshot: CoverageStateSnapshot) -> None:
         """Restore complete surface state."""
         ...
 
 
-class MaskAssetLike(Protocol):
+class MaskAssetLike(PatchMaskLayer, Protocol):
     """Mask asset state required by history replay."""
 
     coverage: CoverageAsset
@@ -150,6 +139,7 @@ class MaskHistory:
         self._scope_for_mask: Callable[[uuid.UUID], uuid.UUID | None] = lambda _id: None
         self._completed: Callable[[MaskHistoryChange], None] | None = None
         self._command_decorator: MaskCommandDecorator | None = None
+        self._patches = MaskPatchHistory(assets)
 
     @property
     def undo_limit(self) -> int:
@@ -255,7 +245,7 @@ class MaskHistory:
         already_applied: bool = False,
     ) -> bool:
         """Apply or record normalized mask patch changes."""
-        command = self._build_patch_command(mask_id, patches, notify=notify)
+        command = self._patches.build_command(mask_id, patches, notify=notify)
         if command is None:
             return False
         if not already_applied:
@@ -412,68 +402,6 @@ class MaskHistory:
             )
         )
         return True
-
-    def _build_patch_command(
-        self,
-        mask_id: uuid.UUID,
-        patches: Sequence[MaskPatch],
-        *,
-        notify: Callable[[uuid.UUID], None] | None,
-    ) -> MaskUndoCommand | None:
-        """Build detached patch data for later replay."""
-        if self._assets.get_layer(mask_id) is None or not patches:
-            return None
-        normalized = tuple(
-            MaskPatch(
-                patch.rect.normalized(),
-                patch.before.copy(),
-                patch.after.copy(),
-                np.array(patch.mask, copy=True, dtype=bool),
-            )
-            for patch in patches
-        )
-        return MaskPatchCommand(
-            mask_id,
-            normalized,
-            self._apply_patches,
-            notify,
-        )
-
-    def _apply_patches(
-        self,
-        mask_id: uuid.UUID,
-        patches: Sequence[MaskPatch],
-        use_after: bool,
-    ) -> None:
-        """Replay retained patches against authoritative coverage."""
-        layer = self._assets.get_layer(mask_id)
-        if layer is None or layer.coverage.raster.is_null():
-            return
-        sequence = tuple(patches) if use_after else tuple(reversed(patches))
-
-        for patch in sequence:
-            source = patch.after if use_after else patch.before
-            source_view, _ = qimage_to_numpy_view_grayscale8(source)
-
-            def mutate(
-                destination: np.ndarray,
-                _image: QImage,
-                *,
-                retained: np.ndarray = source_view,
-                selected: np.ndarray = patch.mask,
-            ) -> None:
-                """Copy one selected patch into isolated canonical storage."""
-                np.copyto(destination, retained, where=selected)
-
-            layer.coverage.raster.mutate_storage_region(
-                RasterBounds(
-                    patch.rect.left(),
-                    patch.rect.top(),
-                    patch.rect.width(),
-                    patch.rect.height(),
-                ),
-                mutate,
-            )
 
     def _apply_image(self, mask_id: uuid.UUID, image: QImage) -> None:
         """Replay a complete image state."""

@@ -90,6 +90,17 @@ _AUTHOR_VECTOR_EXPORTS = (
     "VectorTextEditSnapshot",
 )
 
+_EDIT_SESSION_EXPORTS = (
+    "EditorToolDescriptor",
+    "EditSessionHistory",
+    "EditSessionKind",
+    "EditSessionPolicy",
+    "EditSessionSnapshot",
+    "EditSessionToolChange",
+    "EditSessionUndoBoundary",
+    "ToolEditSessionDeclaration",
+)
+
 __all__ = [
     *_RENDER_TYPE_EXPORTS,
     *_LAYOUT_TYPE_EXPORTS,
@@ -97,6 +108,7 @@ __all__ = [
     *_editor_types.__all__,
     *_VECTOR_TYPE_EXPORTS,
     *_AUTHOR_VECTOR_EXPORTS,
+    *_EDIT_SESSION_EXPORTS,
     "BrushDynamics",
     "BrushOperation",
     "BrushPreset",
@@ -296,6 +308,7 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
         "cutecanvas.composition.geometry_policy",
         "LayerGeometryPolicy",
     ),
+    **{name: ("cutecanvas.edit_sessions", name) for name in _EDIT_SESSION_EXPORTS},
     "EditorFacade": ("cutecanvas.facade.editor", "EditorFacade"),
     "EditorCursorIntent": ("cutecanvas.cursor", "EditorCursorIntent"),
     "EditorCursorTheme": ("cutecanvas.cursor", "EditorCursorTheme"),

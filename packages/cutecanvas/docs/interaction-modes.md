@@ -45,10 +45,13 @@ print(canvas.editor.tools.active)
 
 Use `canvas.CONTROL_MODE_SHARED_EDGE_RESIZE` to drag the coincident straight
 manipulation edge shared by movable layers. CuteCanvas infers maximal continuous
-groups from current geometry, including T junctions and rectangular grids,
-previews every participant mapping together, and commits the release as one
-undoable edit. A locked or otherwise ineligible participant blocks the complete
-group. Transparent pixels and alpha contours do not define eligibility.
+groups from current geometry, including T junctions and rectangular grids, and
+previews every participant mapping together. Each release retains one
+provisional checkpoint, so the user can adjust another handle, undo an
+individual adjustment, and continue. Enter or `applyActiveEditSession()` commits
+the complete result as one undoable edit. A locked or otherwise ineligible
+participant blocks the complete group. Transparent pixels and alpha contours do
+not define eligibility.
 
 While the mode is active, every valid shared edge shows Transform-style endpoint
 and midpoint handles. Drag a horizontal or vertical midpoint to move the
@@ -72,7 +75,9 @@ drag an existing segment to insert a point between its neighbors, press Delete
 to remove the selected point, or press Backspace to remove the open endpoint.
 Click the first point, double-click, or press Enter to commit one retained shape
 and one history edit. Escape or a cancelled pointer sequence discards the whole
-unfinished polygon. Snapping applies while points are placed or moved.
+unfinished polygon. Undo and Redo revise point placement, insertion, movement,
+and deletion before publication. Snapping applies while points are placed or
+moved.
 Activate them with `CuteCanvas.CONTROL_MODE_SELECT_POLYGON` and
 `CuteCanvas.CONTROL_MODE_MASK_POLYGON`.
 
@@ -223,6 +228,11 @@ Enter or an interior double-click applies the complete transform as one undoable
 edit. Escape restores the exact starting transform. Holding Space to navigate
 preserves the unresolved transform and its handle state.
 
+Undo and Redo step through completed transform gestures and frame-relative
+commands while the transform remains unresolved. Applying still creates one
+durable history edit, regardless of how many provisional checkpoints preceded
+it.
+
 Hosts can present frame-relative commands without creating another session.
 `EditorTransformCommand` provides
 `EditorTransformCommand.ROTATE_LEFT_90`,
@@ -256,6 +266,50 @@ movement and scale handles snap without rounding the final layer transform to
 integer scene coordinates. Scale snapping preserves proportional and
 about-center constraints; a rotated side or constrained corner follows its
 actual affine scale axis and advertises only target lines it reaches exactly.
+
+## Control In-progress Edit Sessions
+
+Transform, Polygon Select, Polygon Mask, and Shared Edge Resize declare bounded
+provisional history. `activeEditSession()` returns the one unresolved session's
+kind, tool mode, gesture state, Apply and Cancel availability, checkpoint
+labels, and Undo and Redo depths. `editSessionChanged` publishes the same
+detached state for host controls.
+
+Use the unified editor-history commands for menus and shortcuts:
+
+```python
+if canvas.editorUndoAvailable():
+    canvas.undoEditorEdit()
+
+canvas.redoEditorEdit()
+canvas.applyActiveEditSession()
+canvas.cancelActiveEditSession()
+```
+
+`canvas.editor.history` uses this same route. While a provisional session is
+active, Undo and Redo stay inside its bounded checkpoints and never cross into
+document history. At the immutable session base, the default policy leaves Undo
+disabled. A host can make that boundary cancel the session instead:
+
+```python
+from cutecanvas import EditSessionPolicy, EditSessionUndoBoundary
+
+canvas.setEditSessionPolicy(
+    EditSessionPolicy(
+        checkpoint_limit=128,
+        undo_boundary=EditSessionUndoBoundary.CANCEL_SESSION,
+    )
+)
+```
+
+Persistent tool changes require the active session to be applied or cancelled
+by default. Hosts may select apply-on-change or cancel-on-change through
+`EditSessionToolChange`. Temporary Space navigation suspends direct input and
+preserves the session under every policy.
+
+`toolDescriptor(mode)` and `canvas.editor.tools.descriptors` report which
+built-in tools declare bounded provisional history without constructing or
+activating them.
 
 ## Snapping
 

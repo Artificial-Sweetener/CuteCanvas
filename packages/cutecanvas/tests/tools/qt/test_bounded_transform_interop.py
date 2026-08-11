@@ -20,7 +20,12 @@ from __future__ import annotations
 
 import logging
 
-from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas import (
+    CuteCanvas,
+    EditorTransformCommand,
+    EditorTransformTarget,
+    LayerPolicy,
+)
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
 from PySide6.QtTest import QTest
@@ -57,6 +62,7 @@ def test_transform_shrinks_shared_edge_mapping_without_poisoning_scene(
         assert viewer.setControlMode(viewer.CONTROL_MODE_SHARED_EDGE_RESIZE)
 
         _drag_scene(viewer, QPointF(200.0, 0.0), QPointF(50.0, 0.0))
+        QTest.keyClick(viewer, Qt.Key_Return)
         harness.drain_events()
         bounded = viewer.layerTransform(first.scene_id, first.layer_id)
         assert isinstance(bounded, (PiecewiseLayerTransform, BilinearLayerTransform))
@@ -134,6 +140,7 @@ def test_transform_scales_a_shared_edge_triangle_without_tool_errors(
 
         _drag_scene(viewer, QPointF(200.0, 0.0), QPointF(400.0, 0.0))
         _drag_scene(viewer, QPointF(200.0, 300.0), QPointF(0.0, 300.0))
+        QTest.keyClick(viewer, Qt.Key_Return)
         harness.drain_events()
         triangle = viewer.layerTransform(first.scene_id, first.layer_id)
         assert isinstance(triangle, BilinearLayerTransform)
@@ -175,6 +182,99 @@ def test_transform_scales_a_shared_edge_triangle_without_tool_errors(
         harness.close()
 
 
+def test_transform_commands_use_provisional_history_before_one_durable_edit(
+    qapp,
+) -> None:
+    """Affine commands must undo within the active transform before the document."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 300),
+        widget_size=QSize(800, 620),
+        mask_count=1,
+    )
+    viewer = harness.viewer
+    try:
+        mask_id = harness.mask_ids[0]
+        assert viewer.editor.coverage.rectangle(QRectF(40.0, 60.0, 120.0, 80.0))
+        entry = next(
+            item for item in viewer.listMasksForComposition() if item.mask_id == mask_id
+        )
+        assert entry.scene_id is not None and entry.layer_id is not None
+        viewer.setLayerInteractionPolicy(
+            entry.scene_id,
+            entry.layer_id,
+            LayerPolicy(selectable=True, movable=True, pixel_editable=True),
+        )
+        viewer.setSelectedLayer(entry.scene_id, entry.layer_id)
+        assert viewer.activateEditorTransform(EditorTransformTarget.LAYER_CONTENT)
+        assert viewer.applyEditorTransformCommand(
+            EditorTransformCommand.ROTATE_RIGHT_90
+        )
+        first = _active_layer_mapping(viewer, entry.layer_id)
+        assert viewer.applyEditorTransformCommand(
+            EditorTransformCommand.FLIP_HORIZONTAL
+        )
+        second = _active_layer_mapping(viewer, entry.layer_id)
+        assert first != second
+        state = viewer.activeEditSession()
+        assert state is not None and state.undo_depth == 2
+        assert state.can_apply and state.can_cancel
+        assert viewer.layerTransform(entry.scene_id, entry.layer_id).isIdentity()
+
+        assert viewer.undoEditorEdit()
+        assert _active_layer_mapping(viewer, entry.layer_id) == first
+        assert viewer.redoEditorEdit()
+        assert _active_layer_mapping(viewer, entry.layer_id) == second
+        assert viewer.applyActiveEditSession()
+        assert (
+            viewer.layerTransform(entry.scene_id, entry.layer_id)
+            == second.to_qtransform()
+        )
+        assert viewer.undoSceneEdit()
+        assert viewer.layerTransform(entry.scene_id, entry.layer_id).isIdentity()
+    finally:
+        harness.close()
+
+
+def test_transform_no_op_release_clears_direct_gesture_ownership(qapp) -> None:
+    """A click-only handle gesture remains resolvable without claiming the pointer."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 300),
+        widget_size=QSize(800, 620),
+        mask_count=1,
+    )
+    viewer = harness.viewer
+    try:
+        mask_id = harness.mask_ids[0]
+        assert viewer.editor.coverage.rectangle(QRectF(40.0, 60.0, 120.0, 80.0))
+        entry = next(
+            item for item in viewer.listMasksForComposition() if item.mask_id == mask_id
+        )
+        assert entry.scene_id is not None and entry.layer_id is not None
+        viewer.setLayerInteractionPolicy(
+            entry.scene_id,
+            entry.layer_id,
+            LayerPolicy(selectable=True, movable=True, pixel_editable=True),
+        )
+        viewer.setSelectedLayer(entry.scene_id, entry.layer_id)
+        assert viewer.setControlMode(viewer.CONTROL_MODE_TRANSFORM)
+        box = viewer.sceneLayerTransformInteraction().presentation()
+        assert box is not None
+        handle = box.handles[0][1].toPoint()
+
+        QTest.mousePress(viewer, Qt.LeftButton, Qt.NoModifier, handle)
+        QTest.mouseRelease(viewer, Qt.LeftButton, Qt.NoModifier, handle)
+
+        state = viewer.activeEditSession()
+        assert state is not None
+        assert not state.gesture_active
+        assert not state.can_undo
+        assert viewer.cancelActiveEditSession()
+    finally:
+        harness.close()
+
+
 def _drag_scene(viewer: CuteCanvas, start: QPointF, finish: QPointF) -> None:
     """Complete one mounted scene-space pointer drag."""
     view = viewer.view()
@@ -196,3 +296,10 @@ def _assert_axis_aligned_transform_box(corners: tuple[QPointF, ...]) -> None:
     assert top_right.x() == bottom_right.x()
     assert bottom_right.y() == bottom_left.y()
     assert bottom_left.x() == top_left.x()
+
+
+def _active_layer_mapping(viewer: CuteCanvas, layer_id: object):
+    """Return one mapping from the preview-processed active scene."""
+    scene = viewer.view().current_scene_descriptor()
+    assert scene is not None
+    return next(layer.transform for layer in scene.layers if layer.layer_id == layer_id)

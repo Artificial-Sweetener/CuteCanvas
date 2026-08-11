@@ -149,11 +149,11 @@ The optional SAM integration adds model-assisted selection to the same mask and 
 
 ## Move, Transform, Snap, and Reshape
 
-Move works on selected pixels or complete layer sets. Free Transform provides direct translation, scale, rotation, skew, flips, and quarter-turn commands with one preview and one final history edit.
+Move works on selected pixels or complete layer sets. Free Transform provides direct translation, scale, rotation, skew, flips, and quarter-turn commands. Completed gestures and commands are undoable inside the unresolved transform, while Apply contributes one final edit to document history.
 
 Snapping is shared by movement, transforms, selections, masks, vector shapes, and vector paths. It can align visible content, authored geometry, canvas edges and centers, guides, and a configurable grid. Rotated scale handles follow and snap along their actual manipulation axes.
 
-Shared Edge Resize recognizes a straight boundary shared by several movable layers. Rectangular group boundaries move together, while eligible polygon endpoints move along the straight rail genuinely shared by their participants. Endpoint gestures snap to horizontal, vertical, 45-degree, and continuous stationary-edge alignments. The complete group previews and commits atomically, allowing tiled visual layouts to be adjusted with one gesture.
+Shared Edge Resize recognizes a straight boundary shared by several movable layers. Rectangular group boundaries move together, while eligible polygon endpoints move along the straight rail genuinely shared by their participants. Endpoint gestures snap to horizontal, vertical, 45-degree, and continuous stationary-edge alignments. Several adjustments can be undone, redone, and refined inside one bounded session before the complete group commits atomically.
 
 Canvas geometry remains explicit:
 

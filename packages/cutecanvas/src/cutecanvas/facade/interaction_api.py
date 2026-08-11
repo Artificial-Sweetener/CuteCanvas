@@ -29,19 +29,30 @@ from cutecanvas.core import (
     ToolSignalBinder,
 )
 from cutecanvas.cursor import EditorCursorTheme
+from cutecanvas.edit_sessions import EditorToolDescriptor
 from cutecanvas.overlay_contracts import (
     CanvasOverlayDrawFn,
     CanvasOverlayState,
 )
 from cutecanvas.tools import Tools
 
+from .edit_session_api import EditSessionApiMixin
 
-class InteractionApiMixin:
+
+class InteractionApiMixin(EditSessionApiMixin):
     """Group interactionapi facade behavior."""
 
     def availableControlModes(self) -> tuple[str, ...]:
         """Return registered tool modes in activation order."""
         return self._tools_manager.available_modes()
+
+    def toolDescriptor(self, mode: str) -> EditorToolDescriptor:
+        """Return declarative behavior for one registered editor tool."""
+        return self._tools_manager.descriptor(mode)
+
+    def toolDescriptors(self) -> tuple[EditorToolDescriptor, ...]:
+        """Return declarative behavior for every registered editor tool."""
+        return self._tools_manager.descriptors()
 
     def getControlMode(self) -> str:
         """Return the active tool mode."""

@@ -24,6 +24,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QApplication
 from qpane.sdk.scene import SceneDescriptor
 
+from cutecanvas.edit_sessions import EditSessionSnapshot
 from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from cutecanvas.scene.mapping_mutations import LayerMappingMutationOwner
 from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
@@ -33,6 +34,7 @@ from cutecanvas.snapping.system import SnappingSubsystem
 from .affine_interactions import EditorAffineInteractions
 from .operation_resolution import EditorOperationResolver
 from .pixel_movement import SelectedPixelMovementController
+from .session_coordination import EditSessionCoordinator
 from .shared_edge_interaction import SharedEdgeResizeInteraction
 from .transform_coordinator import EditorTransformCoordinator
 from .transform_interaction import SceneLayerTransformInteraction
@@ -51,6 +53,7 @@ def create_editor_transform_interaction(
     operations: EditorOperationResolver,
     preview_changed: Callable[[], None],
     transform_changed: Callable[[], None],
+    session_changed: Callable[[EditSessionSnapshot | None], None],
     preview: SceneLayerMappingPreview,
     mutations: LayerMappingMutationOwner,
 ) -> tuple[SnappingSubsystem, EditorAffineInteractions]:
@@ -64,11 +67,13 @@ def create_editor_transform_interaction(
         viewport_zoom=viewport_zoom,
         changed=preview_changed,
     )
+    sessions = EditSessionCoordinator(changed=session_changed)
     transform = EditorTransformCoordinator(
         pixels=pixels,
         layers=layers,
         operations=operations,
         snapping=snapping.transform,
+        sessions=sessions,
         changed=transform_changed,
     )
     scale = lambda: max(1e-9, 1.0 / float(viewport_zoom()))
@@ -77,6 +82,7 @@ def create_editor_transform_interaction(
         candidates=snapping.oriented_candidates,
         preview=preview,
         mutations=mutations,
+        sessions=sessions,
         feedback=snapping.feedback,
         panel_to_scene=panel_to_scene,
         scene_to_panel=scene_to_panel,
@@ -88,7 +94,7 @@ def create_editor_transform_interaction(
         transform_preview_changed=layers.refresh_transform_preview,
         committed=layers.publish_committed_change,
     )
-    return snapping, EditorAffineInteractions(transform, shared_edge)
+    return snapping, EditorAffineInteractions(transform, shared_edge, sessions)
 
 
 __all__ = ["create_editor_transform_interaction"]

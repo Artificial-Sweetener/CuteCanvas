@@ -29,6 +29,8 @@ from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.cursor import EditorCursorIntent
+from cutecanvas.edit_sessions import EditSessionKind
+from cutecanvas.editor.session_coordination import EditSessionCoordinator
 
 from .affine_ports import SharedEdgeResizePort, TransformInteractionPort
 from .dependencies import ToolDependencies
@@ -165,6 +167,9 @@ class PixelSelectionInteractionPort:
     translation: SelectionTranslationPort = field(
         default_factory=SelectionTranslationPort
     )
+    edit_sessions: EditSessionCoordinator | None = None
+    edit_session_kind: EditSessionKind | None = None
+    edit_session_tool_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

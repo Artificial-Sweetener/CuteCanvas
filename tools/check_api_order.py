@@ -48,23 +48,35 @@ def contracted_methods(stub: Path, class_name: str) -> set[str]:
 
 
 def implemented_methods(contract: FacadeContract) -> set[str]:
-    """Return methods implemented by the facade and its focused API mixins."""
-    methods: set[str] = set()
+    """Return methods implemented by the facade and its focused API hierarchy."""
+    classes: dict[str, ast.ClassDef] = {}
     for source in contract.sources:
         tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
         for node in tree.body:
-            if (
-                isinstance(node, ast.ClassDef)
-                and node.name in contract.implementation_classes
-            ):
-                methods.update(
-                    member.name
-                    for member in node.body
-                    if isinstance(
-                        member,
-                        (ast.FunctionDef, ast.AsyncFunctionDef),
-                    )
-                )
+            if isinstance(node, ast.ClassDef):
+                classes[node.name] = node
+
+    methods: set[str] = set()
+    pending = list(contract.implementation_classes)
+    visited: set[str] = set()
+    while pending:
+        class_name = pending.pop()
+        if class_name in visited:
+            continue
+        visited.add(class_name)
+        node = classes.get(class_name)
+        if node is None:
+            continue
+        methods.update(
+            member.name
+            for member in node.body
+            if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+        )
+        pending.extend(
+            base.id
+            for base in node.bases
+            if isinstance(base, ast.Name) and base.id in classes
+        )
     return methods
 
 

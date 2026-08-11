@@ -72,10 +72,8 @@ def test_joined_endpoint_reopens_and_opposite_endpoint_remains_editable(qapp) ->
 
         _drag(runtime, viewer, QPointF(200.0, 0.0), QPointF(0.0, 0.0))
         harness.drain_events()
-        assert isinstance(
-            viewer.layerTransform(first.scene_id, first.layer_id),
-            BilinearLayerTransform,
-        )
+        first_preview = _preview_mappings(runtime)[first.layer_id]
+        assert isinstance(first_preview, BilinearLayerTransform)
 
         with harness.observe_presented_frames() as reopened_probe:
             _begin_drag(runtime, viewer, QPointF(0.0, 0.0), QPointF(50.0, 0.0))
@@ -102,8 +100,9 @@ def test_joined_endpoint_reopens_and_opposite_endpoint_remains_editable(qapp) ->
             )
             _wait_for_final_frame(harness)
 
-        first_mapping = viewer.layerTransform(first.scene_id, first.layer_id)
-        second_mapping = viewer.layerTransform(first.scene_id, second.layer_id)
+        provisional = _preview_mappings(runtime)
+        first_mapping = provisional[first.layer_id]
+        second_mapping = provisional[second.layer_id]
         assert first_mapping is not None and second_mapping is not None
         for mapping in (first_mapping, second_mapping):
             assert mapping.map_point(QPointF(200.0, 0.0)) == QPointF(50.0, 0.0)
@@ -112,6 +111,11 @@ def test_joined_endpoint_reopens_and_opposite_endpoint_remains_editable(qapp) ->
             frame.mask_layer_count == 2 for frame in opposite_probe.frames
         ), tuple(frame.mask_item_states for frame in opposite_probe.frames)
         _assert_canvas_coverage(harness, runtime, opposite_probe.frames)
+
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
+        assert runtime._scene_mapping_preview.previews == ()
+        assert viewer.layerTransform(first.scene_id, first.layer_id) == first_mapping
+        assert viewer.layerTransform(first.scene_id, second.layer_id) == second_mapping
 
         _begin_drag(runtime, viewer, QPointF(400.0, 300.0), QPointF(350.0, 300.0))
         assert {
@@ -151,10 +155,20 @@ def _begin_drag(
 
 
 def _wait_for_final_frame(harness: MountedQPaneHarness) -> None:
-    """Wait for committed mask products and publish their refined frame."""
+    """Wait for current mask products and publish their refined frame."""
     assert harness.wait_for_mask_render_idle(timeout_ms=3000)
     assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
     harness.viewer.repaint()
+
+
+def _preview_mappings(
+    viewer: _MountedViewerRuntime,
+) -> dict[object, object]:
+    """Return the current provisional mapping by participant layer."""
+    return {
+        preview.layer_id: preview.mapping
+        for preview in viewer._scene_mapping_preview.previews
+    }
 
 
 def _panel_point(viewer: _MountedViewerRuntime, scene_point: QPointF) -> QPoint:

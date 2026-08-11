@@ -82,8 +82,8 @@ class ToolInteractionDelegate:
             state_changed=self._handle_transient_state_changed,
         )
         self._history_shortcuts = EditorHistoryShortcuts(
-            undo=qpane.undoSceneEdit,
-            redo=qpane.redoSceneEdit,
+            undo=qpane.undoEditorEdit,
+            redo=qpane.redoEditorEdit,
         )
         self._selection_shortcuts = EditorSelectionShortcuts(
             has_selection=self._has_pixel_selection,

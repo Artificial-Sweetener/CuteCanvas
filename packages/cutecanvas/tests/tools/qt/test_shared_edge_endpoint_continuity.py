@@ -186,6 +186,7 @@ def test_45_degree_snap_preview_and_commit_retain_both_masks(qapp) -> None:
                 Qt.MouseButton.LeftButton,
                 pos=near_perfect_slant,
             )
+            QTest.keyClick(viewer, Qt.Key.Key_Return)
             assert harness.wait_for_mask_render_idle(timeout_ms=3000)
             assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
             viewer.repaint()

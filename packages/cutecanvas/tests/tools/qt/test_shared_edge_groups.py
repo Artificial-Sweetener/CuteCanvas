@@ -82,6 +82,7 @@ def test_three_layer_group_previews_commits_and_replays_atomically(qapp) -> None
             assert all(frame.mask_layer_count == 3 for frame in drag_frames)
 
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+            QTest.keyClick(viewer, Qt.Key.Key_Return)
             harness.drain_events(wait_ms=40)
 
         assert runtime._scene_mapping_preview.previews == ()
@@ -108,8 +109,10 @@ def test_three_layer_group_previews_commits_and_replays_atomically(qapp) -> None
         harness.close()
 
 
-def test_switching_tools_cancels_every_three_layer_group_preview(qapp) -> None:
-    """Cancellation must remove every preview without partially committing a group."""
+def test_persistent_tool_change_requires_explicit_three_layer_session_resolution(
+    qapp,
+) -> None:
+    """A persistent tool change must preserve work until the host resolves it."""
     harness = MountedQPaneHarness(
         qapp,
         image_size=QSize(400, 300),
@@ -130,6 +133,13 @@ def test_switching_tools_cancels_every_three_layer_group_preview(qapp) -> None:
             preview.layer_id for preview in runtime._scene_mapping_preview.previews
         } == set(layer_ids)
 
+        assert not viewer.setControlMode(viewer.CONTROL_MODE_CURSOR)
+        harness.drain_events()
+
+        assert {
+            preview.layer_id for preview in runtime._scene_mapping_preview.previews
+        } == set(layer_ids)
+        assert viewer.cancelActiveEditSession()
         assert viewer.setControlMode(viewer.CONTROL_MODE_CURSOR)
         harness.drain_events()
 

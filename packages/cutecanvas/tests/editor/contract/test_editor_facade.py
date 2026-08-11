@@ -23,6 +23,8 @@ from cutecanvas import (
     CloneStampSampleMode,
     CloneStampTransform,
     CuteCanvas,
+    EditSessionHistory,
+    EditSessionKind,
 )
 from cutecanvas_test_support.harness.timing import interaction_clock
 from PySide6.QtCore import QPointF, QRectF
@@ -47,6 +49,30 @@ def test_canvas_emits_public_control_mode_changes(qapp) -> None:
             canvas.CONTROL_MODE_MOVE,
             canvas.CONTROL_MODE_PANZOOM,
         ]
+    finally:
+        canvas.deleteLater()
+
+
+def test_tool_facade_describes_bounded_session_capabilities(qapp) -> None:
+    """Hosts can discover session-bearing tools without constructing them."""
+    del qapp
+    canvas = CuteCanvas(features=())
+    try:
+        declarations = {
+            descriptor.mode: descriptor.edit_session
+            for descriptor in canvas.editor.tools.descriptors
+            if descriptor.edit_session is not None
+        }
+        assert declarations.keys() == {
+            canvas.CONTROL_MODE_TRANSFORM,
+            canvas.CONTROL_MODE_SELECT_POLYGON,
+            canvas.CONTROL_MODE_MASK_POLYGON,
+            canvas.CONTROL_MODE_SHARED_EDGE_RESIZE,
+        }
+        transform = canvas.editor.tools.descriptor(canvas.CONTROL_MODE_TRANSFORM)
+        assert transform.edit_session is not None
+        assert transform.edit_session.kind is EditSessionKind.TRANSFORM
+        assert transform.edit_session.history is EditSessionHistory.BOUNDED
     finally:
         canvas.deleteLater()
 

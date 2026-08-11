@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from qpane.sdk.scene import SceneDescriptor
 
+from .session_coordination import EditSessionCoordinator
 from .shared_edge_interaction import SharedEdgeResizeInteraction
 from .transform_coordinator import EditorTransformCoordinator
 
@@ -32,6 +33,7 @@ class EditorAffineInteractions:
 
     transform: EditorTransformCoordinator
     shared_edge: SharedEdgeResizeInteraction
+    sessions: EditSessionCoordinator
 
     def cancel(self) -> bool:
         """Cancel every affine owner without leaving a partial preview."""

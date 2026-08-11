@@ -584,6 +584,7 @@ class EditorCompositionRoot:
             operations=operation_resolver,
             preview_changed=callbacks.pixel_move_preview_changed,
             transform_changed=callbacks.transform_state_changed,
+            session_changed=inputs.qpane.editSessionChanged.emit,
             preview=inputs.mapping_preview,
             mutations=mapping_mutations,
         )

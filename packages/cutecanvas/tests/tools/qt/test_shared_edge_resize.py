@@ -71,6 +71,7 @@ def test_adjacent_layers_preview_commit_and_undo_as_one_edit(qapp) -> None:
         assert viewer.layerTransform(second.scene_id, second.layer_id).isIdentity()
 
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         harness.drain_events()
         first_transform = viewer.layerTransform(first.scene_id, first.layer_id)
         second_transform = viewer.layerTransform(second.scene_id, second.layer_id)
@@ -118,11 +119,68 @@ def test_tool_switch_cancels_both_shared_edge_previews(qapp) -> None:
         assert viewer.layerTransform(first.scene_id, first.layer_id).isIdentity()
         assert viewer.layerTransform(first.scene_id, second.layer_id).isIdentity()
 
+        assert not viewer.setControlMode(viewer.CONTROL_MODE_CURSOR)
+        QTest.keyClick(viewer, Qt.Key.Key_Escape)
         assert viewer.setControlMode(viewer.CONTROL_MODE_CURSOR)
         harness.drain_events()
 
         assert viewer.layerTransform(first.scene_id, first.layer_id).isIdentity()
         assert viewer.layerTransform(first.scene_id, second.layer_id).isIdentity()
+    finally:
+        harness.close()
+
+
+def test_shared_edge_checkpoint_undo_redo_precedes_document_history(qapp) -> None:
+    """Coupled preview history must remain provisional until one explicit apply."""
+    harness = MountedQPaneHarness(
+        qapp,
+        image_size=QSize(400, 300),
+        widget_size=QSize(800, 620),
+        mask_count=2,
+    )
+    viewer = harness.viewer
+    try:
+        first_id, second_id = harness.mask_ids
+        first_asset = viewer.mask_service.assets.get_layer(first_id)
+        second_asset = viewer.mask_service.assets.get_layer(second_id)
+        assert first_asset is not None and second_asset is not None
+        _paint_rectangle(first_asset, 80, 80, 80, 100)
+        _paint_rectangle(second_asset, 160, 80, 80, 100)
+        viewer.invalidateActiveMaskCache()
+        entries = {entry.mask_id: entry for entry in viewer.listMasksForComposition()}
+        first = entries[first_id]
+        second = entries[second_id]
+        assert first.scene_id is not None and first.layer_id is not None
+        assert second.layer_id is not None
+        policy = LayerPolicy(selectable=True, movable=True, pixel_editable=True)
+        viewer.setLayerInteractionPolicy(first.scene_id, first.layer_id, policy)
+        viewer.setLayerInteractionPolicy(first.scene_id, second.layer_id, policy)
+        assert viewer.setControlMode(viewer.CONTROL_MODE_SHARED_EDGE_RESIZE)
+        _drag_panel(
+            viewer,
+            _panel_point(viewer, QPointF(160.0, 130.0)),
+            _panel_point(viewer, QPointF(180.0, 130.0)),
+        )
+
+        state = viewer.activeEditSession()
+        assert state is not None and state.can_undo and state.undo_depth == 1
+        preview = _preview_mapping(viewer, first.layer_id)
+        assert preview is not None and not preview.to_qtransform().isIdentity()
+        assert viewer.layerTransform(first.scene_id, first.layer_id).isIdentity()
+
+        assert viewer.undoEditorEdit()
+        restored = _preview_mapping(viewer, first.layer_id)
+        assert restored is not None and restored.to_qtransform().isIdentity()
+        assert viewer.redoEditorEdit()
+        assert _preview_mapping(viewer, first.layer_id) == preview
+        assert viewer.applyActiveEditSession()
+        assert viewer.activeEditSession() is None
+        assert (
+            viewer.layerTransform(first.scene_id, first.layer_id)
+            == preview.to_qtransform()
+        )
+        assert viewer.undoSceneEdit()
+        assert viewer.layerTransform(first.scene_id, first.layer_id).isIdentity()
     finally:
         harness.close()
 
@@ -164,6 +222,7 @@ def test_common_corner_pivots_on_rail_and_undoes_as_one_edit(qapp) -> None:
         QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewer, end, delay=0)
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         harness.drain_events()
 
         first_mapping = viewer.layerTransform(first.scene_id, first.layer_id)
@@ -219,6 +278,7 @@ def test_partial_shared_edge_inserts_fixed_topology_and_commits_once(qapp) -> No
         QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewer, end, delay=0)
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         harness.drain_events()
 
         first_mapping = viewer.layerTransform(first.scene_id, first.layer_id)
@@ -330,6 +390,7 @@ def test_raster_edit_after_piecewise_resize_never_reverts_vector_mask_pixels(
         QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewer, end, delay=0)
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         assert harness.wait_for_mask_render_idle(timeout_ms=3000)
         mapping = viewer.layerTransform(first.scene_id, first.layer_id)
         assert isinstance(mapping, PiecewiseLayerTransform)
@@ -459,6 +520,7 @@ def test_brush_and_eraser_after_angled_resize_edit_exact_vector_mask_region(
         QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewer, end, delay=0)
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         assert harness.wait_for_mask_render_idle(timeout_ms=3000)
         mapping = viewer.layerTransform(first.scene_id, first.layer_id)
         assert isinstance(mapping, BilinearLayerTransform)
@@ -598,6 +660,7 @@ def test_brush_after_angled_resize_can_expand_mask_beyond_old_mapping_cage(
         QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewer, end, delay=0)
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         assert harness.wait_for_mask_render_idle(timeout_ms=3000)
         mapping = viewer.layerTransform(first.scene_id, first.layer_id)
         assert isinstance(mapping, BilinearLayerTransform)
@@ -669,6 +732,7 @@ def test_eraser_at_collapsed_mapping_patch_join_has_one_scene_circular_footprint
         QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewer, end, delay=0)
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
         assert harness.wait_for_mask_render_idle(timeout_ms=3000)
         mapping = viewer.layerTransform(first.scene_id, first.layer_id)
         assert isinstance(mapping, BilinearLayerTransform)
@@ -745,6 +809,21 @@ def _snapshot_value(snapshot, x: int, y: int) -> int:
     ):
         return 0
     return int(snapshot.pixels[y - bounds.y, x - bounds.x])
+
+
+def _drag_panel(viewer: object, start: object, end: object) -> None:
+    """Complete one primary pointer drag between panel points."""
+    QTest.mouseMove(viewer, start)
+    QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(viewer, end, delay=0)
+    QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=end)
+
+
+def _preview_mapping(viewer: object, layer_id: object):
+    """Return one mapping from the preview-processed scene."""
+    scene = viewer.view().current_scene_descriptor()
+    assert scene is not None
+    return next(layer.transform for layer in scene.layers if layer.layer_id == layer_id)
 
 
 def _panel_point(viewer: object, scene_point: QPointF):

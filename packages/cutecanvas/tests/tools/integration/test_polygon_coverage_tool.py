@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from cutecanvas.edit_sessions import EditSessionKind
+from cutecanvas.editor.session_coordination import EditSessionCoordinator
 from cutecanvas.tools.polygon_coverage import PolygonCoverageTool
 from cutecanvas.tools.ports import PixelSelectionInteractionPort
 from PySide6.QtCore import QEvent, QPointF, Qt
@@ -134,16 +136,56 @@ def test_escape_discards_every_unfinished_revision() -> None:
     assert not tool.authoring
 
 
+def test_polygon_checkpoints_restore_topology_before_publication() -> None:
+    """Unified Undo and Redo must revise open geometry without document edits."""
+    commits: list[object] = []
+    tool, sessions = _tool_with_sessions(commits)
+    for point in (QPointF(0.0, 0.0), QPointF(10.0, 0.0)):
+        _click(tool, point)
+    assert sessions.snapshot is not None
+    assert not sessions.snapshot.can_apply
+    assert sessions.snapshot.can_cancel
+
+    _click(tool, QPointF(10.0, 10.0))
+    assert sessions.snapshot is not None and sessions.snapshot.can_apply
+    _click(tool, QPointF(0.0, 10.0))
+
+    assert sessions.snapshot is not None
+    assert sessions.snapshot.undo_depth == 4
+    assert sessions.undo(lambda: (_ for _ in ()).throw(AssertionError()))
+    assert sessions.redo(lambda: (_ for _ in ()).throw(AssertionError()))
+    assert sessions.undo(lambda: False)
+    _key(tool, Qt.Key.Key_Return)
+
+    assert len(commits) == 1
+    assert _path_points(commits[0]) == (
+        QPointF(0.0, 0.0),
+        QPointF(10.0, 0.0),
+        QPointF(10.0, 10.0),
+    )
+
+
 def _tool(commits: list[object]) -> PolygonCoverageTool:
     """Return one identity-projected polygon tool with a recording destination."""
+    return _tool_with_sessions(commits)[0]
+
+
+def _tool_with_sessions(
+    commits: list[object],
+) -> tuple[PolygonCoverageTool, EditSessionCoordinator]:
+    """Return one polygon tool and its authoritative session coordinator."""
+    sessions = EditSessionCoordinator(changed=lambda _state: None)
     tool = PolygonCoverageTool()
     tool.activate(
         PixelSelectionInteractionPort(
             panel_to_scene_point=lambda point: QPointF(point),
             commit_coverage_item=lambda item: commits.append(item) or True,
+            edit_sessions=sessions,
+            edit_session_kind=EditSessionKind.POLYGON_SELECTION,
+            edit_session_tool_mode="select-polygon",
         )
     )
-    return tool
+    return tool, sessions
 
 
 def _click(tool: PolygonCoverageTool, point: QPointF) -> None:

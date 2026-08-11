@@ -123,6 +123,24 @@ class PolygonCoverageSession:
         self._vertices.clear()
         return True
 
+    def restore(self, vertices: tuple[PolygonCoverageVertex, ...]) -> bool:
+        """Restore an exact validated topology checkpoint with stable identities."""
+        if len(vertices) > _MAX_VERTICES:
+            raise ValueError("polygon vertex limit exceeded")
+        restored = [
+            PolygonCoverageVertex(vertex.vertex_id, vertex.point) for vertex in vertices
+        ]
+        identities = {vertex.vertex_id for vertex in restored}
+        points = {(vertex.point.x(), vertex.point.y()) for vertex in restored}
+        if len(identities) != len(restored):
+            raise ValueError("polygon vertex identities must be distinct")
+        if len(points) != len(restored):
+            raise ValueError("polygon vertices must be distinct")
+        if restored == self._vertices:
+            return False
+        self._vertices = restored
+        return True
+
     def _require_capacity(self) -> None:
         """Reject topology that exceeds the bounded interactive contract."""
         if len(self._vertices) >= _MAX_VERTICES:

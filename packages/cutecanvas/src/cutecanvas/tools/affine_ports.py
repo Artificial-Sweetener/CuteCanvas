@@ -62,7 +62,9 @@ class SharedEdgeResizePort:
     begin: Callable[[QPointF], bool] = lambda _point: False
     update: Callable[[QPointF], bool] = lambda _point: False
     finish: Callable[[QPointF], bool] = lambda _point: False
+    apply: Callable[[], bool] = _false
     cancel: Callable[[], bool] = _false
+    suspend: Callable[[], bool] = _false
 
 
 __all__ = ["SharedEdgeResizePort", "TransformInteractionPort"]

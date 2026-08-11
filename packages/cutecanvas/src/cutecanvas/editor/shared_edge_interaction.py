@@ -31,18 +31,20 @@ from cutecanvas.scene.mapping_preview import (
     LayerMappingPreview,
     SceneLayerMappingPreview,
 )
-from cutecanvas.scene.mutations import SceneMutationStatus
 from cutecanvas.snapping.edge_candidates import OrientedEdgeCandidateProvider
-from cutecanvas.snapping.edge_index import OrientedEdgeIndex
 from cutecanvas.snapping.feedback import SnapGuideFeedback
 
-from .shared_edge_discovery import SharedEdgeDiscovery
+from .session_coordination import EditSessionCoordinator
 from .shared_edge_geometry import SharedEdgeSeam
+from .shared_edge_handle_resolution import SharedEdgeHandleResolver
+from .shared_edge_history import SharedEdgeProvisionalSession
+from .shared_edge_index import SharedEdgeDiscoveryIndex
 from .shared_edge_pivot import SharedEdgeHandle, SharedEdgePivot
 from .shared_edge_presentation import (
     SharedEdgePresentation,
     SharedEdgePresentationProjector,
 )
+from .shared_edge_publication import SharedEdgeMappingPublication
 from .shared_edge_session import SharedEdgeGestureSession
 
 
@@ -56,6 +58,7 @@ class SharedEdgeResizeInteraction:
         candidates: OrientedEdgeCandidateProvider,
         preview: SceneLayerMappingPreview,
         mutations: LayerMappingMutationOwner,
+        sessions: EditSessionCoordinator,
         feedback: SnapGuideFeedback,
         panel_to_scene: Callable[[QPointF], QPointF | None],
         scene_to_panel: Callable[[QPointF], QPointF | None],
@@ -69,23 +72,38 @@ class SharedEdgeResizeInteraction:
         self._active_scene = active_scene
         self._candidates = candidates
         self._preview = preview
-        self._mutations = mutations
+        self._sessions = sessions
         self._feedback = feedback
         self._panel_to_scene = panel_to_scene
         self._scene_units_per_device_pixel = scene_units_per_device_pixel
         self._suppressed = suppressed
         self._presentation_changed = presentation_changed
         self._transform_preview_changed = transform_preview_changed
-        self._committed = committed
+        self._publication = SharedEdgeMappingPublication(
+            active_scene=active_scene,
+            preview=preview,
+            mutations=mutations,
+            preview_changed=transform_preview_changed,
+            committed=committed,
+        )
         self._projector = SharedEdgePresentationProjector(
             scene_to_panel=scene_to_panel,
         )
-        self._cache_key: tuple[int, float] | None = None
-        self._discovery: SharedEdgeDiscovery | None = None
+        self._discovery = SharedEdgeDiscoveryIndex(
+            candidates=candidates,
+            preview=preview,
+            scale=self._scale,
+        )
+        self._handles = SharedEdgeHandleResolver(
+            active_scene=active_scene,
+            discovery=self._discovery,
+            scale=self._scale,
+        )
         self._seam: SharedEdgeSeam | None = None
         self._handle: SharedEdgeHandle | None = None
         self._pivot: SharedEdgePivot | None = None
         self._session: SharedEdgeGestureSession | None = None
+        self._provisional: SharedEdgeProvisionalSession | None = None
 
     @property
     def active(self) -> bool:
@@ -97,7 +115,7 @@ class SharedEdgeResizeInteraction:
         scene = self._active_scene()
         if scene is None:
             return None
-        discovery = self._ensure_discovery(scene)
+        discovery = self._discovery.get(scene)
         seams = () if discovery is None else discovery.seams()
         return self._projector.project(
             seams,
@@ -115,20 +133,16 @@ class SharedEdgeResizeInteraction:
         if self.active:
             return False
         scene_point = self._panel_to_scene(panel_point)
-        seam = (
-            None
-            if scene_point is None or self._preview.previews
-            else self._discover(scene_point)
-        )
+        seam = None if scene_point is None else self._discover(scene_point)
         handle = (
             None
             if seam is None or scene_point is None
-            else self._handle_at(
+            else self._handles.handle_at(
                 seam,
                 scene_point,
             )
         )
-        pivot = self._pivot_for(seam, handle)
+        pivot = self._handles.pivot_for(seam, handle)
         if seam == self._seam and handle is self._handle and pivot == self._pivot:
             return False
         self._seam = seam
@@ -149,7 +163,7 @@ class SharedEdgeResizeInteraction:
 
     def begin(self, panel_point: QPointF) -> bool:
         """Begin a coupled gesture from the seam under ``panel_point``."""
-        if self.active or self._preview.previews:
+        if self.active:
             return False
         self.update_hover(panel_point)
         seam = self._seam
@@ -166,8 +180,40 @@ class SharedEdgeResizeInteraction:
             or (handle is not SharedEdgeHandle.MIDDLE and self._pivot is None)
         ):
             return False
+        participant_ids = frozenset(
+            participant.layer_id for participant in seam.participants
+        )
+        if (
+            self._provisional is not None
+            and participant_ids != self._provisional.layer_ids
+        ):
+            return False
+        if self._provisional is None:
+            base = tuple(
+                LayerMappingValue(
+                    participant.layer_id,
+                    participant.initial_mapping,
+                )
+                for participant in seam.participants
+            )
+            self._provisional = SharedEdgeProvisionalSession.begin(
+                sessions=self._sessions,
+                scene_id=seam.scene_id,
+                base=base,
+                restore=self._publication.restore,
+                commit=self._publication.commit,
+                closed=self._close_provisional,
+            )
+            if self._provisional is None:
+                return False
+        scene = self._active_scene()
+        if scene is None:
+            return False
         excluded = tuple(participant.layer_id for participant in seam.participants)
-        targets = self._candidates.capture(excluded_layer_ids=excluded)
+        targets = self._candidates.capture_scene(
+            self._preview.process_scene(scene),
+            excluded_layer_ids=excluded,
+        )
         scale = self._scale()
         self._session = SharedEdgeGestureSession(
             seam=seam,
@@ -177,6 +223,7 @@ class SharedEdgeResizeInteraction:
             targets=targets,
             scene_units_per_device_pixel=scale,
         )
+        self._provisional.begin_gesture()
         self._feedback.clear()
         self._presentation_changed()
         return True
@@ -215,30 +262,49 @@ class SharedEdgeResizeInteraction:
         return True
 
     def finish(self, panel_point: QPointF) -> bool:
-        """Resolve the final pointer and commit all transforms atomically."""
+        """Resolve the final pointer and retain one coupled checkpoint."""
         if not self.update(panel_point):
-            return self.cancel()
-        seam = self._seam
-        if seam is None:
-            return self.cancel()
-        values = tuple(
-            LayerMappingValue(preview.layer_id, preview.mapping)
-            for preview in self._preview.previews
+            if self._provisional is not None:
+                self._provisional.suspend()
+            self._clear_gesture()
+            return False
+        provisional = self._provisional
+        if provisional is None:
+            return False
+        values = self._publication.settled_values(provisional.layer_ids)
+        if values is None:
+            provisional.suspend()
+            self._clear_gesture()
+            return False
+        label = (
+            "Move Shared Edge"
+            if self._handle is SharedEdgeHandle.MIDDLE
+            else "Move Shared Edge Point"
         )
-        result = self._mutations.commit(seam.scene_id, values)
-        applied = result.status in {
-            SceneMutationStatus.APPLIED,
-            SceneMutationStatus.UNCHANGED,
-        }
-        self._clear_transient()
-        if applied and result.status is SceneMutationStatus.APPLIED:
-            self._committed()
-        else:
-            self._transform_preview_changed()
-        return applied
+        changed = provisional.settle(values, label)
+        self._clear_gesture()
+        self._discovery.invalidate()
+        self._presentation_changed()
+        return changed
+
+    def apply(self) -> bool:
+        """Commit every retained seam gesture as one atomic document edit."""
+        return self._provisional is not None and self._provisional.apply()
+
+    def suspend(self) -> bool:
+        """Release direct seam input while retaining settled checkpoints."""
+        provisional = self._provisional
+        if provisional is None:
+            return False
+        changed = provisional.suspend()
+        self._clear_gesture()
+        self._presentation_changed()
+        return changed
 
     def cancel(self) -> bool:
         """Discard every preview and all gesture or hover state."""
+        if self._provisional is not None:
+            return self._provisional.cancel()
         changed = self._seam is not None or self._session is not None
         preview_changed = self._preview.clear()
         self._clear_transient(clear_preview=False)
@@ -250,10 +316,17 @@ class SharedEdgeResizeInteraction:
 
     def synchronize_scene(self, scene: SceneDescriptor | None) -> bool:
         """Clear transient state when the authoritative scene changes."""
+        session_scene_id = (
+            None if self._provisional is None else self._provisional.scene_id
+        )
         seam = self._seam
-        if seam is None or (scene is not None and scene.scene_id == seam.scene_id):
-            self._cache_key = None
-            self._discovery = None
+        expected_scene_id = session_scene_id or (
+            None if seam is None else seam.scene_id
+        )
+        if expected_scene_id is None or (
+            scene is not None and scene.scene_id == expected_scene_id
+        ):
+            self._discovery.invalidate()
             return False
         return self.cancel()
 
@@ -262,33 +335,8 @@ class SharedEdgeResizeInteraction:
         scene = self._active_scene()
         if scene is None:
             return None
-        discovery = self._ensure_discovery(scene)
+        discovery = self._discovery.get(scene)
         return None if discovery is None else discovery.seam_at(scene_point)
-
-    def _ensure_discovery(
-        self,
-        scene: SceneDescriptor,
-    ) -> SharedEdgeDiscovery | None:
-        """Return the cached discovery snapshot for one scene revision and scale."""
-        scale = self._scale()
-        key = id(scene), scale
-        if key != self._cache_key:
-            targets = self._candidates.capture(layers_only=True)
-            self._discovery = (
-                None
-                if targets is None or targets.scene_id != scene.scene_id
-                else SharedEdgeDiscovery(
-                    scene,
-                    OrientedEdgeIndex.build(
-                        targets.edges,
-                        scene_units_per_device_pixel=scale,
-                    ),
-                    scene_units_per_device_pixel=scale,
-                    boundary_for=self._candidates.layer_boundary,
-                )
-            )
-            self._cache_key = key
-        return self._discovery
 
     def _valid_active_seam(self) -> SharedEdgeSeam | None:
         """Return the active seam while its authoritative scene remains current."""
@@ -310,43 +358,25 @@ class SharedEdgeResizeInteraction:
         if self._session is not None:
             self._session.clear()
         self._session = None
-        self._cache_key = None
-        self._discovery = None
+        self._discovery.invalidate()
+
+    def _clear_gesture(self) -> None:
+        """Release pointer-specific snap state without resolving the edit."""
+        self._feedback.clear()
+        if self._session is not None:
+            self._session.clear()
+        self._session = None
+
+    def _close_provisional(self) -> None:
+        """Clear preview and interaction state after apply or cancellation."""
+        self._provisional = None
+        self._publication.clear()
+        self._clear_transient(clear_preview=False)
+        self._presentation_changed()
 
     def _scale(self) -> float:
         """Return a positive current scene-unit size for one device pixel."""
         return max(1e-9, float(self._scene_units_per_device_pixel()))
-
-    def _handle_at(
-        self,
-        seam: SharedEdgeSeam,
-        scene_point: QPointF,
-    ) -> SharedEdgeHandle:
-        """Resolve endpoint handles ahead of the parallel-resize seam body."""
-        radius = 8.0 * self._scale()
-        distances = (
-            (_point_distance(scene_point, seam.start), SharedEdgeHandle.START),
-            (_point_distance(scene_point, seam.end), SharedEdgeHandle.END),
-        )
-        nearest_distance, nearest_handle = min(distances, key=lambda value: value[0])
-        return nearest_handle if nearest_distance <= radius else SharedEdgeHandle.MIDDLE
-
-    def _pivot_for(
-        self,
-        seam: SharedEdgeSeam | None,
-        handle: SharedEdgeHandle | None,
-    ) -> SharedEdgePivot | None:
-        """Return the frozen endpoint constraint associated with one hover."""
-        if seam is None or handle is None or handle is SharedEdgeHandle.MIDDLE:
-            return None
-        scene = self._active_scene()
-        if scene is None:
-            return None
-        discovery = self._ensure_discovery(scene)
-        if discovery is None:
-            return None
-        start, end = discovery.pivots(seam)
-        return start if handle is SharedEdgeHandle.START else end
 
     def _focused_points(self) -> tuple[QPointF, QPointF] | None:
         """Return current scene endpoints for focused presentation geometry."""
@@ -358,12 +388,3 @@ class SharedEdgeResizeInteraction:
             if self._session is None
             else self._session.points
         )
-
-
-def _point_distance(first: QPointF, second: QPointF) -> float:
-    """Return Euclidean scene distance between two points."""
-    delta = first - second
-    return QPointF.dotProduct(delta, delta) ** 0.5
-
-
-__all__ = ["SharedEdgeResizeInteraction"]

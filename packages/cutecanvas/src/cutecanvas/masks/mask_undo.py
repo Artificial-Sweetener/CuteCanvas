@@ -34,6 +34,7 @@ from qpane.sdk.raster import qimage_to_numpy_grayscale8
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QImage
+    from qpane.sdk.scene import RasterBounds
 
 
 @dataclass(frozen=True)
@@ -142,12 +143,13 @@ class MaskImageCommand:
 
 @dataclass(slots=True)
 class MaskPatch:
-    """Represent a rectangular patch captured from a mask stroke."""
+    """Represent a storage patch with stable layer-local replay bounds."""
 
     rect: QRect
     before: QImage
     after: QImage
     mask: NDArray[np.bool_]
+    bounds: RasterBounds | None = None
 
 
 @dataclass
@@ -157,6 +159,7 @@ class MaskPatchCommand:
     mask_id: uuid.UUID
     patches: Sequence[MaskPatch]
     apply: Callable[[uuid.UUID, Sequence[MaskPatch], bool], None]
+    resolve_rect: Callable[[uuid.UUID, MaskPatch], QRect | None]
     notify: Callable[[uuid.UUID], None] | None = None
     description: str = "mask-change"
 
@@ -177,9 +180,10 @@ class MaskPatchCommand:
         payload: list[MaskUndoSnippet] = []
         for patch in self.patches:
             image = patch.after if use_after else patch.before
-            if image.isNull():
+            rect = self.resolve_rect(self.mask_id, patch)
+            if image.isNull() or rect is None:
                 continue
-            payload.append(MaskUndoSnippet(rect=patch.rect, image=image))
+            payload.append(MaskUndoSnippet(rect=rect, image=image))
         if not payload:
             return None
         return tuple(payload)

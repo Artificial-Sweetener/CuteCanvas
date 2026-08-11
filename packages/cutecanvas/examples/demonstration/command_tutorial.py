@@ -105,6 +105,7 @@ class CommandTutorialController:
             self._floating_pixels_toolbar = (
                 self._tools.editor_controls.add_floating_toolbar(self._parent)
             )
+        self._tools.editor_controls.history.install_toolbar(self._parent)
         self._tools.build_context_toolbars()
 
         def add_group(actions: list[QAction | None]) -> bool:

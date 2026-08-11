@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .history_controls import DemoHistoryControls
 from .layer_policy import DemoLayerPolicyController
 from .selection_modification_control import SelectionModificationDemoControl
 
@@ -139,16 +140,7 @@ class EditorControls(QObject):
             CuteCanvas.CONTROL_MODE_PAINT_BUCKET,
             "G",
         )
-        self.undo_action = self._action(
-            "Undo",
-            self._undo,
-            QKeySequence.StandardKey.Undo,
-        )
-        self.redo_action = self._action(
-            "Redo",
-            self._redo,
-            QKeySequence.StandardKey.Redo,
-        )
+        self.history = DemoHistoryControls(qpane, show_status, self)
         self.select_all_action = self._action(
             "Select All",
             self._select_all,
@@ -276,8 +268,7 @@ class EditorControls(QObject):
 
     def populate_edit_menu(self, menu: QMenu) -> None:
         """Populate an intentional editor menu without exposing lab controls."""
-        menu.addAction(self.undo_action)
-        menu.addAction(self.redo_action)
+        self.history.populate(menu)
         menu.addSeparator()
         selection_menu = menu.addMenu("Selection Tool")
         for action in self._selection_actions:
@@ -351,8 +342,6 @@ class EditorControls(QObject):
         selection_state = self._qpane.editorOperationState(EditorIntent.SELECT_PIXELS)
         delete_state = self._qpane.editorOperationState(EditorIntent.DELETE_PIXELS)
         floating = self._qpane.floatingPixelEditState()
-        self.undo_action.setEnabled(self._qpane.sceneEditUndoAvailable())
-        self.redo_action.setEnabled(self._qpane.sceneEditRedoAvailable())
         self.select_all_action.setEnabled(selection_state.allowed)
         self.deselect_action.setEnabled(has_selection)
         self.deselect_action.setStatusTip(
@@ -463,16 +452,6 @@ class EditorControls(QObject):
             action.setShortcut(shortcut)
         action.triggered.connect(callback)
         return action
-
-    def _undo(self) -> None:
-        """Undo one chronological composition edit."""
-        if self._qpane.undoSceneEdit():
-            self._show_status("Undid the last editor change.")
-
-    def _redo(self) -> None:
-        """Redo one chronological composition edit."""
-        if self._qpane.redoSceneEdit():
-            self._show_status("Redid the editor change.")
 
     def _select_all(self) -> None:
         """Select the complete composition canvas."""

@@ -54,12 +54,15 @@ class SharedEdgeResizeTool(BaseTool):
         self._begin = dependencies.begin
         self._update = dependencies.update
         self._finish = dependencies.finish
+        self._apply = dependencies.apply
         self._cancel = dependencies.cancel
+        self._suspend = dependencies.suspend
         self.signals.repaint_overlay_requested.emit()
 
     def deactivate(self) -> None:
-        """Cancel transient geometry when another tool takes ownership."""
-        self._cancel()
+        """Release input while preserving any unresolved coupled edit."""
+        if self._active:
+            self._suspend()
         self._reset()
         self.signals.repaint_overlay_requested.emit()
 
@@ -88,7 +91,7 @@ class SharedEdgeResizeTool(BaseTool):
         event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        """Atomically commit every layer transform on primary release."""
+        """Retain one coupled checkpoint on primary release."""
         if event.button() is not Qt.MouseButton.LeftButton or not self._active:
             event.ignore()
             return
@@ -104,16 +107,24 @@ class SharedEdgeResizeTool(BaseTool):
             self.signals.repaint_overlay_requested.emit()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """Cancel the complete transient operation with Escape."""
-        if event.key() != Qt.Key.Key_Escape:
+        """Apply or cancel the complete provisional coupled operation."""
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            changed = self._apply()
+        elif event.key() == Qt.Key.Key_Escape:
+            changed = self._cancel()
+        else:
             event.ignore()
             return
-        changed = self._cancel()
         self._active = False
         if changed:
             self.signals.repaint_overlay_requested.emit()
             self.signals.cursor_update_requested.emit()
         event.accept()
+
+    def suspend_for_temporary_navigation(self) -> None:
+        """Suspend direct seam input without resolving retained checkpoints."""
+        self._suspend()
+        self._active = False
 
     def handle_pointer_sample(self, sample: PointerSample) -> bool:
         """Handle normalized touch and tablet samples through the same lifecycle."""
@@ -170,7 +181,9 @@ class SharedEdgeResizeTool(BaseTool):
         self._begin: Callable[[QPointF], bool] = lambda _point: False
         self._update: Callable[[QPointF], bool] = lambda _point: False
         self._finish: Callable[[QPointF], bool] = lambda _point: False
+        self._apply: Callable[[], bool] = lambda: False
         self._cancel: Callable[[], bool] = lambda: False
+        self._suspend: Callable[[], bool] = lambda: False
 
 
 __all__ = ["SharedEdgeResizeTool"]

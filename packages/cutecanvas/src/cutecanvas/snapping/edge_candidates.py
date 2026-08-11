@@ -69,8 +69,26 @@ class OrientedEdgeCandidateProvider:
     ) -> OrientedTargetSnapshot | None:
         """Return one immutable exact-edge target snapshot."""
         scene = self._active_scene()
+        return (
+            None
+            if scene is None
+            else self.capture_scene(
+                scene,
+                excluded_layer_ids=excluded_layer_ids,
+                layers_only=layers_only,
+            )
+        )
+
+    def capture_scene(
+        self,
+        scene: SceneDescriptor,
+        *,
+        excluded_layer_ids: tuple[uuid.UUID, ...] = (),
+        layers_only: bool = False,
+    ) -> OrientedTargetSnapshot | None:
+        """Return exact edge targets from one explicit scene revision."""
         policy = self._configuration.policy
-        if scene is None or not policy.enabled:
+        if not policy.enabled:
             return None
         excluded = frozenset(excluded_layer_ids)
         edges: list[OrientedEdge] = []

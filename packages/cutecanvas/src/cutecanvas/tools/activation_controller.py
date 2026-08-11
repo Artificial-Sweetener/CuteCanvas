@@ -59,7 +59,13 @@ class EditorToolActivationController:
             Tools.CONTROL_MODE_SMART_SELECT,
             Tools.CONTROL_MODE_SMART_MASK,
         }
-        return mode not in smart_modes or bool(self._canvas.samFeatureAvailable())
+        feature_available = mode not in smart_modes or bool(
+            self._canvas.samFeatureAvailable()
+        )
+        return (
+            feature_available
+            and self._canvas.editSessionCoordinator().prepare_tool_change(mode)
+        )
 
     def activate(self, mode: str) -> bool:
         """Validate and activate one effective mode without owning selection."""

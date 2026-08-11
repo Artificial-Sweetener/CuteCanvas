@@ -89,7 +89,7 @@ def test_angled_shared_edge_keeps_endpoint_and_suppresses_midpoint(qapp) -> None
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=pivot_target)
         harness.drain_events()
 
-        angled = viewer.layerTransform(first.scene_id, first.layer_id)
+        angled = _preview_mappings(runtime)[first.layer_id]
         assert isinstance(angled, PiecewiseLayerTransform)
         source_start = QPointF(160.0, 80.0)
         source_end = QPointF(160.0, 180.0)
@@ -103,7 +103,8 @@ def test_angled_shared_edge_keeps_endpoint_and_suppresses_midpoint(qapp) -> None
         QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=endpoint_target)
         harness.drain_events()
 
-        endpoint_adjusted = viewer.layerTransform(first.scene_id, first.layer_id)
+        endpoint_previews = _preview_mappings(runtime)
+        endpoint_adjusted = endpoint_previews[first.layer_id]
         assert isinstance(endpoint_adjusted, PiecewiseLayerTransform)
         adjusted_start = endpoint_adjusted.map_point(source_start)
         adjusted_end = endpoint_adjusted.map_point(source_end)
@@ -114,7 +115,7 @@ def test_angled_shared_edge_keeps_endpoint_and_suppresses_midpoint(qapp) -> None
         displacement = QPointF(seam.y(), -seam.x()) * (16.0 / seam_length)
         drag_start = _panel_point(runtime, midpoint)
         drag_target = _panel_point(runtime, midpoint + displacement)
-        second_before = viewer.layerTransform(first.scene_id, second.layer_id)
+        second_before = endpoint_previews[second.layer_id]
         retained_points = (
             _panel_point(runtime, QPointF(100.0, 140.0)),
             _panel_point(runtime, QPointF(210.0, 210.0)),
@@ -124,16 +125,13 @@ def test_angled_shared_edge_keeps_endpoint_and_suppresses_midpoint(qapp) -> None
             QTest.mouseMove(viewer, drag_start)
             QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=drag_start)
             QTest.mouseMove(viewer, drag_target, delay=0)
-            assert runtime._scene_mapping_preview.previews == ()
+            assert _preview_mappings(runtime) == endpoint_previews
             QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=drag_target)
             assert harness.wait_for_mask_render_idle(timeout_ms=3000)
             assert harness.wait_for_render_refinement_idle(timeout_ms=3000)
             viewer.repaint()
 
-        assert (
-            viewer.layerTransform(first.scene_id, first.layer_id) == endpoint_adjusted
-        )
-        assert viewer.layerTransform(first.scene_id, second.layer_id) == second_before
+        assert _preview_mappings(runtime) == endpoint_previews
         assert probe.frames
         assert all(frame.mask_layer_count == 2 for frame in probe.frames)
         assert all(
@@ -141,6 +139,11 @@ def test_angled_shared_edge_keeps_endpoint_and_suppresses_midpoint(qapp) -> None
             for frame in probe.frames
             for point in retained_points
         )
+        QTest.keyClick(viewer, Qt.Key.Key_Return)
+        assert (
+            viewer.layerTransform(first.scene_id, first.layer_id) == endpoint_adjusted
+        )
+        assert viewer.layerTransform(first.scene_id, second.layer_id) == second_before
     finally:
         harness.close()
 
@@ -252,6 +255,16 @@ def _panel_point(viewer: _MountedViewerRuntime, scene_point: QPointF) -> QPoint:
     panel = viewer.view().scene_to_panel_point(scene_point)
     assert panel is not None
     return panel.toPoint()
+
+
+def _preview_mappings(
+    viewer: _MountedViewerRuntime,
+) -> dict[object, object]:
+    """Return the current provisional mapping by participant layer."""
+    return {
+        preview.layer_id: preview.mapping
+        for preview in viewer._scene_mapping_preview.previews
+    }
 
 
 def _physical_frame_color(frame: PresentedMaskFrame, point: QPoint) -> QColor:

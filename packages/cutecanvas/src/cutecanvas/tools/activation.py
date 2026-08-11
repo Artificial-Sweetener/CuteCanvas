@@ -26,6 +26,7 @@ from qpane.sdk.vector import VectorShapeKind
 
 from ..coverage import CoverageCombineMode
 from ..coverage.canvas_aperture import CoverageCanvasAperture
+from ..edit_sessions import EditSessionKind
 from ..editor import EditorOperation
 from ..painting.tools.clone_feedback import CloneStampFeedbackProjector
 from ..selection.translation_interaction import PixelSelectionTranslationInteraction
@@ -130,7 +131,9 @@ def build_editor_tool_ports(
         begin=shared_edge.begin,
         update=shared_edge.update,
         finish=shared_edge.finish,
+        apply=shared_edge.apply,
         cancel=shared_edge.cancel,
+        suspend=shared_edge.suspend,
     )
     painting = qpane.paintingCoordinator()
     paint_destination = qpane.interactivePaintDestination()
@@ -181,6 +184,9 @@ def build_editor_tool_ports(
             cancel=selection_translation.cancel,
             suspend=selection_translation.suspend,
         ),
+        edit_sessions=qpane.editSessionCoordinator(),
+        edit_session_kind=EditSessionKind.POLYGON_SELECTION,
+        edit_session_tool_mode="select-polygon",
     )
     coverage_shape_port = PixelSelectionInteractionPort(
         panel_to_scene_point=mask_coordinates.panel_to_source,
@@ -196,6 +202,9 @@ def build_editor_tool_ports(
         constrain_coverage_item=mask_shape_aperture.constrain_item,
         coverage_item_to_panel_path=mask_shape_aperture.item_panel_path,
         snapping=authoring_snap_port,
+        edit_sessions=qpane.editSessionCoordinator(),
+        edit_session_kind=EditSessionKind.POLYGON_MASK,
+        edit_session_tool_mode="mask-polygon",
     )
     painting_port = PaintingInteractionPort(
         is_alt_held=is_alt_held,

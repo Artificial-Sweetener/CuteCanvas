@@ -190,6 +190,45 @@ and redo, `CloneStampFacade` configures retouching, and
 Handles keep stable IDs and read current state from the canvas. They do not
 cache a second mutable document model.
 
+### Bounded tool edit sessions
+
+Transform, shared-edge resize, polygon selection, and polygon mask tools keep
+their provisional checkpoints inside one active edit session. Unified editor
+Undo and Redo stay within that session until it is applied or cancelled, then
+return to the composition's durable history.
+
+- `EditSessionKind` identifies transform, shared-edge, polygon-selection, and
+  polygon-mask sessions.
+- `EditSessionHistory` declares whether a tool provides bounded provisional
+  checkpoints.
+- `EditSessionUndoBoundary` chooses whether Undo stops at the session base or
+  cancels the session there.
+- `EditSessionToolChange` chooses whether a persistent tool change requires
+  resolution, applies the active session, or cancels it.
+- `ToolEditSessionDeclaration` attaches session behavior to a tool.
+- `EditorToolDescriptor` reports a registered mode and its optional session
+  declaration.
+- `EditSessionPolicy` sets the checkpoint limit, Undo boundary, and persistent
+  tool-change behavior.
+- `EditSessionSnapshot` reports the active session identity, kind, gesture
+  state, available actions, labels, and Undo/Redo depths.
+- `CuteCanvas.toolDescriptor()` reports one registered tool without constructing
+  it; `CuteCanvas.toolDescriptors()` reports every registered tool.
+- `CuteCanvas.activeEditSession()` returns the unresolved session or `None`.
+- `CuteCanvas.editSessionPolicy()` returns the current session policy;
+  `CuteCanvas.setEditSessionPolicy()` replaces it.
+- `CuteCanvas.editorUndoAvailable()` reports whether Undo can act at the active
+  session or durable-history boundary.
+- `CuteCanvas.editorRedoAvailable()` reports whether Redo can act at the active
+  session or durable-history boundary.
+- `CuteCanvas.undoEditorEdit()` and `CuteCanvas.redoEditorEdit()` route through
+  provisional session history before durable composition history.
+- `CuteCanvas.applyActiveEditSession()` commits the provisional result as one
+  durable edit; `CuteCanvas.cancelActiveEditSession()` restores the immutable
+  session base.
+- `CuteCanvas.editSessionChanged` emits the current `EditSessionSnapshot` or
+  `None` whenever the bounded session state changes.
+
 ### Detached document persistence
 
 `CompositionPersistenceFacade.capture_document()` captures every independent
