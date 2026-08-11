@@ -32,6 +32,8 @@ from .bilinear_coordinates import (
     inverse_bilinear_source_row,
 )
 
+_PROJECTION_ROW_CHUNK = 128
+
 
 def project_bilinear_coverage(
     snapshot: CoverageSnapshot,
@@ -71,11 +73,18 @@ def project_bilinear_coverage(
     )
     if target_left >= target_right or target_top >= target_bottom:
         return result
-    scene_x = canvas_x + np.arange(target_left, target_right, dtype=np.float64) + 0.5
+    scene_x = (
+        canvas_x + np.arange(target_left, target_right, dtype=np.float64)[None, :] + 0.5
+    )
+    relative_x = scene_x - apex.x()
     source = mapping.source_boundary
-    for target_y in range(target_top, target_bottom):
-        scene_y = canvas_y + target_y + 0.5
-        relative_x = scene_x - apex.x()
+    for chunk_top in range(target_top, target_bottom, _PROJECTION_ROW_CHUNK):
+        chunk_bottom = min(target_bottom, chunk_top + _PROJECTION_ROW_CHUNK)
+        scene_y = (
+            canvas_y
+            + np.arange(chunk_top, chunk_bottom, dtype=np.float64)[:, None]
+            + 0.5
+        )
         relative_y = scene_y - apex.y()
         left_weight = (relative_x * right.y() - relative_y * right.x()) / determinant
         right_weight = (left.x() * relative_y - left.y() * relative_x) / determinant
@@ -95,7 +104,7 @@ def project_bilinear_coverage(
             & (pixel_y < bounds.height)
         )
         if np.any(valid):
-            destination = result[target_y, target_left:target_right]
+            destination = result[chunk_top:chunk_bottom, target_left:target_right]
             destination[valid] = snapshot.pixels[pixel_y[valid], pixel_x[valid]]
     return result
 

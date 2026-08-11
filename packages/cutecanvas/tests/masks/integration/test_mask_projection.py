@@ -27,10 +27,11 @@ from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.projection import (
     MaskCanvasProjectionService,
+    project_mask_coverage_to_scene,
     project_mask_snapshot,
 )
 from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import (
@@ -41,6 +42,7 @@ from qpane.scene.model import (
     SceneKind,
 )
 from qpane.scene.raster import RasterBounds
+from qpane.sdk.scene import BilinearLayerTransform
 
 
 def _descriptor(
@@ -110,6 +112,47 @@ def test_projection_applies_layer_translation_before_canvas_clipping() -> None:
 
     assert projected[0, 3] == 255
     assert projected.sum() == 255
+
+
+def test_bilinear_scene_projection_preserves_canonical_triangle_sampling() -> None:
+    """Joined-edge projection must preserve exact canonical nearest samples."""
+    bounds = RasterBounds(0, 0, 4, 4)
+    snapshot = CoverageSnapshot(
+        bounds,
+        RasterExtentPolicy.FIXED,
+        np.arange(1, 17, dtype=np.uint8).reshape(4, 4),
+    )
+    mapping = BilinearLayerTransform(
+        (
+            QPointF(0.0, 0.0),
+            QPointF(4.0, 0.0),
+            QPointF(4.0, 4.0),
+            QPointF(0.0, 4.0),
+        ),
+        (
+            QPointF(4.0, 0.0),
+            QPointF(4.0, 0.0),
+            QPointF(4.0, 4.0),
+            QPointF(0.0, 4.0),
+        ),
+    )
+
+    projected = project_mask_coverage_to_scene(snapshot, mapping)
+
+    assert projected is not None
+    assert projected.bounds == bounds
+    np.testing.assert_array_equal(
+        projected.pixels,
+        np.array(
+            (
+                (0, 0, 0, 1),
+                (0, 0, 5, 7),
+                (0, 9, 10, 12),
+                (13, 14, 15, 16),
+            ),
+            dtype=np.uint8,
+        ),
+    )
 
 
 def test_generated_canvas_mask_uses_infinite_default_and_obeys_fixed_policy() -> None:
