@@ -150,7 +150,7 @@ def main() -> None:
             raise RuntimeError("mask pixels were not presented")
         if not harness.wait_for_mask_render_idle(timeout_ms=20_000):
             raise RuntimeError("mask rendering did not settle")
-        if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
+        if not harness.wait_for_sampled_render_idle(timeout_ms=20_000):
             raise RuntimeError("sampled refinement did not settle")
         if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
             raise RuntimeError("raster refinement did not settle")
