@@ -39,7 +39,7 @@ from cutecanvas_test_support.harness.abuse_model import (
 from cutecanvas_test_support.harness.abuse_runner import MaskAbuseRunner
 from cutecanvas_test_support.harness.timing import INTERACTIVE_PERFORMANCE
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QCursor, QEnterEvent, QImage, QMouseEvent
+from PySide6.QtGui import QCursor, QEnterEvent, QImage, QMouseEvent, QPainter, QPen
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from qpane.scene.model import LayerKind
@@ -1465,17 +1465,6 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
         mask_count=1,
         brush_size=40,
     )
-    driver = QtStrokeDriver(harness)
-    retained_stroke = StrokeAction(
-        PointerKind.MOUSE,
-        points=(HarnessPoint(120, 160), HarnessPoint(180, 160)),
-        brush_size=40,
-    )
-    removed_stroke = StrokeAction(
-        PointerKind.MOUSE,
-        points=(HarnessPoint(320, 340), HarnessPoint(380, 340)),
-        brush_size=40,
-    )
     service = harness.viewer.mask_service
     assert service is not None
     controller = service.controller
@@ -1490,14 +1479,32 @@ def test_undo_never_presents_a_frame_without_the_retained_mask_pixels(
         if zoom_mode == "one-to-one":
             harness.viewer.setZoom1To1(QPoint(250, 250))
             harness.drain_events(wait_ms=10)
-        for expected_depth, stroke, probe_point in (
-            (1, retained_stroke, retained_point),
-            (2, removed_stroke, removed_point),
+        mask_image = QImage(QSize(2048, 2048), QImage.Format.Format_ARGB32)
+        mask_image.fill(Qt.GlobalColor.black)
+        sample_radius = max(2, round(24.0 / harness.viewer.currentZoom()))
+        for expected_depth, probe_point in (
+            (1, retained_point),
+            (2, removed_point),
         ):
-            driver.begin(stroke)
-            driver.move(stroke, 1)
-            driver.end(stroke)
-            assert harness.wait_for_mask_undo_depth(mask_id, expected_depth)
+            hit = harness.viewer.panelHitTest(probe_point)
+            assert hit is not None
+            assert hit.inside_image
+            sample = hit.clamped_point
+            painter = QPainter(mask_image)
+            painter.setPen(
+                QPen(
+                    Qt.GlobalColor.white,
+                    sample_radius * 2,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                )
+            )
+            painter.drawPoint(sample)
+            painter.end()
+            assert harness.viewer.replaceMaskImage(mask_id, mask_image)
+            state = harness.viewer.getMaskUndoState(mask_id)
+            assert state is not None
+            assert state.undo_depth == expected_depth
             tint = harness.wait_for_mask_tint(probe_point)
             assert tint.latency_ms is not None
             harness.drain_events(wait_ms=5)
