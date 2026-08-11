@@ -57,7 +57,6 @@ class _SpatialPaintProjectionKey:
     composition_id: uuid.UUID
     layer_id: uuid.UUID
     coverage_revision: tuple[int, int]
-    source_revision: object
     transform: BilinearLayerTransform | PiecewiseLayerTransform
 
 
@@ -251,7 +250,6 @@ class MaskSpatialPaintNormalizer:
                 composition_id,
                 layer.layer_id,
                 asset.coverage.revision,
-                layer.source_revision,
                 transform,
             ),
         )

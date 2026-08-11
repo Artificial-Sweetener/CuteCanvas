@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
@@ -84,6 +86,14 @@ def test_prepared_vector_mask_erase_stays_within_interactive_budget(
         ):
             qapp.processEvents()
         assert viewer.mask_service.stroke_interactions.paint_target_ready(layer)
+        if finite_mapping:
+            refreshed_layer = replace(
+                layer,
+                source_revision=layer.source_revision + 1,
+            )
+            assert viewer.mask_service.stroke_interactions.paint_target_ready(
+                refreshed_layer
+            )
         panel_point = viewer.view().scene_to_panel_point(QPointF(900.0, 800.0))
         assert panel_point is not None
 
