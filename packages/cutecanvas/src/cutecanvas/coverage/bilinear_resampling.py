@@ -32,7 +32,9 @@ from .bilinear_coordinates import (
     inverse_bilinear_source_row,
 )
 
-_PROJECTION_ROW_CHUNK = 8
+_PROJECTION_WORKING_SET_BYTES = 96 * 1024 * 1024
+_PROJECTION_FLOAT_ARRAY_COUNT = 7
+_MAXIMUM_PROJECTION_ROWS = 2048
 
 
 def project_bilinear_coverage(
@@ -78,24 +80,49 @@ def project_bilinear_coverage(
     )
     relative_x = scene_x - apex.x()
     source = mapping.source_boundary
-    for chunk_top in range(target_top, target_bottom, _PROJECTION_ROW_CHUNK):
-        chunk_bottom = min(target_bottom, chunk_top + _PROJECTION_ROW_CHUNK)
+    row_chunk = _projection_row_chunk(target_right - target_left)
+    for chunk_top in range(target_top, target_bottom, row_chunk):
+        chunk_bottom = min(target_bottom, chunk_top + row_chunk)
+        chunk_shape = (chunk_bottom - chunk_top, target_right - target_left)
         scene_y = (
             canvas_y
             + np.arange(chunk_top, chunk_bottom, dtype=np.float64)[:, None]
             + 0.5
         )
         relative_y = scene_y - apex.y()
-        left_weight = (relative_x * right.y() - relative_y * right.x()) / determinant
-        right_weight = (left.x() * relative_y - left.y() * relative_x) / determinant
-        v = left_weight + right_weight
-        valid = (left_weight >= 0.0) & (right_weight >= 0.0) & (v <= 1.0) & (v > 1e-12)
+        working = np.empty(chunk_shape, dtype=np.float64)
+        v = np.empty_like(working)
+        np.multiply(relative_x, right.y() - left.y(), out=v)
+        np.multiply(relative_y, left.x() - right.x(), out=working)
+        v += working
+        v /= determinant
+        u = np.empty_like(working)
+        np.multiply(relative_y, left.x(), out=u)
+        np.multiply(relative_x, left.y(), out=working)
+        u -= working
+        u /= determinant
+        valid = (v <= 1.0) & (v > 1e-12) & (u >= 0.0)
+        np.subtract(v, u, out=working)
+        valid &= working >= 0.0
         if not np.any(valid):
             continue
-        u = np.zeros_like(v)
-        np.divide(right_weight, v, out=u, where=valid)
-        source_x, source_y = bilinear_coordinates(source, u, v)
+        np.divide(u, v, out=u, where=valid)
+        u[~valid] = 0.0
+        np.clip(u, 0.0, 1.0, out=u)
+        source_x = _bilinear_coordinate(
+            tuple(point.x() for point in source),
+            u,
+            v,
+            working,
+        )
         pixel_x = np.floor(source_x).astype(np.int64) - bounds.x
+        del source_x
+        source_y = _bilinear_coordinate(
+            tuple(point.y() for point in source),
+            u,
+            v,
+            working,
+        )
         pixel_y = np.floor(source_y).astype(np.int64) - bounds.y
         valid &= (
             (pixel_x >= 0)
@@ -107,6 +134,38 @@ def project_bilinear_coverage(
             destination = result[chunk_top:chunk_bottom, target_left:target_right]
             destination[valid] = snapshot.pixels[pixel_y[valid], pixel_x[valid]]
     return result
+
+
+def _bilinear_coordinate(
+    values: tuple[float, float, float, float],
+    u: np.ndarray,
+    v: np.ndarray,
+    working: np.ndarray,
+) -> np.ndarray:
+    """Evaluate one bilinear coordinate while reusing bounded scratch storage."""
+    first, second, third, fourth = values
+    result = np.empty_like(u)
+    np.multiply(u, second - first, out=result)
+    result += first
+    np.multiply(v, fourth - first, out=working)
+    result += working
+    np.multiply(u, v, out=working)
+    working *= first - second - fourth + third
+    result += working
+    return result
+
+
+def _projection_row_chunk(width: int) -> int:
+    """Choose a wide vector batch without exceeding the working-set target."""
+    row_bytes = max(1, width) * np.dtype(np.float64).itemsize
+    estimated_row_bytes = row_bytes * _PROJECTION_FLOAT_ARRAY_COUNT
+    return max(
+        1,
+        min(
+            _MAXIMUM_PROJECTION_ROWS,
+            _PROJECTION_WORKING_SET_BYTES // estimated_row_bytes,
+        ),
+    )
 
 
 def project_scene_coverage_to_bilinear_layer(

@@ -23,6 +23,7 @@ from math import ceil
 from time import perf_counter, thread_time
 
 import pytest
+from PySide6.QtCore import QEventLoop, QTimer
 
 INTERACTIVE_PERFORMANCE = pytest.mark.interactive_performance
 
@@ -37,6 +38,48 @@ def interaction_clock() -> float:
 def completion_clock() -> float:
     """Return a monotonic wall clock for bounded asynchronous waits."""
     return perf_counter()
+
+
+def wait_for_qt_condition(
+    predicate: Callable[[], bool],
+    *,
+    timeout_seconds: float,
+) -> bool:
+    """Run Qt's event loop until a worker-visible condition or deadline wins."""
+    if timeout_seconds <= 0.0:
+        raise ValueError("timeout_seconds must be positive")
+    if predicate():
+        return True
+    loop = QEventLoop()
+    poll = QTimer()
+    deadline = QTimer()
+    deadline.setSingleShot(True)
+
+    def inspect() -> None:
+        """Quit once the observed condition resolves."""
+        if predicate():
+            loop.quit()
+
+    poll.setInterval(1)
+    poll.timeout.connect(inspect)
+    deadline.timeout.connect(loop.quit)
+    poll.start()
+    deadline.start(ceil(timeout_seconds * 1000.0))
+    loop.exec()
+    poll.stop()
+    deadline.stop()
+    return predicate()
+
+
+def run_qt_event_loop_for(*, duration_seconds: float) -> None:
+    """Advance native Qt delivery for a bounded duration without starving workers."""
+    if duration_seconds < 0.0:
+        raise ValueError("duration_seconds must not be negative")
+    if duration_seconds == 0.0:
+        return
+    loop = QEventLoop()
+    QTimer.singleShot(max(1, ceil(duration_seconds * 1000.0)), loop.quit)
+    loop.exec()
 
 
 def absolute_latency_assertions_are_isolated() -> bool:

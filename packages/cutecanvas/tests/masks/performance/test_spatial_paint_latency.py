@@ -23,8 +23,8 @@ import pytest
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
     INTERACTIVE_PERFORMANCE,
-    completion_clock,
     interaction_clock,
+    wait_for_qt_condition,
 )
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtTest import QTest
@@ -79,14 +79,10 @@ def test_prepared_vector_mask_erase_stays_within_interactive_budget(
             for candidate in scene.layers
             if candidate.layer_id == entry.layer_id
         )
-        deadline = completion_clock() + _PREPARATION_TIMEOUT_SECONDS
-        while (
-            not viewer.mask_service.stroke_interactions.paint_target_ready(layer)
-            and completion_clock() < deadline
-        ):
-            qapp.processEvents()
-            QTest.qWait(1)
-        assert viewer.mask_service.stroke_interactions.paint_target_ready(layer)
+        assert wait_for_qt_condition(
+            lambda: viewer.mask_service.stroke_interactions.paint_target_ready(layer),
+            timeout_seconds=_PREPARATION_TIMEOUT_SECONDS,
+        )
         if finite_mapping:
             refreshed_layer = replace(
                 layer,

@@ -22,7 +22,7 @@ from dataclasses import replace
 import pytest
 from cutecanvas import CuteCanvas
 from cutecanvas.resources import ProjectResourceReference
-from cutecanvas_test_support.harness.timing import completion_clock
+from cutecanvas_test_support.harness.timing import wait_for_qt_condition
 from cutecanvas_test_support.render_compare import (
     assert_images_match,
     checker_image,
@@ -742,12 +742,10 @@ def test_direct_pan_release_atomically_replaces_a_repaired_ring_frame(qapp) -> N
         assert not renderer._surface.storage_origin.isNull()
 
         presenter.finish_navigation_interaction()
-        deadline = completion_clock() + 3.0
-        while presenter.navigation_refinement_pending and completion_clock() < deadline:
-            qapp.processEvents()
-            QTest.qWait(1)
-
-        assert not presenter.navigation_refinement_pending
+        assert wait_for_qt_condition(
+            lambda: not presenter.navigation_refinement_pending,
+            timeout_seconds=3.0,
+        )
         after_refinement = renderer.navigation_refinement_metrics()
         assert (
             after_refinement.completed_frames == before_refinement.completed_frames + 1
@@ -787,12 +785,10 @@ def test_sampled_product_transition_stages_one_complete_guarded_frame(qapp) -> N
         presenter._handle_render_refinement_ready()
         assert presenter.navigation_refinement_pending
 
-        deadline = completion_clock() + 3.0
-        while presenter.navigation_refinement_pending and completion_clock() < deadline:
-            qapp.processEvents()
-            QTest.qWait(1)
-
-        assert not presenter.navigation_refinement_pending
+        assert wait_for_qt_condition(
+            lambda: not presenter.navigation_refinement_pending,
+            timeout_seconds=3.0,
+        )
         after_renderer = renderer.snapshot_metrics()
         after_refinement = renderer.navigation_refinement_metrics()
         assert (
@@ -923,12 +919,10 @@ def test_settled_zoom_builds_exact_frame_in_bounded_atomic_slices(qapp) -> None:
 
         qpane.applyZoom(1.5, QPointF(qpane.rect().center()))
         QTest.qWait(70)
-        deadline = completion_clock() + 3.0
-        while presenter.navigation_refinement_pending and completion_clock() < deadline:
-            qapp.processEvents()
-            QTest.qWait(1)
-
-        assert not presenter.navigation_refinement_pending
+        assert wait_for_qt_condition(
+            lambda: not presenter.navigation_refinement_pending,
+            timeout_seconds=3.0,
+        )
         staged = renderer.navigation_refinement_metrics()
         after = renderer.snapshot_metrics()
         assert staged.completed_frames == 1

@@ -29,11 +29,12 @@ from types import MethodType, TracebackType
 from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 from qpane.scene.model import LayerKind
 from qpane.scene.render_plan import SceneRenderPlan
 from typing_extensions import Self
+
+from .timing import run_qt_event_loop_for, wait_for_qt_condition
 
 _ASYNC_SETTLE_TIMEOUT_MS = 15_000
 
@@ -299,12 +300,11 @@ class MountedQPaneHarness:
                 self.wait_for_background(center, timeout_ms=3000).latency_ms is not None
             )
         else:
-            deadline = time.perf_counter() + 3.0
             renderer = self.viewer.view().presenter.renderer
-            while not renderer.has_base_buffer() and time.perf_counter() < deadline:
-                self.qapp.processEvents()
-                QTest.qWait(1)
-            ready = renderer.has_base_buffer()
+            ready = wait_for_qt_condition(
+                renderer.has_base_buffer,
+                timeout_seconds=3.0,
+            )
         if not ready:
             self.close()
             raise RuntimeError(
@@ -338,7 +338,7 @@ class MountedQPaneHarness:
         """Process queued Qt work and optionally allow timers to advance."""
         self.qapp.processEvents()
         if wait_ms > 0:
-            QTest.qWait(wait_ms)
+            run_qt_event_loop_for(duration_seconds=wait_ms / 1000.0)
             self.qapp.processEvents()
 
     def capture(self) -> QImage:
@@ -396,15 +396,13 @@ class MountedQPaneHarness:
         timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
     ) -> bool:
         """Wait until production mask rendering can no longer change the frame."""
-        deadline = time.perf_counter() + timeout_ms / 1000.0
-        while time.perf_counter() < deadline:
-            self.qapp.processEvents()
+
+        def render_is_idle() -> bool:
+            """Return whether all mask rendering work has settled."""
             service = getattr(self.viewer, "mask_service", None)
-            if service is not None and not service.hasPendingRenderWork():
-                self.qapp.processEvents()
-                return True
-            QTest.qWait(1)
-        return False
+            return service is not None and not service.hasPendingRenderWork()
+
+        return self._wait_for_continuous_idle(render_is_idle, timeout_ms=timeout_ms)
 
     def wait_for_render_refinement_idle(
         self,
@@ -413,26 +411,21 @@ class MountedQPaneHarness:
         include_prefetch: bool = False,
     ) -> bool:
         """Wait until sampled and navigation refinement both remain quiescent."""
-        deadline = time.perf_counter() + timeout_ms / 1000.0
-        idle_since: float | None = None
-        while time.perf_counter() < deadline:
-            self.qapp.processEvents()
+
+        def refinement_is_idle() -> bool:
+            """Return whether all requested refinement work has settled."""
             presenter = self.viewer.view().presenter
             coordinator = presenter._render_refinement
-            idle = (
+            return (
                 coordinator.pending_count == 0
                 and not presenter.navigation_refinement_pending
                 and (not include_prefetch or not coordinator.prefetch_pending)
             )
-            now = time.perf_counter()
-            idle_since = now if idle and idle_since is None else idle_since
-            if not idle:
-                idle_since = None
-            if idle_since is not None and now - idle_since >= 0.025:
-                self.qapp.processEvents()
-                return True
-            QTest.qWait(1)
-        return False
+
+        return self._wait_for_continuous_idle(
+            refinement_is_idle,
+            timeout_ms=timeout_ms,
+        )
 
     def wait_for_sampled_render_idle(
         self,
@@ -441,23 +434,18 @@ class MountedQPaneHarness:
         include_prefetch: bool = False,
     ) -> bool:
         """Wait until sampled source refinement reaches continuous quiescence."""
-        deadline = time.perf_counter() + timeout_ms / 1000.0
-        idle_since: float | None = None
-        while time.perf_counter() < deadline:
-            self.qapp.processEvents()
+
+        def sampled_render_is_idle() -> bool:
+            """Return whether sampled-source refinement has settled."""
             coordinator = self.viewer.view().presenter._render_refinement
-            idle = coordinator.pending_count == 0 and (
+            return coordinator.pending_count == 0 and (
                 not include_prefetch or not coordinator.prefetch_pending
             )
-            now = time.perf_counter()
-            idle_since = now if idle and idle_since is None else idle_since
-            if not idle:
-                idle_since = None
-            if idle_since is not None and now - idle_since >= 0.025:
-                self.qapp.processEvents()
-                return True
-            QTest.qWait(1)
-        return False
+
+        return self._wait_for_continuous_idle(
+            sampled_render_is_idle,
+            timeout_ms=timeout_ms,
+        )
 
     def wait_for_raster_render_idle(
         self,
@@ -465,26 +453,53 @@ class MountedQPaneHarness:
         timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
     ) -> bool:
         """Wait through pyramid completion and a continuous queued-event quiescence."""
-        deadline = time.perf_counter() + timeout_ms / 1000.0
-        idle_since: float | None = None
-        while time.perf_counter() < deadline:
-            self.qapp.processEvents()
+
+        def raster_render_is_idle() -> bool:
+            """Return whether pyramid and tile work has settled."""
             pyramids = self.viewer.view()._pyramid_manager
             tile_metrics = self.viewer.view().tile_manager.snapshot_metrics()
-            idle = (
+            return (
                 not pyramids.pending_asset_keys()
                 and not pyramids.pending_retry_asset_keys()
                 and tile_metrics.active_jobs == 0
                 and tile_metrics.pending_retries == 0
             )
-            now = time.perf_counter()
-            idle_since = now if idle and idle_since is None else idle_since
-            if not idle:
-                idle_since = None
-            if idle_since is not None and now - idle_since >= 0.025:
-                self.qapp.processEvents()
+
+        return self._wait_for_continuous_idle(
+            raster_render_is_idle,
+            timeout_ms=timeout_ms,
+        )
+
+    def _wait_for_continuous_idle(
+        self,
+        is_idle: Callable[[], bool],
+        *,
+        timeout_ms: int,
+    ) -> bool:
+        """Require an asynchronous subsystem to remain idle across Qt events."""
+        deadline = time.perf_counter() + timeout_ms / 1000.0
+
+        while (remaining := deadline - time.perf_counter()) > 0.0:
+            idle_since: float | None = None
+
+            def remained_idle() -> bool:
+                """Track continuous quiescence while the native event loop advances."""
+                nonlocal idle_since
+                idle = is_idle()
+                now = time.perf_counter()
+                idle_since = now if idle and idle_since is None else idle_since
+                if not idle:
+                    idle_since = None
+                return idle_since is not None and now - idle_since >= 0.025
+
+            if not wait_for_qt_condition(
+                remained_idle,
+                timeout_seconds=remaining,
+            ):
+                return False
+            self.qapp.processEvents()
+            if is_idle():
                 return True
-            QTest.qWait(1)
         return False
 
     def wait_for_mask_undo_depth(
@@ -495,14 +510,16 @@ class MountedQPaneHarness:
         timeout_ms: int = _ASYNC_SETTLE_TIMEOUT_MS,
     ) -> bool:
         """Wait until durable mask history reaches ``expected_depth``."""
-        deadline = time.perf_counter() + timeout_ms / 1000.0
-        while time.perf_counter() < deadline:
-            self.qapp.processEvents()
+
+        def history_reached_depth() -> bool:
+            """Return whether durable mask history reached the expected depth."""
             state = self.viewer.getMaskUndoState(mask_id)
-            if state is not None and state.undo_depth == expected_depth:
-                return True
-            QTest.qWait(1)
-        return False
+            return state is not None and state.undo_depth == expected_depth
+
+        return wait_for_qt_condition(
+            history_reached_depth,
+            timeout_seconds=timeout_ms / 1000.0,
+        )
 
     def save_capture(self, path: Path) -> None:
         """Save the current composited widget image or raise on failure."""
@@ -541,18 +558,22 @@ class MountedQPaneHarness:
     ) -> PixelMeasurement:
         """Poll real widget pixels until ``predicate`` accepts the sample."""
         started_at = time.perf_counter()
-        deadline = started_at + timeout_ms / 1000.0
         color = QColor()
-        while time.perf_counter() < deadline:
-            self.qapp.processEvents()
+
+        def pixel_matches() -> bool:
+            """Capture the current widget pixel and evaluate the observation."""
+            nonlocal color
             color = self.viewer.grab().toImage().pixelColor(point)
-            if predicate(color):
-                return PixelMeasurement(
-                    latency_ms=(time.perf_counter() - started_at) * 1000.0,
-                    color=color,
-                )
-            QTest.qWait(1)
-        return PixelMeasurement(latency_ms=None, color=color)
+            return predicate(color)
+
+        matched = wait_for_qt_condition(
+            pixel_matches,
+            timeout_seconds=timeout_ms / 1000.0,
+        )
+        return PixelMeasurement(
+            latency_ms=(time.perf_counter() - started_at) * 1000.0 if matched else None,
+            color=color,
+        )
 
     def diagnostics_rows(self) -> tuple[tuple[str, str], ...]:
         """Collect the pane's supported diagnostics as serializable rows."""

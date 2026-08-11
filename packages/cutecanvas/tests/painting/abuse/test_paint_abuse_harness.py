@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import statistics
-import time
 
 import numpy as np
 from cutecanvas import (
@@ -33,6 +32,7 @@ from cutecanvas_test_support.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
     stable_latency_samples,
+    wait_for_qt_condition,
 )
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QTransform
@@ -578,17 +578,17 @@ def test_empty_composition_mask_paint_is_responsive_and_exact(
             qapp.processEvents()
             latencies.append((interaction_clock() - started) * 1000.0)
         QTest.mouseRelease(viewer, Qt.LeftButton, Qt.NoModifier, final)
-        deadline = time.monotonic() + 3.0
-        while time.monotonic() < deadline:
-            qapp.processEvents()
+
+        def paint_committed() -> bool:
+            """Return whether the durable edit and derived mask render settled."""
             undo_state = viewer.getMaskUndoState(mask_id)
-            if (
+            return bool(
                 undo_state is not None
                 and undo_state.undo_depth == 1
                 and not viewer.mask_service.hasPendingRenderWork()
-            ):
-                break
-            QTest.qWait(1)
+            )
+
+        assert wait_for_qt_condition(paint_committed, timeout_seconds=3.0)
         undo_state = viewer.getMaskUndoState(mask_id)
         assert undo_state is not None and undo_state.undo_depth == 1
 
