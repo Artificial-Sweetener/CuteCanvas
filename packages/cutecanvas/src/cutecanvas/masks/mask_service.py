@@ -54,8 +54,8 @@ from .render_coordination import (
 )
 from .spatial_paint import MaskSpatialPaintNormalizer
 from .spatial_paint_history import MaskSpatialPaintHistory
-from .stroke_interactions import MaskStrokeInteractionCoordinator
 from .status_diagnostics import MaskStatusDiagnostics
+from .stroke_interactions import MaskStrokeInteractionCoordinator
 from .strokes import MaskStrokeDebugSnapshot, MaskStrokePipeline
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
