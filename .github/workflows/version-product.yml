@@ -11,6 +11,11 @@ on:
         description: Semantic bump used to establish the first product tag
         required: true
         type: string
+      release_initial:
+        description: Allow publication before this product has a release tag
+        required: false
+        default: true
+        type: boolean
       legacy_anchor:
         description: Existing legacy tag used as the first lineage anchor
         required: false
@@ -84,13 +89,16 @@ jobs:
         env:
           PRODUCT: ${{ inputs.product }}
           LEGACY_ANCHOR: ${{ inputs.legacy_anchor }}
+          RELEASE_INITIAL: ${{ inputs.release_initial }}
         run: |
           remote_tags="$(git ls-remote --tags origin "refs/tags/${PRODUCT}-v*")"
           if [ -n "$remote_tags" ]; then
             echo "initial=false" >> "$GITHUB_OUTPUT"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "initial=true" >> "$GITHUB_OUTPUT"
-            if [ -n "$LEGACY_ANCHOR" ]; then
+            echo "enabled=$RELEASE_INITIAL" >> "$GITHUB_OUTPUT"
+            if [ "$RELEASE_INITIAL" = "true" ] && [ -n "$LEGACY_ANCHOR" ]; then
               git rev-parse --verify "refs/tags/$LEGACY_ANCHOR"
               git tag "${PRODUCT}-${LEGACY_ANCHOR}" "$LEGACY_ANCHOR"
             fi
@@ -99,6 +107,7 @@ jobs:
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
 
       - name: Create the semantic release commit and product tag
+        if: steps.lineage.outputs.enabled == 'true'
         shell: bash
         working-directory: packages/${{ inputs.product }}
         env:

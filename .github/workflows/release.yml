@@ -23,6 +23,7 @@ jobs:
     with:
       product: ferrastra
       first_bump: "minor"
+      release_initial: false
       expected_head: ${{ github.sha }}
     secrets: inherit
 
@@ -32,6 +33,7 @@ jobs:
     with:
       product: qpane
       first_bump: "major"
+      release_initial: true
       legacy_anchor: "v2.1.1"
       cascade_patch: ${{ needs.version-ferrastra.outputs.released == 'true' }}
       expected_head: ${{ needs.version-ferrastra.outputs.head_sha }}
@@ -43,6 +45,7 @@ jobs:
     with:
       product: cutecanvas
       first_bump: "major"
+      release_initial: true
       cascade_patch: ${{ needs.version-qpane.outputs.released == 'true' }}
       expected_head: ${{ needs.version-qpane.outputs.head_sha }}
     secrets: inherit

@@ -41,6 +41,29 @@ def test_main_push_versions_the_complete_waterfall_before_publication() -> None:
     assert workflow.count('first_bump: "major"') == 2
 
 
+def test_release_waits_for_ferrastras_explicit_initial_publication() -> None:
+    """Keep the native package private until its first release is admitted."""
+    release = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
+    ferrastra = release[
+        release.index("  version-ferrastra:") : release.index("  version-qpane:")
+    ]
+    qpane = release[
+        release.index("  version-qpane:") : release.index("  version-cutecanvas:")
+    ]
+    cutecanvas = release[
+        release.index("  version-cutecanvas:") : release.index("  publish-ferrastra:")
+    ]
+    version = (
+        repository_root() / ".github/workflows/version-product.yml"
+    ).read_text("utf-8")
+
+    assert "release_initial: false" in ferrastra
+    assert "release_initial: true" in qpane
+    assert "release_initial: true" in cutecanvas
+    assert "release_initial:" in version
+    assert "if: steps.lineage.outputs.enabled == 'true'" in version
+
+
 def test_upstream_releases_force_downstream_patch_waterfalls() -> None:
     """Cascade Ferrastra through QPane and every QPane release through CuteCanvas."""
     workflow = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
