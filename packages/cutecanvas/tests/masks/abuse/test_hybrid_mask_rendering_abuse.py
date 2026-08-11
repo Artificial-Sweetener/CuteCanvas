@@ -777,7 +777,7 @@ def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
     assert tail_interaction_latency_ms(zoom_latencies) < 25.0
     assert result["scroll_attempts"] >= 29
     assert result["scroll_hits"] >= result["scroll_attempts"]
-    assert result["scroll_misses"] == 0
+    assert result["scroll_misses"] == 0, result["miss_frame_indices"]
     assert result["scroll_repairs"] >= 8
     redraws = {
         "pan": result["pan_full_redraws"],

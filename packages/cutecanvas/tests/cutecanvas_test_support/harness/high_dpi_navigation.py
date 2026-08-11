@@ -45,11 +45,13 @@ class _PanMeasurements:
     """Collect real pointer-to-presentation latency across repeated gestures."""
 
     previous_repairs: int
+    previous_misses: int
     latencies_ms: list[float] = field(default_factory=list)
     input_latencies_ms: list[float] = field(default_factory=list)
     presentation_latencies_ms: list[float] = field(default_factory=list)
     renderer_latencies_ms: list[float] = field(default_factory=list)
     repair_frame_indices: list[int] = field(default_factory=list)
+    miss_frame_indices: list[int] = field(default_factory=list)
 
     def drive(
         self,
@@ -78,6 +80,9 @@ class _PanMeasurements:
                 if frame_metrics.scroll_repairs > self.previous_repairs:
                     self.repair_frame_indices.append(frame_index)
                     self.previous_repairs = frame_metrics.scroll_repairs
+                if frame_metrics.scroll_misses > self.previous_misses:
+                    self.miss_frame_indices.append(frame_index)
+                    self.previous_misses = frame_metrics.scroll_misses
         finally:
             release_position = positions[-1] if positions else origin
             QTest.mouseRelease(
@@ -143,11 +148,12 @@ def main() -> None:
         viewer.applyZoom(5.0, center)
         if harness.wait_for_mask_tint(center, timeout_ms=20_000).latency_ms is None:
             raise RuntimeError("mask pixels were not presented")
-        if (
-            absolute_latency_assertions_are_isolated()
-            and not harness.wait_for_mask_render_idle(timeout_ms=20_000)
-        ):
+        if not harness.wait_for_mask_render_idle(timeout_ms=20_000):
             raise RuntimeError("mask rendering did not settle")
+        if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
+            raise RuntimeError("sampled refinement did not settle")
+        if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
+            raise RuntimeError("raster refinement did not settle")
         _wait_for_navigation_settle(harness, "initial frame")
 
         physical = viewer.physicalViewportRect().size()
@@ -158,15 +164,25 @@ def main() -> None:
         if harness.wait_for_mask_tint(center, timeout_ms=20_000).latency_ms is None:
             raise RuntimeError("warm navigation baseline omitted mask pixels")
         metrics_before = renderer.snapshot_metrics()
-        pan_positions = tuple(
+        pan_lead_in = tuple(
+            center + QPoint(round(850.0 * step / 24.0), 0) for step in range(1, 25)
+        )
+        pan_orbit = tuple(
             center
             + QPoint(
                 round(math.cos(index * math.tau / 120.0) * 850.0),
                 round(math.sin(index * math.tau / 120.0) * 450.0),
             )
-            for index in range(240)
-        ) + (center,)
-        measurements = _PanMeasurements(metrics_before.scroll_repairs)
+            for index in range(241)
+        )
+        pan_lead_out = tuple(
+            center + QPoint(round(850.0 * step / 24.0), 0) for step in range(23, -1, -1)
+        )
+        pan_positions = pan_lead_in + pan_orbit + pan_lead_out
+        measurements = _PanMeasurements(
+            metrics_before.scroll_repairs,
+            metrics_before.scroll_misses,
+        )
         with harness.observe_renderer_paint_durations() as paint_probe:
             measurements.drive(viewer, app, center, pan_positions)
             _wait_for_navigation_settle(harness, "circular pan")
@@ -244,6 +260,7 @@ def main() -> None:
             "pan_presentation_latencies_ms": measurements.presentation_latencies_ms,
             "pan_renderer_latencies_ms": measurements.renderer_latencies_ms,
             "repair_frame_indices": measurements.repair_frame_indices,
+            "miss_frame_indices": measurements.miss_frame_indices,
             "zoom_latencies_ms": zoom_latencies,
             "renderer_paint_latencies_ms": paint_probe.durations_ms,
             "pan_renderer_paint_latencies_ms": (
