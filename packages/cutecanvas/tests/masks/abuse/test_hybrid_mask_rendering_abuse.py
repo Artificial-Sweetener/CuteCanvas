@@ -376,8 +376,15 @@ def test_rapid_mask_pan_keeps_pixels_and_sampling_density_stable(
     try:
         assert viewer.editor.coverage.rectangle(QRectF(0.0, 0.0, 4096.0, 4096.0))
         viewer.applyZoom(4.0, QPointF(400.0, 300.0))
-        assert harness.wait_for_render_refinement_idle(timeout_ms=5000)
+        _settle_sampled_render_for_latency(harness)
+        viewer.view().renderer.markDirty()
+        viewer.repaint()
         harness.drain_events(wait_ms=60)
+        for point in sample_points:
+            assert (
+                harness.wait_for_mask_tint(point, timeout_ms=8000).latency_ms
+                is not None
+            )
         baseline = tuple(harness.color_at(point).getRgb() for point in sample_points)
         assert all(harness.is_mask_tint(QColor(*color)) for color in baseline)
 

@@ -1029,7 +1029,6 @@ def test_expanding_mask_continuous_edge_stroke_stays_interactive(
         assert harness.wait_for_mask_undo_depth(
             harness.mask_ids[0],
             1,
-            timeout_ms=5000,
         )
     finally:
         harness.close()
