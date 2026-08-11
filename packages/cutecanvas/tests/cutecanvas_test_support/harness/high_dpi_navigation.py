@@ -201,7 +201,10 @@ def main() -> None:
             pan_paint_count = len(paint_probe.durations_ms)
 
             zoom_latencies: list[float] = []
-            for delta in (120, 120, -120, -120, 120, -120):
+            zoom_redraw_trace: list[dict[str, object]] = []
+            zoom_steps = (120, 120, -120, -120, 120, -120)
+            for index, delta in enumerate(zoom_steps):
+                redraws_before_step = renderer.snapshot_metrics().full_redraws
                 wheel = QWheelEvent(
                     QPointF(center),
                     QPointF(viewer.mapToGlobal(center)),
@@ -209,7 +212,11 @@ def main() -> None:
                     QPoint(0, delta),
                     Qt.NoButton,
                     Qt.NoModifier,
-                    Qt.ScrollPhase.ScrollUpdate,
+                    (
+                        Qt.ScrollPhase.ScrollBegin
+                        if index == 0
+                        else Qt.ScrollPhase.ScrollUpdate
+                    ),
                     False,
                 )
                 started = interaction_clock()
@@ -217,8 +224,38 @@ def main() -> None:
                 viewer.repaint()
                 app.processEvents()
                 zoom_latencies.append((interaction_clock() - started) * 1000.0)
+                zoom_redraw_trace.append(
+                    {
+                        "delta": delta,
+                        "zoom": viewer.currentZoom(),
+                        "full_redraws": (
+                            renderer.snapshot_metrics().full_redraws
+                            - redraws_before_step
+                        ),
+                    }
+                )
                 QTest.qWait(35)
+            redraws_before_end = renderer.snapshot_metrics().full_redraws
+            wheel_end = QWheelEvent(
+                QPointF(center),
+                QPointF(viewer.mapToGlobal(center)),
+                QPoint(),
+                QPoint(),
+                Qt.NoButton,
+                Qt.NoModifier,
+                Qt.ScrollPhase.ScrollEnd,
+                False,
+            )
+            QApplication.sendEvent(viewer, wheel_end)
+            app.processEvents()
+            zoom_end_full_redraws = (
+                renderer.snapshot_metrics().full_redraws - redraws_before_end
+            )
+            redraws_before_settle = renderer.snapshot_metrics().full_redraws
             _wait_for_navigation_settle(harness, "wheel zoom")
+            zoom_settle_full_redraws = (
+                renderer.snapshot_metrics().full_redraws - redraws_before_settle
+            )
         metrics_after = renderer.snapshot_metrics()
         staged_pending_observed = viewer.view().presenter.navigation_refinement_pending
         if not absolute_latency_assertions_are_isolated():
@@ -262,6 +299,9 @@ def main() -> None:
             "repair_frame_indices": measurements.repair_frame_indices,
             "miss_frame_indices": measurements.miss_frame_indices,
             "zoom_latencies_ms": zoom_latencies,
+            "zoom_redraw_trace": zoom_redraw_trace,
+            "zoom_end_full_redraws": zoom_end_full_redraws,
+            "zoom_settle_full_redraws": zoom_settle_full_redraws,
             "renderer_paint_latencies_ms": paint_probe.durations_ms,
             "pan_renderer_paint_latencies_ms": (
                 paint_probe.durations_ms[:pan_paint_count]

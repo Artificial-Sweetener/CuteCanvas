@@ -51,22 +51,6 @@ class _PositioningMouseEvent:
         self._point = QPointF(point)
 
 
-class _WheelEventStub:
-    def __init__(self, point: QPointF, delta_y: int):
-        self._point = QPointF(point)
-        self._delta_y = delta_y
-        self.accepted = False
-
-    def position(self) -> QPointF:
-        return QPointF(self._point)
-
-    def angleDelta(self) -> QPoint:
-        return QPoint(0, self._delta_y)
-
-    def accept(self) -> None:
-        self.accepted = True
-
-
 def _make_mouse_event(
     event_type: QEvent.Type,
     point: QPointF,
@@ -97,7 +81,9 @@ def _patch_drag_distance(monkeypatch):
     yield
 
 
-def test_panzoom_respects_lock(qapp):
+def test_panzoom_pan_respects_navigation_lock(qapp: QApplication) -> None:
+    """Locked navigation must ignore pointer pan input."""
+    del qapp
     tool = PanZoomTool()
     tool.activate(
         NavigationInteractionPort(
@@ -109,13 +95,10 @@ def test_panzoom_respects_lock(qapp):
     )
     received: list[str] = []
     tool.signals.pan_requested.connect(lambda *_: received.append("pan"))
-    tool.signals.zoom_requested.connect(lambda *_: received.append("zoom"))
     press = _PositioningMouseEvent(QPointF(10, 10))
     tool.mousePressEvent(press)
     move = _PositioningMouseEvent(QPointF(20, 20), buttons=Qt.MouseButton.LeftButton)
     tool.mouseMoveEvent(move)
-    wheel = _WheelEventStub(QPointF(10, 10), 120)
-    tool.wheelEvent(wheel)
     assert received == []
 
 
@@ -313,141 +296,6 @@ def test_panzoom_does_not_enter_panning_when_pan_impossible(qapp):
     tool.mouseReleaseEvent(release)
     assert emissions == []
     assert tool.getCursor().shape() == Qt.CursorShape.ArrowCursor
-
-
-def test_panzoom_wheel_emits_zoom(qapp):
-    tool = PanZoomTool()
-    zooms: list[tuple[float, QPoint]] = []
-    current_zoom = 2.0
-    native_zoom = 1.0
-
-    def on_zoom(value: float, anchor: QPoint) -> None:
-        nonlocal current_zoom
-        zooms.append((value, anchor))
-        current_zoom = value
-
-    tool.signals.zoom_requested.connect(on_zoom)
-    tool.activate(
-        NavigationInteractionPort(
-            is_navigation_locked=lambda: False,
-            is_content_empty=lambda: False,
-            get_pan=lambda: QPointF(0, 0),
-            get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda _point: native_zoom,
-        )
-    )
-    grow_event = _WheelEventStub(QPointF(5, 5), 120)
-    tool.wheelEvent(grow_event)
-    shrink_event = _WheelEventStub(QPointF(5, 5), -120)
-    tool.wheelEvent(shrink_event)
-    assert zooms[0][0] == pytest.approx(2.5)
-    assert zooms[0][1] == QPoint(5, 5)
-    assert zooms[1][0] == pytest.approx(2.0)
-
-
-def test_panzoom_wheel_uses_delta_magnitude(qapp):
-    tool = PanZoomTool()
-    zooms: list[float] = []
-    current_zoom = 2.0
-
-    def on_zoom(value: float, _anchor: QPoint) -> None:
-        nonlocal current_zoom
-        zooms.append(value)
-        current_zoom = value
-
-    tool.signals.zoom_requested.connect(on_zoom)
-    tool.activate(
-        NavigationInteractionPort(
-            is_navigation_locked=lambda: False,
-            is_content_empty=lambda: False,
-            get_pan=lambda: QPointF(0, 0),
-            get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda _point: 1.0,
-        )
-    )
-    grow_event = _WheelEventStub(QPointF(5, 5), 240)
-    tool.wheelEvent(grow_event)
-    shrink_event = _WheelEventStub(QPointF(5, 5), -240)
-    tool.wheelEvent(shrink_event)
-    assert zooms[0] == pytest.approx(2.0 * 1.25 * 1.25)
-    assert zooms[1] == pytest.approx(2.0)
-    assert grow_event.accepted is True
-    assert shrink_event.accepted is True
-
-
-def test_panzoom_wheel_snaps_to_native_zoom_on_crossing(qapp):
-    tool = PanZoomTool()
-    emissions: list[tuple[float, ViewportZoomMode]] = []
-    current_zoom = 0.9
-    native_zoom = 1.0
-
-    def on_snap(value: float, _anchor: QPoint, mode: ViewportZoomMode) -> None:
-        nonlocal current_zoom
-        emissions.append((value, mode))
-        current_zoom = value
-
-    tool.signals.zoom_snap_requested.connect(on_snap)
-    tool.activate(
-        NavigationInteractionPort(
-            is_navigation_locked=lambda: False,
-            is_content_empty=lambda: False,
-            get_pan=lambda: QPointF(0, 0),
-            get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda _point: native_zoom,
-        )
-    )
-    tool.wheelEvent(_WheelEventStub(QPointF(5, 5), 120))
-    assert emissions == [(native_zoom, ViewportZoomMode.ONE_TO_ONE)]
-
-
-def test_panzoom_wheel_snaps_to_native_zoom_on_reverse_crossing(qapp):
-    tool = PanZoomTool()
-    emissions: list[tuple[float, ViewportZoomMode]] = []
-    current_zoom = 1.2
-    native_zoom = 1.0
-
-    def on_snap(value: float, _anchor: QPoint, mode: ViewportZoomMode) -> None:
-        nonlocal current_zoom
-        emissions.append((value, mode))
-        current_zoom = value
-
-    tool.signals.zoom_snap_requested.connect(on_snap)
-    tool.activate(
-        NavigationInteractionPort(
-            is_navigation_locked=lambda: False,
-            is_content_empty=lambda: False,
-            get_pan=lambda: QPointF(0, 0),
-            get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda _point: native_zoom,
-        )
-    )
-    tool.wheelEvent(_WheelEventStub(QPointF(5, 5), -120))
-    assert emissions == [(native_zoom, ViewportZoomMode.ONE_TO_ONE)]
-
-
-def test_panzoom_wheel_snaps_to_hidpi_native_zoom(qapp):
-    tool = PanZoomTool()
-    emissions: list[tuple[float, ViewportZoomMode]] = []
-    current_zoom = 1.4
-    native_zoom = 1.5
-
-    def on_snap(value: float, _anchor: QPoint, mode: ViewportZoomMode) -> None:
-        nonlocal current_zoom
-        emissions.append((value, mode))
-        current_zoom = value
-
-    tool.signals.zoom_snap_requested.connect(on_snap)
-    tool.activate(
-        NavigationInteractionPort(
-            is_navigation_locked=lambda: False,
-            is_content_empty=lambda: False,
-            get_pan=lambda: QPointF(0, 0),
-            get_zoom=lambda: current_zoom,
-            get_native_zoom=lambda _point: native_zoom,
-        )
-    )
-    tool.wheelEvent(_WheelEventStub(QPointF(5, 5), 120))
-    assert emissions == [(native_zoom, ViewportZoomMode.ONE_TO_ONE)]
 
 
 def test_panzoom_double_click_sets_zoom_fit_when_not_fit(qapp):

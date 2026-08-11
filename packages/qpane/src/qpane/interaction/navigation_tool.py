@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QCursor, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication
 
@@ -33,11 +33,16 @@ class PanZoomTool(ViewerTool):
     _WHEEL_UNITS_PER_STEP = 120.0
     _WHEEL_ZOOM_IN_FACTOR = 1.25
     _WHEEL_ZOOM_OUT_FACTOR = 0.8
+    _WHEEL_SESSION_IDLE_MS = 120
     input_profile = ToolInputProfile(navigation=True)
 
     def __init__(self) -> None:
         """Prepare empty navigation state."""
         super().__init__()
+        self._wheel_session_timer = QTimer(self.signals)
+        self._wheel_session_timer.setSingleShot(True)
+        self._wheel_session_timer.setInterval(self._WHEEL_SESSION_IDLE_MS)
+        self._wheel_session_timer.timeout.connect(self._finish_wheel_navigation)
         self._reset_state()
 
     def activate(self, dependencies: object) -> None:
@@ -48,6 +53,7 @@ class PanZoomTool(ViewerTool):
 
     def deactivate(self) -> None:
         """Release captured collaborators and transient pointer state."""
+        self._finish_wheel_navigation()
         self._reset_state()
 
     def getCursor(self) -> QCursor:
@@ -74,6 +80,7 @@ class PanZoomTool(ViewerTool):
         self._drag_start_position = position
         self._last_position = position
         if not self._port.is_drag_out_allowed() and self._port.can_pan():
+            self._finish_wheel_navigation()
             self._panning = True
             self.signals.navigation_started.emit()
             self.signals.cursor_update_requested.emit()
@@ -137,11 +144,21 @@ class PanZoomTool(ViewerTool):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """Zoom by wheel magnitude and snap when crossing Fit or 1:1."""
+        phase = self._wheel_phase(event)
+        if phase is Qt.ScrollPhase.ScrollEnd:
+            self._finish_wheel_navigation()
+            event.accept()
+            return
         if self._port.is_navigation_locked() or self._port.is_content_empty():
             return
         angle = event.angleDelta().y()
         if angle == 0:
             return
+        self._begin_wheel_navigation()
+        if phase is Qt.ScrollPhase.NoScrollPhase:
+            self._wheel_session_timer.start()
+        else:
+            self._wheel_session_timer.stop()
         steps = abs(angle) / self._WHEEL_UNITS_PER_STEP
         step_factor = (
             self._WHEEL_ZOOM_IN_FACTOR if angle > 0 else self._WHEEL_ZOOM_OUT_FACTOR
@@ -162,10 +179,35 @@ class PanZoomTool(ViewerTool):
 
     def _reset_state(self) -> None:
         """Restore inert dependencies and pointer state."""
+        self._wheel_session_timer.stop()
         self._port = NavigationInteractionPort()
         self._panning = False
+        self._wheel_navigation_active = False
         self._drag_start_position: QPoint | None = None
         self._last_position: QPoint | None = None
+
+    def _begin_wheel_navigation(self) -> None:
+        """Open one refinement-suppressed lifetime for a wheel gesture."""
+        if self._panning or self._wheel_navigation_active:
+            return
+        self._wheel_navigation_active = True
+        self.signals.navigation_started.emit()
+
+    def _finish_wheel_navigation(self) -> None:
+        """Close the active wheel lifetime after its explicit or idle end."""
+        self._wheel_session_timer.stop()
+        if not self._wheel_navigation_active:
+            return
+        self._wheel_navigation_active = False
+        self.signals.navigation_finished.emit()
+
+    @staticmethod
+    def _wheel_phase(event: QWheelEvent) -> Qt.ScrollPhase:
+        """Read a wheel phase while supporting source-compatible event stubs."""
+        phase = getattr(event, "phase", None)
+        if phase is None:
+            return Qt.ScrollPhase.NoScrollPhase
+        return phase()
 
     def _drag_out_threshold_crossed(self, event: QMouseEvent) -> bool:
         """Return whether a drag-enabled host should begin dragging content out."""
