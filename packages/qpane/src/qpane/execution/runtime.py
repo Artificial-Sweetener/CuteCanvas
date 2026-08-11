@@ -181,17 +181,19 @@ class ExecutionRuntime:
         return scope
 
     def shutdown(self, *, wait: bool = False) -> None:
-        """Cancel every scope and release runtime-owned backends."""
+        """Cancel every scope and optionally await runtime-owned backends."""
 
         with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            scopes = tuple(self._scopes)
-            self._scopes.clear()
+            already_closed = self._closed
+            if already_closed:
+                scopes: tuple[ExecutionScope, ...] = ()
+            else:
+                self._closed = True
+                scopes = tuple(self._scopes)
+                self._scopes.clear()
         for scope in scopes:
             scope.close(reason="runtime_shutdown")
-        if not self._shutdown_backends:
+        if not self._shutdown_backends or (already_closed and not wait):
             return
         for backend in self._backends:
             shutdown = getattr(backend, "shutdown", None)

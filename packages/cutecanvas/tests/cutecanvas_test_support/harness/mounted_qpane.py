@@ -312,7 +312,8 @@ class MountedQPaneHarness:
             )
 
     def close(self) -> None:
-        """Dispose the pane and drain its queued Qt work."""
+        """Dispose the pane and await its harness-owned execution workers."""
+        execution_runtime = self.viewer.documentRuntime().execution_runtime
         for document in tuple(self.viewer.editor.compositions):
             if document.state.policy.removable:
                 document.remove()
@@ -322,6 +323,7 @@ class MountedQPaneHarness:
         self.host.deleteLater()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.qapp.processEvents()
+        execution_runtime.shutdown(wait=True)
 
     def activate_mask(self, index: int) -> uuid.UUID:
         """Activate and return the mask at ``index``."""

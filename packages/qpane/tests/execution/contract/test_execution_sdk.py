@@ -80,6 +80,18 @@ class _InlineBackend:
         return _Submission()
 
 
+class _ShutdownBackend(_InlineBackend):
+    """Record whether an owned backend receives blocking shutdown escalation."""
+
+    def __init__(self) -> None:
+        """Create an empty shutdown-call record."""
+        self.wait_requests: list[bool] = []
+
+    def shutdown(self, *, wait: bool = False) -> None:
+        """Record the requested backend termination strength."""
+        self.wait_requests.append(wait)
+
+
 class _QueuedBackend:
     """Retain accepted jobs until a test activates or removes them."""
 
@@ -229,6 +241,17 @@ def test_inline_backend_completes_and_adopts_once() -> None:
     assert handle.outcome.result == 42
     assert adopted == [42]
     assert scope.pending_count == 0
+
+
+def test_runtime_shutdown_can_escalate_an_existing_close_to_wait() -> None:
+    """A teardown owner may await workers after an earlier responsive close."""
+    backend = _ShutdownBackend()
+    runtime = ExecutionRuntime(backend, shutdown_backends=True)
+
+    runtime.shutdown(wait=False)
+    runtime.shutdown(wait=True)
+
+    assert backend.wait_requests == [False, True]
 
 
 def test_rejection_creates_no_accepted_handle_or_work() -> None:
