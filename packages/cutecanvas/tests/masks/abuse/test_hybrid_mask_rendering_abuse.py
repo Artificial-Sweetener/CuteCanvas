@@ -448,7 +448,9 @@ def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
             assert viewer.editor.coverage.rectangle(QRectF(0.0, 0.0, 3840.0, 2160.0))
         harness.activate_mask(0)
         viewer.applyZoom(initial_zoom, center)
+        assert harness.wait_for_mask_render_idle(timeout_ms=8000)
         assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
+        assert harness.wait_for_raster_render_idle(timeout_ms=8000)
         harness.drain_events(wait_ms=30)
 
         with harness.observe_presented_frames() as probe:
@@ -679,8 +681,10 @@ def test_painted_1440p_masks_navigate_fluidly_in_a_four_k_viewport(
             < 30.0
         ), stable_zoom
         assert max(stable_latency_samples(zoom_probe.durations_ms)) < 2.0
+        assert harness.wait_for_mask_render_idle(timeout_ms=8000)
         assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
-        harness.drain_events()
+        assert harness.wait_for_raster_render_idle(timeout_ms=8000)
+        harness.drain_events(wait_ms=60)
         settled = viewer.view().renderer.get_base_buffer().copy()
         viewer.view().renderer.markDirty()
         viewer.update()

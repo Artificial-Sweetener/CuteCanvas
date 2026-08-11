@@ -172,10 +172,8 @@ def _assert_complete_mask_frame(
 ) -> None:
     """Require a settled visual baseline before observing one transition."""
     assert harness.wait_for_mask_render_idle(timeout_ms=20_000)
-    assert harness.wait_for_render_refinement_idle(
-        timeout_ms=20_000,
-        include_prefetch=True,
-    )
+    assert harness.wait_for_render_refinement_idle(timeout_ms=20_000)
+    assert harness.wait_for_raster_render_idle(timeout_ms=20_000)
     with harness.observe_presented_frames() as probe:
         harness.viewer.repaint()
     assert probe.frames
