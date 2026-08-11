@@ -33,7 +33,6 @@ from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
     absolute_latency_assertions_are_isolated,
-    completion_clock,
     interaction_clock,
 )
 
@@ -97,19 +96,11 @@ def _wait_for_navigation_settle(
     harness: MountedQPaneHarness,
     operation: str,
 ) -> None:
-    """Finish staged navigation and isolate wall-clock background contention."""
-    if absolute_latency_assertions_are_isolated():
-        presenter = harness.viewer.view().presenter
-        deadline = completion_clock() + 20.0
-        while presenter.navigation_refinement_pending and completion_clock() < deadline:
-            harness.qapp.processEvents()
-            QTest.qWait(1)
-        if presenter.navigation_refinement_pending:
-            raise RuntimeError(f"{operation} navigation refinement did not settle")
-        if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
-            raise RuntimeError(f"{operation} sampled refinement did not settle")
-        if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
-            raise RuntimeError(f"{operation} raster refinement did not settle")
+    """Finish every staged navigation owner before measuring another gesture."""
+    if not harness.wait_for_render_refinement_idle(timeout_ms=20_000):
+        raise RuntimeError(f"{operation} navigation refinement did not settle")
+    if not harness.wait_for_raster_render_idle(timeout_ms=20_000):
+        raise RuntimeError(f"{operation} raster refinement did not settle")
     harness.drain_events(wait_ms=30)
 
 
