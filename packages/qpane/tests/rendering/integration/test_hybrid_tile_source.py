@@ -40,6 +40,21 @@ class _RejectingSampler:
         raise AssertionError("non-overlapping hybrid primitive was sampled")
 
 
+class _RecordingSampler:
+    """Return opaque coverage while recording exact sampled regions."""
+
+    def __init__(self) -> None:
+        """Create an empty sampling record."""
+        self.calls: list[tuple[QRectF, QSize]] = []
+
+    def sample(self, source_rect: QRectF, pixel_size: QSize) -> QImage:
+        """Record and return one exact grayscale sample."""
+        self.calls.append((QRectF(source_rect), QSize(pixel_size)))
+        image = QImage(pixel_size, QImage.Format.Format_Grayscale8)
+        image.fill(255)
+        return image
+
+
 def test_non_overlapping_hybrid_batch_returns_transparent_tiles() -> None:
     """Avoid allocating and colorizing one batch with no possible coverage."""
     source_id = uuid.uuid4()
@@ -99,3 +114,88 @@ def test_presentation_style_participates_in_shared_tile_identity() -> None:
 
     assert white.revision_key != magenta.revision_key
     assert white.fallback_key != magenta.fallback_key
+
+
+def test_hybrid_batch_never_samples_the_gap_between_distant_tiles() -> None:
+    """Cache-filtered tile batches must not amplify work across empty spans."""
+    sampler = _RecordingSampler()
+    source_id = uuid.uuid4()
+    document = HybridDocument(
+        source_id,
+        RasterBounds(0, 0, 4096, 4096),
+        (
+            HybridRasterPrimitive(
+                uuid.uuid4(),
+                RasterBounds(0, 0, 4096, 4096),
+                sampler,
+            ),
+        ),
+    )
+    source = HybridRenderTileSource(
+        document,
+        HybridPresentationStyle(QColor("white")),
+    )
+    requests = (
+        _request(source, column=0, paint_rect=QRectF(0.0, 0.0, 66.0, 66.0)),
+        _request(source, column=40, paint_rect=QRectF(2558.0, 0.0, 66.0, 66.0)),
+    )
+
+    products = source.render_tiles(requests, lambda: False)
+
+    assert tuple(product.key for product in products) == tuple(
+        request.key for request in requests
+    )
+    assert len(sampler.calls) == 2
+    assert {size for _, size in sampler.calls} == {QSize(66, 66)}
+
+
+def test_hybrid_batch_retains_shared_sampling_for_adjacent_tile_rectangle() -> None:
+    """Adjacent tiles must retain one efficient shared evaluation."""
+    sampler = _RecordingSampler()
+    source_id = uuid.uuid4()
+    document = HybridDocument(
+        source_id,
+        RasterBounds(0, 0, 256, 256),
+        (
+            HybridRasterPrimitive(
+                uuid.uuid4(),
+                RasterBounds(0, 0, 256, 256),
+                sampler,
+            ),
+        ),
+    )
+    source = HybridRenderTileSource(
+        document,
+        HybridPresentationStyle(QColor("white")),
+    )
+    requests = (
+        _request(source, column=0, row=0, paint_rect=QRectF(0.0, 0.0, 66.0, 66.0)),
+        _request(source, column=1, row=0, paint_rect=QRectF(64.0, 0.0, 66.0, 66.0)),
+        _request(source, column=0, row=1, paint_rect=QRectF(0.0, 64.0, 66.0, 66.0)),
+        _request(source, column=1, row=1, paint_rect=QRectF(64.0, 64.0, 66.0, 66.0)),
+    )
+
+    products = source.render_tiles(requests, lambda: False)
+
+    assert len(products) == 4
+    assert sampler.calls == [(QRectF(0.0, 0.0, 130.0, 130.0), QSize(130, 130))]
+
+
+def _request(
+    source: HybridRenderTileSource,
+    *,
+    column: int,
+    row: int = 0,
+    paint_rect: QRectF,
+) -> RenderTileRequest:
+    """Build one stable request for hybrid batching tests."""
+    key = RenderTileKey(
+        source.source_kind,
+        source.source_id,
+        source.fallback_key,
+        source.revision_key,
+        1.0,
+        column,
+        row,
+    )
+    return RenderTileRequest(key, QRectF(paint_rect), QRectF(paint_rect))

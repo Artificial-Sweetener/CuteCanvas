@@ -85,18 +85,31 @@ class HybridRenderTileSource:
         """Evaluate and present one complete visible tile batch."""
         if not requests or is_cancelled():
             return ()
+        products_by_key: dict[Hashable, RenderTileProduct] = {}
+        for batch in _bounded_batches(requests):
+            if is_cancelled():
+                return ()
+            for product in self._render_batch(batch, is_cancelled):
+                products_by_key[product.key] = product
+        if is_cancelled():
+            return ()
+        return tuple(products_by_key[request.key] for request in requests)
+
+    def _render_batch(
+        self,
+        batch: _HybridTileBatch,
+        is_cancelled: Callable[[], bool],
+    ) -> tuple[RenderTileProduct, ...]:
+        """Evaluate one spatially compact group of same-scale tiles."""
+        requests = batch.requests
         scale = requests[0].key.scale
-        batch_rect = QRectF(requests[0].paint_rect)
-        for request in requests[1:]:
-            batch_rect = batch_rect.united(request.paint_rect)
-        document_rect = _to_document_rect(batch_rect, self.document.bounds)
+        document_rect = _to_document_rect(batch.paint_rect, self.document.bounds)
         if not _has_primitive_overlap(self.document, document_rect):
             return tuple(_transparent_product(request, scale) for request in requests)
-        batch_size = _sample_size(batch_rect, scale)
         coverage = HybridDocumentEvaluator().evaluate_pixels(
             self.document,
             document_rect,
-            batch_size,
+            _sample_size(batch.paint_rect, scale),
         )
         if is_cancelled():
             return ()
@@ -106,16 +119,13 @@ class HybridRenderTileSource:
             if is_cancelled():
                 return ()
             paint = request.paint_rect
-            sample_rect = _pixel_rect(paint, batch_rect, scale)
-            detached = presented.copy(sample_rect.toAlignedRect())
-            core = request.source_rect
-            image_source_rect = _pixel_rect(core, paint, scale)
+            sample_rect = _pixel_rect(paint, batch.paint_rect, scale)
             products.append(
                 RenderTileProduct(
                     request.key,
-                    core,
-                    detached,
-                    image_source_rect,
+                    request.source_rect,
+                    presented.copy(sample_rect.toAlignedRect()),
+                    _pixel_rect(request.source_rect, paint, scale),
                 )
             )
         return tuple(products)
@@ -140,6 +150,59 @@ class HybridRenderTileSource:
 def _to_document_rect(rect: QRectF, bounds: RasterBounds) -> QRectF:
     """Translate zero-origin sampling coordinates into document coordinates."""
     return rect.translated(float(bounds.x), float(bounds.y))
+
+
+@dataclass(frozen=True, slots=True)
+class _HybridTileBatch:
+    """Group tiles whose shared sample does not amplify raster work."""
+
+    requests: tuple[RenderTileRequest, ...]
+    paint_rect: QRectF
+    sample_area: int
+
+
+def _bounded_batches(
+    requests: tuple[RenderTileRequest, ...],
+) -> tuple[_HybridTileBatch, ...]:
+    """Combine spatial tiles only while their union reduces sampled pixels."""
+    scale = requests[0].key.scale
+    batches = [
+        _HybridTileBatch(
+            (request,),
+            QRectF(request.paint_rect),
+            _sample_area(request.paint_rect, scale),
+        )
+        for request in requests
+    ]
+    while True:
+        best_merge: tuple[int, int, QRectF, int] | None = None
+        best_saving = 0
+        for left_index, left in enumerate(batches):
+            for right_index in range(left_index + 1, len(batches)):
+                right = batches[right_index]
+                united = left.paint_rect.united(right.paint_rect)
+                united_area = _sample_area(united, scale)
+                saving = left.sample_area + right.sample_area - united_area
+                if saving >= best_saving:
+                    best_saving = saving
+                    best_merge = (left_index, right_index, united, united_area)
+        if best_merge is None:
+            return tuple(batches)
+        left_index, right_index, united, united_area = best_merge
+        left = batches[left_index]
+        right = batches[right_index]
+        batches[left_index] = _HybridTileBatch(
+            left.requests + right.requests,
+            united,
+            united_area,
+        )
+        batches.pop(right_index)
+
+
+def _sample_area(rect: QRectF, scale: float) -> int:
+    """Return exact allocated grayscale pixels for one sample rectangle."""
+    size = _sample_size(rect, scale)
+    return size.width() * size.height()
 
 
 def _sample_size(rect: QRectF, scale: float) -> QSize:
