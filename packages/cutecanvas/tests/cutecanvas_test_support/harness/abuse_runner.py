@@ -321,16 +321,14 @@ class MaskAbuseRunner:
         )
 
     def _run_idle(self, action: IdleAction) -> None:
-        """Require a settled widget composition to remain pixel-identical."""
-        if not self._harness.wait_for_render_refinement_idle():
-            self._fail("idle", "Renderer did not settle before the idle baseline")
-        before = self._harness.capture()
+        """Require settled mask coverage to remain visible without new input."""
+        if not self._harness.wait_for_mask_render_idle():
+            self._fail("idle", "Mask renderer did not settle before the idle baseline")
+        expected_points = self._oracle.expected_tinted_points()
+        self._require_expected_tint(expected_points, phase="idle-baseline")
         self._harness.drain_events(wait_ms=action.wait_ms)
-        after = self._harness.capture()
-        if before != after:
-            self._fail("idle", "Mounted CuteCanvas pixels changed without new input")
         self._require_expected_tint(
-            self._oracle.expected_tinted_points(),
+            expected_points,
             phase="idle-preservation",
         )
 

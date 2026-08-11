@@ -83,7 +83,7 @@ class RedoAction:
 
 @dataclass(frozen=True, slots=True)
 class IdleAction:
-    """Drain events and require the mounted composition to remain stable."""
+    """Drain events and require mounted mask coverage to remain stable."""
 
     wait_ms: int = 20
     kind: str = "idle"
