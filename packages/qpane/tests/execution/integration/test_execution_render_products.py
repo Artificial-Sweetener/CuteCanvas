@@ -126,3 +126,27 @@ def test_pyramid_generation_adopts_detached_product(qapp) -> None:
     assert completed.status == PyramidStatus.COMPLETE
     assert completed.levels
     assert manager.cache_usage_bytes > 0
+
+
+def test_pyramid_shutdown_releases_completed_products(qapp) -> None:
+    """Release full-resolution images and derived levels when the owner closes."""
+    backend = ControllableExecutionBackend()
+    runtime = ExecutionRuntime(backend)
+    scope = runtime.open_scope(owner_id="pyramid-release-test")
+    manager = PyramidManager(
+        Config(min_view_size_px=16, cache=_DETERMINISTIC_CACHE),
+        execution_scope=scope,
+    )
+    source = _source_key()
+    manager.generate_pyramid_for_asset(source, _image(128))
+    backend.run_next()
+
+    assert manager.pyramid_for_asset(source) is not None
+    assert tuple(manager.iter_cached_asset_keys()) == (source,)
+    assert manager.cache_usage_bytes > 0
+
+    manager.shutdown(wait=False)
+
+    assert manager.pyramid_for_asset(source) is None
+    assert tuple(manager.iter_cached_asset_keys()) == ()
+    assert manager.cache_usage_bytes == 0

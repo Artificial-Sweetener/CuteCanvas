@@ -515,16 +515,11 @@ class PyramidManager(QObject, CacheMetricsMixin):
 
     def clear(self) -> None:
         """Cancel workers, reset counters, and empty every cache entry."""
-        self.shutdown(wait=False)
         self._assert_main_thread()
         pyramid_count = len(self._pyramids)
-        self._pyramids.clear()
         had_entries = bool(self._cache)
-        self._cache.clear()
-        self._rejected_cache_keys.clear()
-        self._prefetch_drop_all()
+        self.shutdown(wait=False)
         self._reset_cache_metrics()
-        self._set_cache_usage_bytes(0)
         assert self._cache_size_bytes == 0, "Cache size not zero after clear"
         if had_entries:
             self._record_eviction_metadata("clear")
@@ -687,7 +682,7 @@ class PyramidManager(QObject, CacheMetricsMixin):
         self._eviction.cancel()
 
     def shutdown(self, *, wait: bool = True) -> None:
-        """Cancel workers and pending eviction callbacks."""
+        """Cancel background work and release every retained pyramid product."""
         self._assert_main_thread()
         self._cancel_eviction_task()
         self._cancel_all_pyramid_retries()
@@ -700,6 +695,10 @@ class PyramidManager(QObject, CacheMetricsMixin):
             )
         self._active_handles.clear()
         self._prefetch_drop_all()
+        self._pyramids.clear()
+        self._cache.clear()
+        self._rejected_cache_keys.clear()
+        self._set_cache_usage_bytes(0)
         self._execution_scope.close(reason="pyramid_manager_shutdown")
         if wait:
             logger.debug("Pyramid scope does not own the shared runtime")

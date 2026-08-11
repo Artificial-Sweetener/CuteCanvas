@@ -69,7 +69,7 @@ path = "packages/qpane/src/qpane/rendering/pyramid.py"
 kind = "remediation"
 justification = "Pyramid product, cache, and asynchronous retry lifecycles remain colocated until the work coordinator is extracted."
 review_by = 2026-12-15
-max_lines = 653
+max_lines = 652
 next_limit = 480
 debt = "QPANE-ARCH-004"
 

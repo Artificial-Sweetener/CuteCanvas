@@ -91,7 +91,9 @@ def test_shutdown_cancels_pending_generation(qapp, sample_image: QImage) -> None
 
     assert not execution.pending_jobs()
     assert execution.cancelled
-    assert manager.pyramid_for_asset(key).status is not PyramidStatus.COMPLETE
+    assert manager.pyramid_for_asset(key) is None
+    assert tuple(manager.iter_cached_asset_keys()) == ()
+    assert manager.cache_usage_bytes == 0
 
 
 def test_structured_rejection_retries_and_then_adopts(
