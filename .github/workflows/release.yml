@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
-  id-token: write
 
 concurrency:
   group: release-main
@@ -50,54 +50,42 @@ jobs:
       expected_head: ${{ needs.version-qpane.outputs.head_sha }}
     secrets: inherit
 
-  publish-ferrastra:
+  publish-waterfall:
     needs:
       - version-ferrastra
       - version-qpane
       - version-cutecanvas
-    if: needs.version-ferrastra.outputs.released == 'true'
-    uses: ./.github/workflows/publish.yml
-    with:
-      release_tag: ${{ needs.version-ferrastra.outputs.release_tag }}
-      verified: true
-    secrets: inherit
-
-  publish-qpane:
-    needs:
-      - version-ferrastra
-      - version-qpane
-      - version-cutecanvas
-      - publish-ferrastra
     if: >-
       always() &&
       needs.version-ferrastra.result == 'success' &&
       needs.version-qpane.result == 'success' &&
       needs.version-cutecanvas.result == 'success' &&
-      needs.version-qpane.outputs.released == 'true' &&
-      (needs.publish-ferrastra.result == 'success' ||
-      needs.publish-ferrastra.result == 'skipped')
-    uses: ./.github/workflows/publish.yml
-    with:
-      release_tag: ${{ needs.version-qpane.outputs.release_tag }}
-      verified: true
-    secrets: inherit
+      (needs.version-ferrastra.outputs.released == 'true' ||
+      needs.version-qpane.outputs.released == 'true' ||
+      needs.version-cutecanvas.outputs.released == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Check out the versioned release lineage
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.version-cutecanvas.outputs.head_sha }}
 
-  publish-cutecanvas:
-    needs:
-      - version-ferrastra
-      - version-qpane
-      - version-cutecanvas
-      - publish-qpane
-    if: >-
-      always() &&
-      needs.version-ferrastra.result == 'success' &&
-      needs.version-qpane.result == 'success' &&
-      needs.version-cutecanvas.result == 'success' &&
-      needs.version-cutecanvas.outputs.released == 'true' &&
-      (needs.publish-qpane.result == 'success' ||
-      needs.publish-qpane.result == 'skipped')
-    uses: ./.github/workflows/publish.yml
-    with:
-      release_tag: ${{ needs.version-cutecanvas.outputs.release_tag }}
-      verified: true
-    secrets: inherit
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Publish the versioned product waterfall
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FERRASTRA_RELEASED: ${{ needs.version-ferrastra.outputs.released }}
+          FERRASTRA_RELEASE_TAG: ${{ needs.version-ferrastra.outputs.release_tag }}
+          QPANE_RELEASED: ${{ needs.version-qpane.outputs.released }}
+          QPANE_RELEASE_TAG: ${{ needs.version-qpane.outputs.release_tag }}
+          CUTECANVAS_RELEASED: ${{ needs.version-cutecanvas.outputs.released }}
+          CUTECANVAS_RELEASE_TAG: ${{ needs.version-cutecanvas.outputs.release_tag }}
+        run: python tools/release_publications.py dispatch

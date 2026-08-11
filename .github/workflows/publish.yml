@@ -1,22 +1,18 @@
 name: Publish package to PyPI
 
+run-name: Publish ${{ inputs.release_tag || github.ref_name }} from release ${{ inputs.orchestrator_run_id || 'direct' }}
+
 on:
-  workflow_call:
-    inputs:
-      release_tag:
-        description: Existing product-prefixed tag to build and publish
-        required: true
-        type: string
-      verified:
-        description: Caller already completed the repository verification gate
-        required: false
-        default: false
-        type: boolean
   workflow_dispatch:
     inputs:
       release_tag:
         description: Existing product-prefixed tag to recover or republish
         required: true
+        type: string
+      orchestrator_run_id:
+        description: Active release workflow run that already completed verification
+        required: false
+        default: ""
         type: string
   push:
     tags:
@@ -25,6 +21,7 @@ on:
       - "cutecanvas-v*"
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -37,14 +34,38 @@ env:
 
 jobs:
   verify:
-    if: inputs.verified != true
+    if: inputs.orchestrator_run_id == ''
     uses: ./.github/workflows/verify.yml
 
+  confirm-orchestrator:
+    if: inputs.orchestrator_run_id != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tagged release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Confirm the release workflow verification gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/release_publications.py verify "${{ inputs.orchestrator_run_id }}"
+
   select:
-    needs: verify
+    needs:
+      - verify
+      - confirm-orchestrator
     if: >-
       always() &&
-      (needs.verify.result == 'success' || needs.verify.result == 'skipped')
+      ((needs.verify.result == 'success' &&
+      needs.confirm-orchestrator.result == 'skipped') ||
+      (needs.verify.result == 'skipped' &&
+      needs.confirm-orchestrator.result == 'success'))
     runs-on: ubuntu-latest
     outputs:
       package: ${{ steps.product.outputs.package }}
