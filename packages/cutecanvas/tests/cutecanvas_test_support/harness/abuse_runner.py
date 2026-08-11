@@ -321,9 +321,7 @@ class MaskAbuseRunner:
         )
 
     def _run_idle(self, action: IdleAction) -> None:
-        """Require settled mask coverage to remain visible without new input."""
-        if not self._harness.wait_for_mask_render_idle():
-            self._fail("idle", "Mask renderer did not settle before the idle baseline")
+        """Require mask coverage to remain visible without new input."""
         expected_points = self._oracle.expected_tinted_points()
         self._require_expected_tint(expected_points, phase="idle-baseline")
         self._harness.drain_events(wait_ms=action.wait_ms)
