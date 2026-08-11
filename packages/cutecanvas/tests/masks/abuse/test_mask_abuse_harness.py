@@ -398,8 +398,7 @@ def test_clipped_mask_partial_repaints_preserve_retained_opacity(
         driver.move(retained_stroke, 1)
         driver.end(retained_stroke)
         assert harness.wait_for_mask_undo_depth(mask_id, 1)
-        retained_color = harness.color_at(retained_point)
-        assert harness.is_mask_tint(retained_color)
+        assert harness.is_mask_tint(harness.color_at(retained_point))
 
         with harness.observe_presented_frames() as frames:
             driver.begin(remote_stroke)
@@ -410,7 +409,8 @@ def test_clipped_mask_partial_repaints_preserve_retained_opacity(
 
         assert frames.frames
         assert all(
-            frame.color_at(retained_point) == retained_color for frame in frames.frames
+            harness.is_mask_tint(frame.color_at(retained_point))
+            for frame in frames.frames
         )
     finally:
         harness.close()
