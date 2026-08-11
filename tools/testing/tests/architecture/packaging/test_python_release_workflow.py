@@ -53,9 +53,9 @@ def test_release_waits_for_ferrastras_explicit_initial_publication() -> None:
     cutecanvas = release[
         release.index("  version-cutecanvas:") : release.index("  publish-ferrastra:")
     ]
-    version = (
-        repository_root() / ".github/workflows/version-product.yml"
-    ).read_text("utf-8")
+    version = (repository_root() / ".github/workflows/version-product.yml").read_text(
+        "utf-8"
+    )
 
     assert "release_initial: false" in ferrastra
     assert "release_initial: true" in qpane

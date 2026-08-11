@@ -52,9 +52,7 @@ def test_moving_top_edge_acquires_document_center_while_left_edge_stays_snapped(
 
 
 @pytest.mark.interactive_performance
-def test_cross_feature_snapping_scales_subquadratically_under_dense_reversals() -> (
-    None
-):
+def test_cross_feature_snapping_scales_subquadratically_under_dense_reversals() -> None:
     """Doubling candidates must not approach quadratic construction or pointer cost."""
     baseline_candidates = _candidates(250)
     dense_candidates = _candidates(500)
