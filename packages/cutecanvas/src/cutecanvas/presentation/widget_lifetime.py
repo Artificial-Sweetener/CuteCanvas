@@ -50,12 +50,17 @@ class WidgetOwnerLifetimeGuard(QObject):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """Observe ownership changes without consuming the widget event."""
+        event_type = event.type()
         if watched is self._widget:
-            event_type = event.type()
             if event_type == QEvent.Type.DeferredDelete:
                 self._request_close()
             elif event_type == QEvent.Type.ParentChange:
                 self._bind_parent()
+        elif (
+            watched is self._lifetime_parent
+            and event_type == QEvent.Type.DeferredDelete
+        ):
+            self._request_close()
         return False
 
     def _bind_parent(self) -> None:
@@ -67,6 +72,7 @@ class WidgetOwnerLifetimeGuard(QObject):
         self._unbind_parent()
         self._lifetime_parent = parent
         if parent is not None:
+            parent.installEventFilter(self)
             parent.destroyed.connect(self._parent_destroyed)
 
     def _unbind_parent(self) -> None:
@@ -76,14 +82,14 @@ class WidgetOwnerLifetimeGuard(QObject):
         if parent is None:
             return
         try:
+            parent.removeEventFilter(self)
             parent.destroyed.disconnect(self._parent_destroyed)
         except (RuntimeError, TypeError):
             pass
 
     def _parent_destroyed(self, _owner: object | None = None) -> None:
-        """Close resources before the enclosing owner deletes this widget."""
+        """Drop the stale parent wrapper after Qt completes its destruction."""
         self._lifetime_parent = None
-        self._request_close()
 
     def _request_close(self) -> None:
         """Invoke the live resource owner exactly through its idempotent boundary."""

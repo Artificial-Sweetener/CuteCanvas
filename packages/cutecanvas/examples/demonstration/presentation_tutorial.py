@@ -134,6 +134,8 @@ class PresentationTutorialController:
 
     def close(self) -> None:
         """Close the tutorial window during application teardown."""
+        if self._workspace is not None:
+            self._workspace.close()
         if self._dialog is not None:
             self._dialog.close()
 
