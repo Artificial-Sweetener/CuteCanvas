@@ -208,6 +208,10 @@ steps synchronously for hosts that do not need split scheduling.
   previously captured snapshot.
 - `CompositionPersistenceFacade.load_document()` restores every root from one
   document archive.
+- `prepare_document_restore()` decodes and validates an archive without touching
+  a live editor, so hosts can perform that expensive work on a worker thread.
+- `CompositionPersistenceFacade.restore_document()` transactionally installs a
+  `PreparedDocumentRestore` on the editor-owning thread.
 
 The sections below list the complete public surface. Use the narrative guides
 for step-by-step workflows.

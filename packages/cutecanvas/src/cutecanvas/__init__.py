@@ -151,6 +151,8 @@ __all__ = [
     "CompositionHandle",
     "CompositionPersistenceFacade",
     "DocumentPersistenceSnapshot",
+    "PreparedDocumentRestore",
+    "prepare_document_restore",
     "EditorFacade",
     "EditorCursorIntent",
     "EditorCursorTheme",
@@ -272,6 +274,14 @@ _AUTHOR_SYMBOLS: dict[str, tuple[str, str]] = {
     "DocumentPersistenceSnapshot": (
         "cutecanvas.facade.persistence",
         "DocumentPersistenceSnapshot",
+    ),
+    "PreparedDocumentRestore": (
+        "cutecanvas.facade.persistence",
+        "PreparedDocumentRestore",
+    ),
+    "prepare_document_restore": (
+        "cutecanvas.facade.persistence",
+        "prepare_document_restore",
     ),
     "LayerHandle": ("cutecanvas.facade.layer_handles", "LayerHandle"),
     "LayerEffectHandle": (

@@ -161,6 +161,8 @@ from .facade.persistence import (
 from .facade.persistence import (
     DocumentPersistenceSnapshot as DocumentPersistenceSnapshot,
 )
+from .facade.persistence import PreparedDocumentRestore as PreparedDocumentRestore
+from .facade.persistence import prepare_document_restore as prepare_document_restore
 from .masks.export import MaskExportSnapshot as MaskExportSnapshot
 from .masks.mask_undo import MaskUndoState
 from .masks.workflow import MaskInfo as MaskInfo

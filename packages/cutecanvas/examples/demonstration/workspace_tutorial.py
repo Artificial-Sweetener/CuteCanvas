@@ -26,7 +26,12 @@ import uuid
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from cutecanvas import CuteCanvas, ExecutionRuntime, LayerPolicy
+from cutecanvas import (
+    CuteCanvas,
+    ExecutionRuntime,
+    LayerPolicy,
+    prepare_document_restore,
+)
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QFileDialog, QWidget
 
@@ -105,10 +110,12 @@ class WorkspaceTutorialController:
     def open_composition(self, path: Path) -> bool:
         """Restore one complete editable CuteCanvas archive from a known path."""
         try:
-            composition = self._canvas.editor.persistence.load(path)
+            prepared = prepare_document_restore(path)
+            compositions = self._canvas.editor.persistence.restore_document(prepared)
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             self._set_status(f"Could not open composition: {exc}")
             return False
+        composition = compositions[0]
         self._set_status(f"Opened {composition.state.title}.")
         return True
 

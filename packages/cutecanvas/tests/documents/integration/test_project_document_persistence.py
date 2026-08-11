@@ -23,7 +23,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from cutecanvas import CuteCanvas
+from cutecanvas import CuteCanvas, prepare_document_restore
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.harness.timing import completion_clock
 from PySide6.QtCore import QRectF
@@ -173,6 +173,43 @@ def test_complete_document_archive_round_trips_independent_roots(
         assert tuple(handle.id for handle in loaded) == (first_id, second_id)
         assert restored.currentCompositionID() is None
         assert restored.document().masks.get_layer(mask_id) is not None
+    finally:
+        source.close()
+        restored.close()
+        source.deleteLater()
+        restored.deleteLater()
+        qapp.processEvents()
+
+
+def test_document_archive_preparation_is_detached_from_live_installation(
+    qapp,
+    tmp_path,
+) -> None:
+    """A worker-prepared archive should not mutate an editor until installation."""
+
+    source = CuteCanvas(features=("mask",))
+    restored = CuteCanvas(features=("mask",))
+    try:
+        composition_id = source.createCompositionFromImage(_image("red"))
+        path = tmp_path / "prepared-document.cutecanvas"
+        source.editor.persistence.save_document(path)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            prepared = executor.submit(prepare_document_restore, path).result(
+                timeout=5.0
+            )
+
+        assert prepared.composition_ids == (composition_id,)
+        assert restored.getCompositionSnapshot().order == ()
+
+        handles = restored.editor.persistence.restore_document(
+            prepared,
+            open_first=False,
+        )
+
+        assert tuple(handle.id for handle in handles) == (composition_id,)
+        assert restored.getCompositionSnapshot().order == (composition_id,)
+        assert restored.currentCompositionID() is None
     finally:
         source.close()
         restored.close()

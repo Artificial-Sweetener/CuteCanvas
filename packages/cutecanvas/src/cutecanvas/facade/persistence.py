@@ -25,6 +25,7 @@ from ..persistence import (
     CompositionArchiveSnapshot,
     CompositionPersistenceService,
 )
+from ..persistence.codec import CompositionArchiveCodec
 from .composition_handles import CompositionHandle
 from .handles import EditorHandleHost
 
@@ -35,6 +36,21 @@ class DocumentPersistenceSnapshot:
 
     composition_ids: tuple[uuid.UUID, ...]
     _archive: CompositionArchiveSnapshot = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedDocumentRestore:
+    """Carry a validated document archive prepared outside the GUI thread."""
+
+    composition_ids: tuple[uuid.UUID, ...]
+    _archive: CompositionArchiveSnapshot = field(repr=False)
+
+
+def prepare_document_restore(path: str | Path) -> PreparedDocumentRestore:
+    """Decode and validate a document archive without mutating a live editor."""
+
+    archive = CompositionArchiveCodec().read(Path(path))
+    return PreparedDocumentRestore(archive.root_document_ids, archive)
 
 
 class CompositionPersistenceFacade:
@@ -96,9 +112,24 @@ class CompositionPersistenceFacade:
         open_first: bool = True,
     ) -> tuple[CompositionHandle, ...]:
         """Transactionally restore all roots from one document archive."""
+        return self.restore_document(
+            prepare_document_restore(path),
+            open_first=open_first,
+        )
+
+    def restore_document(
+        self,
+        prepared: PreparedDocumentRestore,
+        *,
+        open_first: bool = True,
+    ) -> tuple[CompositionHandle, ...]:
+        """Install one prepared document archive into the live editor."""
+
+        if not isinstance(prepared, PreparedDocumentRestore):
+            raise TypeError("prepared must be a PreparedDocumentRestore")
         compositions = tuple(
             CompositionHandle(self._host, composition_id)
-            for composition_id in self._service.load_document(Path(path))
+            for composition_id in self._service.restore_document(prepared._archive)
         )
         if open_first and compositions:
             compositions[0].open()

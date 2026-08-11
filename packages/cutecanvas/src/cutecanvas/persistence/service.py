@@ -105,6 +105,13 @@ class CompositionPersistenceService:
     def load_document(self, path: Path) -> tuple[uuid.UUID, ...]:
         """Validate and transactionally restore all roots from one archive."""
         archive = self._codec.read(path)
+        return self.restore_document(archive)
+
+    def restore_document(
+        self,
+        archive: CompositionArchiveSnapshot,
+    ) -> tuple[uuid.UUID, ...]:
+        """Transactionally install one previously validated document archive."""
         CompositionArchiveRestorer(
             compositions=self._compositions,
             masks=self._masks(),
