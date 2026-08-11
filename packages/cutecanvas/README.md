@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/2b10acf82f3b0aaf5844ba992653bbd7f00f1462/assets/logos/cutecanvas-logo-on-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/2b10acf82f3b0aaf5844ba992653bbd7f00f1462/assets/logos/cutecanvas-logo-on-light.svg">
-    <img alt="CuteCanvas — PySide6 Graphics Editor" src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/2b10acf82f3b0aaf5844ba992653bbd7f00f1462/assets/logos/cutecanvas-logo.svg" width="760">
+    <img alt="CuteCanvas — PySide6 Graphics Editor" src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/2b10acf82f3b0aaf5844ba992653bbd7f00f1462/assets/logos/cutecanvas-logo.svg" width="420">
   </picture>
 </h1>
 
