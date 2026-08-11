@@ -40,6 +40,11 @@ class LayerIsolationCompositor:
         paint_layer: Callable[[QPainter], None],
     ) -> None:
         """Render a complete layer independently, then blend it over the backdrop."""
+        composite_clip = (
+            painter.worldTransform().map(painter.clipRegion())
+            if painter.hasClipping()
+            else None
+        )
         depth = self._depth
         self._depth += 1
         try:
@@ -55,6 +60,11 @@ class LayerIsolationCompositor:
             painter.save()
             try:
                 painter.resetTransform()
+                if composite_clip is not None:
+                    painter.setClipRegion(
+                        composite_clip,
+                        Qt.ClipOperation.ReplaceClip,
+                    )
                 painter.setOpacity(opacity)
                 painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
                 painter.drawImage(QPointF(), buffer)

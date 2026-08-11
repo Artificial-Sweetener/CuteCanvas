@@ -54,3 +54,43 @@ def test_nested_layer_isolation_keeps_outer_surface_intact(qapp) -> None:
 
     assert output.pixelColor(2, 2) == QColor("red")
     assert output.pixelColor(8, 8) == QColor("blue")
+
+
+def test_transformed_partial_composite_maps_outer_clip_to_device_space(qapp) -> None:
+    """A transformed repair must neither redraw nor reuse pixels outside its clip."""
+    del qapp
+    output = QImage(16, 8, QImage.Format.Format_ARGB32_Premultiplied)
+    output.fill(Qt.GlobalColor.transparent)
+    isolation = LayerIsolationCompositor()
+
+    painter = QPainter(output)
+    try:
+        isolation.composite(
+            painter,
+            opacity=1.0,
+            paint_layer=lambda layer: layer.fillRect(
+                QRectF(0.0, 0.0, 4.0, 4.0),
+                QColor("red"),
+            ),
+        )
+    finally:
+        painter.end()
+    output.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(output)
+    try:
+        painter.translate(8.0, 0.0)
+        painter.setClipRect(QRectF(0.0, 0.0, 4.0, 4.0))
+        isolation.composite(
+            painter,
+            opacity=1.0,
+            paint_layer=lambda layer: layer.fillRect(
+                QRectF(0.0, 0.0, 4.0, 4.0),
+                QColor("blue"),
+            ),
+        )
+    finally:
+        painter.end()
+
+    assert output.pixelColor(2, 2).alpha() == 0
+    assert output.pixelColor(10, 2) == QColor("blue")

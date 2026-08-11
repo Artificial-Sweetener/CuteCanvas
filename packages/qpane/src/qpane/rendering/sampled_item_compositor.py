@@ -108,9 +108,19 @@ class SampledItemCompositor:
         preview: TransientSampledResolvedContribution,
     ) -> None:
         """Draw a settled edit through the source's native sample batch."""
-        self._prepare_item(painter, plan, item)
-        painter.setOpacity(item.descriptor.opacity)
-        self._draw_tiles(painter, preview.tiles)
+
+        def paint_layer(layer_painter: QPainter) -> None:
+            """Replace overlapping samples on one transparent surface."""
+            self._prepare_item(layer_painter, plan, item)
+            layer_painter.setCompositionMode(QPainter.CompositionMode_Source)
+            for tile in preview.tiles:
+                _draw_sampled_tile(layer_painter, tile)
+
+        self._isolation.composite(
+            painter,
+            opacity=item.descriptor.opacity,
+            paint_layer=paint_layer,
+        )
 
     def _draw_resolved_replacement(
         self,
@@ -192,21 +202,7 @@ class SampledItemCompositor:
         source_clips: tuple[QRectF, ...] | None = None,
     ) -> None:
         """Draw one sampled batch after its layer transform is active."""
-        SampledItemCompositor._draw_tiles(
-            painter,
-            item.tiles,
-            source_clips=source_clips,
-        )
-
-    @staticmethod
-    def _draw_tiles(
-        painter: QPainter,
-        tiles: tuple[SampledTileRenderData, ...],
-        *,
-        source_clips: tuple[QRectF, ...] | None = None,
-    ) -> None:
-        """Draw one atomic sampled batch through the current layer state."""
-        for tile in tiles:
+        for tile in item.tiles:
             if source_clips is not None and not any(
                 tile.source_rect.intersects(source_clip) for source_clip in source_clips
             ):

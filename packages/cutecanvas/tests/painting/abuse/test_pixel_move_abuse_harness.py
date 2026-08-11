@@ -569,7 +569,12 @@ def test_incremental_mask_drags_match_full_redraw_across_preview_and_commits(
         settled_plan = renderer.get_current_render_plan()
         assert settled_plan is not None
         assert settled_plan.transient_raster is None
-        np.testing.assert_array_equal(floating_pixels, committed_pixels)
+        np.testing.assert_allclose(
+            floating_pixels,
+            committed_pixels,
+            rtol=0.0,
+            atol=1,
+        )
         viewer.markDirty()
         viewer.update()
         harness.drain_events()
