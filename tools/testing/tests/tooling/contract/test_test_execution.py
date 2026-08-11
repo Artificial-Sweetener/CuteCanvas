@@ -68,7 +68,7 @@ def test_test_process_failure_is_returned_to_the_caller() -> None:
 
 
 def test_isolated_gate_runs_one_policy_group_per_pytest_process() -> None:
-    """Hosted verification must isolate Qt and runtime state by policy group."""
+    """Hosted verification must honor group and stronger case isolation."""
     policies = load_policies(repository_root())
     commands: list[tuple[str, ...]] = []
 
@@ -78,21 +78,39 @@ def test_isolated_gate_runs_one_policy_group_per_pytest_process() -> None:
         commands.append(tuple(command))
         return 0
 
+    def two_nodes(path: str, root: Path) -> tuple[int, tuple[str, ...]]:
+        """Return two deterministic cases for each strongly isolated group."""
+        assert root == repository_root()
+        return 0, (
+            f"{path}/test_first.py::test_first",
+            f"{path}/test_second.py::test_second",
+        )
+
     assert (
         run_isolated_groups(
             repository_root(),
             policies,
             runner=successful_runner,
+            node_collector=two_nodes,
         )
         == 0
     )
     pytest_commands = tuple(command for command in commands if "pytest" in command)
-    expected_group_count = sum(
-        len(area.proofs) for policy in policies.values() for area in policy.areas
+    case_isolated_count = sum(
+        len(area.case_isolated_proofs)
+        for policy in policies.values()
+        for area in policy.areas
     )
-    assert len(pytest_commands) == expected_group_count
+    expected_process_count = (
+        sum(len(area.proofs) for policy in policies.values() for area in policy.areas)
+        + case_isolated_count
+    )
+    assert len(pytest_commands) == expected_process_count
     assert all("-n" not in command for command in pytest_commands)
     assert all(len(command) == 4 for command in pytest_commands)
+    assert sum("::" in command[-1] for command in pytest_commands) == (
+        case_isolated_count * 2
+    )
 
 
 def test_isolated_gate_stops_after_the_first_failed_group() -> None:

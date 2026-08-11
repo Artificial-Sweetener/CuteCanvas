@@ -39,6 +39,7 @@ sources = [
   "packages/cutecanvas/src/cutecanvas/masks/**",
 ]
 proofs = ["abuse", "integration", "performance", "qt"]
+case_isolated_proofs = ["abuse", "performance"]
 
 [[areas]]
 name = "painting"

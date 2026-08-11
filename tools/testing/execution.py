@@ -26,6 +26,7 @@ from pathlib import Path
 from tools.testing.model import TestGroup, TestPolicy, TestSelection
 
 CommandRunner = Callable[[Sequence[str], Path], int]
+TestNodeCollector = Callable[[str, Path], tuple[int, tuple[str, ...]]]
 _MAX_PARALLEL_TEST_PROCESSES = 8
 
 
@@ -117,9 +118,11 @@ def run_isolated_groups(
     policies: dict[str, TestPolicy],
     *,
     runner: CommandRunner | None = None,
+    node_collector: TestNodeCollector | None = None,
 ) -> int:
-    """Run every policy-owned group in its own process and stop on failure."""
+    """Run every policy group with its declared process isolation."""
     active_runner = runner or _run_command
+    active_collector = node_collector or _collect_test_nodes
     result = active_runner(
         (sys.executable, "tools/check_architecture.py"),
         root,
@@ -132,6 +135,19 @@ def run_isolated_groups(
             for proof in area.proofs:
                 group = TestGroup(product, area.name, proof)
                 path = group_paths(frozenset({group}), policies)[0]
+                if proof in area.case_isolated_proofs:
+                    status, node_ids = active_collector(path, root)
+                    if status:
+                        return status
+                    for node_id in node_ids:
+                        print(f"Running isolated test case: {node_id}", flush=True)
+                        result = active_runner(
+                            (sys.executable, "-m", "pytest", node_id),
+                            root,
+                        )
+                        if result:
+                            return result
+                    continue
                 print(
                     f"Running isolated test group: {product}/{area.name}/{proof}",
                     flush=True,
@@ -143,6 +159,38 @@ def run_isolated_groups(
                 if result:
                     return result
     return 0
+
+
+def _collect_test_nodes(path: str, root: Path) -> tuple[int, tuple[str, ...]]:
+    """Collect stable root-relative node IDs for a case-isolated proof group."""
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "--rootdir=.",
+            path,
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode:
+        print(completed.stdout, end="")
+        print(completed.stderr, end="", file=sys.stderr)
+        return completed.returncode, ()
+    node_ids = tuple(
+        line.strip()
+        for line in completed.stdout.splitlines()
+        if "::" in line and line.lstrip() == line
+    )
+    if not node_ids:
+        print(f"Case-isolated proof group collected no tests: {path}", file=sys.stderr)
+        return 5, ()
+    return 0, node_ids
 
 
 def _requires_python_wheel_gate(selection: TestSelection) -> bool:

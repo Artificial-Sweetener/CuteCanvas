@@ -145,15 +145,29 @@ def load_policy_file(path: Path) -> TestPolicy:
 
 def _parse_area(data: dict[str, Any], path: Path) -> TestArea:
     """Parse one nonempty behavior area."""
+    case_isolated_proofs = (
+        _required_text_list(data, "case_isolated_proofs", path)
+        if "case_isolated_proofs" in data
+        else ()
+    )
     area = TestArea(
         name=_required_text(data, "name", path),
         sources=_required_text_list(data, "sources", path),
         proofs=_required_text_list(data, "proofs", path),
+        case_isolated_proofs=case_isolated_proofs,
     )
     if not area.proofs:
         raise PolicyError(f"{path}: area {area.name!r} must require proof")
     if len(set(area.proofs)) != len(area.proofs):
         raise PolicyError(f"{path}: area {area.name!r} repeats a proof kind")
+    if len(set(area.case_isolated_proofs)) != len(area.case_isolated_proofs):
+        raise PolicyError(f"{path}: area {area.name!r} repeats case isolation")
+    unknown_isolation = set(area.case_isolated_proofs) - set(area.proofs)
+    if unknown_isolation:
+        raise PolicyError(
+            f"{path}: area {area.name!r} isolates unknown proof kinds "
+            f"{sorted(unknown_isolation)}"
+        )
     return area
 
 

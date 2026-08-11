@@ -104,6 +104,28 @@ proofs = ["contract"]
         load_policy_file(policy_path)
 
 
+def test_policy_rejects_case_isolation_for_an_unknown_proof(tmp_path: Path) -> None:
+    """Strong process isolation must name a proof owned by the same area."""
+    policy_path = tmp_path / "TEST_POLICY.toml"
+    policy_path.write_text(
+        """
+schema = 1
+product = "invalid"
+test_root = "tests"
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+[[areas]]
+name = "api"
+sources = ["src/**"]
+proofs = ["contract"]
+case_isolated_proofs = ["abuse"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError, match="isolates unknown proof kinds"):
+        load_policy_file(policy_path)
+
+
 @pytest.mark.parametrize("legacy_directory", ("tests", "examples"))
 def test_root_runtime_ownership_rejects_python_artifacts(
     tmp_path: Path,

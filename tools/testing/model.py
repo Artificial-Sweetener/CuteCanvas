@@ -38,6 +38,7 @@ class TestArea:
     name: str
     sources: tuple[str, ...]
     proofs: tuple[str, ...]
+    case_isolated_proofs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
