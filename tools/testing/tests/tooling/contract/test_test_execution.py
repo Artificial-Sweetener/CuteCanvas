@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 from tools.testing.cli import _print_selection
-from tools.testing.execution import group_paths, run_selection
+from tools.testing.execution import group_paths, run_isolated_groups, run_selection
 from tools.testing.model import SelectionReason
 from tools.testing.model import TestGroup as _TestGroup
 from tools.testing.model import TestSelection as _TestSelection
@@ -65,6 +65,57 @@ def test_test_process_failure_is_returned_to_the_caller() -> None:
     assert commands[0][-1] == "tools/check_architecture.py"
     assert "pytest" in commands[1]
     assert commands[1][3:6] == ("-n", "auto", "--maxprocesses=8")
+
+
+def test_isolated_gate_runs_one_policy_group_per_pytest_process() -> None:
+    """Hosted verification must isolate Qt and runtime state by policy group."""
+    policies = load_policies(repository_root())
+    commands: list[tuple[str, ...]] = []
+
+    def successful_runner(command: Sequence[str], root: Path) -> int:
+        """Capture every command without executing the complete repository."""
+        assert root == repository_root()
+        commands.append(tuple(command))
+        return 0
+
+    assert (
+        run_isolated_groups(
+            repository_root(),
+            policies,
+            runner=successful_runner,
+        )
+        == 0
+    )
+    pytest_commands = tuple(command for command in commands if "pytest" in command)
+    expected_group_count = sum(
+        len(area.proofs) for policy in policies.values() for area in policy.areas
+    )
+    assert len(pytest_commands) == expected_group_count
+    assert all("-n" not in command for command in pytest_commands)
+    assert all(len(command) == 4 for command in pytest_commands)
+
+
+def test_isolated_gate_stops_after_the_first_failed_group() -> None:
+    """A failed isolated group must prevent later groups from masking it."""
+    policies = load_policies(repository_root())
+    commands: list[tuple[str, ...]] = []
+
+    def second_group_fails(command: Sequence[str], root: Path) -> int:
+        """Fail the second pytest process after architecture validation."""
+        assert root == repository_root()
+        commands.append(tuple(command))
+        pytest_count = sum("pytest" in candidate for candidate in commands)
+        return 9 if "pytest" in command and pytest_count == 2 else 0
+
+    assert (
+        run_isolated_groups(
+            repository_root(),
+            policies,
+            runner=second_group_fails,
+        )
+        == 9
+    )
+    assert sum("pytest" in command for command in commands) == 2
 
 
 def test_native_commit_gate_denies_warnings_and_dependency_risk() -> None:

@@ -543,8 +543,10 @@ def test_four_overlapping_4k_masks_navigate_fluidly_without_dropped_layers(
         )
         assert max(stable_pan) < _NAVIGATION_STALL_BUDGET_MS
         assert max(stable_zoom) < _NAVIGATION_STALL_BUDGET_MS
+        assert harness.wait_for_mask_render_idle(timeout_ms=8000)
         assert harness.wait_for_render_refinement_idle(timeout_ms=8000)
-        harness.drain_events()
+        assert harness.wait_for_raster_render_idle(timeout_ms=8000)
+        harness.drain_events(wait_ms=60)
         renderer = viewer.view().renderer
         settled = renderer.get_base_buffer().copy()
         viewer.view().renderer.markDirty()

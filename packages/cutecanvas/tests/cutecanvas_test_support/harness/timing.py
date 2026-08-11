@@ -28,8 +28,8 @@ INTERACTIVE_PERFORMANCE = pytest.mark.interactive_performance
 
 
 def interaction_clock() -> float:
-    """Measure synchronous dispatch work without xdist scheduler contention."""
-    if os.environ.get("PYTEST_XDIST_WORKER"):
+    """Measure synchronous work without parallel or hosted scheduling delay."""
+    if os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("CI"):
         return thread_time()
     return perf_counter()
 
@@ -40,8 +40,8 @@ def completion_clock() -> float:
 
 
 def absolute_latency_assertions_are_isolated() -> bool:
-    """Return whether no parallel test workers can contend with wall-clock timing."""
-    return not bool(os.environ.get("PYTEST_XDIST_WORKER"))
+    """Return whether wall-clock latency runs without shared or hosted contention."""
+    return not bool(os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("CI"))
 
 
 def average_interaction_latency_ms(

@@ -112,6 +112,36 @@ def run_selection(
     return 0
 
 
+def run_isolated_groups(
+    root: Path,
+    policies: dict[str, TestPolicy],
+    *,
+    runner: CommandRunner | None = None,
+) -> int:
+    """Run every policy-owned group in its own process and stop on failure."""
+    active_runner = runner or _run_command
+    result = active_runner(
+        (sys.executable, "tools/check_architecture.py"),
+        root,
+    )
+    if result:
+        return result
+    for product in sorted(policies):
+        policy = policies[product]
+        for area in policy.areas:
+            for proof in area.proofs:
+                group = TestGroup(product, area.name, proof)
+                path = group_paths(frozenset({group}), policies)[0]
+                print(f"Running isolated test group: {product}/{area.name}/{proof}")
+                result = active_runner(
+                    (sys.executable, "-m", "pytest", path),
+                    root,
+                )
+                if result:
+                    return result
+    return 0
+
+
 def _requires_python_wheel_gate(selection: TestSelection) -> bool:
     """Return whether staged packaging or public contracts affect Python wheels."""
     for path in _changed_paths(selection):
