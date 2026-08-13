@@ -21,6 +21,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+from cutecanvas.coverage.bilinear_coordinates import map_bilinear_source_grid
 from PySide6.QtCore import QPointF, QRect
 from qpane.sdk.scene import (
     BilinearLayerTransform,
@@ -28,8 +29,6 @@ from qpane.sdk.scene import (
     PiecewiseLayerTransform,
     RasterBounds,
 )
-
-from cutecanvas.coverage.bilinear_coordinates import map_bilinear_source_grid
 
 from .model import BrushDab
 from .piecewise_tip_coordinates import map_piecewise_source_grid

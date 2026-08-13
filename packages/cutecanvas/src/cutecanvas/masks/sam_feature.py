@@ -24,10 +24,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from PySide6.QtCore import QPoint
-from qpane.sdk.features import FeatureInstallError
-from qpane.sdk.types import DiagnosticRecord
-
 from cutecanvas.sam.segmentation_request import SmartSegmentationRequest
 from cutecanvas.tools.smart_segmentation import (
     SmartMaskTool,
@@ -35,6 +31,9 @@ from cutecanvas.tools.smart_segmentation import (
     connect_smart_segmentation_signals,
     disconnect_smart_segmentation_signals,
 )
+from PySide6.QtCore import QPoint
+from qpane.sdk.features import FeatureInstallError
+from qpane.sdk.types import DiagnosticRecord
 
 from ..core.config import SAM_DEFAULT_MODEL_HASH, SAM_DEFAULT_MODEL_URL
 from ..core.config_features import require_sam_config

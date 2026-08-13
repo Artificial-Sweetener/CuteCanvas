@@ -21,14 +21,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF
-
 from cutecanvas.coverage import (
     CoverageCombineMode,
     CoverageGeometryFactory,
     CoverageItem,
     VectorCoverageItem,
 )
+from PySide6.QtCore import QPointF
 
 
 class PolygonCoveragePublication:

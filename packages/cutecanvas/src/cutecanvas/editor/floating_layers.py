@@ -21,14 +21,13 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
+from cutecanvas.scene.pixel_fragments import RasterPixelFragment
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerSourceReference,
     LayerTransform,
     SceneDescriptor,
 )
-
-from cutecanvas.scene.pixel_fragments import RasterPixelFragment
 
 
 @dataclass(frozen=True, slots=True)

@@ -21,10 +21,9 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cutecanvas.coverage import WritableCoverageRegion
 from PySide6.QtCore import QRect
 from qpane.sdk.scene import RasterBounds
-
-from cutecanvas.coverage import WritableCoverageRegion
 
 from ..coverage.spatial_constraint import CoverageSpatialConstraint
 from ..painting import BrushDabEngine, BrushDabRegionPlanner, BrushStrokeSegment

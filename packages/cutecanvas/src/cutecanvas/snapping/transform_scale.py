@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from cutecanvas.scene.transform_session import LayerTransformBoxState
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
@@ -30,8 +31,6 @@ from qpane.sdk.scene import (
     TransformOperation,
     TransformOperationKind,
 )
-
-from cutecanvas.scene.transform_session import LayerTransformBoxState
 
 from .axis_resolution import AxisSnapLock, AxisSnapResolver, build_candidate_index
 from .candidates import SnapTargetSnapshot

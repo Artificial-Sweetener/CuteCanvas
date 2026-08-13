@@ -20,9 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from qpane.sdk.scene import RasterBounds
-
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import RasterBounds
 
 from .content_bounds import occupied_channel_bounds
 

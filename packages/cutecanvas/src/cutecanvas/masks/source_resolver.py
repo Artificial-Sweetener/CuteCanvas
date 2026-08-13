@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Protocol
 
 import numpy as np
+from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.coverage.boundary import sparse_coverage_convex_boundary
+from cutecanvas.scene.pixel_fragments import RasterPixelFormat
+from cutecanvas.scene.pixel_transitions import RasterPixelTransition
+from cutecanvas.scene.source_capabilities import PixelSampleGeometry
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage, QPixmap
 from qpane.sdk.raster import present_hybrid_sample
@@ -34,11 +39,6 @@ from qpane.sdk.scene import (
     RasterSourcePatch,
 )
 
-from cutecanvas.coverage import CoverageSnapshot
-from cutecanvas.coverage.boundary import sparse_coverage_convex_boundary
-from cutecanvas.scene.pixel_fragments import RasterPixelFormat
-from cutecanvas.scene.pixel_transitions import RasterPixelTransition
-from cutecanvas.scene.source_capabilities import PixelSampleGeometry
 from qpane import HybridPresentationStyle, HybridSource
 
 from ..resources import ProjectResourceReference

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from cutecanvas.scene.transform_session import LayerTransformBoxState
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
@@ -27,8 +28,6 @@ from qpane.sdk.scene import (
     TransformModifiers,
     TransformOperation,
 )
-
-from cutecanvas.scene.transform_session import LayerTransformBoxState
 
 from .edge_candidates import OrientedTargetSnapshot
 from .edge_index import OrientedEdgeIndex

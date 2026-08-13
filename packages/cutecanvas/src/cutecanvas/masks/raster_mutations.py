@@ -21,6 +21,9 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cutecanvas.coverage import CoverageSurface
+from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
+from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QRect
 from qpane.sdk.execution import (
     ExecutionHandle,
@@ -34,10 +37,6 @@ from qpane.sdk.execution import (
     ExecutionUrgency,
 )
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
-
-from cutecanvas.coverage import CoverageSurface
-from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
-from cutecanvas.types import RasterExtentPolicy
 
 from ..raster.structure_products import (
     RasterReframeProduct,

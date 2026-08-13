@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.scene import (
@@ -31,8 +32,6 @@ from qpane.sdk.scene import (
     RasterBounds,
     SceneDescriptor,
 )
-
-from cutecanvas.types import RasterExtentPolicy
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import (

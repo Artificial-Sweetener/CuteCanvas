@@ -32,6 +32,9 @@ from cutecanvas import (
     OutboundMimeItem,
     ResponsiveGridPolicy,
 )
+from demonstration.projection_tutorial import (
+    ProjectionTutorialController,
+)
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -41,10 +44,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QWidget,
-)
-
-from demonstration.projection_tutorial import (
-    ProjectionTutorialController,
 )
 
 

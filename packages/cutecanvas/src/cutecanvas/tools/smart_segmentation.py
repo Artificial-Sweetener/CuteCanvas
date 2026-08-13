@@ -21,15 +21,15 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, ClassVar
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QWheelEvent
-
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.cursor import EditorCursorIntent
 from cutecanvas.sam.segmentation_request import (
     SmartSegmentationProduct,
     SmartSegmentationRequest,
 )
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QWheelEvent
+
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .base import BaseTool

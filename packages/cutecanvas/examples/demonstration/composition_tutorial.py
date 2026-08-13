@@ -26,14 +26,13 @@ import uuid
 from collections.abc import Callable
 
 from cutecanvas import CuteCanvas
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
-
 from demonstration.composition_properties_dialog import (
     CompositionPropertiesDialog,
 )
 from demonstration.compositions import CompositionDock
 from demonstration.layer_properties_dialog import LayerPropertiesDialog
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 
 class CompositionTutorialController:

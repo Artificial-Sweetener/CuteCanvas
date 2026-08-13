@@ -18,13 +18,12 @@
 
 from __future__ import annotations
 
-from qpane.sdk.scene import SceneDescriptor
-
 from cutecanvas.editor.affine_interactions import EditorAffineInteractions
 from cutecanvas.editor.movement import EditorMovementInteraction
 from cutecanvas.scene.layer_move import SceneLayerMoveController
 from cutecanvas.scene.transform_session import SceneLayerTransformController
 from cutecanvas.snapping.system import SnappingSubsystem
+from qpane.sdk.scene import SceneDescriptor
 
 
 def synchronize_scene_interactions(

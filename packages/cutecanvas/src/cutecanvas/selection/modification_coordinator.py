@@ -21,9 +21,6 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from qpane.sdk.execution import ExecutionScope
-from qpane.sdk.scene import RasterBounds, SceneDescriptor
-
 from cutecanvas.coverage import (
     CoverageDocument,
     CoverageEdgeModificationRequest,
@@ -42,6 +39,8 @@ from cutecanvas.runtime.coverage_modification_preview import (
 from cutecanvas.runtime.latest_requests import DocumentLatestRequestRegistry
 from cutecanvas.scene.canvas_bounds import scene_raster_bounds
 from cutecanvas.types import LayerEdgeOperation, PixelSelectionModificationResult
+from qpane.sdk.execution import ExecutionScope
+from qpane.sdk.scene import RasterBounds, SceneDescriptor
 
 from .service import PixelSelectionService
 

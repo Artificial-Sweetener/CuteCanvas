@@ -27,10 +27,9 @@ from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 
 from cutecanvas import Config, CuteCanvas
+from demonstration.config.dialog import ConfigDialog
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QDialog, QMenu, QWidget
-
-from demonstration.config.dialog import ConfigDialog
 
 DIAGNOSTIC_DOMAIN_FIELD = "diagnostics_domains_enabled"
 SAM_CONFIG_FIELDS = ConfigDialog.SAM_FIELDS

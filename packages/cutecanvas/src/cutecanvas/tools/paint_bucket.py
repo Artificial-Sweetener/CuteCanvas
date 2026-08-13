@@ -20,10 +20,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import ClassVar
 
+from cutecanvas.coverage import CoverageCombineMode
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
-
-from cutecanvas.coverage import CoverageCombineMode
 
 from .base import BaseTool
 from .coverage_operation import resolve_coverage_operation

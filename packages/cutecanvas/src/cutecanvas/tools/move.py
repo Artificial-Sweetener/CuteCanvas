@@ -21,10 +21,10 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
+from cutecanvas.cursor import EditorCursorIntent
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent
 
-from cutecanvas.cursor import EditorCursorIntent
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .base import BaseTool

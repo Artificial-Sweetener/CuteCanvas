@@ -19,11 +19,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from qpane.sdk.scene import SceneDescriptor
-
 from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
 from cutecanvas.snapping.edge_candidates import OrientedEdgeCandidateProvider
 from cutecanvas.snapping.edge_index import OrientedEdgeIndex
+from qpane.sdk.scene import SceneDescriptor
 
 from .shared_edge_discovery import SharedEdgeDiscovery
 

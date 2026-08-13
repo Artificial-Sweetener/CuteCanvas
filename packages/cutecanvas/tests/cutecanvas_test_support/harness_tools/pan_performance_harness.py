@@ -29,10 +29,6 @@ from pathlib import Path
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication
-
 from cutecanvas_test_support.harness_tools.pan_performance_analysis import (
     LatencySummary,
     PerformanceRegression,
@@ -48,6 +44,9 @@ from cutecanvas_test_support.harness_tools.pan_performance_runtime import (
 from cutecanvas_test_support.harness_tools.pan_render_harness import (
     coordinate_fingerprint_image,
 )
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QApplication
 
 _RESULT_VERSION = 1
 _DEFAULT_REGRESSION_RATIO = 0.20

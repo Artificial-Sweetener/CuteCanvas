@@ -26,6 +26,7 @@ from cutecanvas import (
     CompositionSnapshot,
     CuteCanvas,
 )
+from demonstration.compositions.highlights import LayerBrowserHighlights
 from PySide6.QtCore import QEvent, QItemSelectionModel, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QDropEvent
 from PySide6.QtWidgets import (
@@ -36,8 +37,6 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
 )
-
-from demonstration.compositions.highlights import LayerBrowserHighlights
 
 FocusPolicy = Callable[[str], None]
 _BROWSER_ROLE = Qt.ItemDataRole.UserRole

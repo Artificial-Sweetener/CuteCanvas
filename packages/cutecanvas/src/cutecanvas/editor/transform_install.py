@@ -20,16 +20,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QApplication
-from qpane.sdk.scene import SceneDescriptor
-
 from cutecanvas.edit_sessions import EditSessionSnapshot
 from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from cutecanvas.scene.mapping_mutations import LayerMappingMutationOwner
 from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
 from cutecanvas.selection import PixelSelectionService
 from cutecanvas.snapping.system import SnappingSubsystem
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtWidgets import QApplication
+from qpane.sdk.scene import SceneDescriptor
 
 from .affine_interactions import EditorAffineInteractions
 from .operation_resolution import EditorOperationResolver

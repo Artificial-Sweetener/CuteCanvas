@@ -21,14 +21,13 @@ import json
 import math
 
 from cutecanvas import CuteCanvas
+from cutecanvas_test_support.harness.viewport_resize_probe import (
+    MountedViewportResizeProbe,
+)
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 from qpane.sdk.rendering import ViewportZoomMode
-
-from cutecanvas_test_support.harness.viewport_resize_probe import (
-    MountedViewportResizeProbe,
-)
 
 RESULT_PREFIX = "VIEWPORT_RESIZE_DPI_RESULT="
 

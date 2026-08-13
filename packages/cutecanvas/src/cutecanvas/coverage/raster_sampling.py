@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from cutecanvas.ferrastra import NativeCoverageProjector
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import (
@@ -27,8 +28,6 @@ from qpane.sdk.raster import (
     qimage_to_numpy_grayscale8,
 )
 from qpane.sdk.scene import LayerTransform, RasterBounds
-
-from cutecanvas.ferrastra import NativeCoverageProjector
 
 from .surface import CoverageSurface
 

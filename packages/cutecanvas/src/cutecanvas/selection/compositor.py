@@ -18,10 +18,9 @@
 from __future__ import annotations
 
 import numpy as np
-from qpane.sdk.scene import RasterBounds
-
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot, combine_coverage
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import RasterBounds
 
 
 def compose_selection_coverage(

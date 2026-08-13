@@ -20,11 +20,11 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import ClassVar
 
+from cutecanvas.tools.cursor_feedback import ToolCursorStyle
+from cutecanvas.tools.ports import CloneStampInteractionPort
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QWheelEvent
 
-from cutecanvas.tools.cursor_feedback import ToolCursorStyle
-from cutecanvas.tools.ports import CloneStampInteractionPort
 from qpane import PointerPhase, PointerSample
 
 from .brush import BrushTool

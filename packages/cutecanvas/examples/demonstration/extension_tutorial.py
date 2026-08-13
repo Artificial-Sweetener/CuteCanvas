@@ -28,6 +28,9 @@ import traceback
 from collections.abc import Callable
 
 from cutecanvas import CuteCanvas
+from demonstration import demo_text, hooks_examples
+from demonstration.custom_tool import build_custom_cursor_tool
+from demonstration.hooks_editor import HookEditorWindow
 from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QAction,
@@ -44,10 +47,6 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import QWidget
-
-from demonstration import demo_text, hooks_examples
-from demonstration.custom_tool import build_custom_cursor_tool
-from demonstration.hooks_editor import HookEditorWindow
 
 logger = logging.getLogger(__name__)
 

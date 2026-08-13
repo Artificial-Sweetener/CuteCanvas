@@ -22,10 +22,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
-from qpane.sdk.scene import RasterBounds
-
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import RasterBounds
 
 from .sources import DenseFloodFillPixelSource, FloodFillPixelSource
 

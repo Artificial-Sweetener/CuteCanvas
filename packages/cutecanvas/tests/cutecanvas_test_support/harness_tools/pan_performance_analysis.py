@@ -24,12 +24,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from cutecanvas_test_support.harness_tools.pan_performance_runtime import PanFrameTiming
+from cutecanvas_test_support.harness_tools.pan_render_harness import HeadlessPanHarness
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
-
-from cutecanvas_test_support.harness_tools.pan_performance_runtime import PanFrameTiming
-from cutecanvas_test_support.harness_tools.pan_render_harness import HeadlessPanHarness
 
 COMPARISON_METRICS = (
     "end_to_end.p95_ms",

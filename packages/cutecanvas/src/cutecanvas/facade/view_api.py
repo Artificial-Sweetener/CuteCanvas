@@ -19,10 +19,9 @@ from __future__ import annotations
 
 from math import isfinite
 
+from cutecanvas.scene.geometry import aspect_scene_rect
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
 from qpane.sdk.rendering import PanelHitTest
-
-from cutecanvas.scene.geometry import aspect_scene_rect
 
 
 class ViewApiMixin:

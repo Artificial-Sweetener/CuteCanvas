@@ -20,11 +20,10 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from cutecanvas.resources import ProjectResourceKind, ProjectResourceStore
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import qimage_to_numpy_const_view_bgra32
-
-from cutecanvas.resources import ProjectResourceKind, ProjectResourceStore
 
 from ..raster.content_bounds import occupied_channel_bounds
 from .model import (

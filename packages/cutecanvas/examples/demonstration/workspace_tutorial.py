@@ -32,14 +32,13 @@ from cutecanvas import (
     LayerPolicy,
     prepare_document_restore,
 )
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QFileDialog, QWidget
-
 from demonstration.document_saves import (
     DocumentSaveCoordinator,
     DocumentSaveResult,
 )
 from demonstration.workers import ImageLoadCoordinator
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QFileDialog, QWidget
 
 
 class WorkspaceTutorialController:

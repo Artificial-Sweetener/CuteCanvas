@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import (
@@ -30,8 +31,6 @@ from qpane.sdk.raster import (
     qimage_to_numpy_view_argb32,
 )
 from qpane.sdk.scene import RasterBounds
-
-from cutecanvas.types import RasterExtentPolicy
 
 from .preview_sampling import sample_argb32_preview
 from .sparse_grid import SparseRasterGrid, SparseRasterSnapshot, SparseRasterTile

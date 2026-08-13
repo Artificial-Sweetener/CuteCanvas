@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from ferrastra import Graph, GraphBuilder, RasterReconstructionSpace
-
 from qpane.scene.raster_sampling import RasterExactSampling
 
 

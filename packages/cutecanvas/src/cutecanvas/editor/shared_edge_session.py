@@ -21,14 +21,13 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerMapping
-
 from cutecanvas.snapping.edge_candidates import OrientedTargetSnapshot
 from cutecanvas.snapping.edge_index import OrientedEdgeIndex
 from cutecanvas.snapping.edge_model import SnapGuideValue
 from cutecanvas.snapping.oriented_resolution import OrientedEdgeSnapResolver
 from cutecanvas.snapping.rail_resolution import RailSnapResolver
+from PySide6.QtCore import QPointF
+from qpane.sdk.scene import LayerMapping
 
 from .shared_edge_geometry import SharedEdgeSeam
 from .shared_edge_pivot import SharedEdgeHandle, SharedEdgePivot

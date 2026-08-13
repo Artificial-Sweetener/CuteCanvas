@@ -22,12 +22,11 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
-
 from cutecanvas.masks.export import MaskExportSnapshot, MaskImageExportService
 from cutecanvas.masks.workflow import MaskInfo
 from cutecanvas.types import LayerEdgeOperation
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
 
 if TYPE_CHECKING:
     from cutecanvas.composition.scene_adapter import CompositionSceneAdapter
@@ -194,9 +193,8 @@ class MaskApiMixin:
         if "sam" not in self.installedFeatures:
             return False, "SAM tools disabled in this mode."
         try:
-            from qpane.sdk.features import FeatureInstallError
-
             from cutecanvas.masks.sam_feature import install_sam_feature
+            from qpane.sdk.features import FeatureInstallError
 
             self._masks_controller.detachSamManager()
             install_sam_feature(self)

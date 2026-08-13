@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QPoint, Signal
-
 from cutecanvas.edit_sessions import (
     EditorToolDescriptor,
     EditSessionKind,
     ToolEditSessionDeclaration,
 )
+from PySide6.QtCore import QObject, QPoint, Signal
+
 from qpane import (
     CursorTool,
     PanZoomTool,

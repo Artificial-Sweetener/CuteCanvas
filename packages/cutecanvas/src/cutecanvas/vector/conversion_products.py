@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
+from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage, QPainter
 from qpane.sdk.execution import CancellationToken
@@ -34,9 +36,6 @@ from qpane.sdk.vector import (
     draw_vector_document,
     painted_document_path,
 )
-
-from cutecanvas.coverage import CoverageSnapshot
-from cutecanvas.types import RasterExtentPolicy
 
 from .text_paths import VectorTextPathConversion, build_text_path_conversion
 

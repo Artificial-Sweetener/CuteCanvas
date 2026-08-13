@@ -20,14 +20,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF
-
 from cutecanvas.edit_sessions import EditSessionKind
 from cutecanvas.editor.provisional_history import (
     BoundedProvisionalHistory,
     ProvisionalHistorySnapshot,
 )
 from cutecanvas.editor.session_coordination import EditSessionCoordinator
+from PySide6.QtCore import QPointF
 
 from .polygon_coverage_session import PolygonCoverageSession, PolygonCoverageVertex
 

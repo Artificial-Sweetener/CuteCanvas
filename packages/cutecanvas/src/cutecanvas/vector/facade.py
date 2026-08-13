@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from cutecanvas.coverage import CoverageCombineMode
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QTransform
 from qpane.sdk.scene import (
@@ -35,8 +36,6 @@ from qpane.sdk.vector import (
     VectorStyle,
     VectorTextContent,
 )
-
-from cutecanvas.coverage import CoverageCombineMode
 
 from ..composition import CompositionService
 from ..scene.layer_selection import SceneLayerSelectionController

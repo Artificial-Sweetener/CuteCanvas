@@ -22,9 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
-
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,6 +20,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from cutecanvas.scene.pixel_fragments import RasterPixelFormat
+from cutecanvas.scene.pixel_transitions import RasterPixelTransition
+from cutecanvas.scene.source_capabilities import PixelSampleGeometry
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import (
@@ -32,10 +35,6 @@ from qpane.sdk.scene import (
     RasterProductPolicy,
     RasterSourcePatch,
 )
-
-from cutecanvas.scene.pixel_fragments import RasterPixelFormat
-from cutecanvas.scene.pixel_transitions import RasterPixelTransition
-from cutecanvas.scene.source_capabilities import PixelSampleGeometry
 
 from ..resources import ProjectResourceReference
 from .assets import EditableRasterAssetStore

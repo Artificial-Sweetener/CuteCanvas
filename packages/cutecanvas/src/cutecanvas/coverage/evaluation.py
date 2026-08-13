@@ -21,17 +21,16 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
-from qpane.sdk.raster import qimage_to_numpy_grayscale8
-from qpane.sdk.scene import LayerTransform, RasterBounds
-from qpane.sdk.vector import object_path
-
 from cutecanvas.painting.compositor import BrushCompositor
 from cutecanvas.painting.dab_engine import BrushDabEngine
 from cutecanvas.painting.model import BrushOperation
 from cutecanvas.painting.regions import BrushDabRegionPlanner
 from cutecanvas.types import RasterExtentPolicy
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
+from qpane.sdk.raster import qimage_to_numpy_grayscale8
+from qpane.sdk.scene import LayerTransform, RasterBounds
+from qpane.sdk.vector import object_path
 
 from .content_bounds import occupied_coverage_bounds
 from .document import (

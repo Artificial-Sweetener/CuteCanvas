@@ -17,8 +17,6 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPointF
-
 from cutecanvas.editor import EditorOperation
 from cutecanvas.editor.interaction_policy import (
     CanvasInteractionMode,
@@ -30,6 +28,7 @@ from cutecanvas.types import (
     EditorOperationState,
     EditorPolicy,
 )
+from PySide6.QtCore import QPoint, QPointF
 
 
 class EditorPolicyApiMixin:

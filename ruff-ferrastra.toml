@@ -46,6 +46,9 @@ ignore = [
   "RUF067",
 ]
 
+[lint.isort]
+detect-same-package = false
+
 [lint.per-file-ignores]
 "**/tests/*.py" = ["PLC2701"]
 "tests/test_ferrastra_*.py" = ["PLC2701"]

@@ -21,12 +21,11 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerTransform, SceneDescriptor
-
 from cutecanvas.coverage.containment import coverage_contains
 from cutecanvas.coverage.document import CoverageDocument
 from cutecanvas.coverage.surface import CoverageSnapshot
+from PySide6.QtCore import QPointF
+from qpane.sdk.scene import LayerTransform, SceneDescriptor
 
 from .service import PixelSelectionService
 

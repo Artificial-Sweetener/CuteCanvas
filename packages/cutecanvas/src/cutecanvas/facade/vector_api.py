@@ -21,6 +21,17 @@ import uuid
 from collections.abc import Iterable
 from math import isfinite
 
+from cutecanvas.coverage import CoverageCombineMode
+from cutecanvas.types import (
+    PixelSelectionMode,
+)
+from cutecanvas.vector.public import (
+    VectorDocumentSnapshot,
+    VectorMaskSnapshot,
+    VectorNodeSelectionSnapshot,
+    VectorSelectionSnapshot,
+    VectorTextEditSnapshot,
+)
 from PySide6.QtCore import (
     QRectF,
     QSize,
@@ -37,18 +48,6 @@ from qpane.sdk.vector import (
     VectorStyle,
     VectorTextContent,
     VectorTextStyle,
-)
-
-from cutecanvas.coverage import CoverageCombineMode
-from cutecanvas.types import (
-    PixelSelectionMode,
-)
-from cutecanvas.vector.public import (
-    VectorDocumentSnapshot,
-    VectorMaskSnapshot,
-    VectorNodeSelectionSnapshot,
-    VectorSelectionSnapshot,
-    VectorTextEditSnapshot,
 )
 
 

@@ -32,7 +32,6 @@ from ferrastra import (
     Region,
 )
 from PySide6.QtGui import QImage
-
 from qpane.ferrastra.qimage import qimage_from_rgba8, qimage_to_rgba8
 
 

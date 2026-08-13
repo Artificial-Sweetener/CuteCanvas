@@ -24,17 +24,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt
-from PySide6.QtGui import QImage, QWheelEvent
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
-from qpane.raster.image_conversion import qimage_to_numpy_argb32
-
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
 )
+from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtGui import QImage, QWheelEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QWidget
+from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 _RESULT_PREFIX = "HIGH_DPI_NAVIGATION_RESULT="
 

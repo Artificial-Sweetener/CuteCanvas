@@ -19,9 +19,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF, QRectF
-
 from cutecanvas.scene.transform_session import LayerTransformBoxState
+from PySide6.QtCore import QPointF, QRectF
 
 from .candidates import SnapCandidateProvider
 from .configuration import SnapConfiguration

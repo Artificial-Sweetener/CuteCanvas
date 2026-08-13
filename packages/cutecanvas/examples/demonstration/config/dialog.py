@@ -24,6 +24,17 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from cutecanvas import Config
+from demonstration.config.spec import (
+    _ALL_FIELDS,
+    _CONFIG_FIELDS,
+    DIAGNOSTIC_DOMAIN_OPTIONS,
+    FieldGroupSpec,
+    FieldSpec,
+    SectionSpec,
+    active_namespaces_for_features,
+    build_sections_for_features,
+    field_sets_for_sections,
+)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -44,18 +55,6 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
-)
-
-from demonstration.config.spec import (
-    _ALL_FIELDS,
-    _CONFIG_FIELDS,
-    DIAGNOSTIC_DOMAIN_OPTIONS,
-    FieldGroupSpec,
-    FieldSpec,
-    SectionSpec,
-    active_namespaces_for_features,
-    build_sections_for_features,
-    field_sets_for_sections,
 )
 
 _SAM_CONFIG_FIELDS: tuple[str, ...] = (

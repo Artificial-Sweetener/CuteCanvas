@@ -19,6 +19,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from cutecanvas.snapping.transform import TransformSnapCoordinator
+from cutecanvas.types import (
+    EditorTransformCommand,
+    EditorTransformSnapshot,
+    EditorTransformTarget,
+)
 from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
@@ -26,13 +32,6 @@ from qpane.sdk.scene import (
     TransformHandle,
     TransformModifiers,
     TransformOperation,
-)
-
-from cutecanvas.snapping.transform import TransformSnapCoordinator
-from cutecanvas.types import (
-    EditorTransformCommand,
-    EditorTransformSnapshot,
-    EditorTransformTarget,
 )
 
 from ..scene.transform_session import LayerTransformBoxState

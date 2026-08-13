@@ -23,8 +23,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from PySide6.QtGui import QImage
-
 from cutecanvas.coverage import (
     CoverageAsset,
     CoverageDocument,
@@ -34,6 +32,7 @@ from cutecanvas.coverage import (
 )
 from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
 from cutecanvas.coverage.snapshot_equality import coverage_state_snapshots_equal
+from PySide6.QtGui import QImage
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.edit_history import CompositionEditCommand

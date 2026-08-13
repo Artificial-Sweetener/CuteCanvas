@@ -19,15 +19,6 @@ from __future__ import annotations
 
 import math
 
-from qpane.sdk.scene import (
-    BilinearLayerTransform,
-    LayerMapping,
-    LayerPlacement,
-    LayerTransform,
-    PiecewiseLayerTransform,
-    RasterBounds,
-)
-
 from cutecanvas.coverage import AffineCoverageResampler, CoverageSnapshot
 from cutecanvas.coverage.bilinear_resampling import (
     project_bilinear_coverage,
@@ -38,6 +29,14 @@ from cutecanvas.coverage.piecewise_resampling import (
     project_scene_coverage_to_piecewise_layer,
 )
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerMapping,
+    LayerPlacement,
+    LayerTransform,
+    PiecewiseLayerTransform,
+    RasterBounds,
+)
 
 from .compositor import trim_selection_coverage
 

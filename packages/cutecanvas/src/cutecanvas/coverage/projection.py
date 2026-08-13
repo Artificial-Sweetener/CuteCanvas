@@ -20,11 +20,10 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from qpane.sdk.execution import CancellationToken
-from qpane.sdk.scene import LayerTransform, RasterBounds
-
 from cutecanvas.ferrastra import NativeCoverageProjector
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.execution import CancellationToken
+from qpane.sdk.scene import LayerTransform, RasterBounds
 
 from .surface import CoverageSnapshot
 

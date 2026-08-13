@@ -28,12 +28,11 @@ from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.mask_service import MaskService
 from cutecanvas.painting import BrushStrokeSegment
+from cutecanvas_test_support.config import fixed_cache_config
+from cutecanvas_test_support.execution_backend import TestExecution
 from PySide6.QtCore import QCoreApplication, QPointF
 from PySide6.QtGui import QImage, Qt
 from PySide6.QtWidgets import QApplication
-
-from cutecanvas_test_support.config import fixed_cache_config
-from cutecanvas_test_support.execution_backend import TestExecution
 
 
 def cleanup_canvas(canvas: CuteCanvas, application: QApplication) -> None:

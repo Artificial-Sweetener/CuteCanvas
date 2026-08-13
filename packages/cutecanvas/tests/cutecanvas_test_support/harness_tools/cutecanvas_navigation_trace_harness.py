@@ -61,6 +61,14 @@ if __name__ == "__main__":
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from cutecanvas_test_support.harness_tools.cutecanvas_pan_performance_harness import (
+    DocumentPanHarness,
+    LatencySummary,
+    _plan_transforms,
+    compare_images,
+    save_difference_artifacts,
+    summarize_latencies,
+)
 from demonstration.navigation_trace import (
     NavigationState,
     NavigationTrace,
@@ -91,15 +99,6 @@ from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SceneRenderPlan,
     VectorLayerRenderItem,
-)
-
-from cutecanvas_test_support.harness_tools.cutecanvas_pan_performance_harness import (
-    DocumentPanHarness,
-    LatencySummary,
-    _plan_transforms,
-    compare_images,
-    save_difference_artifacts,
-    summarize_latencies,
 )
 
 _SETTLED_CORRECTNESS_TOLERANCE = 1

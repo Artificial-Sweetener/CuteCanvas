@@ -18,9 +18,8 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtGui import QPainterPath
-
 from cutecanvas.coverage import CoverageSnapshot
+from PySide6.QtGui import QPainterPath
 
 
 class SelectionBoundaryBuilder:

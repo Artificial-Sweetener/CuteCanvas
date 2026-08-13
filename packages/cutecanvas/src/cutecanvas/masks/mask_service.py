@@ -24,12 +24,11 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 import numpy as np
+from cutecanvas.coverage import CoverageItem, CoverageSnapshot
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPixmap
 from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.types import DiagnosticRecord
-
-from cutecanvas.coverage import CoverageItem, CoverageSnapshot
 
 from ..composition.layers import CompositionLayerInstance
 from ..core.config import Config

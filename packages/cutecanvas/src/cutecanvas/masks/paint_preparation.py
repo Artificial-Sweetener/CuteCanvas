@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from cutecanvas.coverage import CoverageAsset, CoverageSnapshot
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,
@@ -31,8 +32,6 @@ from qpane.sdk.execution import (
     ExecutionState,
     ExecutionUrgency,
 )
-
-from cutecanvas.coverage import CoverageAsset, CoverageSnapshot
 
 from .mask import MaskAssetStore
 

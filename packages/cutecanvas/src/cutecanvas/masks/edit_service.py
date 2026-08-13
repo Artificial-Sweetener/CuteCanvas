@@ -25,6 +25,8 @@ from dataclasses import replace
 from typing import Any
 
 import numpy as np
+from cutecanvas.coverage import CoverageItem, CoverageSnapshot, WritableCoverageRegion
+from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QPoint, QRect, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import (
@@ -32,9 +34,6 @@ from qpane.sdk.raster import (
     qimage_to_numpy_grayscale8,
 )
 from qpane.sdk.scene import RasterBounds
-
-from cutecanvas.coverage import CoverageItem, CoverageSnapshot, WritableCoverageRegion
-from cutecanvas.types import RasterExtentPolicy
 
 from .history_presentation import MaskHistoryPresenter
 from .mask import MaskAssetStore, MaskLayer

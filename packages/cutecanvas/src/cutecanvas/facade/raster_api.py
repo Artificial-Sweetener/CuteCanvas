@@ -20,18 +20,6 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
-from PySide6.QtCore import (
-    QPointF,
-    QRect,
-    QRectF,
-    QSize,
-)
-from PySide6.QtGui import (
-    QColor,
-    QImage,
-)
-from qpane.sdk.scene import RasterBounds
-
 from cutecanvas.composition.public_policy import (
     internal_layer_policy,
 )
@@ -54,6 +42,17 @@ from cutecanvas.types import (
     PaintTargetSnapshot,
     RasterExtentPolicy,
 )
+from PySide6.QtCore import (
+    QPointF,
+    QRect,
+    QRectF,
+    QSize,
+)
+from PySide6.QtGui import (
+    QColor,
+    QImage,
+)
+from qpane.sdk.scene import RasterBounds
 
 
 class RasterApiMixin:

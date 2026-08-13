@@ -19,14 +19,13 @@ from __future__ import annotations
 
 import uuid
 
-from PySide6.QtGui import QColor
-
 from cutecanvas.coverage import (
     CoverageCombineMode,
     CoverageItem,
     CoverageSnapshot,
     RasterCoverageItem,
 )
+from PySide6.QtGui import QColor
 
 from ..fill.sources import HybridCoverageFillPixelSource
 from ..painting import (

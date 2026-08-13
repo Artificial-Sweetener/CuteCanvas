@@ -20,10 +20,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from cutecanvas import CuteCanvas
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QToolBar
-
 from demonstration.canvas_geometry_dialog import CanvasGeometryDialog
 from demonstration.composition_tutorial import (
     CompositionTutorialController,
@@ -34,6 +30,9 @@ from demonstration.configuration_tutorial import (
 from demonstration.extension_tutorial import ExtensionTutorialController
 from demonstration.tool_mode_tutorial import ToolModeTutorialController
 from demonstration.workspace_tutorial import WorkspaceTutorialController
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import QMainWindow, QToolBar
 
 
 class CommandTutorialController:
