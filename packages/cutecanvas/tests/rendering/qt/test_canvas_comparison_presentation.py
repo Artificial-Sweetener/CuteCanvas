@@ -29,6 +29,7 @@ from cutecanvas import CanvasComparisonOverlayState
 from cutecanvas.document import CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
 from cutecanvas_test_support.execution_backend import ControllableExecutionBackend
+from qpane.scene.render_plan import RasterLayerRenderItem
 from qpane.sdk.execution import ExecutionRuntime
 from qpane.sdk.types import ComparisonOrientation
 
@@ -657,6 +658,9 @@ def _assert_comparison_matches_primary_pattern(
     primary = plan.render_items[0]
     inverse, invertible = primary.transform.inverted()
     assert invertible
+    product_scale = (
+        primary.pyramid_scale if isinstance(primary, RasterLayerRenderItem) else 1.0
+    )
     split_x = _comparison_divider_x(pane)
     mismatches: list[tuple[int, int, str, str]] = []
     for y in range(13, frame.height() - 13, 11):
@@ -664,8 +668,8 @@ def _assert_comparison_matches_primary_pattern(
             if abs(x - split_x) <= 4.0:
                 continue
             product_point = inverse.map(QPointF(float(x), float(y)))
-            source_x = int(product_point.x() / max(primary.pyramid_scale, 1e-9))
-            source_y = int(product_point.y() / max(primary.pyramid_scale, 1e-9))
+            source_x = int(product_point.x() / product_scale)
+            source_y = int(product_point.y() / product_scale)
             if not (
                 0 <= source_x < primary_source.width()
                 and 0 <= source_y < primary_source.height()
@@ -716,6 +720,9 @@ def _assert_comparison_sources_match_normalized_scene(
     primary = plan.render_items[0]
     inverse, invertible = primary.transform.inverted()
     assert invertible
+    product_scale = (
+        primary.pyramid_scale if isinstance(primary, RasterLayerRenderItem) else 1.0
+    )
     split_x = _comparison_divider_x(pane)
     mismatches: list[tuple[int, int, str, str]] = []
     for y in range(13, frame.height() - 13, 11):
@@ -723,8 +730,8 @@ def _assert_comparison_sources_match_normalized_scene(
             if abs(x - split_x) <= 4.0:
                 continue
             product_point = inverse.map(QPointF(float(x), float(y)))
-            primary_x = product_point.x() / max(primary.pyramid_scale, 1e-9)
-            primary_y = product_point.y() / max(primary.pyramid_scale, 1e-9)
+            primary_x = product_point.x() / product_scale
+            primary_y = product_point.y() / product_scale
             normalized_x = primary_x / primary_source.width()
             normalized_y = primary_y / primary_source.height()
             if not (0.0 <= normalized_x < 1.0 and 0.0 <= normalized_y < 1.0):
