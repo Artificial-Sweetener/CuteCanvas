@@ -96,9 +96,15 @@ class _ProgressWatchdog:
             observed_state=initial_state,
         )
 
-    def permits_wait(self, state: object, *, now: float) -> bool:
-        """Return whether progress and the hard deadline permit more waiting."""
-        if state != self.observed_state:
+    def permits_wait(
+        self,
+        state: object,
+        *,
+        now: float,
+        work_active: bool = False,
+    ) -> bool:
+        """Return whether progress, active work, and bounds permit waiting."""
+        if state != self.observed_state or work_active:
             self.observed_state = state
             self.stall_deadline = min(
                 self.hard_deadline,
@@ -416,6 +422,7 @@ class HeadlessPanHarness:
                     return
             else:
                 idle_since = None
+            execution_snapshots = qpane._execution_runtime.execution_snapshots()
             progress_state = (
                 pending_asset_keys,
                 pending_retry_asset_keys,
@@ -429,9 +436,22 @@ class HeadlessPanHarness:
                 refinement.pending_count,
                 bool(getattr(refinement, "prefetch_pending", False)),
                 view.presenter.navigation_refinement_pending,
-                qpane._execution_runtime.execution_snapshots(),
+                execution_snapshots,
             )
-            if not watchdog.permits_wait(progress_state, now=now):
+            work_active = (
+                pyramid_metrics.active_jobs > 0
+                or tile_metrics.active_jobs > 0
+                or refinement.pending_count > 0
+                or any(
+                    snapshot.pending > 0 or snapshot.running > 0
+                    for snapshot in execution_snapshots
+                )
+            )
+            if not watchdog.permits_wait(
+                progress_state,
+                now=now,
+                work_active=work_active,
+            ):
                 raise TimeoutError(
                     "pan harness raster products did not settle: "
                     f"progress={progress_state!r}"

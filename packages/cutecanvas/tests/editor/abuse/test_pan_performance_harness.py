@@ -129,7 +129,7 @@ def test_progress_watchdog_extends_only_after_observable_progress() -> None:
 
 
 def test_progress_watchdog_never_extends_past_hard_deadline() -> None:
-    """Continuous progress must not defeat the wait's absolute bound."""
+    """Continuous active work must not defeat the wait's absolute bound."""
     watchdog = _ProgressWatchdog.start(
         now=0.0,
         stall_timeout_seconds=5.0,
@@ -137,9 +137,9 @@ def test_progress_watchdog_never_extends_past_hard_deadline() -> None:
         initial_state=("pending", 0),
     )
 
-    assert watchdog.permits_wait(("pending", 1), now=4.0)
-    assert watchdog.permits_wait(("pending", 2), now=8.0)
-    assert not watchdog.permits_wait(("pending", 3), now=12.0)
+    assert watchdog.permits_wait(("pending", 0), now=4.0, work_active=True)
+    assert watchdog.permits_wait(("pending", 0), now=8.0, work_active=True)
+    assert not watchdog.permits_wait(("pending", 0), now=12.0, work_active=True)
 
 
 def test_cutecanvas_reproducer_path_retains_exact_large_first_jump() -> None:
