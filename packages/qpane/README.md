@@ -1,6 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/logo-black.png#gh-light-mode-only" alt="QPane" width="320">
-  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/logo-white.png#gh-dark-mode-only" alt="QPane" width="320">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/logo-white.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/logo-black.png">
+    <img src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/logo-black.png" alt="QPane" width="320">
+  </picture>
 </p>
 
 <p align="center">

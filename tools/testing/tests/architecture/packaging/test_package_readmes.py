@@ -106,12 +106,15 @@ def test_qpane_readme_keeps_its_product_logo_at_the_top() -> None:
     readme = (_ROOT / "packages/qpane/README.md").read_text("utf-8")
     assert readme.startswith(
         '<p align="center">\n'
-        '  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/'
-        'CuteCanvas/main/assets/logos/logo-black.png#gh-light-mode-only" '
-        'alt="QPane" width="320">\n'
-        '  <img src="https://raw.githubusercontent.com/Artificial-Sweetener/'
-        'CuteCanvas/main/assets/logos/logo-white.png#gh-dark-mode-only" '
-        'alt="QPane" width="320">'
+        "  <picture>\n"
+        '    <source media="(prefers-color-scheme: dark)" '
+        'srcset="https://raw.githubusercontent.com/Artificial-Sweetener/'
+        'CuteCanvas/main/assets/logos/logo-white.png">\n'
+        '    <source media="(prefers-color-scheme: light)" '
+        'srcset="https://raw.githubusercontent.com/Artificial-Sweetener/'
+        'CuteCanvas/main/assets/logos/logo-black.png">\n'
+        '    <img src="https://raw.githubusercontent.com/Artificial-Sweetener/'
+        'CuteCanvas/main/assets/logos/logo-black.png" alt="QPane" width="320">'
     )
     assert "**QPane — PySide6 Image Viewer**" not in readme
 

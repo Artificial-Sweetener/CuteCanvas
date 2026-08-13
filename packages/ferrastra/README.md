@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/ferrastra-logo-on-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/ferrastra-logo-on-light.svg">
-    <img alt="Ferrastra — oxidized image processing" src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/ferrastra-logo.svg" width="720">
+    <img alt="Ferrastra — oxidized image processing" src="https://raw.githubusercontent.com/Artificial-Sweetener/CuteCanvas/main/assets/logos/ferrastra-logo-on-light.svg" width="720">
   </picture>
 </h1>
 
