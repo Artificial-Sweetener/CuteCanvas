@@ -26,6 +26,7 @@ from qpane import LayerPresentationStyle
 from qpane_test_support.pan_render_harness import (
     FrameArtifactDetector,
     HeadlessPanHarness,
+    _ProgressWatchdog,
     coordinate_fingerprint_image,
     random_walk_pans,
 )
@@ -74,6 +75,35 @@ def test_detector_honors_channel_tolerance() -> None:
     difference = FrameArtifactDetector(channel_tolerance=2).compare(actual, expected)
 
     assert difference.detected is False
+
+
+def test_progress_watchdog_extends_only_after_observable_progress() -> None:
+    """A busy queue may continue only while its diagnostic state advances."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=30.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 0), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=9.98)
+    assert not watchdog.permits_wait(("pending", 1), now=9.99)
+
+
+def test_progress_watchdog_never_extends_past_hard_deadline() -> None:
+    """Continuous progress must not defeat the wait's absolute bound."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=12.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 1), now=4.0)
+    assert watchdog.permits_wait(("pending", 2), now=8.0)
+    assert not watchdog.permits_wait(("pending", 3), now=12.0)
 
 
 def test_headless_pan_harness_matches_clean_full_redraws(

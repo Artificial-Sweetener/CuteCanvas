@@ -64,6 +64,49 @@ class PanHarnessFailure:
     artifact_directory: Path
 
 
+@dataclass
+class _ProgressWatchdog:
+    """Bound an asynchronous wait by both stalled and total wall time."""
+
+    stall_timeout_seconds: float
+    hard_deadline: float
+    stall_deadline: float
+    observed_state: object
+
+    @classmethod
+    def start(
+        cls,
+        *,
+        now: float,
+        stall_timeout_seconds: float,
+        hard_timeout_seconds: float,
+        initial_state: object,
+    ) -> _ProgressWatchdog:
+        """Create a watchdog whose first deadlines begin at ``now``."""
+        if stall_timeout_seconds <= 0.0:
+            raise ValueError("stall_timeout_seconds must be positive")
+        if hard_timeout_seconds < stall_timeout_seconds:
+            raise ValueError(
+                "hard_timeout_seconds must be at least stall_timeout_seconds"
+            )
+        return cls(
+            stall_timeout_seconds=stall_timeout_seconds,
+            hard_deadline=now + hard_timeout_seconds,
+            stall_deadline=now + stall_timeout_seconds,
+            observed_state=initial_state,
+        )
+
+    def permits_wait(self, state: object, *, now: float) -> bool:
+        """Return whether progress and the hard deadline permit more waiting."""
+        if state != self.observed_state:
+            self.observed_state = state
+            self.stall_deadline = min(
+                self.hard_deadline,
+                now + self.stall_timeout_seconds,
+            )
+        return now < self.stall_deadline and now < self.hard_deadline
+
+
 class FrameArtifactDetector:
     """Compare rendered frames without assuming any artifact color or shape."""
 
@@ -337,18 +380,30 @@ class HeadlessPanHarness:
         qpane: QPane,
         *,
         timeout_seconds: float = 5.0,
+        hard_timeout_seconds: float = 30.0,
     ) -> None:
-        """Settle asynchronous pyramid and tile products before comparisons."""
-        deadline = time.perf_counter() + timeout_seconds
+        """Settle products unless work stalls or exceeds the hard deadline."""
+        started = time.perf_counter()
+        watchdog = _ProgressWatchdog.start(
+            now=started,
+            stall_timeout_seconds=timeout_seconds,
+            hard_timeout_seconds=hard_timeout_seconds,
+            initial_state=None,
+        )
         idle_since: float | None = None
         view = qpane._rendering
-        while time.perf_counter() < deadline:
+        while True:
             self._settle_widget()
             tile_metrics = view.presenter.tile_manager.snapshot_metrics()
+            pyramid_metrics = view.pyramids.snapshot_metrics()
             refinement = view.presenter._render_refinement
+            pending_asset_keys = frozenset(view.pyramids.pending_asset_keys())
+            pending_retry_asset_keys = frozenset(
+                view.pyramids.pending_retry_asset_keys()
+            )
             idle = (
-                not view.pyramids.pending_asset_keys()
-                and not view.pyramids.pending_retry_asset_keys()
+                not pending_asset_keys
+                and not pending_retry_asset_keys
                 and tile_metrics.active_jobs == 0
                 and tile_metrics.pending_retries == 0
                 and refinement.pending_count == 0
@@ -364,8 +419,27 @@ class HeadlessPanHarness:
                     return
             else:
                 idle_since = None
+            progress_state = (
+                pending_asset_keys,
+                pending_retry_asset_keys,
+                pyramid_metrics.active_jobs,
+                pyramid_metrics.cache_bytes,
+                tile_metrics.active_jobs,
+                tile_metrics.pending_retries,
+                tile_metrics.cache_bytes,
+                tile_metrics.prefetch_completed,
+                tile_metrics.prefetch_failed,
+                refinement.pending_count,
+                bool(getattr(refinement, "prefetch_pending", False)),
+                view.presenter.navigation_refinement_pending,
+                qpane._execution_runtime.execution_snapshots(),
+            )
+            if not watchdog.permits_wait(progress_state, now=now):
+                raise TimeoutError(
+                    "pan harness raster products did not settle: "
+                    f"progress={progress_state!r}"
+                )
             QTest.qWait(1)
-        raise TimeoutError("pan harness raster products did not settle")
 
     def _capture_full_redraw_reference(
         self,

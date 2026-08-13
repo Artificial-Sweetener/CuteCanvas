@@ -34,6 +34,7 @@ from cutecanvas_test_support.harness_tools.pan_performance_runtime import (
 )
 from cutecanvas_test_support.harness_tools.pan_render_harness import (
     HeadlessPanHarness,
+    _ProgressWatchdog,
     coordinate_fingerprint_image,
 )
 
@@ -110,6 +111,35 @@ def test_headless_pan_harness_close_joins_every_owned_execution_worker(
     assert all(runtime.is_closed for runtime in runtimes)
     assert workers
     assert not any(thread.is_alive() for thread in workers)
+
+
+def test_progress_watchdog_extends_only_after_observable_progress() -> None:
+    """A busy queue may continue only while its diagnostic state advances."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=30.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 0), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=9.98)
+    assert not watchdog.permits_wait(("pending", 1), now=9.99)
+
+
+def test_progress_watchdog_never_extends_past_hard_deadline() -> None:
+    """Continuous progress must not defeat the wait's absolute bound."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=12.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 1), now=4.0)
+    assert watchdog.permits_wait(("pending", 2), now=8.0)
+    assert not watchdog.permits_wait(("pending", 3), now=12.0)
 
 
 def test_cutecanvas_reproducer_path_retains_exact_large_first_jump() -> None:
