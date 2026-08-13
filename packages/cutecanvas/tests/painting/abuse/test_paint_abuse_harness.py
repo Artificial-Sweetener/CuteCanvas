@@ -20,8 +20,8 @@ from __future__ import annotations
 import statistics
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -49,6 +49,23 @@ pytestmark = INTERACTIVE_PERFORMANCE
 
 _MEDIAN_POINTER_BUDGET_MS = 16.0
 _ISOLATED_POINTER_CEILING_MS = 100.0
+
+
+def _send_pressed_mouse_move(viewer: CuteCanvas, point: QPoint) -> None:
+    """Dispatch one drag move without platform test-driver pacing."""
+    local_position = QPointF(point)
+    QApplication.sendEvent(
+        viewer,
+        QMouseEvent(
+            QEvent.Type.MouseMove,
+            local_position,
+            local_position,
+            QPointF(viewer.mapToGlobal(point)),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
 
 
 def _single_mask_dab_result(
@@ -575,7 +592,7 @@ def test_empty_composition_mask_paint_is_responsive_and_exact(
         for index in range(120):
             final = QPoint(80 + round(index * 480 / 119), 320 + index % 7 - 3)
             started = interaction_clock()
-            QTest.mouseMove(viewer, final, delay=0)
+            _send_pressed_mouse_move(viewer, final)
             qapp.processEvents()
             latencies.append((interaction_clock() - started) * 1000.0)
         QTest.mouseRelease(viewer, Qt.LeftButton, Qt.NoModifier, final)
