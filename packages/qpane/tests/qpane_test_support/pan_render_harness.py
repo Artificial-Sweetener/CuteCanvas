@@ -34,7 +34,7 @@ from PySide6.QtGui import QImage, QRegion
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from qpane import QPane
+from qpane import Config, QPane
 
 
 @dataclass(frozen=True)
@@ -299,8 +299,10 @@ class HeadlessPanHarness:
         return HeadlessPanHarness.capture_settled_buffer_frame(qpane)
 
     def _create_qpane(self, image: QImage, viewport_size: QSize) -> QPane:
-        """Create one configured QPane used by the differential harness."""
-        qpane = QPane()
+        """Create one pane isolated to the harness's pan-rendering concern."""
+        qpane = QPane(
+            config=Config(min_view_size_px=max(image.width(), image.height()))
+        )
         try:
             device_pixel_ratio = self._device_pixel_ratio
             qpane.devicePixelRatioF = lambda: device_pixel_ratio  # type: ignore[method-assign]
