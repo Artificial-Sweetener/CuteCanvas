@@ -142,6 +142,35 @@ def test_headless_pan_harness_checks_only_selected_replay_steps(
     assert final_pan == pans[-1]
 
 
+def test_headless_pan_harness_close_joins_every_owned_execution_worker(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    """Harness teardown must leave no native work competing with later tests."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(256, 256)),
+        viewport_size=QSize(96, 96),
+        artifact_root=tmp_path,
+    )
+    runtimes = (
+        harness._qpane._execution_runtime,
+        harness._reference_qpane._execution_runtime,
+    )
+    workers = tuple(
+        thread
+        for runtime in runtimes
+        for backend in runtime._backends
+        for thread in getattr(backend, "_threads", ())
+    )
+
+    harness.close()
+
+    assert all(runtime.is_closed for runtime in runtimes)
+    assert workers
+    assert not any(thread.is_alive() for thread in workers)
+
+
 def test_headless_pan_harness_survives_accumulated_tiled_edge_repairs(
     qapp,
     tmp_path: Path,
