@@ -20,6 +20,10 @@ import uuid
 from dataclasses import replace
 
 import pytest
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt, QTransform
+from PySide6.QtTest import QTest
+
 from cutecanvas import CuteCanvas
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas_test_support.harness.timing import wait_for_qt_condition
@@ -29,9 +33,15 @@ from cutecanvas_test_support.render_compare import (
     rendered_overscanned_widget_frame,
 )
 from cutecanvas_test_support.render_plan import make_render_plan
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt, QTransform
-from PySide6.QtTest import QTest
+from qpane import (
+    ClipCoordinateSpace,
+    LayerClip,
+    LayerTransform,
+    QPane,
+    RasterSource,
+    RenderLayer,
+    RenderScene,
+)
 from qpane.rendering.navigation_plan import (
     navigation_repair_sources_match,
     retained_raster_navigation_delta,
@@ -46,16 +56,6 @@ from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SampledTileRenderData,
     TileRenderData,
-)
-
-from qpane import (
-    ClipCoordinateSpace,
-    LayerClip,
-    LayerTransform,
-    QPane,
-    RasterSource,
-    RenderLayer,
-    RenderScene,
 )
 
 

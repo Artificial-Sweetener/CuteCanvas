@@ -19,9 +19,6 @@
 from __future__ import annotations
 
 import pytest
-from cutecanvas import CuteCanvas
-from cutecanvas.tools.input import PointerInputController
-from cutecanvas_test_support.harness import PointerTransitionProbe
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import (
     QEnterEvent,
@@ -36,6 +33,9 @@ from PySide6.QtGui import (
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
+from cutecanvas import CuteCanvas
+from cutecanvas.tools.input import PointerInputController
+from cutecanvas_test_support.harness import PointerTransitionProbe
 from qpane import (
     PointerDeviceKind,
     PointerPhase,

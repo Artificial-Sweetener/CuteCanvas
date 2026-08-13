@@ -21,6 +21,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+
 from cutecanvas.editor.shared_edge_pivot import SharedEdgeHandle
 from cutecanvas.editor.shared_edge_presentation import (
     SharedEdgeHandlePresentation,
@@ -28,9 +31,6 @@ from cutecanvas.editor.shared_edge_presentation import (
 )
 from cutecanvas.tools.affine_ports import SharedEdgeResizePort
 from cutecanvas.tools.shared_edge_resize import SharedEdgeResizeTool
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
-
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

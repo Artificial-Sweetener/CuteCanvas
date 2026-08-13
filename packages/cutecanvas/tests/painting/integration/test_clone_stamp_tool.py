@@ -17,6 +17,9 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
+
 from cutecanvas.painting import BrushStrokeSegment
 from cutecanvas.painting.tools import CloneStampTool
 from cutecanvas.painting.tools.brush_preview import AffineBrushPreview
@@ -24,9 +27,6 @@ from cutecanvas.tools.ports import (
     CloneStampInteractionPort,
     PaintingInteractionPort,
 )
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
-
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

@@ -21,6 +21,9 @@ import uuid
 from types import SimpleNamespace
 
 import numpy as np
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas.composition.edit_controller import CompositionEditController
 from cutecanvas.composition.edit_history import CompositionEditHistory
 from cutecanvas.coverage import CoverageSnapshot
@@ -51,8 +54,6 @@ from cutecanvas.scene.pixel_owners import (
 )
 from cutecanvas.selection import PixelSelectionService
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QImage
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import (

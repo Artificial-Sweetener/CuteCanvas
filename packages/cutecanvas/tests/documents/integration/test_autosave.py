@@ -22,6 +22,9 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from PySide6.QtCore import QObject, QSize
+from PySide6.QtGui import QImage, Qt
+
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks.autosave import AutosaveManager
 from cutecanvas.masks.install import should_enable_mask_autosave
@@ -30,8 +33,6 @@ from cutecanvas_test_support.execution_backend import (
     ControllableExecutionBackend,
     RejectingExecutionBackend,
 )
-from PySide6.QtCore import QObject, QSize
-from PySide6.QtGui import QImage, Qt
 from qpane.sdk.execution import ExecutionRuntime, InlineDispatcher
 
 

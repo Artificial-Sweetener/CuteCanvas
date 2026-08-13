@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 import numpy as np
-from cutecanvas.ferrastra import NativeCoverageProjector
 from PySide6.QtCore import QSize
+
+from cutecanvas.ferrastra import NativeCoverageProjector
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 

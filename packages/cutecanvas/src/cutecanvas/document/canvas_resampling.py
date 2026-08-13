@@ -24,6 +24,7 @@ from math import ceil, floor
 
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage
+
 from qpane.sdk.execution import CancellationToken
 from qpane.sdk.scene import (
     ClipCoordinateSpace,

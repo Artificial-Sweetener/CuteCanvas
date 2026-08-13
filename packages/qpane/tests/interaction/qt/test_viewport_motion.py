@@ -17,6 +17,7 @@
 """Tests for transient kinetic viewport motion ownership."""
 
 from PySide6.QtCore import QObject, QPointF
+
 from qpane.rendering.viewport_motion import ViewportMotionController
 
 

@@ -22,6 +22,7 @@ import numpy as np
 import numpy.typing as npt
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
+
 from qpane.sdk.raster import numpy_to_qimage_argb32
 
 

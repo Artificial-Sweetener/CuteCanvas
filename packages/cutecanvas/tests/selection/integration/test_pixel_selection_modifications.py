@@ -23,16 +23,17 @@ from threading import Event
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QImage
+from PySide6.QtTest import QSignalSpy
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import (
     CuteCanvas,
     LayerEdgeOperation,
     PixelSelectionModificationResult,
 )
 from cutecanvas.coverage import CoverageEdgeModificationRequest, CoverageSnapshot
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QImage
-from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication
 
 
 def test_public_selection_modifications_are_async_undoable_and_layer_safe(

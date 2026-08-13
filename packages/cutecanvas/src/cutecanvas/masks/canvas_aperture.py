@@ -25,6 +25,7 @@ from collections.abc import Callable
 import numpy as np
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPainterPath, QPolygonF
+
 from qpane.sdk.scene import (
     BilinearLayerTransform,
     LayerDescriptor,

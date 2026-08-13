@@ -21,9 +21,10 @@ import uuid
 from collections.abc import Callable
 from typing import Literal, Protocol
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.cursor import EditorCursorIntent
 from cutecanvas.snapping.model import SnapGuide
-from PySide6.QtCore import QPointF
 
 from ..scene.layer_selection import SceneLayerSelection
 from ..scene.movement_interaction import SceneLayerMovementInteraction

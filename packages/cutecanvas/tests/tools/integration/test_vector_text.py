@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import time
 
+from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QColor
+
 from cutecanvas import (
     VectorParagraphStyle,
     VectorTextAlignment,
@@ -27,8 +30,6 @@ from cutecanvas import (
     VectorTextSpan,
     VectorTextStyle,
 )
-from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QColor
 from qpane.vector.text_layout import SemanticTextLayoutCache
 
 

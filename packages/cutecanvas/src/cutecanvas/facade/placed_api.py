@@ -20,6 +20,13 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from PySide6.QtCore import (
+    QRectF,
+)
+from PySide6.QtGui import (
+    QImage,
+)
+
 from cutecanvas.composition.public_policy import (
     internal_layer_policy,
 )
@@ -28,12 +35,6 @@ from cutecanvas.types import (
     LayerPolicy,
     PlacedAssetSnapshot,
     RasterSurfaceSnapshot,
-)
-from PySide6.QtCore import (
-    QRectF,
-)
-from PySide6.QtGui import (
-    QImage,
 )
 
 

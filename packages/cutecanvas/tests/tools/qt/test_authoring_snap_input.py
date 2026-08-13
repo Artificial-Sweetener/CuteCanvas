@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent
+
 from cutecanvas.coverage import CoverageDocument, CoverageDocumentEvaluator
 from cutecanvas.tools.ports import (
     AuthoringSnapPort,
@@ -27,9 +30,6 @@ from cutecanvas.tools.ports import (
 )
 from cutecanvas.tools.selection_shapes import LassoSelectionTool, RectangleSelectionTool
 from cutecanvas.vector.tools import VectorPathTool
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent
-
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

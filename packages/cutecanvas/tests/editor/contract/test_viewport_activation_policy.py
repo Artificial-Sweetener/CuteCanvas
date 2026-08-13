@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import pytest
+
 from cutecanvas.runtime.viewport_activation import (
     ViewportActivation,
     resolve_viewport_activation,

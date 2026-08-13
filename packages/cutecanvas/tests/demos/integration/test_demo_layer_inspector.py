@@ -21,6 +21,11 @@ import threading
 import time
 from pathlib import Path
 
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QMessageBox
+
 from cutecanvas import CuteCanvas, RasterExtentPolicy, VectorShapeKind
 from cutecanvas.placed import rasterization as placed_rasterization
 from cutecanvas_demo import ExampleOptions, ExampleWindow
@@ -28,10 +33,6 @@ from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from demonstration.layer_inspector import RasterStorageProperties
 from demonstration.placed_asset_controls import PlacedAssetControls
 from demonstration.transform_controls import LayerTransformControls
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QMessageBox
 from qpane.sdk.execution import CancellationToken
 
 

@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from ferrastra import Graph, GraphBuilder
 from PySide6.QtCore import QPointF
+
+from ferrastra import Graph, GraphBuilder
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 

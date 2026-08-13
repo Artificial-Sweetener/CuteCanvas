@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Protocol
 
 import numpy as np
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_fragments import RasterPixelFragment, RasterPixelLift
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition

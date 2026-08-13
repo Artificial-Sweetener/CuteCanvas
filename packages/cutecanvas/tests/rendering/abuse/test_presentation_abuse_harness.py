@@ -20,13 +20,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from cutecanvas import CuteCanvas
-from cutecanvas.document import CanvasDocument, CanvasInspectionGroup
-from cutecanvas.presentation import CanvasWorkspace
-from cutecanvas_test_support.harness.timing import (
-    INTERACTIVE_PERFORMANCE,
-    average_interaction_latency_ms,
-)
 from PySide6.QtCore import (
     QCoreApplication,
     QElapsedTimer,
@@ -36,6 +29,15 @@ from PySide6.QtCore import (
     QSize,
 )
 from PySide6.QtGui import QColor, QImage, QPainter
+
+from cutecanvas import CuteCanvas
+from cutecanvas.document import CanvasDocument, CanvasInspectionGroup
+from cutecanvas.presentation import CanvasWorkspace
+from cutecanvas_test_support.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    average_interaction_latency_ms,
+)
+from qpane.scene import ClipCoordinateSpace, RenderStrategy
 from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SceneRenderItem,
@@ -43,8 +45,6 @@ from qpane.scene.render_plan import (
 )
 from qpane.sdk.rendering import ViewportZoomMode
 from qpane.sdk.types import ComparisonOrientation
-
-from qpane.scene import ClipCoordinateSpace, RenderStrategy
 
 pytestmark = INTERACTIVE_PERFORMANCE
 

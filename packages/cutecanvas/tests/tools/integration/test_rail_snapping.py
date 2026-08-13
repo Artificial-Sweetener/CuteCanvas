@@ -19,10 +19,11 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.snapping.edge_model import OrientedEdge
 from cutecanvas.snapping.model import SnapGrid
 from cutecanvas.snapping.rail_resolution import RailSnapResolver
-from PySide6.QtCore import QPointF, QRectF
 
 
 def test_diagonal_rail_snaps_to_frozen_edge_intersection_with_hysteresis() -> None:

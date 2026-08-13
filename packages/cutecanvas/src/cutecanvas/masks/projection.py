@@ -22,6 +22,9 @@ import uuid
 from collections.abc import Callable
 
 import numpy as np
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QImage
+
 from cutecanvas.coverage import (
     AffineCoverageResampler,
     CoverageCombineMode,
@@ -40,8 +43,6 @@ from cutecanvas.coverage.piecewise_resampling import (
     project_scene_coverage_to_piecewise_layer,
 )
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QImage
 from qpane.sdk.raster import numpy_to_qimage_grayscale8
 from qpane.sdk.scene import (
     BilinearLayerTransform,

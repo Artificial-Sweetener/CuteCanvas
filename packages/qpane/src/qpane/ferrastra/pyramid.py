@@ -22,6 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from PySide6.QtGui import QImage
+
 from ferrastra import CancellationToken as NativeCancellationToken
 from ferrastra import (
     Engine,
@@ -31,7 +33,6 @@ from ferrastra import (
     RasterReconstructionSpace,
     Region,
 )
-from PySide6.QtGui import QImage
 from qpane.ferrastra.qimage import qimage_from_rgba8, qimage_to_rgba8
 
 

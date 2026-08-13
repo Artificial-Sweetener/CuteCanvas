@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from cutecanvas import Config, CuteCanvas, LayerPolicy
 from PySide6.QtGui import QImage
+
+from cutecanvas import Config, CuteCanvas, LayerPolicy
 
 
 def build_touch_mask_editor(image: QImage) -> CuteCanvas:

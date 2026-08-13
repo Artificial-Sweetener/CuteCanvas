@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF, QRectF
+
 from qpane.sdk.scene import (
     BilinearLayerTransform,
     LayerDescriptor,

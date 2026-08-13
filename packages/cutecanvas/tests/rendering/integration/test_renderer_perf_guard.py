@@ -14,10 +14,11 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from cutecanvas import CuteCanvas
-from cutecanvas_test_support.render_plan import make_render_plan
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QImage
+
+from cutecanvas import CuteCanvas
+from cutecanvas_test_support.render_plan import make_render_plan
 
 
 def _cleanup_qpane(qpane, qapp):

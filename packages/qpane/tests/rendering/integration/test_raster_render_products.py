@@ -18,6 +18,7 @@
 import uuid
 
 from PySide6.QtGui import QImage
+
 from qpane.rendering.raster_products import RasterRenderProductStore
 from qpane.scene.identity import SourceRenderAssetKey
 

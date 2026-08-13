@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from PySide6.QtGui import QColor
+
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from ..types import PaintTargetKind

@@ -21,6 +21,11 @@ import statistics
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QTransform
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import (
     BrushPreset,
     CloneStampAlignment,
@@ -36,10 +41,6 @@ from cutecanvas.painting.tools.clone_feedback import CloneStampFeedbackProjector
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import INTERACTIVE_PERFORMANCE
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QTransform
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.sdk.raster import qimage_to_numpy_argb32
 from qpane.sdk.rendering import LayerSourcePoint, PanelPoint, ScenePoint
 from qpane.sdk.scene import RasterBounds

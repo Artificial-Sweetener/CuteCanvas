@@ -18,6 +18,7 @@
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
+
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.scene.render_plan import RenderStrategy
 from qpane_test_support.render_plan import make_render_plan

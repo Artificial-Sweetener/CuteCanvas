@@ -20,6 +20,12 @@ from __future__ import annotations
 import uuid
 from contextlib import nullcontext
 
+from PySide6.QtCore import (
+    QRect,
+    QRectF,
+)
+from PySide6.QtGui import QColor
+
 from cutecanvas.composition import CompositionRecord
 from cutecanvas.composition.layers import CompositionLayerInstance
 from cutecanvas.composition.public_layer_mapping import detached_public_layer_mapping
@@ -51,11 +57,6 @@ from cutecanvas.vector.conversion import (
     VectorConversionCompletion,
     VectorConversionKind,
 )
-from PySide6.QtCore import (
-    QRect,
-    QRectF,
-)
-from PySide6.QtGui import QColor
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
 )

@@ -20,11 +20,12 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CuteCanvas, LayerPolicy
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas_test_support.execution_backend import RejectingExecutionBackend
-from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.execution import ExecutionRuntime
 
 

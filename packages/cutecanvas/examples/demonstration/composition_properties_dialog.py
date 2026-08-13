@@ -20,7 +20,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas import CompositionPolicy, CuteCanvas
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -29,6 +28,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from cutecanvas import CompositionPolicy, CuteCanvas
 
 
 class CompositionPropertiesDialog(QDialog):

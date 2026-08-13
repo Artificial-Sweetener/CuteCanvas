@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from cutecanvas.ferrastra import NativeRasterProjector
 from PySide6.QtGui import QColor, QImage
+
+from cutecanvas.ferrastra import NativeRasterProjector
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 

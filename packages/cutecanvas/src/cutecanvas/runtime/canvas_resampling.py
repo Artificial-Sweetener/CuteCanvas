@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from PySide6.QtCore import QSize
+
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

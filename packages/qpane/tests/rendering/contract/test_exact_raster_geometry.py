@@ -21,9 +21,10 @@ from __future__ import annotations
 import math
 import uuid
 
-from ferrastra import RasterReconstructionSpace
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage, QTransform
+
+from ferrastra import RasterReconstructionSpace
 from qpane.rendering.exact_raster_geometry import (
     exact_axis_sampling_grid,
     exact_visible_tile_requests,

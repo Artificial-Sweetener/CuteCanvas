@@ -23,13 +23,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from PySide6.QtCore import QPoint, QPointF, QRect
+from PySide6.QtGui import QColor, QPainterPath, QPen
+
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.cursor import EditorCursorIntent
 from cutecanvas.edit_sessions import EditSessionKind
 from cutecanvas.editor.session_coordination import EditSessionCoordinator
-from PySide6.QtCore import QPoint, QPointF, QRect
-from PySide6.QtGui import QColor, QPainterPath, QPen
-
 from qpane import CursorInteractionPort, NavigationInteractionPort
 
 from .affine_ports import SharedEdgeResizePort, TransformInteractionPort

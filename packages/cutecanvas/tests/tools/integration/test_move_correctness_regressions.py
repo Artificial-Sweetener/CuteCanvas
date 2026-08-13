@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from cutecanvas import LayerPolicy
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
+
+from cutecanvas import LayerPolicy
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 
 
 def _paint_square(layer: object, left: int, top: int, size: int) -> None:

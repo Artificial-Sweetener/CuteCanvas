@@ -20,13 +20,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from PySide6.QtGui import QColor
+
 from cutecanvas.coverage import (
     CoverageCombineMode,
     CoverageDocument,
     CoverageItem,
     StrokeCoverageItem,
 )
-from PySide6.QtGui import QColor
 
 from ..painting import (
     BrushCompositor,

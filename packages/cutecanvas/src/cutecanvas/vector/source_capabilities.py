@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize
+
 from qpane.sdk.scene import LayerSourceReference, RasterBounds
 from qpane.sdk.vector import (
     SemanticTextLayoutCache,

@@ -22,6 +22,7 @@ import uuid
 
 from PySide6.QtCore import QObject, QRect, Signal
 from PySide6.QtGui import QImage
+
 from qpane.sdk.scene import RasterBounds
 
 from .live_preview_raster import LiveMaskPreviewPatches

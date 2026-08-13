@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 import pytest
-from cutecanvas import CanvasDocument, CanvasWorkspace, CuteCanvas
 from PySide6.QtCore import QRectF
+
+from cutecanvas import CanvasDocument, CanvasWorkspace, CuteCanvas
 
 
 def test_workspace_bounds_inactive_renderers_after_many_target_reflow(qapp) -> None:

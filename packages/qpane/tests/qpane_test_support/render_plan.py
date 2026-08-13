@@ -23,6 +23,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage, Qt, QTransform
+
 from qpane.rendering.sdk import RasterSource
 from qpane.scene.identity import (
     SceneLayerAssetKey,

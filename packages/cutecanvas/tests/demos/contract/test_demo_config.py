@@ -17,6 +17,9 @@
 """Example configuration dialog integration and persistence tests."""
 
 import pytest
+from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QCheckBox
+
 from cutecanvas import Config, CuteCanvas
 from cutecanvas_demo import ExampleOptions, ExampleWindow, parse_args
 from cutecanvas_test_support.render_plan import make_render_plan
@@ -25,11 +28,8 @@ from demonstration.config.spec import (
     build_sections_for_features,
     field_sets_for_sections,
 )
-from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QCheckBox
-from qpane.features.registry import FeatureInstallError
-
 from qpane import RasterReconstructionSpace
+from qpane.features.registry import FeatureInstallError
 
 MB = 1024 * 1024
 

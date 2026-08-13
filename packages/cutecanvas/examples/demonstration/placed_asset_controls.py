@@ -21,7 +21,6 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from cutecanvas import CuteCanvas
 from PySide6.QtWidgets import (
     QFileDialog,
     QGridLayout,
@@ -30,6 +29,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
 )
+
+from cutecanvas import CuteCanvas
 
 
 class PlacedAssetControls(QGroupBox):

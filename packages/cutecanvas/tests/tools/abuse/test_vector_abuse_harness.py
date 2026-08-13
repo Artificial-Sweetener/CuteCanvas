@@ -20,6 +20,11 @@ from __future__ import annotations
 import statistics
 import uuid
 
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QKeyEvent, QTransform
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import (
     VectorPathCommand,
     VectorPathCommandKind,
@@ -36,10 +41,6 @@ from cutecanvas_test_support.harness.timing import (
     interaction_clock,
     stable_latency_samples,
 )
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QTransform
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.scene.render_plan import VectorLayerRenderItem
 from qpane.sdk.execution import ExecutionRuntime

@@ -17,9 +17,10 @@
 
 from __future__ import annotations
 
-from cutecanvas.ferrastra import NativeCoverageProjector
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage, QPixmap
+
+from cutecanvas.ferrastra import NativeCoverageProjector
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,

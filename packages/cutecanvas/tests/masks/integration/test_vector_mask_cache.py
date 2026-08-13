@@ -20,9 +20,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
-from cutecanvas.vector.mask_cache import VectorMaskPathCache
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QPainterPath
+
+from cutecanvas.vector.mask_cache import VectorMaskPathCache
 from qpane.scene.affine import LayerTransform
 from qpane.scene.raster import RasterBounds
 from qpane.vector.model import VectorDocument, VectorObject

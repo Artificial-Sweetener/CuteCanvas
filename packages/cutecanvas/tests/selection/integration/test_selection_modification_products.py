@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.selection import (
     PixelSelectionModificationRequest,

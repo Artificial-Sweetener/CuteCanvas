@@ -21,6 +21,7 @@ import uuid
 from typing import cast
 
 import pytest
+
 from cutecanvas.edit_sessions import (
     EditSessionKind,
     EditSessionPolicy,

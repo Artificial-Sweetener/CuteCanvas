@@ -20,6 +20,9 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QColor
+
 from cutecanvas.coverage import (
     CoverageAsset,
     CoverageCombineMode,
@@ -37,8 +40,6 @@ from cutecanvas_test_support.harness.timing import (
     average_interaction_latency_ms,
     interaction_clock,
 )
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QColor
 from qpane.scene.affine import LayerTransform
 from qpane.scene.raster import RasterBounds
 from qpane.vector.model import VectorObject

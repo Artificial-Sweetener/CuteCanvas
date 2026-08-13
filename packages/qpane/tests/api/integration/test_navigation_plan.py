@@ -21,14 +21,14 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPoint, QPointF, QRect
 from PySide6.QtGui import QTransform
+
+from qpane import PiecewiseLayerTransform
 from qpane.rendering.navigation_plan import (
     retained_raster_navigation_delta,
     translated_navigation_plan,
 )
 from qpane.rendering.panel_mapping import PiecewisePanelMapping
 from qpane_test_support.render_plan import make_render_plan
-
-from qpane import PiecewiseLayerTransform
 
 
 def test_translated_navigation_plan_preserves_products_and_projects_pan() -> None:

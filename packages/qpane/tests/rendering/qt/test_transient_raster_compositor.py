@@ -21,6 +21,7 @@ import uuid
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QImage, QPainter
+
 from qpane.rendering.layer_isolation import LayerIsolationCompositor
 from qpane.rendering.transient_raster_compositor import TransientRasterCompositor
 from qpane.scene.affine import LayerTransform

@@ -26,6 +26,9 @@ import uuid
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QFileDialog, QWidget
+
 from cutecanvas import (
     CuteCanvas,
     ExecutionRuntime,
@@ -37,8 +40,6 @@ from demonstration.document_saves import (
     DocumentSaveResult,
 )
 from demonstration.workers import ImageLoadCoordinator
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QFileDialog, QWidget
 
 
 class WorkspaceTutorialController:

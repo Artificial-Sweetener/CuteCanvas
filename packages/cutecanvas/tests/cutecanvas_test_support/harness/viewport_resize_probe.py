@@ -23,6 +23,7 @@ from typing import Protocol
 from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF
 from PySide6.QtGui import QTransform
 from PySide6.QtWidgets import QApplication
+
 from qpane.sdk.rendering import ViewportZoomMode
 
 

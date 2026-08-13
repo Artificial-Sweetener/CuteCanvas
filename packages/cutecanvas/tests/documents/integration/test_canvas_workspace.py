@@ -20,6 +20,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
+from PySide6.QtTest import QSignalSpy, QTest
+from PySide6.QtWidgets import QWidget
+from shiboken6 import isValid
+
 from cutecanvas import (
     CanvasComparisonOverlayState,
     CanvasComparisonZoomGesture,
@@ -32,14 +38,9 @@ from cutecanvas import (
 )
 from cutecanvas.document import CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
-from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QWidget
 from qpane.sdk.execution import create_default_execution_runtime
 from qpane.sdk.layout import ResponsiveGridPolicy, ResponsiveGridTopology
 from qpane.sdk.types import ComparisonOrientation
-from shiboken6 import isValid
 
 
 def _document() -> tuple[CanvasDocument, tuple]:

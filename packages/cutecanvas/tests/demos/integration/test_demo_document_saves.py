@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from time import monotonic
 
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CuteCanvas
 from demonstration.document_saves import (
     DocumentSaveCoordinator,
     DocumentSaveResult,
 )
-from PySide6.QtGui import QColor, QImage
-
 from qpane import create_default_execution_runtime
 
 

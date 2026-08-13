@@ -26,13 +26,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MethodType, TracebackType
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from typing_extensions import Self
+
+from cutecanvas import CuteCanvas
 from qpane.scene.model import LayerKind
 from qpane.scene.render_plan import SceneRenderPlan
-from typing_extensions import Self
 
 from .timing import run_qt_event_loop_for, wait_for_qt_condition
 

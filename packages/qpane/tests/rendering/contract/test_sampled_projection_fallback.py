@@ -22,6 +22,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QTransform
+
 from qpane.rendering.sampled_projection_fallback import (
     reproject_sampled_fallback,
 )

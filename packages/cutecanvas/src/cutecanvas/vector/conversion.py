@@ -21,9 +21,10 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
+
+from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from qpane.sdk.execution import (
     CancellationToken,
     ExecutionHandle,

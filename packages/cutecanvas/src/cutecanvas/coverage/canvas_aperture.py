@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPainterPath, QTransform
+
 from qpane.sdk.scene import LayerTransform, SceneDescriptor
 from qpane.sdk.vector import object_path
 

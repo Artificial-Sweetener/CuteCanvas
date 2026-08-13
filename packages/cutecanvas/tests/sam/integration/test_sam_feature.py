@@ -23,6 +23,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import Config, CuteCanvas, LayerPolicy
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.masks import sam_feature
@@ -36,12 +40,8 @@ from cutecanvas.sam.segmentation_request import (
     SmartSegmentationRequest,
 )
 from cutecanvas_test_support.execution_backend import TestExecution
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication
-from qpane.types import DiagnosticRecord
-
 from qpane.features import FeatureInstallError
+from qpane.types import DiagnosticRecord
 
 
 def _stub_sam_service(monkeypatch):

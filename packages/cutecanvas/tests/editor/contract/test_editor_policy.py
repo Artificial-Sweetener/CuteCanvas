@@ -17,6 +17,9 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QImage
+
 from cutecanvas import (
     EditorCapability,
     EditorIntent,
@@ -24,8 +27,6 @@ from cutecanvas import (
     LayerPolicy,
     NonEditablePaintPolicy,
 )
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QImage
 
 
 def test_noneditable_paint_policy_defaults_to_visible_layer_creation() -> None:

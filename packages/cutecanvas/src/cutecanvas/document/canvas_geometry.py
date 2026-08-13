@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtCore import QRectF, QSize
+
 from qpane.sdk.scene import (
     ClipCoordinateSpace,
     LayerClip,

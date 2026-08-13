@@ -21,6 +21,8 @@ import math
 from collections.abc import Callable
 
 import numpy as np
+from PySide6.QtCore import QRectF
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.coverage.bilinear_resampling import (
     project_scene_coverage_to_bilinear_layer,
@@ -29,7 +31,6 @@ from cutecanvas.coverage.piecewise_resampling import (
     project_scene_coverage_to_piecewise_layer,
 )
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QRectF
 from qpane.sdk.scene import (
     BilinearLayerTransform,
     LayerDescriptor,

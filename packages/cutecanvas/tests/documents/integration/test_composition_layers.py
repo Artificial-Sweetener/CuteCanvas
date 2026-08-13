@@ -18,13 +18,14 @@
 
 import uuid
 
+from PySide6.QtGui import QColor
+
 from cutecanvas.composition.layers import (
     CompositionLayerInstance,
     CompositionLayerStore,
 )
 from cutecanvas.composition.resource_lifetime import CompositionResourceLifetime
 from cutecanvas.resources import ProjectResourceReference
-from PySide6.QtGui import QColor
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import (
     LayerInteractionPolicy,

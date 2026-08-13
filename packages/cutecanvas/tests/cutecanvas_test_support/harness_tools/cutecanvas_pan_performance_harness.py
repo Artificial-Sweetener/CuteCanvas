@@ -40,9 +40,7 @@ if __name__ == "__main__":
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("QT_SCALE_FACTOR", "1.75")
 
-import cutecanvas
 import numpy as np
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import (
     QBackingStore,
@@ -55,7 +53,9 @@ from PySide6.QtGui import (
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+import cutecanvas
 import qpane
+from cutecanvas import CuteCanvas
 
 _RESULT_VERSION = 1
 _DEFAULT_DOCUMENT = Path(r"C:\Users\imkno\test.cutecanvas")

@@ -20,13 +20,6 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, replace
 
-from cutecanvas import (
-    BrushDynamics,
-    BrushPreset,
-    CuteCanvas,
-    LayerSnapshot,
-    PaintTargetKind,
-)
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -36,6 +29,14 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QToolBar,
+)
+
+from cutecanvas import (
+    BrushDynamics,
+    BrushPreset,
+    CuteCanvas,
+    LayerSnapshot,
+    PaintTargetKind,
 )
 
 

@@ -19,14 +19,14 @@ from __future__ import annotations
 import types
 
 import pytest
-from cutecanvas_test_support.config import fixed_cache_config
-from cutecanvas_test_support.render_plan import make_render_plan
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QRegion, Qt, QTransform
-from qpane.scene.render_plan import RenderStrategy
 
+from cutecanvas_test_support.config import fixed_cache_config
+from cutecanvas_test_support.render_plan import make_render_plan
 from qpane import QPane
 from qpane.rendering import Renderer
+from qpane.scene.render_plan import RenderStrategy
 
 
 class _StubQPane:

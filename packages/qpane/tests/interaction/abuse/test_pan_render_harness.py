@@ -21,14 +21,14 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
+
+from qpane import LayerPresentationStyle
 from qpane_test_support.pan_render_harness import (
     FrameArtifactDetector,
     HeadlessPanHarness,
     coordinate_fingerprint_image,
     random_walk_pans,
 )
-
-from qpane import LayerPresentationStyle
 
 
 def test_detector_accepts_identical_frames() -> None:

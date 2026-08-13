@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 import pytest
-from ferrastra import RasterReconstructionSpace
 from PySide6.QtGui import QColor, QImage
+
+from ferrastra import RasterReconstructionSpace
 from qpane.execution.cancellation import CancellationToken
 from qpane.ferrastra import (
     generate_exact_pyramid_levels,

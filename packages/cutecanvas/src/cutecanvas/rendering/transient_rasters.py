@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import numpy as np
+
 from qpane.sdk.scene import (
     LayerDescriptor,
     RasterBounds,

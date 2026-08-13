@@ -23,10 +23,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
-from cutecanvas.coverage import CoverageSnapshot
-from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage, QPainter
+
+from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.execution import CancellationToken
 from qpane.sdk.raster import qimage_to_numpy_argb32
 from qpane.sdk.scene import LayerPlacement, LayerTransform, RasterBounds

@@ -20,10 +20,11 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 
-from cutecanvas.coverage import CoverageSnapshot
-from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPolygonF
+
+from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.raster import qimage_to_numpy_grayscale8
 from qpane.sdk.scene import RasterBounds
 

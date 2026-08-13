@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect
+
 from qpane.sdk.scene import RasterBounds
 
 

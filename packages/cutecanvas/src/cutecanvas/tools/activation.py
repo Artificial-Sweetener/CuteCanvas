@@ -21,9 +21,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPen
-from qpane.sdk.vector import VectorShapeKind
 
 from qpane import CursorInteractionPort, NavigationInteractionPort
+from qpane.sdk.vector import VectorShapeKind
 
 from ..coverage import CoverageCombineMode
 from ..coverage.canvas_aperture import CoverageCanvasAperture

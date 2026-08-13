@@ -18,12 +18,13 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPointF
+
 from cutecanvas.document.canvas_crop import CanvasCropEffect
 from cutecanvas.persistence.effect_codec import (
     decode_layer_effect,
     encode_layer_effect,
 )
-from PySide6.QtCore import QPointF
 
 
 def test_canvas_crop_effect_round_trips_exact_target_local_geometry() -> None:

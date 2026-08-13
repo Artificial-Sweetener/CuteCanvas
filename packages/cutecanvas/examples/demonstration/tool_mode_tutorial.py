@@ -19,6 +19,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import QMainWindow, QToolBar
+
 from cutecanvas import CuteCanvas, EditorTransformTarget
 from demonstration.brush_controls import BrushControls
 from demonstration.clone_stamp_controls import CloneStampControls
@@ -28,8 +31,6 @@ from demonstration.editor_policy_controls import EditorPolicyControls
 from demonstration.extension_tutorial import CUSTOM_TOOL_MODE, LENS_TOOL_MODE
 from demonstration.move_controls import MoveControls
 from demonstration.vector_controls import VectorControls
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QToolBar
 
 
 class ToolModeTutorialController:

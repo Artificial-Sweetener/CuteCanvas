@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QImage
+
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

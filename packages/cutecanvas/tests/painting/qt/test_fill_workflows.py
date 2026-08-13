@@ -21,6 +21,9 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QImage
+
 from cutecanvas import CuteCanvas, LayerPolicy
 from cutecanvas.coverage import (
     CoverageCombineMode,
@@ -29,8 +32,6 @@ from cutecanvas.coverage import (
     VectorCoverageItem,
 )
 from cutecanvas_test_support.execution_backend import ControlledExecution
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QImage
 
 
 def _mounted_mask_canvas(

@@ -19,11 +19,12 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.snapping.edge_index import OrientedEdgeIndex
 from cutecanvas.snapping.edge_model import OrientedEdge, polygon_edges
 from cutecanvas.snapping.model import SnapGrid
 from cutecanvas.snapping.oriented_resolution import OrientedEdgeSnapResolver
-from PySide6.QtCore import QPointF, QRectF
 
 
 def _edge(owner: str, offset: float) -> OrientedEdge:

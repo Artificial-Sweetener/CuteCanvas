@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QPoint, QRect, QSize
 from PySide6.QtGui import QImage, QPainter
+
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,

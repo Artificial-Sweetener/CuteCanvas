@@ -21,6 +21,9 @@ from __future__ import annotations
 import uuid
 from itertools import pairwise
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import (
     CanvasDocument,
     CanvasWorkspace,
@@ -30,8 +33,6 @@ from cutecanvas import (
     ResponsiveGridSnapshot,
 )
 from cutecanvas.presentation.grid_surface import ResponsiveCanvasGrid
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
 
 
 def test_fractional_dpr_grid_keeps_equal_tiles_and_physical_gutters(

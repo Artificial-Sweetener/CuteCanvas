@@ -16,6 +16,9 @@
 
 """Tests for deterministic standalone pan-performance analysis helpers."""
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas_test_support.harness_tools.cutecanvas_pan_performance_harness import (
     compare_images,
     elliptical_pointer_path,
@@ -29,8 +32,6 @@ from cutecanvas_test_support.harness_tools.pan_performance_runtime import (
     PanFrameTiming,
     pointer_path,
 )
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
 
 
 def _frame(

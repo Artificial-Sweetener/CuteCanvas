@@ -25,6 +25,8 @@ from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QImage, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from qpane import QPane
 from qpane.ferrastra import FerrastraRasterTileSource
 from qpane.rendering.exact_raster_geometry import exact_visible_tile_requests
 from qpane.scene.identity import source_render_asset_key
@@ -35,8 +37,6 @@ from qpane.scene.render_plan import (
     SceneRenderPlan,
 )
 from qpane_test_support.execution_backend import TestExecution
-
-from qpane import QPane
 
 
 def test_exact_raster_tile_preserves_requested_grid_and_authoritative_pixels() -> None:

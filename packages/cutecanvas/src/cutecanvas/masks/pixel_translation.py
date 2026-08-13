@@ -18,6 +18,8 @@
 from __future__ import annotations
 
 import numpy as np
+from PySide6.QtGui import QImage
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
 from cutecanvas.scene.pixel_transitions import (
@@ -25,7 +27,6 @@ from cutecanvas.scene.pixel_transitions import (
     raster_edit_patch_bounds,
 )
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtGui import QImage
 from qpane.sdk.scene import RasterBounds
 
 from .mask import MaskLayer

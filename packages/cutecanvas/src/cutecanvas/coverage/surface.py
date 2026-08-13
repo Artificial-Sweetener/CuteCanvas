@@ -23,9 +23,10 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 import numpy as np
-from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QImage
+
+from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.raster import qimage_to_numpy_view_grayscale8
 from qpane.sdk.scene import RasterBounds
 

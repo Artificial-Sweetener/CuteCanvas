@@ -20,7 +20,6 @@ from __future__ import annotations
 import math
 import uuid
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QTransform
 from PySide6.QtWidgets import (
@@ -33,6 +32,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from cutecanvas import CuteCanvas
 
 _POSITION_LIMIT = 1_000_000_000.0
 _SCALE_LIMIT = 10_000.0

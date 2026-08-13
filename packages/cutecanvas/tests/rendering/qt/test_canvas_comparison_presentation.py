@@ -21,13 +21,14 @@ from __future__ import annotations
 from math import hypot
 
 import pytest
+from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+
 from cutecanvas import CanvasComparisonOverlayState
 from cutecanvas.document import CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
 from cutecanvas_test_support.execution_backend import ControllableExecutionBackend
-from PySide6.QtCore import QElapsedTimer, QPoint, QPointF, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
 from qpane.sdk.execution import ExecutionRuntime
 from qpane.sdk.types import ComparisonOrientation
 

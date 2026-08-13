@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import uuid
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.scene.mapping_preview import (
     LayerMappingPreview,
     SceneLayerMappingPreview,
 )
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerKind,

@@ -23,6 +23,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 import numpy as np
+
 from cutecanvas.sam.segmentation_request import (
     SmartSegmentationProduct,
     SmartSegmentationRequest,

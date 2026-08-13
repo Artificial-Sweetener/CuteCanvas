@@ -21,10 +21,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from ferrastra import CancellationToken as NativeCancellationToken
-from ferrastra import Engine, EvaluationBudget, Graph, RasterResult, Region
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
+
+from ferrastra import CancellationToken as NativeCancellationToken
+from ferrastra import Engine, EvaluationBudget, Graph, RasterResult, Region
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 from .affine_projection_graph import build_affine_projection_graph

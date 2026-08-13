@@ -23,6 +23,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 import pytest
+
 from cutecanvas import Config
 from cutecanvas_test_support.execution_backend import ControlledExecution
 from cutecanvas_test_support.render_plan import make_tile_key

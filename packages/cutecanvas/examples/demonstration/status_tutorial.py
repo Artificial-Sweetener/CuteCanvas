@@ -27,7 +27,6 @@ from collections.abc import Callable
 from math import isclose
 from pathlib import Path
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -38,6 +37,8 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidget,
 )
+
+from cutecanvas import CuteCanvas
 
 
 class StatusTutorialController:

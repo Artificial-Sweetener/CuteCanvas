@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass
 
 import numpy as np
+
 from cutecanvas.coverage import CoverageSnapshot
 from qpane.sdk.scene import RasterBounds
 

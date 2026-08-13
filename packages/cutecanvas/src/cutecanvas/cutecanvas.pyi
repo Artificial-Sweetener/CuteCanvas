@@ -36,6 +36,26 @@ from PySide6.QtGui import (
     QTransform,
 )
 from PySide6.QtWidgets import QWidget
+from typing_extensions import Self
+
+from qpane import (
+    ComparisonOrientation as ComparisonOrientation,
+)
+from qpane import (
+    DiagnosticRecord as DiagnosticRecord,
+)
+from qpane import (
+    LayerPresentationEffect as LayerPresentationEffect,
+)
+from qpane import (
+    LayerPresentationEffectKind as LayerPresentationEffectKind,
+)
+from qpane import (
+    LayerPresentationStyle as LayerPresentationStyle,
+)
+from qpane import (
+    PanelHitTest,
+)
 from qpane.sdk.execution import BackendSubmission as BackendSubmission
 from qpane.sdk.execution import DefaultExecutionPolicy
 from qpane.sdk.execution import DiagnosticsSubscription as DiagnosticsSubscription
@@ -76,26 +96,6 @@ from qpane.sdk.ui import (
 )
 from qpane.sdk.ui import (
     OutboundMimeProvider as OutboundMimeProvider,
-)
-from typing_extensions import Self
-
-from qpane import (
-    ComparisonOrientation as ComparisonOrientation,
-)
-from qpane import (
-    DiagnosticRecord as DiagnosticRecord,
-)
-from qpane import (
-    LayerPresentationEffect as LayerPresentationEffect,
-)
-from qpane import (
-    LayerPresentationEffectKind as LayerPresentationEffectKind,
-)
-from qpane import (
-    LayerPresentationStyle as LayerPresentationStyle,
-)
-from qpane import (
-    PanelHitTest,
 )
 
 from .composition.geometry_policy import LayerGeometryMode as LayerGeometryMode

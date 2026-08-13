@@ -20,14 +20,15 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtTest import QTest
+
 from cutecanvas import CuteCanvas, LayerPolicy
 from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
 from cutecanvas_test_support.harness.mounted_qpane import (
     MountedQPaneHarness,
     PresentedMaskFrame,
 )
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtTest import QTest
 from qpane.rendering.view import View
 from qpane.sdk.scene import BilinearLayerTransform
 

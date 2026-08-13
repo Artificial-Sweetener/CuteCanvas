@@ -21,10 +21,11 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from cutecanvas.painting import PaintingCoordinator, PaintTargetContext
 from cutecanvas.selection import LayerCoverageProjector, PixelSelectionService
-from PySide6.QtCore import QPointF
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

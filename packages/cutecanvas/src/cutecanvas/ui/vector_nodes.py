@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
+
 from qpane.sdk.vector import VectorNodeRole
 
 from ..vector.node_edit import VectorNodeOverlayState

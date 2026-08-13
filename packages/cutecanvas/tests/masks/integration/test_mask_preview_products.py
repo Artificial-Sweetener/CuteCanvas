@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 import numpy as np
-from cutecanvas.masks.preview_products import preview_mask_coverage
 from PySide6.QtCore import QSize
+
+from cutecanvas.masks.preview_products import preview_mask_coverage
 from qpane.sdk.raster import qimage_to_numpy_grayscale8
 
 

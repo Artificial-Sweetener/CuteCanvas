@@ -22,8 +22,9 @@ import math
 import uuid
 from dataclasses import replace
 
-from cutecanvas.types import LayerEdgeOperation
 from PySide6.QtCore import QPointF
+
+from cutecanvas.types import LayerEdgeOperation
 from qpane.sdk.scene import LayerTransform, compose_layer_mappings
 
 

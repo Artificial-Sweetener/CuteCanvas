@@ -29,6 +29,22 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
+from PySide6.QtCore import QByteArray, QEvent, QRect, Qt
+from PySide6.QtGui import (
+    QIcon,
+    QKeySequence,
+    QShortcut,
+)
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QLabel,
+    QMainWindow,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
 from cutecanvas import Config, CuteCanvas, ExecutionRuntime
 from demo_settings import load_demo_settings, save_demo_window_settings
 from demonstration import demo_text
@@ -53,22 +69,6 @@ from demonstration.status_tutorial import StatusTutorialController
 from demonstration.tool_mode_tutorial import ToolModeTutorialController
 from demonstration.welcome_document import seed_welcome_document
 from demonstration.workspace_tutorial import WorkspaceTutorialController
-from PySide6.QtCore import QByteArray, QEvent, QRect, Qt
-from PySide6.QtGui import (
-    QIcon,
-    QKeySequence,
-    QShortcut,
-)
-from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
-    QLabel,
-    QMainWindow,
-    QSplitter,
-    QVBoxLayout,
-    QWidget,
-)
-
 from qpane import create_default_execution_runtime
 
 MASK_KEY_LOOKUP = {

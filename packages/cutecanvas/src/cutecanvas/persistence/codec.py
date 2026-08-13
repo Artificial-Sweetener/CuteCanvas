@@ -25,13 +25,14 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+from PySide6.QtCore import QRectF, QSize
+
 from cutecanvas.coverage import (
     CoverageAssetSnapshot,
     CoverageDocument,
     CoverageSnapshot,
 )
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QRectF, QSize
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     qimage_to_numpy_argb32,

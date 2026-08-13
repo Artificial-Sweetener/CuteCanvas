@@ -21,7 +21,6 @@ import uuid
 from collections.abc import Callable
 from dataclasses import replace
 
-from cutecanvas import CuteCanvas, VectorShapeKind, VectorTextAlignment
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QAction, QActionGroup, QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
@@ -34,6 +33,8 @@ from PySide6.QtWidgets import (
     QToolBar,
     QToolButton,
 )
+
+from cutecanvas import CuteCanvas, VectorShapeKind, VectorTextAlignment
 
 
 class VectorControls(QObject):

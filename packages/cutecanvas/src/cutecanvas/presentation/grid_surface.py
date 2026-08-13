@@ -26,6 +26,7 @@ from typing import cast
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF
 from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QWidget
+
 from qpane.sdk.layout import (
     ResponsiveGridLayout,
     ResponsiveGridPolicy,

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+
 from qpane.sdk.scene import TransformHandle
 
 from .affine_handles import draw_affine_handle

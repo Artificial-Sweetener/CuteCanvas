@@ -25,6 +25,7 @@ from enum import Enum
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage, QTransform
+
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRect
 from PySide6.QtGui import QColor, QImage, QPainter, Qt, QTransform
+
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import RenderStrategy, SceneRenderPlan, TileRenderData

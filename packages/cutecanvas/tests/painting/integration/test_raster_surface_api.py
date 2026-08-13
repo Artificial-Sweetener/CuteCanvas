@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import time
 
+from PySide6.QtCore import QRect, QRectF
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import LayerPolicy, RasterExtentPolicy
 from cutecanvas.painting import BrushStrokeSegment
 from cutecanvas_test_support.mask_test_utils import drain_mask_jobs
-from PySide6.QtCore import QRect, QRectF
-from PySide6.QtGui import QColor, QImage
 from qpane.scene.raster import RasterBounds
 
 

@@ -21,6 +21,7 @@ import uuid
 from threading import Lock
 
 from PySide6.QtCore import QObject, QSize, Signal
+
 from qpane.sdk.execution import (
     DefaultExecutionPolicy,
     ExecutionLeaseRelease,

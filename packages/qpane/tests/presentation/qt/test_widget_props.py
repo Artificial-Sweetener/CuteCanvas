@@ -23,12 +23,12 @@ import pytest
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QWidget
+
+from qpane import QPane
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.ui.widget_props import apply_widget_defaults
 from qpane_test_support.qt_events import wait_until
 from qpane_test_support.render_compare import checker_image
-
-from qpane import QPane
 
 
 def test_widget_defaults_preserve_host_background_composition(

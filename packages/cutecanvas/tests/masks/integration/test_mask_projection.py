@@ -22,6 +22,9 @@ from time import perf_counter
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPointF, QSize
+from PySide6.QtGui import QImage
+
 from cutecanvas import RasterExtentPolicy
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.masks.mask import MaskAssetStore
@@ -31,8 +34,6 @@ from cutecanvas.masks.projection import (
     project_mask_snapshot,
 )
 from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
-from PySide6.QtCore import QPointF, QSize
-from PySide6.QtGui import QImage
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import (
     LayerDescriptor,

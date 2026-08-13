@@ -22,12 +22,13 @@ import uuid
 from collections.abc import Callable
 
 import pytest
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas.sam.manager import SamManager
 from cutecanvas_test_support.execution_backend import (
     ControllableAffinityExecutionBackend,
     ControllableExecutionBackend,
 )
-from PySide6.QtGui import QColor, QImage
 from qpane.cache.consumers import KeyedCacheConsumer
 from qpane.cache.coordinator import CacheCoordinator, CachePriority
 from qpane.sdk.execution import ExecutionRuntime, InlineDispatcher

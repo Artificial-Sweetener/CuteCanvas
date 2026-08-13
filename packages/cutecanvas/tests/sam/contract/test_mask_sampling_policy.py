@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPoint, QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from qpane.scene.model import LayerKind
 from qpane.scene.raster_sampling import RasterPresentationSampling
 

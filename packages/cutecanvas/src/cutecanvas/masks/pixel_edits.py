@@ -22,6 +22,9 @@ from collections.abc import Callable
 from typing import Protocol
 
 import numpy as np
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QImage
+
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot, combine_coverage
 from cutecanvas.scene.pixel_extraction import build_pixel_lift
 from cutecanvas.scene.pixel_fragments import (
@@ -31,8 +34,6 @@ from cutecanvas.scene.pixel_fragments import (
 )
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QRect
-from PySide6.QtGui import QImage
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from ..resources import ProjectResourceReference

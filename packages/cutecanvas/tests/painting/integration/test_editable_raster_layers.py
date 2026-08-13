@@ -20,14 +20,15 @@ from __future__ import annotations
 import time
 import uuid
 
+from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QSignalSpy, QTest
+
 from cutecanvas import (
     LayerGeometryMode,
     LayerGeometryPolicy,
     LayerPolicy,
 )
-from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QSignalSpy, QTest
 from qpane.scene.raster import RasterBounds
 from qpane.scene.render_plan import SampledLayerRenderItem
 

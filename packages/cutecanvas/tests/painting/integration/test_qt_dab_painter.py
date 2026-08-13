@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from cutecanvas.painting import BrushStrokeSegment
-from cutecanvas.painting.qt_dab_painter import paint_coverage_segments
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QImage
+
+from cutecanvas.painting import BrushStrokeSegment
+from cutecanvas.painting.qt_dab_painter import paint_coverage_segments
 from qpane.sdk.raster import qimage_to_numpy_grayscale8
 
 

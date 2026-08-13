@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QRegion
+
 from qpane.rendering.widget_surface import WidgetRenderSurface
 
 

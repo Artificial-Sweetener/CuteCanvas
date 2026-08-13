@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from PySide6.QtCore import QPointF
+
 from qpane.sdk.scene import RasterBounds
 
 

@@ -23,6 +23,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage, Qt, QTransform
+
 from qpane.rendering.sampled_frame_continuity import SampledFrameContinuity
 from qpane.rendering.sdk import RasterSource
 from qpane.scene.raster import RasterBounds

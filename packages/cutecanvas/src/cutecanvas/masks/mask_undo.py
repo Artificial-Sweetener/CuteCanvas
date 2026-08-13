@@ -30,10 +30,12 @@ from typing import (
 import numpy as np
 from numpy.typing import NDArray
 from PySide6.QtCore import QRect
+
 from qpane.sdk.raster import qimage_to_numpy_grayscale8
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QImage
+
     from qpane.sdk.scene import RasterBounds
 
 

@@ -22,6 +22,7 @@ from time import process_time
 
 import numpy as np
 import pytest
+
 from cutecanvas.masks.image_ops import (
     adjust_connected_component,
     resize_mask_nearest,

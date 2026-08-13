@@ -21,6 +21,7 @@ import uuid
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage
+
 from qpane.hybrid.model import (
     HybridDocument,
     HybridPresentationStyle,

@@ -20,10 +20,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas, LayerEdgeOperation
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QInputDialog
+
+from cutecanvas import CuteCanvas, LayerEdgeOperation
 
 
 class SelectionModificationDemoControl(QObject):

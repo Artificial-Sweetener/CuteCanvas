@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QPointF
+
 from qpane.scene.mapping import validate_layer_mapping
 from qpane.sdk.scene import PiecewiseLayerTransform, RasterBounds
 

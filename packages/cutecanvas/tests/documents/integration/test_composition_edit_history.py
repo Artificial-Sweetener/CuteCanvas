@@ -20,6 +20,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from PySide6.QtCore import QRectF
+
 from cutecanvas import CanvasDocument, ExternalHistoryPolicy
 from cutecanvas.composition.edit_controller import CompositionEditController
 from cutecanvas.composition.edit_history import CompositionEditHistory
@@ -33,7 +35,6 @@ from cutecanvas.composition.resource_lifetime import (
 )
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.scene.mapping_edit import LayerMappingEdit, LayerMappingTransition
-from PySide6.QtCore import QRectF
 from qpane.scene.affine import LayerTransform
 from qpane.scene.projective import ProjectiveLayerTransform
 

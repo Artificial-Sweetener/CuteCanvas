@@ -18,10 +18,9 @@
 
 import json
 
-from qpane.scene.render_plan import RenderStrategy
-
 from qpane import Config, RasterReconstructionSpace
 from qpane.rendering import PyramidStatus, ViewportZoomMode
+from qpane.scene.render_plan import RenderStrategy
 
 
 def test_render_strategy_behaves_like_string() -> None:

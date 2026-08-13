@@ -19,11 +19,11 @@
 from __future__ import annotations
 
 import pytest
+
 from cutecanvas.core.config import Config
 from cutecanvas.core.config_features import MASK_DESCRIPTOR
 from qpane.core.config import FeatureAwareConfig
 from qpane.core.config_features import CORE_DESCRIPTOR
-
 from qpane.features import FeatureInstallError
 
 

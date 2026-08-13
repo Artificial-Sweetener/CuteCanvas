@@ -18,9 +18,10 @@
 
 from __future__ import annotations
 
-from cutecanvas import CanvasDocument, CuteCanvas
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage
+
+from cutecanvas import CanvasDocument, CuteCanvas
 from qpane.sdk.rendering import ViewportZoomMode
 
 

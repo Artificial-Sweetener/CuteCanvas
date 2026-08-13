@@ -641,9 +641,10 @@ def main(argv: Iterable[str] | None = None) -> int:
             ),
         )
     _options_type, window_type = _load_example_types()
-    from cutecanvas import Config
     from PySide6.QtGui import QImageReader
     from PySide6.QtWidgets import QApplication
+
+    from cutecanvas import Config
 
     opts = parse_args(args)
     _configure_logging(opts.log_level)

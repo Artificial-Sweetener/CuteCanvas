@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtGui import QTransform
+
 from qpane.rendering.raster_sampling import (
     device_aligned_raster_transform,
     exact_raster_sampling,

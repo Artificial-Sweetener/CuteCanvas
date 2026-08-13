@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.scene.mapping_mutations import (
     LayerMappingMutationOwner,
     LayerMappingValue,
@@ -30,7 +32,6 @@ from cutecanvas.scene.mapping_preview import (
 )
 from cutecanvas.snapping.edge_candidates import OrientedEdgeCandidateProvider
 from cutecanvas.snapping.feedback import SnapGuideFeedback
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import SceneDescriptor
 
 from .session_coordination import EditSessionCoordinator

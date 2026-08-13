@@ -24,6 +24,9 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import (
     RasterExtentPolicy,
     VectorFillRule,
@@ -70,8 +73,6 @@ from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
 from cutecanvas.resources.composition_resources import CompositionResourceOwner
 from cutecanvas.vector.effects import VectorMaskEffect
 from cutecanvas.vector.store import VectorAssetStore
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QColor, QImage
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import LayerInteractionPolicy, LayerPlacement
 from qpane.scene.projective import ProjectiveLayerTransform

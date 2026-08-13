@@ -22,9 +22,10 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from PySide6.QtCore import QRectF
+
 from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from cutecanvas.selection import PixelSelectionService
-from PySide6.QtCore import QRectF
 from qpane.sdk.scene import SceneDescriptor
 
 from .configuration import SnapConfiguration, SnapPolicy

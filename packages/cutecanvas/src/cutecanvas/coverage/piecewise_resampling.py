@@ -21,9 +21,10 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from PySide6.QtCore import QPointF
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import LayerTransform, PiecewiseLayerTransform, RasterBounds
 
 

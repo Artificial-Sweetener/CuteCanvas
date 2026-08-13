@@ -22,6 +22,18 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import numpy as np
+from PySide6.QtCore import (
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QTimer,
+)
+from PySide6.QtGui import (
+    QImage,
+)
+from PySide6.QtWidgets import QWidget
+
 from cutecanvas import ui
 from cutecanvas.core import (
     FeatureFailure,
@@ -51,17 +63,6 @@ from cutecanvas.resources import ProjectResourceKind
 from cutecanvas.resources.layer_operations import ResourceForkOwner
 from cutecanvas.types import DiagnosticsDomain
 from cutecanvas.vector.facade import VectorHostFacade
-from PySide6.QtCore import (
-    QPoint,
-    QPointF,
-    QRect,
-    QRectF,
-    QTimer,
-)
-from PySide6.QtGui import (
-    QImage,
-)
-from PySide6.QtWidgets import QWidget
 from qpane.sdk.cache import CacheRegistry
 from qpane.sdk.diagnostics import DiagnosticsSnapshot
 from qpane.sdk.rendering import ViewportZoomMode

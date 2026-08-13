@@ -21,6 +21,15 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import replace
 
+from PySide6.QtCore import (
+    QPoint,
+    QRectF,
+)
+from PySide6.QtGui import (
+    QImage,
+    QTransform,
+)
+
 from cutecanvas.composition.geometry_policy import LayerGeometryPolicy
 from cutecanvas.composition.public_layer_mapping import (
     detached_public_layer_mapping,
@@ -37,14 +46,6 @@ from cutecanvas.types import (
     LayerPolicy,
     LayerSelectionSnapshot,
     SceneSnapshot,
-)
-from PySide6.QtCore import (
-    QPoint,
-    QRectF,
-)
-from PySide6.QtGui import (
-    QImage,
-    QTransform,
 )
 from qpane.sdk.scene import (
     BilinearLayerTransform,

@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtGui import QImage
+
 from qpane.sdk.raster import numpy_to_qimage_grayscale8
 from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 

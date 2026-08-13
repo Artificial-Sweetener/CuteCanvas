@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QScreen,
     QWindow,
 )
+
 from qpane.sdk.rendering import ViewportZoomMode
 
 from ..document import CanvasViewportInteraction

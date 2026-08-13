@@ -17,6 +17,9 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+
 from cutecanvas.coverage import (
     CoverageCombineMode,
     CoverageDocument,
@@ -33,8 +36,6 @@ from cutecanvas.tools.selection_shapes import (
     RectangleSelectionTool,
 )
 from cutecanvas.tools.selection_shortcuts import EditorSelectionShortcuts
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 
 def _event(

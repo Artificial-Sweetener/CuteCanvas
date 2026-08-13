@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 
 from PySide6.QtCore import QRectF
+
 from qpane.sdk.vector import VectorDocument
 
 from .public import (

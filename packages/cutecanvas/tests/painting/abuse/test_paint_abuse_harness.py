@@ -20,6 +20,11 @@ from __future__ import annotations
 import statistics
 
 import numpy as np
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import (
     BrushPreset,
     CuteCanvas,
@@ -34,10 +39,6 @@ from cutecanvas_test_support.harness.timing import (
     stable_latency_samples,
     wait_for_qt_condition,
 )
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QTransform
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import (
     qimage_to_numpy_argb32,
     qimage_to_numpy_grayscale8,

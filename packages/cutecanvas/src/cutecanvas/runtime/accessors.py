@@ -20,6 +20,15 @@ from __future__ import annotations
 import logging
 import uuid
 
+from PySide6.QtCore import (
+    QPoint,
+    QRectF,
+    QSize,
+)
+from PySide6.QtGui import (
+    QImage,
+)
+
 from cutecanvas.composition import CompositionService
 from cutecanvas.core import (
     CuteCanvasHooks,
@@ -67,14 +76,6 @@ from cutecanvas.vector.facade import VectorHostFacade
 from cutecanvas.vector.interaction import VectorInteractionController
 from cutecanvas.vector.node_edit import VectorNodeEditController
 from cutecanvas.vector.text_edit import VectorTextEditController
-from PySide6.QtCore import (
-    QPoint,
-    QRectF,
-    QSize,
-)
-from PySide6.QtGui import (
-    QImage,
-)
 from qpane.sdk.cache import CacheCoordinator
 from qpane.sdk.diagnostics import Diagnostics
 from qpane.sdk.rendering import RenderingPresenter, SceneCoordinateSystem, View

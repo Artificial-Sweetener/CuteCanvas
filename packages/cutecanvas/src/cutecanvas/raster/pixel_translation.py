@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
 from cutecanvas.scene.pixel_transitions import (

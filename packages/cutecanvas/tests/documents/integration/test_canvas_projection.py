@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
-from cutecanvas import CanvasProjectionStatus, CuteCanvas
-from cutecanvas.document import CanvasDocument
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QSignalSpy, QTest
+
+from cutecanvas import CanvasProjectionStatus, CuteCanvas
+from cutecanvas.document import CanvasDocument
 
 
 def _wait_for_signal(spy: QSignalSpy, *, timeout_ms: int = 3000) -> bool:

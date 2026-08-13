@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import pytest
+
 from cutecanvas.composition.geometry_policy import (
     LayerGeometryMode,
     LayerGeometryPolicy,

@@ -21,8 +21,9 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from cutecanvas import CanvasProjectionResult, CuteCanvas
 from PySide6.QtWidgets import QFileDialog, QWidget
+
+from cutecanvas import CanvasProjectionResult, CuteCanvas
 
 
 class ProjectionTutorialController:

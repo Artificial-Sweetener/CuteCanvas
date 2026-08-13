@@ -21,13 +21,13 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent, QPainter
+
 from cutecanvas.editor.shared_edge_pivot import SharedEdgeHandle
 from cutecanvas.editor.shared_edge_presentation import SharedEdgePresentation
 from cutecanvas.ui.shared_edge import SharedEdgeRenderer
 from cutecanvas.ui.transform_cursor import TransformCursorFactory
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent, QPainter
-
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .affine_ports import SharedEdgeResizePort

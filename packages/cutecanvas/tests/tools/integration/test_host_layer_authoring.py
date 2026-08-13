@@ -18,15 +18,16 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtTest import QSignalSpy
+
 from cutecanvas import (
     CoverageCoordinateSpace,
     CuteCanvas,
     PixelSelectionMode,
 )
 from cutecanvas_test_support.harness.timing import interaction_clock
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QImage, QTransform
-from PySide6.QtTest import QSignalSpy
 
 _HOST_COMMAND_BUDGET_MS = 4.0
 

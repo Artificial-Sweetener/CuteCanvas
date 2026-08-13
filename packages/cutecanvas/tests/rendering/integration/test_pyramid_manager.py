@@ -22,12 +22,12 @@ import time
 import uuid
 
 import pytest
+from PySide6.QtGui import QImage, Qt
+
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.execution_backend import ControlledExecution
 from cutecanvas_test_support.render_plan import make_source_key
 from ferrastra import RasterReconstructionSpace
-from PySide6.QtGui import QImage, Qt
-
 from qpane import Config
 from qpane.rendering import PyramidManager, PyramidStatus
 

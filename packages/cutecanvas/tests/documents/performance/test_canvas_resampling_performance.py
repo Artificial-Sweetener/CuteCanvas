@@ -17,13 +17,14 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CanvasDocument, CanvasResamplingMode
 from cutecanvas_test_support.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     average_interaction_latency_ms,
 )
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
 
 pytestmark = INTERACTIVE_PERFORMANCE
 

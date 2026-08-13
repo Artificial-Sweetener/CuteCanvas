@@ -20,8 +20,9 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas.coverage import CoverageSnapshot
 from PySide6.QtCore import QRect
+
+from cutecanvas.coverage import CoverageSnapshot
 
 from .mask import MaskAssetStore
 from .render_cache import MaskRenderCache

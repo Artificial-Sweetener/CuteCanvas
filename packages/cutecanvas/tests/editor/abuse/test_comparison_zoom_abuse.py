@@ -18,6 +18,10 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QElapsedTimer, QEvent, QPoint, QPointF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent
+from PySide6.QtTest import QTest
+
 from cutecanvas.document import CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
 from cutecanvas_test_support.execution_backend import ControllableExecutionBackend
@@ -25,9 +29,6 @@ from cutecanvas_test_support.harness_tools.pan_render_harness import (
     HeadlessPanHarness,
     coordinate_fingerprint_image,
 )
-from PySide6.QtCore import QElapsedTimer, QEvent, QPoint, QPointF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QMouseEvent
-from PySide6.QtTest import QTest
 from qpane.sdk.execution import ExecutionRuntime
 
 

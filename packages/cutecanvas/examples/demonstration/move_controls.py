@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas, MoveToolOptions
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QToolBar
+
+from cutecanvas import CuteCanvas, MoveToolOptions
 
 
 class MoveControls(QObject):

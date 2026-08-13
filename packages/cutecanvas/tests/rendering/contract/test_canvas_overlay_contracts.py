@@ -19,9 +19,10 @@
 from __future__ import annotations
 
 import pytest
-from cutecanvas import CanvasOverlayState
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage, QTransform
+
+from cutecanvas import CanvasOverlayState
 
 
 @pytest.mark.parametrize(

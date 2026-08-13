@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+
 from qpane.sdk.scene import LayerSourceReference, RasterBounds
 
 from ..composition.edit_controller import CompositionEditController

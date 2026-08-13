@@ -22,12 +22,13 @@ import uuid
 from typing import Protocol, cast
 
 import numpy as np
-from cutecanvas import CuteCanvas, LayerPolicy
-from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QTransform
 from PySide6.QtTest import QTest
+
+from cutecanvas import CuteCanvas, LayerPolicy
+from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from qpane.rendering.view import View
 
 

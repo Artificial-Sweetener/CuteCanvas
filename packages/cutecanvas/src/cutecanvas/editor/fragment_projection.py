@@ -20,10 +20,11 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from PySide6.QtGui import QImage
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.ferrastra import NativeCoverageProjector, NativeRasterProjector
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
-from PySide6.QtGui import QImage
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     qimage_to_numpy_argb32,

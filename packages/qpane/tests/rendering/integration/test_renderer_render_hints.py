@@ -29,6 +29,8 @@ from PySide6.QtGui import (
     Qt,
     QTransform,
 )
+
+from qpane.rendering import Renderer
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.scene.model import LayerKind
 from qpane.scene.raster_sampling import RasterPresentationSampling
@@ -38,8 +40,6 @@ from qpane.scene.render_plan import (
     SceneRenderPlan,
 )
 from qpane_test_support.render_plan import make_render_plan
-
-from qpane.rendering import Renderer
 
 
 class _StubQPane:

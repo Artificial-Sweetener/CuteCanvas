@@ -21,9 +21,10 @@ import uuid
 from dataclasses import dataclass
 
 import numpy as np
-from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
+
+from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.raster import numpy_to_qimage_grayscale8
 from qpane.sdk.scene import RasterBounds
 

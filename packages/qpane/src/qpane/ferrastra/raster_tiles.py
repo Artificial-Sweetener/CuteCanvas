@@ -24,10 +24,11 @@ from collections.abc import Callable, Hashable
 from threading import Lock
 from typing import Protocol, runtime_checkable
 
-from ferrastra import CancellationToken as NativeCancellationToken
-from ferrastra import Engine, EvaluationBudget, Graph, RasterResult, Region
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
+
+from ferrastra import CancellationToken as NativeCancellationToken
+from ferrastra import Engine, EvaluationBudget, Graph, RasterResult, Region
 
 from ..rendering.render_sampling_grid import AffineSamplingGrid, AxisAlignedSamplingGrid
 from ..rendering.render_tile_geometry import RenderTileRequest

@@ -26,9 +26,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtGui import QCursor
-from qpane.sdk.overlays import OverlayDrawFn, SceneOverlayDrawFn
 
 from qpane import ViewerTool
+from qpane.sdk.overlays import OverlayDrawFn, SceneOverlayDrawFn
 
 from ..tools import ToolManagerSignals
 

@@ -22,6 +22,11 @@ from itertools import product
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QCursor, QEnterEvent, QImage, QMouseEvent, QPainter, QPen
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import LayerPolicy, RasterExtentPolicy
 from cutecanvas_test_support.harness.abuse_model import (
     AbuseAction,
@@ -38,10 +43,6 @@ from cutecanvas_test_support.harness.abuse_model import (
 )
 from cutecanvas_test_support.harness.abuse_runner import MaskAbuseRunner
 from cutecanvas_test_support.harness.timing import INTERACTIVE_PERFORMANCE
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QCursor, QEnterEvent, QImage, QMouseEvent, QPainter, QPen
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.scene.model import LayerKind
 
 pytestmark = INTERACTIVE_PERFORMANCE

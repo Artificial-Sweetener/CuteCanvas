@@ -23,14 +23,14 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QLineF, QPointF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent, QPainter, QPolygonF
+
+from qpane import PointerPhase, PointerSample, ToolInputProfile
 from qpane.sdk.scene import (
     TransformHandle,
     TransformModifiers,
     TransformOperation,
     TransformOperationKind,
 )
-
-from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from ..ui.transform_box import TransformBoxRenderer
 from ..ui.transform_cursor import TransformCursorFactory

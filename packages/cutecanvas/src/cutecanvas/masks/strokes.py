@@ -26,6 +26,7 @@ from uuid import UUID, uuid4
 
 import numpy as np
 from PySide6.QtCore import QRect
+
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

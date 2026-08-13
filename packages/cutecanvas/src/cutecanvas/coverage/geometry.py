@@ -22,6 +22,7 @@ from collections.abc import Sequence
 
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor
+
 from qpane.sdk.scene import LayerTransform
 from qpane.sdk.vector import (
     VectorObject,

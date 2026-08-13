@@ -30,13 +30,13 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+
+from qpane import HybridPresentationStyle
 from qpane.sdk.configuration import CacheSettings
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
 )
 from qpane.sdk.scene import RasterBounds
-
-from qpane import HybridPresentationStyle
 
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config

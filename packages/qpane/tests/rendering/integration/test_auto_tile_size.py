@@ -18,10 +18,10 @@
 from __future__ import annotations
 
 import pytest
-from qpane.rendering.raster_tile_grid import RasterTileGrid
-from qpane_test_support.qt_events import wait_until
 
 from qpane import Config, QPane
+from qpane.rendering.raster_tile_grid import RasterTileGrid
+from qpane_test_support.qt_events import wait_until
 
 
 def _active_grid(pane: QPane) -> RasterTileGrid:

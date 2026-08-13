@@ -22,6 +22,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
+
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.rendering.panel_mapping import PiecewisePanelMapping
 from qpane.scene.bilinear import BilinearLayerTransform

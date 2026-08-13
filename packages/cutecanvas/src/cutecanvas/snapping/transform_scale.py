@@ -21,8 +21,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from cutecanvas.scene.transform_session import LayerTransformBoxState
 from PySide6.QtCore import QPointF
+
+from cutecanvas.scene.transform_session import LayerTransformBoxState
 from qpane.sdk.scene import (
     AffineTransformGeometry,
     LayerMapping,

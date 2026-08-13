@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF
 from PySide6.QtGui import QColor, QImage, QTransform
+
 from qpane.sdk.scene import BilinearLayerTransform, PiecewiseLayerTransform
 
 if TYPE_CHECKING:

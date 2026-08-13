@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QTransform
+
 from qpane.rendering.panel_mapping import PiecewisePanelMapping
 from qpane.rendering.projective_visibility import visible_source_rect
 from qpane.sdk.scene import PiecewiseLayerTransform

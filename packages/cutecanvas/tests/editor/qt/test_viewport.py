@@ -15,9 +15,9 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import pytest
-from cutecanvas import Config
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF
 
+from cutecanvas import Config
 from qpane.rendering import Viewport, ViewportZoomMode
 
 

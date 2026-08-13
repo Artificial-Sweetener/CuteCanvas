@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+
 from cutecanvas.composition.edit_history import CompositionEditHistory
 from cutecanvas.coverage import CoverageDocument, CoverageSnapshot, RasterCoverageItem
 from cutecanvas.resources import ProjectResourceReference

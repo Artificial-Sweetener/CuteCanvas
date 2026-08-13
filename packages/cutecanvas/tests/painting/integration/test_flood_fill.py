@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.fill import FillCancelledError, FloodFillEngine, FloodFillRequest
 from cutecanvas.types import RasterExtentPolicy

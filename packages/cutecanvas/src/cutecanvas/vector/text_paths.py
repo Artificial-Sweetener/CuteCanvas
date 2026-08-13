@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainterPath
+
 from qpane.sdk.vector import (
     SemanticTextLayoutCache,
     VectorDocument,

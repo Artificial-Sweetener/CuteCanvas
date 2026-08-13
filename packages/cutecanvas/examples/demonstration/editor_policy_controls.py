@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas, EditorCapability, EditorPolicy
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
+
+from cutecanvas import CuteCanvas, EditorCapability, EditorPolicy
 
 _CAPABILITY_LABELS = (
     (EditorCapability.SELECT_PIXELS, "Pixel Selection"),

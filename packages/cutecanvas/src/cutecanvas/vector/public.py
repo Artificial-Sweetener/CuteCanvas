@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QTransform
+
 from qpane.sdk.vector import (
     VectorNodeRole,
     VectorObjectKind,

@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 
 from PySide6.QtCore import QPointF
+
 from qpane.sdk.rendering import SceneCoordinateSystem, ScenePoint
 from qpane.sdk.scene import LayerMapping
 

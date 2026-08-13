@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QLineF, QPointF, QRect
 from PySide6.QtGui import QPainter
+
 from qpane.sdk.types import ComparisonOrientation
 
 from ..document import CanvasComparison

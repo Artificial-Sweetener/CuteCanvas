@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import logging
 
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtTest import QTest
+
 from cutecanvas import (
     CuteCanvas,
     EditorTransformCommand,
@@ -27,8 +30,6 @@ from cutecanvas import (
     LayerPolicy,
 )
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtTest import QTest
 from qpane.sdk.scene import BilinearLayerTransform, PiecewiseLayerTransform
 
 

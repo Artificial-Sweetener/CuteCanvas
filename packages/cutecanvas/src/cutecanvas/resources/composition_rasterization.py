@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage
+
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

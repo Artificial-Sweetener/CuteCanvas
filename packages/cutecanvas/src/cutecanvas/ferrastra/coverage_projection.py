@@ -23,9 +23,10 @@ from typing import Protocol
 
 import numpy as np
 import numpy.typing as npt
+from PySide6.QtCore import QSize
+
 from ferrastra import CancellationToken as NativeCancellationToken
 from ferrastra import CoverageResult, Engine, EvaluationBudget, Region
-from PySide6.QtCore import QSize
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 from .affine_projection_graph import build_affine_projection_graph

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QCursor, QImage
+
 from qpane.sdk.cache import CachePriority, EvictableCacheConsumer
 from qpane.sdk.scene import RasterBounds
 

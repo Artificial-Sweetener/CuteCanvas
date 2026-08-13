@@ -20,6 +20,8 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QPointF
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.selection.history import PixelSelectionEdit
 from cutecanvas.selection.service import PixelSelectionService
@@ -27,7 +29,6 @@ from cutecanvas.selection.translation_interaction import (
     PixelSelectionTranslationInteraction,
 )
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import LayerPlacement, RasterBounds, SceneDescriptor, SceneKind
 
 

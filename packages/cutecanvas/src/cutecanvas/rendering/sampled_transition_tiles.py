@@ -24,6 +24,7 @@ from collections.abc import Hashable
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage, QPainter, QRegion
+
 from qpane.sdk.scene import (
     RasterBounds,
     SampledLayerRenderItem,

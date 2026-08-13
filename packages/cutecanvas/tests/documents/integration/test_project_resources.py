@@ -22,6 +22,10 @@ import uuid
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+
 from cutecanvas import CuteCanvas, VectorShapeKind, VectorStyle
 from cutecanvas.placed.model import FileFingerprint
 from cutecanvas.placed.store import PlacedAssetStore
@@ -29,9 +33,6 @@ from cutecanvas.raster.assets import EditableRasterAssetStore
 from cutecanvas.resources import ProjectResourceKind, ProjectResourceStore
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.harness.timing import completion_clock
-from PySide6.QtCore import QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
 from qpane.sdk.scene import RasterBounds
 
 

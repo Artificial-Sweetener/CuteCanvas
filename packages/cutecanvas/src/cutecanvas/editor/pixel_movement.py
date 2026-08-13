@@ -20,9 +20,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
+from PySide6.QtCore import QPoint, QPointF, QRect
+
 from cutecanvas.coverage.containment import coverage_contains
 from cutecanvas.scene.pixel_move_preview import RasterPixelMovePreview
-from PySide6.QtCore import QPoint, QPointF, QRect
 from qpane.sdk.scene import (
     AffineTransformGeometry,
     LayerTransform,

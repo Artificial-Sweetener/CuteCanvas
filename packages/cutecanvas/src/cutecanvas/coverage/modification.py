@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+
 from cutecanvas.types import LayerEdgeOperation
 from qpane.sdk.scene import RasterBounds
 

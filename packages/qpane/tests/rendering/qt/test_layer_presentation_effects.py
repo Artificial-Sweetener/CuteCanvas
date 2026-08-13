@@ -24,6 +24,15 @@ from dataclasses import replace
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPicture, QTransform
+
+from qpane import (
+    LayerPresentationEffect,
+    LayerPresentationStyle,
+    QPane,
+    RasterSource,
+    RenderLayer,
+    RenderScene,
+)
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.rendering.presentation_effect_compositor import (
     LayerPresentationEffectCompositor,
@@ -40,15 +49,6 @@ from qpane.scene.render_plan import (
 )
 from qpane_test_support.render_plan import make_render_plan
 from qpane_test_support.timing import interaction_clock, stable_latency_samples
-
-from qpane import (
-    LayerPresentationEffect,
-    LayerPresentationStyle,
-    QPane,
-    RasterSource,
-    RenderLayer,
-    RenderScene,
-)
 
 
 def _sparse_image() -> QImage:

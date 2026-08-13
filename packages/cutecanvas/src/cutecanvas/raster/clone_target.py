@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+
 from qpane.sdk.rendering import SceneRegionRasterizer
 from qpane.sdk.scene import (
     LayerDescriptor,

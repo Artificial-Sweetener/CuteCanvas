@@ -20,14 +20,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QTransform
+
 from cutecanvas.ui.brush_feedback import (
     draw_brush_outline,
     draw_brush_path_outline,
 )
 from cutecanvas.ui.erase_indicator import EraseIndicatorRenderer
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QTransform
-
 from qpane import PointerDeviceKind
 
 

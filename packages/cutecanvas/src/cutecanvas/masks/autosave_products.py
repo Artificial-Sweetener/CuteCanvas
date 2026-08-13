@@ -25,6 +25,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QImage, Qt
+
 from qpane.sdk.execution import CancellationToken
 
 MaskImagePayload = QImage | bytes | Callable[[], QImage]

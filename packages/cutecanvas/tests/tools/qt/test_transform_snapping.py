@@ -21,11 +21,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from cutecanvas import CompositionHandle, CuteCanvas, EditorTransformTarget
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import CompositionHandle, CuteCanvas, EditorTransformTarget
 from qpane.sdk.scene import TransformHandle
 
 

@@ -22,8 +22,9 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from PySide6.QtCore import QPointF, QRectF
+
+from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 from .configuration import SnapConfiguration

@@ -24,6 +24,7 @@ from typing import cast
 from PySide6.QtCore import QPoint, QRectF, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QStackedLayout, QWidget
+
 from qpane.sdk.execution import (
     DefaultExecutionPolicy,
     ExecutionRuntime,

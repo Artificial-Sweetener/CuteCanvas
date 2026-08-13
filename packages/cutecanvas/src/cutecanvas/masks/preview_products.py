@@ -21,6 +21,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
+
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
     numpy_to_qimage_grayscale8,

@@ -22,14 +22,15 @@ import uuid
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QPainterPath
+from PySide6.QtTest import QTest
+
 from cutecanvas.coverage import CoverageCombineMode, CoverageGeometryFactory
 from cutecanvas.coverage.canvas_aperture import CoverageCanvasAperture
 from cutecanvas.coverage.document import VectorCoverageItem
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import average_interaction_latency_ms
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QPainterPath
-from PySide6.QtTest import QTest
 from qpane.sdk.raster import qimage_to_numpy_argb32
 
 

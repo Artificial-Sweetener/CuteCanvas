@@ -20,6 +20,8 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas.coverage import CoverageAsset, CoverageSnapshot, CoverageSurface
 from cutecanvas.masks.mask import MaskLayer
 from cutecanvas.masks.pixel_translation import MaskPixelTranslator
@@ -30,7 +32,6 @@ from cutecanvas_test_support.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     average_interaction_latency_ms,
 )
-from PySide6.QtGui import QColor, QImage
 from qpane.scene.raster import RasterBounds
 
 pytestmark = INTERACTIVE_PERFORMANCE

@@ -21,9 +21,10 @@ from time import perf_counter
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QSize
+
 from cutecanvas.coverage import CoverageSurface, normalize_coverage_array
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QSize
 from qpane.scene.raster import RasterBounds
 
 

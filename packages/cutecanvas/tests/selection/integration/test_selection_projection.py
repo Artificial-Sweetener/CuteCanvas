@@ -21,6 +21,8 @@ import random
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QPointF
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.editor.selection_projection import (
     LayerSelectionProjectionCache,
@@ -28,7 +30,6 @@ from cutecanvas.editor.selection_projection import (
 )
 from cutecanvas.selection import LayerCoverageProjector
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QPointF
 from qpane.scene.affine import LayerTransform
 from qpane.scene.bilinear import BilinearLayerTransform
 from qpane.scene.piecewise import PiecewiseLayerTransform

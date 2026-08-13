@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
+
 from qpane.rendering.sdk import RasterSource
 from qpane.scene.identity import SceneLayerAssetKey, SourceRenderAssetKey
 from qpane.scene.model import (

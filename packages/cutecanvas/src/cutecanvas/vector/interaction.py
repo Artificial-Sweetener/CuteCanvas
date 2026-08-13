@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF, QRectF
+
 from qpane.sdk.scene import SceneDescriptor
 from qpane.sdk.vector import (
     VectorPathCommand,

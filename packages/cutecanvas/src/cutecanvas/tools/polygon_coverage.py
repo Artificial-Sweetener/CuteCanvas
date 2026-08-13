@@ -22,11 +22,11 @@ import uuid
 from collections.abc import Callable
 from typing import ClassVar
 
-from cutecanvas.coverage import CoverageCombineMode
-from cutecanvas.cursor import EditorCursorIntent
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter
 
+from cutecanvas.coverage import CoverageCombineMode
+from cutecanvas.cursor import EditorCursorIntent
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .base import BaseTool

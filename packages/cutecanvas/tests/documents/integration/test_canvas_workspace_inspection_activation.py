@@ -21,11 +21,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QPointF, QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CanvasInspectionGroup, CompositionPolicy
 from cutecanvas.document import CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
-from PySide6.QtCore import QPointF, QSize
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.inspection import InspectionViewState, InspectionZoomMode
 from qpane.sdk.rendering import ViewportZoomMode
 

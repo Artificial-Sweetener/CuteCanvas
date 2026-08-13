@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QCoreApplication
+
 from qpane.raster.image_conversion import qimage_to_numpy_view_grayscale8
 
 

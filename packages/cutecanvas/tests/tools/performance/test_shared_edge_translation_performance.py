@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import uuid
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.editor.shared_edge_geometry import shared_edge_seam
 from cutecanvas.editor.shared_edge_grouping import grouped_shared_edges
 from cutecanvas.snapping.edge_model import polygon_edges, quadrilateral_edges
@@ -28,7 +30,6 @@ from cutecanvas_test_support.harness.timing import (
     interaction_clock,
     tail_interaction_latency_ms,
 )
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import LayerTransform
 
 pytestmark = INTERACTIVE_PERFORMANCE

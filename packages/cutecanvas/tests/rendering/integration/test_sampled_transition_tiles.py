@@ -22,6 +22,9 @@ import uuid
 from dataclasses import replace
 
 import numpy as np
+from PySide6.QtCore import QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QImage, QTransform
+
 from cutecanvas.rendering.raster_transitions import RasterTransitionRenderCompiler
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
@@ -30,8 +33,6 @@ from cutecanvas.scene.source_capabilities import (
     PixelSampleGeometry,
 )
 from cutecanvas_test_support.render_plan import make_render_plan
-from PySide6.QtCore import QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QImage, QTransform
 from qpane.scene.raster import RasterBounds
 from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (

@@ -20,11 +20,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtWidgets import QLabel, QSizePolicy, QToolBar, QVBoxLayout, QWidget
+
 from cutecanvas import CuteCanvas
 from demonstration import demo_text
 from demonstration.compositions.browser import CompositionBrowser
-from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtWidgets import QLabel, QSizePolicy, QToolBar, QVBoxLayout, QWidget
 
 
 class CompositionDock(QWidget):

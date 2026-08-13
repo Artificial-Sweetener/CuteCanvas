@@ -21,12 +21,12 @@ from __future__ import annotations
 from typing import cast
 from unittest.mock import MagicMock
 
-from cutecanvas.painting.tools.brush_preview import BrushPreview, BrushPreviewRenderer
-from cutecanvas.ui.cursor_builder import CursorBuilder
-from cutecanvas.ui.erase_indicator import EraseIndicatorRenderer
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF
 from PySide6.QtGui import QColor, QFont, QImage, QPainter
 
+from cutecanvas.painting.tools.brush_preview import BrushPreview, BrushPreviewRenderer
+from cutecanvas.ui.cursor_builder import CursorBuilder
+from cutecanvas.ui.erase_indicator import EraseIndicatorRenderer
 from qpane import PointerDeviceKind
 
 

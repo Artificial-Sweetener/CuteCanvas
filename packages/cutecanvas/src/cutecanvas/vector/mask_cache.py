@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtGui import QPainterPath
+
 from qpane.sdk.vector import (
     SemanticTextLayoutCache,
     VectorDocument,

@@ -18,12 +18,13 @@
 from __future__ import annotations
 
 import numpy as np
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas.raster.assets import EditableRasterAssetStore
 from cutecanvas.raster.presentation_state import EditableRasterPresentationState
 from cutecanvas.raster.source_resolver import EditableRasterSourceCapabilities
 from cutecanvas.resources import ProjectResourceReference, ProjectResourceStore
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtGui import QColor, QImage
 from qpane.scene.raster import RasterBounds
 from qpane.scene.source_capabilities import RasterProductPolicy
 

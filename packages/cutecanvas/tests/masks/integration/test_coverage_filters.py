@@ -21,6 +21,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
+
 from cutecanvas.coverage import (
     CoverageFilterCancelledError,
     dilate_coverage,

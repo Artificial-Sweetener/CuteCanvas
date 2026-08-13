@@ -23,10 +23,10 @@ from collections.abc import Iterator
 
 import pytest
 from PySide6.QtWidgets import QApplication
-from qpane_test_support.process_lock import interactive_performance_isolation
-from qpane_test_support.qt_lifetime import flush_deferred_qt_lifetime
 
 from qpane import QPane
+from qpane_test_support.process_lock import interactive_performance_isolation
+from qpane_test_support.qt_lifetime import flush_deferred_qt_lifetime
 
 
 @pytest.fixture(autouse=True)

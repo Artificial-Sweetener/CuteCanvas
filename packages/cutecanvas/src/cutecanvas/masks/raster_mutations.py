@@ -21,10 +21,11 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from PySide6.QtCore import QRect
+
 from cutecanvas.coverage import CoverageSurface
 from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QRect
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

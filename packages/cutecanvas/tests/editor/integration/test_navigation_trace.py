@@ -22,6 +22,10 @@ import json
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QWheelEvent
+from PySide6.QtWidgets import QApplication, QWidget
+
 from cutecanvas_test_support.harness_tools.cutecanvas_navigation_trace_harness import (
     _checkpoint_difference_is_acceptable,
     _pan_checkpoint_event_indices,
@@ -32,9 +36,6 @@ from demonstration.navigation_trace import (
     NavigationTraceRecorder,
     load_navigation_trace,
 )
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, Signal
-from PySide6.QtGui import QMouseEvent, QWheelEvent
-from PySide6.QtWidgets import QApplication, QWidget
 
 
 class _TraceWidget(QWidget):

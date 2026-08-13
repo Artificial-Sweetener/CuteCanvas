@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-from cutecanvas.editor.shared_edge_pivot import SharedEdgeHandle
-from cutecanvas.editor.shared_edge_presentation import SharedEdgePresentation
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
+
+from cutecanvas.editor.shared_edge_pivot import SharedEdgeHandle
+from cutecanvas.editor.shared_edge_presentation import SharedEdgePresentation
 
 from .affine_handles import draw_affine_handle
 

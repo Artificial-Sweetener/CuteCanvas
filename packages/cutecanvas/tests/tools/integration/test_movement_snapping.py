@@ -20,6 +20,11 @@ from __future__ import annotations
 import time
 
 import pytest
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import (
     CuteCanvas,
     LayerPolicy,
@@ -27,10 +32,6 @@ from cutecanvas import (
     VectorStyle,
 )
 from cutecanvas.editor.movement import EditorMovementInteraction
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QTransform
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 
 
 def _opaque_image(width: int = 100, height: int = 100) -> QImage:

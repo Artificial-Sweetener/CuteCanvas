@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from PySide6.QtCore import QRectF
+
 from qpane.sdk.scene import (
     BilinearLayerTransform,
     LayerInteractionPolicy,

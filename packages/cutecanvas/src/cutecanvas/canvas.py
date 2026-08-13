@@ -40,6 +40,7 @@ from PySide6.QtGui import (
     QWindow,
 )
 from PySide6.QtWidgets import QWidget
+
 from qpane.sdk.execution import DefaultExecutionPolicy, ExecutionRuntime
 from qpane.sdk.rendering import (
     View,

@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtGui import QColor, QImage
+
 from qpane.sdk.scene import RasterBounds
 from qpane.sdk.types import DiagnosticRecord
 

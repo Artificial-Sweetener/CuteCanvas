@@ -18,6 +18,11 @@
 from __future__ import annotations
 
 import numpy as np
+from PySide6.QtCore import QPointF, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import LayerPolicy
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
@@ -25,10 +30,6 @@ from cutecanvas_test_support.harness.timing import (
     interaction_clock,
     stable_latency_samples,
 )
-from PySide6.QtCore import QPointF, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 pytestmark = INTERACTIVE_PERFORMANCE

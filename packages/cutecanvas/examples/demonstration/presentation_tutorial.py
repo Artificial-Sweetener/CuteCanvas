@@ -22,6 +22,17 @@ import uuid
 from collections.abc import Callable
 from typing import cast
 
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
 from cutecanvas import (
     CanvasContentReference,
     CanvasInspectionGroup,
@@ -34,16 +45,6 @@ from cutecanvas import (
 )
 from demonstration.projection_tutorial import (
     ProjectionTutorialController,
-)
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
 )
 
 

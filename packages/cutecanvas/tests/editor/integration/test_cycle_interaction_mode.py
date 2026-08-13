@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from cutecanvas import Config, CuteCanvas
 from PySide6.QtGui import QImage
+
+from cutecanvas import Config, CuteCanvas
 
 
 def _add_image(qpane: CuteCanvas) -> None:

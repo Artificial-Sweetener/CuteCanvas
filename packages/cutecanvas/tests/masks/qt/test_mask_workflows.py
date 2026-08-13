@@ -23,6 +23,9 @@ from types import MethodType
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QCoreApplication, QPoint, QPointF, QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, Qt, QTransform
+
 from cutecanvas import Config, CuteCanvas
 from cutecanvas.composition.model import (
     CompositionOrigin,
@@ -49,8 +52,6 @@ from cutecanvas.resources import ProjectResourceReference
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.execution_backend import TestExecution
 from cutecanvas_test_support.mask_test_utils import drain_mask_jobs, snapshot_mask_layer
-from PySide6.QtCore import QCoreApplication, QPoint, QPointF, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, Qt, QTransform
 from qpane.raster.image_conversion import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_view_grayscale8,

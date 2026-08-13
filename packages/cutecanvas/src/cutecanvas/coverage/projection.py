@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+
 from cutecanvas.ferrastra import NativeCoverageProjector
 from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.execution import CancellationToken

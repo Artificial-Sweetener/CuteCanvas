@@ -18,13 +18,14 @@
 from __future__ import annotations
 
 import numpy as np
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+
 from cutecanvas import CuteCanvas
 from cutecanvas_demo import ExampleOptions, ExampleWindow
 from cutecanvas_test_support.harness import MountedQPaneHarness
 from demonstration.compositions.browser import CompositionBrowser
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
 
 
 def _image(color: str, size: QSize | None = None) -> QImage:

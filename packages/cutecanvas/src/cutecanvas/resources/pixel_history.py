@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Callable
 
 import numpy as np
+
 from qpane.sdk.scene import RasterBounds
 
 from ..composition.layers import CompositionLayerStore

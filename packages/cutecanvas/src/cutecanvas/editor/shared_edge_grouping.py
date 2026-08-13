@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import uuid
 
-from cutecanvas.snapping.edge_model import OrientedEdge
 from PySide6.QtCore import QPointF
+
+from cutecanvas.snapping.edge_model import OrientedEdge
 
 from .shared_edge_geometry import SharedEdgeSeam
 from .shared_edge_participant import (

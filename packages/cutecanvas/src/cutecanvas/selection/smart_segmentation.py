@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import numpy as np
+
 from cutecanvas.coverage import CoverageSnapshot, normalize_coverage_array
 from cutecanvas.sam.segmentation_request import SmartSegmentationRequest
 from cutecanvas.types import RasterExtentPolicy

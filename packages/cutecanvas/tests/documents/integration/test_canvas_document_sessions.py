@@ -20,12 +20,13 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
-from cutecanvas import CuteCanvas, LayerPolicy, PixelSelectionMode
-from cutecanvas.document import CanvasDocument, CanvasViewSession
-from cutecanvas.document.inspection import SessionInspectionBinding
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
+
+from cutecanvas import CuteCanvas, LayerPolicy, PixelSelectionMode
+from cutecanvas.document import CanvasDocument, CanvasViewSession
+from cutecanvas.document.inspection import SessionInspectionBinding
 from qpane.sdk.inspection import InspectionStateStore
 from qpane.sdk.rendering import ViewportZoomMode
 from qpane.sdk.types import LinkedGroup

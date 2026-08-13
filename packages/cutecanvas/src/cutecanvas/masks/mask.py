@@ -25,6 +25,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 import numpy as np
+from PySide6.QtGui import QImage
+
 from cutecanvas.coverage import (
     CoverageAsset,
     CoverageAssetSnapshot,
@@ -34,7 +36,6 @@ from cutecanvas.coverage import (
     CoverageSurface,
 )
 from cutecanvas.coverage.raster_structure import CoverageRasterStructureState
-from PySide6.QtGui import QImage
 
 from ..composition.edit_controller import CompositionEditController
 from ..raster.sparse_grid import SparseRasterSnapshot

@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 
 import numpy as np
+
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from ..coverage import CoverageSnapshot

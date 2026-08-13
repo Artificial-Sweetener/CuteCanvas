@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage
+
 from qpane.sdk.vector import VectorShapeKind
 
 from ..edit_sessions import EditorToolDescriptor

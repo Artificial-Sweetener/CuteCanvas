@@ -22,11 +22,12 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas.masks.export import MaskExportSnapshot, MaskImageExportService
 from cutecanvas.masks.workflow import MaskInfo
 from cutecanvas.types import LayerEdgeOperation
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
 
 if TYPE_CHECKING:
     from cutecanvas.composition.scene_adapter import CompositionSceneAdapter

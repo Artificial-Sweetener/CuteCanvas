@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF
+
 from qpane.sdk.scene import SceneDescriptor
 
 from .shared_edge_geometry import SharedEdgeSeam

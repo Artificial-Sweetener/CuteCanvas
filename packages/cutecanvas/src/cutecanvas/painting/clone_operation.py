@@ -22,6 +22,7 @@ from typing import Protocol, runtime_checkable
 
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor
+
 from qpane.sdk.rendering import (
     LayerLocalPoint,
     PanelPoint,

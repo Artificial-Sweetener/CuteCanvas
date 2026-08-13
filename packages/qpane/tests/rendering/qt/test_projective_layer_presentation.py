@@ -23,10 +23,6 @@ import uuid
 import pytest
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
-from qpane.rendering.item_compositor import SceneItemCompositor
-from qpane.rendering.scene_hit_testing import SceneRenderHitTester
-from qpane.scene.render_plan import SceneRenderPlan
-from qpane_test_support.timing import interaction_clock, stable_latency_samples
 
 from qpane import (
     ProjectiveLayerTransform,
@@ -35,6 +31,10 @@ from qpane import (
     RenderLayer,
     RenderScene,
 )
+from qpane.rendering.item_compositor import SceneItemCompositor
+from qpane.rendering.scene_hit_testing import SceneRenderHitTester
+from qpane.scene.render_plan import SceneRenderPlan
+from qpane_test_support.timing import interaction_clock, stable_latency_samples
 
 
 def test_projective_layer_draws_and_hit_tests_through_one_render_plan(qapp) -> None:

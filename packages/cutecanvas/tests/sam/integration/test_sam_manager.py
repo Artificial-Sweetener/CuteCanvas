@@ -24,6 +24,9 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+from PySide6.QtCore import QObject
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas.sam import service
 from cutecanvas.sam.manager import SamManager
 from cutecanvas.sam.session import prepare_image_rgb
@@ -32,8 +35,6 @@ from cutecanvas_test_support.execution_backend import (
     ControllableExecutionBackend,
     RejectingAffinityExecutionBackend,
 )
-from PySide6.QtCore import QObject
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.execution import (
     ExecutionLeaseRelease,
     ExecutionRequest,

@@ -20,6 +20,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QTransform
+
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.rendering.frame_buffer_presenter import FrameBufferPresenter
 from qpane.rendering.widget_surface import WidgetRenderSurface

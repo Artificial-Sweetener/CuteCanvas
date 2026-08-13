@@ -22,13 +22,14 @@ from collections.abc import Iterator
 
 import numpy as np
 import pytest
-from cutecanvas import PixelSelectionMode, RasterExtentPolicy
-from cutecanvas.coverage.spatial_constraint import PathCoverageConstraint
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QPainterPath
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import PixelSelectionMode, RasterExtentPolicy
+from cutecanvas.coverage.spatial_constraint import PathCoverageConstraint
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from qpane.sdk.raster import qimage_to_numpy_argb32
 from qpane.sdk.scene import ClipCoordinateSpace, LayerClip, RasterBounds
 from qpane.sdk.vector import VectorShapeKind

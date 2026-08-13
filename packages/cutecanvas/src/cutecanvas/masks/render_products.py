@@ -24,6 +24,7 @@ from time import monotonic
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QImage
+
 from qpane.sdk.execution import CancellationToken
 
 from .mask import MaskAssetStore

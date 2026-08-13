@@ -26,16 +26,17 @@ import uuid
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import CuteCanvas
 from cutecanvas_test_support.harness.mounted_qpane import (
     MountedQPaneHarness,
     PresentedMaskFrame,
 )
 from cutecanvas_test_support.repository import repository_root
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 
 _HIGH_DPI_RESULT_PREFIX = "HYBRID_MASK_EDIT_CONTINUITY="
 

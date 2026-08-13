@@ -23,11 +23,6 @@ from collections.abc import Callable
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPathStroker
-from qpane.rendering.item_compositor import SceneItemCompositor
-from qpane.rendering.panel_mapping import PiecewisePanelMapping
-from qpane.rendering.piecewise_compositor import draw_piecewise_item
-from qpane.rendering.scene_hit_testing import SceneRenderHitTester
-from qpane.scene.render_plan import SceneRenderPlan
 
 from qpane import (
     BilinearLayerTransform,
@@ -37,6 +32,11 @@ from qpane import (
     RenderLayer,
     RenderScene,
 )
+from qpane.rendering.item_compositor import SceneItemCompositor
+from qpane.rendering.panel_mapping import PiecewisePanelMapping
+from qpane.rendering.piecewise_compositor import draw_piecewise_item
+from qpane.rendering.scene_hit_testing import SceneRenderHitTester
+from qpane.scene.render_plan import SceneRenderPlan
 
 
 def test_piecewise_layer_draws_without_a_false_global_transform(qapp) -> None:

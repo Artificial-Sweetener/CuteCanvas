@@ -20,9 +20,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas.coverage import CoverageCombineMode
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QTransform
+
+from cutecanvas.coverage import CoverageCombineMode
 from qpane.sdk.scene import (
     LayerInteractionPolicy,
     LayerPlacement,

@@ -22,9 +22,10 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-from cutecanvas import LayerPolicy
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QImage
+
+from cutecanvas import LayerPolicy
 
 
 def _masks(qpane):

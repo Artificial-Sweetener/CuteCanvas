@@ -17,9 +17,8 @@
 
 from __future__ import annotations
 
-from qpane_demonstration.configuration import ViewerSettingsDialog
-
 from qpane import Config, RasterReconstructionSpace
+from qpane_demonstration.configuration import ViewerSettingsDialog
 
 
 def test_example_preserves_automatic_tile_size_by_default(qapp) -> None:

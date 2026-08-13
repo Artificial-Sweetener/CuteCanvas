@@ -22,10 +22,11 @@ import uuid
 from collections import OrderedDict
 
 import pytest
+from PySide6.QtGui import QImage
+
 from cutecanvas import Config
 from cutecanvas_test_support.execution_backend import ControlledExecution
 from cutecanvas_test_support.render_plan import make_source_key
-from PySide6.QtGui import QImage
 from qpane.rendering.pyramid import ImagePyramid, PyramidManager
 
 

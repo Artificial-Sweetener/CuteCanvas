@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QPointF
+
 from qpane.scene.bilinear import BilinearLayerTransform
 from qpane.scene.piecewise import PiecewiseLayerTransform
 from qpane.scene.transform_geometry import (

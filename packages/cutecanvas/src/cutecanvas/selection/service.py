@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Callable
 
 import numpy as np
+
 from cutecanvas.coverage import (
     CoverageCombineMode,
     CoverageDocument,
