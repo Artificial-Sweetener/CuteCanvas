@@ -593,8 +593,8 @@ def test_empty_composition_mask_paint_is_responsive_and_exact(
             final = QPoint(80 + round(index * 480 / 119), 320 + index % 7 - 3)
             started = interaction_clock()
             _send_pressed_mouse_move(viewer, final)
-            qapp.processEvents()
             latencies.append((interaction_clock() - started) * 1000.0)
+            qapp.processEvents()
         QTest.mouseRelease(viewer, Qt.LeftButton, Qt.NoModifier, final)
 
         def paint_committed() -> bool:

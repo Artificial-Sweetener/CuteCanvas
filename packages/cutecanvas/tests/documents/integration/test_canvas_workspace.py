@@ -88,6 +88,27 @@ def test_parent_deletion_closes_workspace_owners_before_qt_children(qapp) -> Non
     document.close()
 
 
+def test_closed_workspace_is_deleted_before_another_workspace_is_created(qapp) -> None:
+    """Closing a terminal workspace must release its native widget allocation."""
+    document, identifiers = _document()
+    workspace = CanvasWorkspace(document=document, features=())
+    workspace.setSinglePresentation(identifiers[0])
+    workspace.show()
+    qapp.processEvents()
+
+    workspace.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+    assert not isValid(workspace)
+    replacement = CanvasWorkspace(document=document, features=())
+    try:
+        assert isValid(replacement)
+    finally:
+        replacement.close()
+        document.close()
+
+
 def test_workspace_switches_presentations_without_mutating_document(qapp) -> None:
     """Single, tabs, grid, and comparison reuse one document content graph."""
     document, identifiers = _document()
