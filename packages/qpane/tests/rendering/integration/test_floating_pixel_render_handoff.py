@@ -25,6 +25,7 @@ from PySide6.QtGui import QColor, QImage, QTransform
 from qpane.rendering.transient_raster import TransientRasterHandoff
 from qpane.scene.affine import LayerTransform
 from qpane.scene.raster import RasterBounds
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SampledTileRenderData,
@@ -169,7 +170,7 @@ def test_sampled_handoff_rejects_tiles_after_source_lattice_changes() -> None:
         placement=descriptor.placement,
         clip=descriptor.clip,
         source_size=source_size,
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=(tile,),
     )
     contribution = TransientSampledResolvedContribution(
@@ -409,7 +410,7 @@ def _sampled_handoff_fixture() -> tuple[
         placement=descriptor.placement,
         clip=descriptor.clip,
         source_size=QSize(64, 64),
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=(source_tile,),
     )
     resolved_image = QImage(64, 64, QImage.Format.Format_ARGB32_Premultiplied)

@@ -52,6 +52,24 @@ def translated_navigation_plan(
     )
 
 
+def covered_translated_navigation_plan(
+    plan: SceneRenderPlan,
+    target_pan: QPointF,
+    panel_rect: QRectF,
+    *,
+    device_pixel_ratio: float,
+) -> SceneRenderPlan | None:
+    """Translate retained products only while they cover the repair surface."""
+    translated = translated_navigation_plan(
+        plan,
+        target_pan,
+        device_pixel_ratio=device_pixel_ratio,
+    )
+    if sampled_navigation_plan_covers_panel_rect(translated, panel_rect):
+        return translated
+    return None
+
+
 def sampled_navigation_plan_covers_panel_rect(
     plan: SceneRenderPlan,
     panel_rect: QRectF,
@@ -158,6 +176,18 @@ def _sampled_item_covers_panel_rect(
     panel_rect: QRectF,
 ) -> bool:
     """Return whether one sampled item can paint its visible panel coverage."""
+    if item.panel_space_products:
+        source_bounds = QRectF(
+            0.0,
+            0.0,
+            float(item.source_size.width()),
+            float(item.source_size.height()),
+        )
+        required = item.transform.mapRect(source_bounds).intersected(panel_rect)
+        return required.isEmpty() or rectangles_cover(
+            required,
+            tuple(tile.source_rect for tile in item.tiles),
+        )
     panel_to_source, invertible = item.transform.inverted()
     if not invertible:
         return True
@@ -196,6 +226,7 @@ def _product_identity(item: SceneRenderItem) -> tuple[object, ...]:
     if isinstance(item, SampledLayerRenderItem):
         return (
             *common,
+            item.panel_space_products,
             None if item.source_bounds is None else _rect_identity(item.source_bounds),
             tuple(
                 (
@@ -236,7 +267,12 @@ def _repair_source_identity(item: SceneRenderItem) -> tuple[object, ...] | None:
         item.placement,
         item.clip,
         item.source_size,
-        item.render_hint_enabled,
+        item.presentation_sampling,
+        (
+            item.panel_space_products
+            if isinstance(item, SampledLayerRenderItem)
+            else False
+        ),
     )
     if isinstance(item, RasterLayerRenderItem):
         return (
@@ -258,6 +294,7 @@ def _rect_identity(rect: QRectF) -> tuple[float, float, float, float]:
 
 
 __all__ = [
+    "covered_translated_navigation_plan",
     "navigation_products_match",
     "navigation_repair_sources_match",
     "retained_raster_navigation_delta",

@@ -35,14 +35,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-from ..scene.identity import (
-    SceneLayerTileKey,
-)
-from ..scene.model import (
-    LayerClip,
-    LayerDescriptor,
-    SceneDescriptor,
-)
+from ..scene.identity import SceneLayerTileKey
+from ..scene.model import LayerClip, LayerDescriptor, SceneDescriptor
 from ..scene.presentation_effects import (
     LayerPresentationEffect,
     LayerPresentationStyle,
@@ -67,10 +61,7 @@ from .frame_projector import SceneFrameProjector
 from .hybrid_planner import HybridRenderPlanner, SampledFramePlan
 from .layer_clip_presentation import LayerClipPresentationRegistry
 from .layer_effects import LayerEffectFrameCompiler
-from .navigation_plan import (
-    sampled_navigation_plan_covers_panel_rect,
-    translated_navigation_plan,
-)
+from .navigation_plan import covered_translated_navigation_plan
 from .presentation_effect_registry import LayerPresentationEffectRegistry
 from .raster_planner import RasterRenderPlanner
 from .raster_products import RasterPyramidProducts, RasterRenderProductStore
@@ -187,15 +178,6 @@ class RenderingPresenter:
             sampled_sources=sampled_sources,
         )
         self._frame_projector = SceneFrameProjector(self.viewport)
-        self._raster_planner = RasterRenderPlanner(
-            compiler=self._scene_compiler,
-            projector=self._frame_projector,
-            products=self._raster_products,
-            raster_sources=raster_sources,
-            raster_patches=raster_patches,
-            tile_manager_provider=lambda: self.tile_manager,
-            viewport=self.viewport,
-        )
         self._vector_cache = VectorRenderCache()
         if cache_registry is not None:
             cache_registry.attach_vector_render_cache(self._vector_cache)
@@ -207,6 +189,17 @@ class RenderingPresenter:
             cache=self._render_tile_cache,
             ready=self._handle_render_refinement_ready,
         )
+        self._raster_planner = RasterRenderPlanner(
+            compiler=self._scene_compiler,
+            projector=self._frame_projector,
+            products=self._raster_products,
+            raster_sources=raster_sources,
+            raster_patches=raster_patches,
+            refinement=self._render_refinement,
+            tile_manager_provider=lambda: self.tile_manager,
+            viewport=self.viewport,
+        )
+        self._raster_planner.apply_config(qpane.settings)
         self._vector_planner = VectorRenderPlanner(
             projector=self._frame_projector,
             cache=self._vector_cache,
@@ -881,12 +874,15 @@ class RenderingPresenter:
         target_pan = QPointF(self.viewport.pan)
         candidate_plan: SceneRenderPlan | None = None
         if self._navigation_interaction_active:
-            projected_plan = translated_navigation_plan(
+            projected_plan = covered_translated_navigation_plan(
                 previous_plan,
                 target_pan,
+                self._navigation_sampling_panel_rect(),
                 device_pixel_ratio=float(self._qpane.devicePixelRatioF()),
             )
-            if self.renderer.tryPresentGuardedPan(projected_plan):
+            if projected_plan is not None and self.renderer.tryPresentGuardedPan(
+                projected_plan
+            ):
                 self._pending_navigation_plan = projected_plan
                 self._defer_navigation_refinement()
                 self._last_scroll_reuse_signature = (
@@ -895,10 +891,7 @@ class RenderingPresenter:
                 return True
             candidate_plan = (
                 projected_plan
-                if sampled_navigation_plan_covers_panel_rect(
-                    projected_plan,
-                    self._navigation_sampling_panel_rect(),
-                )
+                if projected_plan is not None
                 else self.calculateRenderPlan(
                     use_pan=target_pan,
                     is_blank=False,
@@ -934,7 +927,7 @@ class RenderingPresenter:
         """Suspend derived work for the full lifetime of a direct navigation drag."""
         self._navigation_interaction_active = True
         self._navigation_refinement_timer.stop()
-        self._render_refinement.suspend_for_navigation()
+        self._render_refinement.suspend_for_interaction()
 
     def finish_navigation_interaction(self) -> None:
         """Schedule one exact frame after a direct navigation drag finishes."""
@@ -1040,6 +1033,7 @@ class RenderingPresenter:
         """Apply viewport settings and the rendering-owned tile-grid policy."""
         self.viewport.applyConfig(config)
         self._tile_grid_runtime.apply_config(config)
+        self._raster_planner.apply_config(config)
 
     def validate_config(self, config: Config) -> None:
         """Validate rendering-owned settings without mutating collaborators."""

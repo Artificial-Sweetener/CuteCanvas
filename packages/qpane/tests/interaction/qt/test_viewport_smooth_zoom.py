@@ -22,8 +22,9 @@ import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QWidget
-from qpane.core import Config
 from qpane.rendering.viewport import Viewport, ViewportZoomMode
+
+from qpane.core import Config
 
 
 class MockView:

@@ -33,6 +33,7 @@ from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QImage, QRegion
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
 from qpane import QPane
 
 
@@ -195,11 +196,16 @@ class HeadlessPanHarness:
                 actual_history.append(QPointF(actual_pan))
                 if selected_steps is not None and step_index not in selected_steps:
                     continue
+                if not direct_navigation:
+                    self._wait_for_raster_idle(self._qpane)
                 actual_frame = self.capture_settled_buffer(self._qpane)
                 renderer = presenter.renderer
                 buffer_pan = QPointF(renderer._buffer_pan)
                 valid_region = QRegion(renderer._buffer_valid_region)
-                expected_frame = self._capture_full_redraw_reference(buffer_pan)
+                expected_frame = self._capture_full_redraw_reference(
+                    buffer_pan,
+                    settle_exact=not direct_navigation,
+                )
                 visible_rect = QRect(
                     renderer.buffer_overscan_physical_px,
                     renderer.buffer_overscan_physical_px,
@@ -333,11 +339,14 @@ class HeadlessPanHarness:
         while time.perf_counter() < deadline:
             self._settle_widget()
             tile_metrics = view.presenter.tile_manager.snapshot_metrics()
+            refinement = view.presenter._render_refinement
             idle = (
                 not view.pyramids.pending_asset_keys()
                 and not view.pyramids.pending_retry_asset_keys()
                 and tile_metrics.active_jobs == 0
                 and tile_metrics.pending_retries == 0
+                and refinement.pending_count == 0
+                and not view.presenter.navigation_refinement_pending
             )
             now = time.perf_counter()
             if idle:
@@ -352,15 +361,49 @@ class HeadlessPanHarness:
             QTest.qWait(1)
         raise TimeoutError("pan harness raster products did not settle")
 
-    def _capture_full_redraw_reference(self, buffer_pan: QPointF) -> QImage:
+    def _capture_full_redraw_reference(
+        self,
+        buffer_pan: QPointF,
+        *,
+        settle_exact: bool,
+    ) -> QImage:
         """Render a clean reference at the incremental buffer's settled pan."""
         presenter = self._reference_qpane._rendering.presenter
+        if settle_exact:
+            self._wait_for_reference_products(buffer_pan)
         plan = presenter.calculateRenderPlan(use_pan=buffer_pan, is_blank=False)
         if plan is None:
             raise RuntimeError("QPane produced no render plan for the redraw oracle")
         presenter.renderer.markDirty()
         presenter.renderer.paint(plan)
         return self.capture_settled_buffer(self._reference_qpane)
+
+    def _wait_for_reference_products(
+        self,
+        buffer_pan: QPointF,
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        """Settle products requested on the redraw oracle's explicit pan grid."""
+        deadline = time.perf_counter() + timeout_seconds
+        idle_since: float | None = None
+        presenter = self._reference_qpane._rendering.presenter
+        while time.perf_counter() < deadline:
+            presenter.calculateRenderPlan(use_pan=buffer_pan, is_blank=False)
+            self._settle_widget()
+            idle = (
+                presenter._render_refinement.pending_count == 0
+                and not presenter.navigation_refinement_pending
+            )
+            now = time.perf_counter()
+            if idle:
+                idle_since = now if idle_since is None else idle_since
+                if now - idle_since >= 0.025:
+                    return
+            else:
+                idle_since = None
+            QTest.qWait(1)
+        raise TimeoutError("redraw oracle products did not settle")
 
     def _write_failure_artifacts(
         self,

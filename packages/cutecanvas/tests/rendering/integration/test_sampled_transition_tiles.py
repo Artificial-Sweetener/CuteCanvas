@@ -33,6 +33,7 @@ from cutecanvas_test_support.render_plan import make_render_plan
 from PySide6.QtCore import QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
 from qpane.scene.raster import RasterBounds
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SampledTileRenderData,
@@ -188,7 +189,7 @@ def _sampled_item(
         placement=descriptor.placement,
         clip=descriptor.clip,
         source_size=QSize(192, 64),
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=tiles,
     )
 

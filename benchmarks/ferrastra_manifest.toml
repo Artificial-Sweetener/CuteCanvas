@@ -1,5 +1,5 @@
 schema_version = 1
-stage = 0
+stage = 2
 
 [reference_system]
 cpu = "Intel Core i9-14900K"
@@ -58,6 +58,49 @@ require_memory_ceiling = true
 require_latency_thresholds = true
 require_adversarial_inputs = true
 
-# Stage 0 has no graphics operation and therefore no benchmark registrations.
-# An operation must add a complete [[operations]] entry before implementation.
-operations = []
+[[registration.operations]]
+semantic_id = "ferrastra.resample.lanczos3"
+semantic_version = 1
+input_products = ["raster.rgba8-premultiplied-encoded"]
+output_product = "raster.rgba8-premultiplied-encoded"
+demand = "scale-aware three-lobe source support for the exact destination region"
+damage = "exact bounded projection for transparent and clamp edges; conservative full projection for periodic edges"
+memory_budget = "destination bytes plus bounded coefficient and reusable row scratch"
+cancellation = "poll at least once per destination sample with atomic exact publication"
+quality = "exact"
+conformance = "independent scalar oracle, tile equivalence, strides, edge modes, alpha, working space, and cancellation"
+reference_result = "independent direct two-dimensional scalar oracle"
+memory_ceiling_bytes = 536870912
+cancellation_latency_ms = 5.0
+thread_budget = 8
+benchmark_cases = [
+  "scale-75-percent",
+  "scale-50-percent",
+  "scale-25-percent",
+  "severe-minification",
+  "transparent-edges",
+  "tile-versus-monolithic",
+  "coefficients-cold-versus-reused",
+]
+adversarial_inputs = [
+  "one-pixel-source",
+  "checkerboard",
+  "premultiplied-transparent-edge",
+  "maximum-supported-dimension-planning",
+]
+
+[registration.operations.controlled_case]
+id = "scale-50-percent"
+source_width = 2048
+source_height = 2048
+destination_width = 1024
+destination_height = 1024
+edge_mode = "clamp"
+working_space = "srgb_linear"
+memory_budget_bytes = 536870912
+scratch_budget_bytes = 268435456
+
+[registration.operations.latency_thresholds_ms]
+p50 = 250.0
+p95 = 350.0
+p99 = 500.0

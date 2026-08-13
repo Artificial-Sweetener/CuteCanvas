@@ -23,8 +23,9 @@ from threading import Event
 
 from cutecanvas import CuteCanvas
 from cutecanvas_test_support.harness.timing import interaction_clock
-from qpane.core import headroom
 from qpane.execution import CancellationToken
+
+from qpane.core import headroom
 
 MB = 1024 * 1024
 

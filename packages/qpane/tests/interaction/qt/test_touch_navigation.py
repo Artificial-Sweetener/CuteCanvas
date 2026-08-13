@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 import pytest
 from PySide6.QtCore import QPointF, QRectF
+
 from qpane import TouchNavigationPort, TouchNavigationSession
 
 

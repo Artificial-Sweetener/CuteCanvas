@@ -33,6 +33,11 @@ sources = [
 proofs = ["abuse", "contract", "integration", "packaging", "qt", "unit"]
 
 [[areas]]
+name = "ferrastra"
+sources = ["packages/cutecanvas/src/cutecanvas/ferrastra/**"]
+proofs = ["integration"]
+
+[[areas]]
 name = "masks"
 sources = [
   "packages/cutecanvas/src/cutecanvas/coverage/**",

@@ -18,8 +18,10 @@
 
 import json
 
-from qpane.rendering import PyramidStatus, ViewportZoomMode
 from qpane.scene.render_plan import RenderStrategy
+
+from qpane import Config, RasterReconstructionSpace
+from qpane.rendering import PyramidStatus, ViewportZoomMode
 
 
 def test_render_strategy_behaves_like_string() -> None:
@@ -50,3 +52,18 @@ def test_pyramid_status_behaves_like_string() -> None:
     assert PyramidStatus("pending") is pending
     assert json.loads(json.dumps({"status": pending})) == {"status": pending}
     assert {pending} == {"pending"}
+
+
+def test_viewport_reconstruction_space_defaults_to_srgb_encoded() -> None:
+    """Normal viewer construction should use conventional encoded reconstruction."""
+    config = Config()
+
+    assert (
+        config.viewport_reconstruction_space is RasterReconstructionSpace.SRGB_ENCODED
+    )
+    assert (
+        Config(
+            viewport_reconstruction_space="srgb_linear"
+        ).viewport_reconstruction_space
+        is RasterReconstructionSpace.SRGB_LINEAR
+    )

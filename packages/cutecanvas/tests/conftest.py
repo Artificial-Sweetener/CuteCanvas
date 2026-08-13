@@ -31,6 +31,7 @@ from cutecanvas_test_support.harness.process_lock import (
 from cutecanvas_test_support.harness.qt_lifetime import flush_deferred_qt_lifetime
 from cutecanvas_test_support.mask_workflow import provision_canvas_with_mask
 from PySide6.QtWidgets import QApplication
+
 from qpane import QPane
 
 

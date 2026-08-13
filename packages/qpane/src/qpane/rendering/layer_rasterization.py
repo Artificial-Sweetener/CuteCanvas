@@ -18,49 +18,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage
 
 from ..execution import CancellationToken
 from .render_tile_types import RegionSampleSource
-
-
-class LayerRasterizer:
-    """Render one detached source product at an explicit raster specification."""
-
-    @staticmethod
-    def rasterize(source: QImage, pixel_size: QSize) -> QImage:
-        """Return premultiplied pixels using QPane's smooth raster semantics."""
-        if source.isNull():
-            raise ValueError("rasterization source must not be null")
-        if pixel_size.isEmpty():
-            raise ValueError("rasterization pixel size must be positive")
-        target = QImage(pixel_size, QImage.Format_ARGB32_Premultiplied)
-        if target.isNull():
-            raise MemoryError("rasterization target could not be allocated")
-        target.fill(0)
-        painter = QPainter(target)
-        if not painter.isActive():
-            raise RuntimeError("rasterization painter could not be activated")
-        try:
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            painter.drawImage(
-                QRectF(0.0, 0.0, pixel_size.width(), pixel_size.height()), source
-            )
-        finally:
-            painter.end()
-        return target
-
-
-def rasterize_layer(
-    source: QImage,
-    pixel_size: QSize,
-    cancellation: CancellationToken,
-) -> QImage:
-    """Rasterize one detached render product cooperatively."""
-
-    if cancellation.is_cancelled:
-        raise RuntimeError(cancellation.reason or "layer rasterization cancelled")
-    return LayerRasterizer.rasterize(QImage(source), QSize(pixel_size))
 
 
 def rasterize_region(

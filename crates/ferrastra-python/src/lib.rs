@@ -14,12 +14,28 @@
 //    You should have received a copy of the GNU General Public License
 //    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-//! Responsibility: Expose native package identity through Ferrastra's private Python boundary.
+//! Responsibility: Register Ferrastra's typed private native Python boundary.
 //!
-//! Does not own: graphics products, kernels, graph planning, scheduling, caches,
-//! application adapters, or public Python policy.
+//! Does not own: kernels, graph semantics, stores, scheduling, caches, application adapters,
+//! or public Python documentation policy.
+
+mod budget;
+mod buffer;
+mod engine;
+mod errors;
+mod graph;
+mod region;
+mod requirements;
+mod result;
 
 use pyo3::prelude::*;
+
+use budget::{PyCancellationToken, PyEvaluationBudget};
+use engine::{PyCompiledGraph, PyEngine};
+use graph::{PyGraph, PyGraphBuilder};
+use region::PyRegion;
+use requirements::PyEvaluationRequirements;
+use result::{PyCoverageResult, PyRasterResult};
 
 /// Return the Cargo package version embedded in the native extension.
 #[pyfunction]
@@ -31,7 +47,37 @@ fn package_version() -> &'static str {
 /// Register Ferrastra's private native packaging boundary.
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    errors::register(module)?;
+    module.add_class::<PyCancellationToken>()?;
+    module.add_class::<PyEvaluationBudget>()?;
+    module.add_class::<PyEvaluationRequirements>()?;
+    module.add_class::<PyGraph>()?;
+    module.add_class::<PyGraphBuilder>()?;
+    module.add_class::<PyCompiledGraph>()?;
+    module.add_class::<PyRegion>()?;
+    module.add_class::<PyEngine>()?;
+    module.add_class::<PyRasterResult>()?;
+    module.add_class::<PyCoverageResult>()?;
     module.add_function(wrap_pyfunction!(package_version, module)?)?;
-    module.add("__all__", ("package_version",))?;
+    module.add(
+        "__all__",
+        [
+            "BufferError",
+            "CancellationToken",
+            "CompiledGraph",
+            "CoverageResult",
+            "Engine",
+            "EvaluationBudget",
+            "EvaluationError",
+            "EvaluationRequirements",
+            "FerrastraError",
+            "Graph",
+            "GraphBuilder",
+            "GraphError",
+            "RasterResult",
+            "Region",
+            "package_version",
+        ],
+    )?;
     Ok(())
 }

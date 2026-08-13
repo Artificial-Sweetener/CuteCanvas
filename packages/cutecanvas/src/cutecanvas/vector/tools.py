@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QCursor, QKeyEvent, QMouseEvent, QPainter, QPen, QPolygonF
+
 from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from ..tools.base import BaseTool

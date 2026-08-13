@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
-from qpane import Config
 from qpane_demonstration.configuration import ViewerSettingsDialog
+
+from qpane import Config, RasterReconstructionSpace
 
 
 def test_example_preserves_automatic_tile_size_by_default(qapp) -> None:
@@ -43,6 +44,25 @@ def test_example_emits_exact_fixed_tile_size(qapp) -> None:
 
         assert dialog.tile_size.isEnabled()
         assert dialog.config(Config()).tile_size == 1536
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_example_defaults_to_encoded_and_exposes_linear_opt_in(qapp) -> None:
+    """The normal demo must need no setup while retaining an explicit linear choice."""
+    dialog = ViewerSettingsDialog(Config(), ())
+    try:
+        assert (
+            dialog.reconstruction_space.currentData()
+            == RasterReconstructionSpace.SRGB_ENCODED.value
+        )
+        dialog.reconstruction_space.setCurrentIndex(1)
+        assert (
+            dialog.config(Config()).viewport_reconstruction_space
+            is RasterReconstructionSpace.SRGB_LINEAR
+        )
     finally:
         dialog.close()
         dialog.deleteLater()

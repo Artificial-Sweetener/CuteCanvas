@@ -24,14 +24,6 @@ from dataclasses import replace
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPicture, QTransform
-from qpane import (
-    LayerPresentationEffect,
-    LayerPresentationStyle,
-    QPane,
-    RasterSource,
-    RenderLayer,
-    RenderScene,
-)
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.rendering.presentation_effect_compositor import (
     LayerPresentationEffectCompositor,
@@ -39,6 +31,7 @@ from qpane.rendering.presentation_effect_compositor import (
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import ClipCoordinateSpace, LayerClip, LayerKind
 from qpane.scene.raster import RasterBounds
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SampledTileRenderData,
@@ -47,6 +40,15 @@ from qpane.scene.render_plan import (
 )
 from qpane_test_support.render_plan import make_render_plan
 from qpane_test_support.timing import interaction_clock, stable_latency_samples
+
+from qpane import (
+    LayerPresentationEffect,
+    LayerPresentationStyle,
+    QPane,
+    RasterSource,
+    RenderLayer,
+    RenderScene,
+)
 
 
 def _sparse_image() -> QImage:
@@ -301,7 +303,7 @@ def test_vector_effect_remains_stable_when_refined_tiles_replace_picture() -> No
         placement=raster_item.placement,
         clip=None,
         source_size=QSize(20, 20),
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
     )
     effect = LayerPresentationEffect(
         plan.scene_id,
@@ -352,7 +354,7 @@ def test_sampled_source_effect_uses_the_resolved_tile_alpha() -> None:
         placement=raster_item.placement,
         clip=None,
         source_size=QSize(20, 20),
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
         tiles=(
             SampledTileRenderData(
                 sample,

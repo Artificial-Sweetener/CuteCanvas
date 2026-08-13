@@ -26,13 +26,14 @@ from cutecanvas.resources.active_raster_coordinates import (
 )
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage, QTransform
-from qpane import LayerSourcePoint
 from qpane.sdk.rendering import (
     LayerCoordinateProjection,
     SceneCoordinateProjection,
     SceneCoordinateSystem,
 )
 from qpane.sdk.scene import LayerTransform
+
+from qpane import LayerSourcePoint
 
 
 def test_active_raster_projection_honors_affine_layer_and_view_geometry() -> None:

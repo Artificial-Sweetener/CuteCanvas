@@ -14,7 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Characterize the Stage 0 native extension's package identity contract."""
+"""Verify the private extension's version and typed surface contract."""
 
 from __future__ import annotations
 

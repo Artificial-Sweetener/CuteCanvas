@@ -28,23 +28,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
-from qpane import HybridPresentationStyle
 from qpane.sdk.configuration import CacheSettings
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
-    numpy_to_qimage_grayscale8_at_size,
 )
 from qpane.sdk.scene import RasterBounds
 
+from qpane import HybridPresentationStyle
+
 from ..core.config import Config
 from ..core.config_features import MaskConfigSlice, require_mask_config
-from ..coverage.raster_sampling import CoverageSurfaceSampler
 from .live_preview_raster import LiveMaskPreviewPatches, LiveMaskPreviewRaster
 from .live_preview_store import MaskLivePreviewStore
 from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
+from .preview_products import preview_mask_coverage, preview_mask_overlay
 from .rasterizer import MaskRasterizer
 from .render_product_geometry import (
     scaled_source_rect,
@@ -918,7 +918,7 @@ class MaskRenderCache:
         image = (
             numpy_to_qimage_grayscale8(pixels)
             if target_size is None
-            else numpy_to_qimage_grayscale8_at_size(pixels, target_size)
+            else preview_mask_coverage(pixels, target_size)
         )
         return self.colorize_image(
             image,
@@ -992,7 +992,10 @@ class MaskRenderCache:
                 return result
             base = self._cache.get(self._key(mask_id, None))
             if base is not None:
-                result = base.scaled(self.target_scaled_size(base.size(), scale_key))
+                target_size = self.target_scaled_size(base.size(), scale_key)
+                result = QPixmap.fromImage(
+                    preview_mask_overlay(base.toImage(), target_size)
+                )
             else:
                 result = self._scaled_surface_pixmap(layer, scale_key)
             self._misses += 1
@@ -1150,23 +1153,16 @@ class MaskRenderCache:
         source_size = QSize(bounds.width, bounds.height)
         target_size = self.target_scaled_size(source_size, scale)
         if layer.coverage.has_retained_items:
-            scaled = numpy_to_qimage_grayscale8(
-                layer.coverage.snapshot(bounds).pixels
-            ).scaled(
-                target_size,
-                Qt.AspectRatioMode.IgnoreAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            pixels = layer.coverage.snapshot(bounds).pixels
+            scaled = preview_mask_coverage(pixels, target_size)
         else:
-            scaled = CoverageSurfaceSampler(layer.coverage.raster).sample(
-                QRectF(
-                    float(bounds.x),
-                    float(bounds.y),
-                    float(bounds.width),
-                    float(bounds.height),
-                ),
-                target_size,
+            stride = max(
+                1,
+                math.ceil(bounds.width / (target_size.width() * 2)),
+                math.ceil(bounds.height / (target_size.height() * 2)),
             )
+            pixels = layer.coverage.raster.capture_region_strided(bounds, stride)
+            scaled = preview_mask_coverage(pixels, target_size)
         return self._colorize_pixmap(scaled, layer.mask_id, "scaled_cache_miss")
 
     def _colorize_pixmap(

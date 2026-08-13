@@ -21,10 +21,11 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
-from qpane import ProjectiveLayerTransform, RasterSource, RenderLayer, RenderScene
 from qpane.rendering.sdk_adapter import RenderSceneController
 from qpane.scene.source_capabilities import LayerSourceCapabilities
 from qpane.sdk.rendering import SceneRegionRasterizer
+
+from qpane import ProjectiveLayerTransform, RasterSource, RenderLayer, RenderScene
 
 
 def test_render_layer_preserves_projective_mapping_in_scene_contract() -> None:

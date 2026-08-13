@@ -25,20 +25,33 @@ import venv
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
+_FERRASTRA = _ROOT / "packages/ferrastra"
 _QPANE = _ROOT / "packages/qpane"
 _CUTECANVAS = _ROOT / "packages/cutecanvas"
 
 _QPANE_CHECK = """
 import importlib.util
 from pathlib import Path
+import ferrastra
 import qpane
+from PySide6.QtGui import QColor, QImage
+from qpane.execution.cancellation import CancellationToken
+from qpane.ferrastra import generate_exact_pyramid_levels
 
 package = Path(qpane.__file__).resolve().parent
+native_package = Path(ferrastra.__file__).resolve().parent
 environment = Path(__ENVIRONMENT__).resolve()
 assert package.is_relative_to(environment)
+assert native_package.is_relative_to(environment)
 assert importlib.util.find_spec("cutecanvas") is None
 assert (package / "qpane.pyi").is_file()
 assert (package / "py.typed").is_file()
+source = QImage(8, 4, QImage.Format_ARGB32_Premultiplied)
+source.fill(QColor(65, 105, 225, 255))
+levels = generate_exact_pyramid_levels(source, 1, CancellationToken()).levels
+assert tuple(levels) == (0.5, 0.25)
+assert [level.size().toTuple() for level in levels.values()] == [(4, 2), (2, 1)]
+assert all(level.pixelColor(0, 0) == QColor(65, 105, 225, 255) for level in levels.values())
 """
 
 _CUTECANVAS_CHECK = """
@@ -57,25 +70,29 @@ assert (canvas / "py.typed").is_file()
 
 
 def run() -> None:
-    """Build both wheels and exercise their declared dependency direction."""
+    """Build all product wheels and exercise their declared dependency direction."""
     with tempfile.TemporaryDirectory(prefix="qpane-wheels-") as temporary:
         temporary_root = Path(temporary)
         distribution = temporary_root / "dist"
+        _build(_FERRASTRA, distribution)
         _build(_QPANE, distribution)
         _build(_CUTECANVAS, distribution)
+        ferrastra_wheel = _single_wheel(distribution, "ferrastra")
         qpane_wheel = _single_wheel(distribution, "qpane")
         cutecanvas_wheel = _single_wheel(distribution, "cutecanvas")
 
         environment = temporary_root / "consumer-environment"
         venv.EnvBuilder(with_pip=True).create(environment)
         interpreter = _environment_python(environment)
+        _run(str(interpreter), "-m", "pip", "install", str(ferrastra_wheel))
         _run(str(interpreter), "-m", "pip", "install", str(qpane_wheel))
         _run_isolated(interpreter, environment, temporary_root, _QPANE_CHECK)
         _run(str(interpreter), "-m", "pip", "install", str(cutecanvas_wheel))
         _run_isolated(interpreter, environment, temporary_root, _CUTECANVAS_CHECK)
     print(
-        "SUCCESS: QPane installs without CuteCanvas; CuteCanvas installs against "
-        "the built QPane wheel using only declared dependencies."
+        "SUCCESS: QPane installs with the built Ferrastra wheel and without "
+        "CuteCanvas; CuteCanvas installs against the built QPane wheel using "
+        "only declared dependencies."
     )
 
 

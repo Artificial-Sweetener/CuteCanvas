@@ -41,15 +41,16 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QTransform, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+from qpane.hybrid.tile_source import HybridRenderTileSource
+from qpane.raster.image_conversion import qimage_to_numpy_argb32
+from qpane.rendering.render_tile_geometry import visible_tile_requests
+
 from qpane import (
     HybridDocument,
     HybridPresentationStyle,
     HybridVectorPrimitive,
     RasterBounds,
 )
-from qpane.hybrid.tile_source import HybridRenderTileSource
-from qpane.raster.image_conversion import qimage_to_numpy_argb32
-from qpane.rendering.render_tile_geometry import visible_tile_requests
 
 pytestmark = INTERACTIVE_PERFORMANCE
 
@@ -745,7 +746,6 @@ def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
     environment = os.environ.copy()
     # The subprocess owns Qt independently while retaining the hosted CPU-clock
     # policy when CI executes other jobs on the same runner.
-    environment.pop("PYTEST_XDIST_WORKER", None)
     environment.update(
         {
             "QT_QPA_PLATFORM": "offscreen",

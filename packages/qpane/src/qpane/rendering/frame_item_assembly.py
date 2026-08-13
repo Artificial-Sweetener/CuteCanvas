@@ -81,6 +81,7 @@ class FrameItemAssembler:
             compiled,
             frame,
             layers=(*compiled.layers, *fallback_layers),
+            allow_exact=_scene_layers_are_stable(compiled, previous_plan),
         )
         fallback_layer_ids = frozenset(
             item.descriptor.layer_id
@@ -121,6 +122,22 @@ class FrameItemAssembler:
             for item in items_by_layer_id.get(layer.layer_id, ())
         )
         return self._clips.apply(compiled.scene.scene_id, ordered_items)
+
+
+def _scene_layers_are_stable(
+    compiled: CompiledRenderScene,
+    previous_plan: SceneRenderPlan | None,
+) -> bool:
+    """Prevent exact adoption from exposing an intermediate layer-set transition."""
+    if previous_plan is None:
+        return True
+    previous_layers = frozenset(
+        item.descriptor.layer_id for item in previous_plan.render_items
+    )
+    current_layers = frozenset(
+        layer.layer_id for layer in compiled.scene.layers if layer.visible
+    )
+    return previous_layers == current_layers
 
 
 __all__ = ["FrameItemAssembler"]

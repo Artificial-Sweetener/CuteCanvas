@@ -28,6 +28,7 @@ from cutecanvas.tools.ports import SmartSegmentationInteractionPort
 from cutecanvas.tools.smart_segmentation import SmartMaskTool, SmartSelectTool
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor
+
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

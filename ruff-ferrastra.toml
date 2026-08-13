@@ -6,6 +6,7 @@ include = [
   "packages/ferrastra/**/*.pyi",
   "tools/architecture/**/*.py",
   "tools/check_ferrastra_*.py",
+  "tools/ferrastra_benchmarks.py",
   "tools/ferrastra_ownership.py",
   "tools/verify_ferrastra_wheel.py",
   "tests/test_ferrastra_*.py",

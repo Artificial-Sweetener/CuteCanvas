@@ -21,9 +21,12 @@ import pytest
 from PySide6.QtGui import QTransform
 from qpane.rendering.raster_sampling import (
     device_aligned_raster_transform,
+    exact_raster_sampling,
+    raster_presentation_sampling,
+    raster_presentation_sampling_for_source_scale,
     raster_sample_scale_limit,
-    smooth_raster_sampling_enabled,
 )
+from qpane.scene.raster_sampling import RasterExactSampling, RasterPresentationSampling
 
 
 @pytest.mark.parametrize(
@@ -54,23 +57,56 @@ def test_device_aligned_transform_has_stable_physical_phase(
 @pytest.mark.parametrize(
     ("logical_scale", "device_pixel_ratio", "expected"),
     (
-        (1.99, 1.0, True),
-        (2.0, 1.0, False),
-        (0.99, 2.0, True),
-        (1.0, 2.0, False),
-        (0.5, 3.0, True),
+        (1.99, 1.0, RasterPresentationSampling.BILINEAR),
+        (2.0, 1.0, RasterPresentationSampling.NEAREST),
+        (0.99, 2.0, RasterPresentationSampling.BILINEAR),
+        (1.0, 2.0, RasterPresentationSampling.NEAREST),
+        (0.5, 3.0, RasterPresentationSampling.BILINEAR),
     ),
 )
 def test_sampling_policy_switches_at_two_physical_pixels_per_source_pixel(
     logical_scale: float,
     device_pixel_ratio: float,
-    expected: bool,
+    expected: RasterPresentationSampling,
 ) -> None:
     """Every rasterized layer should share one physical-pixel sharpness threshold."""
     transform = QTransform()
     transform.scale(logical_scale, logical_scale)
 
-    assert smooth_raster_sampling_enabled(transform, device_pixel_ratio) is expected
+    assert raster_presentation_sampling(transform, device_pixel_ratio) is expected
+
+
+@pytest.mark.parametrize("device_pixel_ratio", (1.0, 1.5, 2.0, 3.0))
+def test_source_native_threshold_does_not_move_with_display_density(
+    device_pixel_ratio: float,
+) -> None:
+    """The base-image 200% boundary stays relative to its real-pixel 1:1 zoom."""
+    assert (
+        raster_presentation_sampling_for_source_scale(1.999)
+        is RasterPresentationSampling.BILINEAR
+    )
+    assert (
+        exact_raster_sampling(
+            QTransform.fromScale(1.0 / device_pixel_ratio, 1.0 / device_pixel_ratio),
+            device_pixel_ratio,
+            source_native_scale=2.0,
+        )
+        is RasterExactSampling.NEAREST
+    )
+
+
+def test_exact_operation_is_named_by_mapping_and_source_native_threshold() -> None:
+    """Settled sampling distinguishes Lanczos3, affine bilinear, and nearest."""
+    axis = QTransform.fromScale(1.25, 1.25)
+    affine = QTransform(axis)
+    affine.rotate(15.0)
+
+    assert exact_raster_sampling(axis, 1.0) is RasterExactSampling.LANCZOS3
+    assert exact_raster_sampling(affine, 1.0) is RasterExactSampling.AFFINE_BILINEAR
+    assert (
+        exact_raster_sampling(axis, 1.0, source_native_scale=2.0)
+        is RasterExactSampling.NEAREST
+    )
 
 
 @pytest.mark.parametrize(

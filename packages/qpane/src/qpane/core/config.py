@@ -35,7 +35,6 @@ from collections.abc import (
 )
 from copy import deepcopy
 from dataclasses import dataclass, field, fields
-from enum import Enum
 from typing import (
     Any,
     Literal,
@@ -46,7 +45,9 @@ from typing import (
 from typing_extensions import Self
 
 from ..features import FeatureInstallError
-from ..types import CacheMode, DiagnosticsDomain, PlaceholderScaleMode, ZoomMode
+from ..ferrastra.reconstruction import RasterReconstructionSpace
+from ..types import CacheMode, PlaceholderScaleMode, ZoomMode
+from .config_values import normalize_domain_sequence, normalize_enum_value
 
 logger = logging.getLogger(__name__)
 
@@ -69,44 +70,6 @@ def _warn_psutil_missing() -> None:
 _AUTO_BUDGET_WARNING_EMITTED = False
 
 _HARD_HEADROOM_WARNING_EMITTED = False
-
-
-def _normalize_enum_value(value: Any, enum_cls: type[Enum], *, field: str) -> str:
-    """Return the canonical enum value string or raise for unsupported inputs."""
-    if isinstance(value, enum_cls):
-        return str(value.value)
-    if isinstance(value, str):
-        candidate = value.strip().lower()
-        mapping = {member.value.lower(): member.value for member in enum_cls}
-        if candidate in mapping:
-            return mapping[candidate]
-        raise ValueError(f"Unsupported {field} '{value}'")
-    raise TypeError(f"{field} must be a string or {enum_cls.__name__}")
-
-
-def _normalize_domain_sequence(
-    domains: Iterable[str | DiagnosticsDomain] | None,
-) -> tuple[str, ...]:
-    """Return canonical diagnostics domains deduplicated in order."""
-    if domains is None:
-        return ()
-    if isinstance(domains, (str, DiagnosticsDomain)):
-        domains = (domains,)
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for domain in domains:
-        if isinstance(domain, Enum):
-            canonical = str(domain.value).strip().lower()
-        elif isinstance(domain, str):
-            canonical = domain.strip().lower()
-        else:
-            raise TypeError("diagnostics domains must be strings or string enums")
-        if not canonical:
-            raise ValueError("diagnostics domains must be non-empty")
-        if canonical not in seen:
-            normalized.append(canonical)
-            seen.add(canonical)
-    return tuple(normalized)
 
 
 @dataclass
@@ -337,7 +300,7 @@ class CacheSettings:
             if key not in allowed:
                 raise ValueError(f"cache.{key} is not supported")
         mode = mapping.get("mode", self.mode)
-        self.mode = _normalize_enum_value(mode, CacheMode, field="cache mode")
+        self.mode = normalize_enum_value(mode, CacheMode, field="cache mode")
         normalized_mode = self.mode
         global _AUTO_BUDGET_WARNING_EMITTED, _HARD_HEADROOM_WARNING_EMITTED
         for key, value in mapping.items():
@@ -475,9 +438,7 @@ class CacheSettings:
 
     def _validate_mode_union(self) -> None:
         """Ensure the configured mode and fields align with the supported union."""
-        normalized_mode = _normalize_enum_value(
-            self.mode, CacheMode, field="cache mode"
-        )
+        normalized_mode = normalize_enum_value(self.mode, CacheMode, field="cache mode")
         self.mode = normalized_mode
 
 
@@ -563,7 +524,7 @@ class PlaceholderSettings:
             elif key == "drag_out_enabled":
                 self.drag_out_enabled = bool(value)
             elif key == "zoom_mode":
-                self.zoom_mode = _normalize_enum_value(
+                self.zoom_mode = normalize_enum_value(
                     value, ZoomMode, field="placeholder zoom_mode"
                 )
             elif key == "locked_zoom":
@@ -571,7 +532,7 @@ class PlaceholderSettings:
             elif key == "locked_size":
                 self.locked_size = self._coerce_size(value)
             elif key == "scale_mode":
-                self.scale_mode = _normalize_enum_value(
+                self.scale_mode = normalize_enum_value(
                     value, PlaceholderScaleMode, field="placeholder scale_mode"
                 )
             elif key == "display_size":
@@ -613,6 +574,7 @@ _DEFAULTS: dict[str, Any] = {
     "tile_size": "auto",
     "tile_overlap": 8,
     "min_view_size_px": 128,
+    "viewport_reconstruction_space": RasterReconstructionSpace.SRGB_ENCODED,
     "canvas_expansion_factor": 1.4,
     "safe_min_zoom": 1e-3,
     "drag_out_enabled": True,
@@ -710,6 +672,12 @@ class Config:
         data["cache"] = cache_settings.to_dict()
         placeholder_settings = getattr(self, "placeholder", PlaceholderSettings())
         data["placeholder"] = placeholder_settings.to_dict()
+        reconstruction_space = getattr(
+            self,
+            "viewport_reconstruction_space",
+            RasterReconstructionSpace.SRGB_ENCODED,
+        )
+        data["viewport_reconstruction_space"] = reconstruction_space.value
         return data
 
     # Internal helpers ---------------------------------------------------
@@ -724,7 +692,14 @@ class Config:
             elif key == "placeholder":
                 setattr(self, key, self._merge_placeholder_settings(value))
             elif key == "diagnostics_domains_enabled":
-                setattr(self, key, _normalize_domain_sequence(value))
+                setattr(self, key, normalize_domain_sequence(value))
+            elif key == "viewport_reconstruction_space":
+                canonical = normalize_enum_value(
+                    value,
+                    RasterReconstructionSpace,
+                    field="viewport_reconstruction_space",
+                )
+                setattr(self, key, RasterReconstructionSpace(canonical))
             else:
                 setattr(self, key, self._copy_value(value))
 

@@ -21,10 +21,9 @@ import uuid
 from dataclasses import replace
 from math import ceil, floor
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.execution import CancellationToken
-from qpane.sdk.raster import AffineImageResampler
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 from ..coverage import (
@@ -34,6 +33,7 @@ from ..coverage import (
     CoverageSurface,
 )
 from ..coverage.document import CoverageDocument
+from ..ferrastra import NativeRasterProjector
 from ..placed.model import PlacedAssetSnapshot
 from ..raster.color_surface import ColorRasterSurface
 from ..raster.sparse_grid import SparseRasterSnapshot
@@ -56,7 +56,9 @@ def build_resample_product(
     for item in plan.resources:
         if cancellation is not None:
             cancellation.raise_if_cancelled()
-        products.append(_resample_resource(item, plan.local_scale, plan.mode))
+        products.append(
+            _resample_resource(item, plan.local_scale, plan.mode, cancellation)
+        )
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     selection_document = _scaled_coverage_document(
@@ -68,6 +70,7 @@ def build_resample_product(
         plan.before.selection_coverage,
         plan.scene_scale,
         plan.mode,
+        cancellation,
     )
     return CanvasResampleProduct(
         plan,
@@ -81,6 +84,7 @@ def _resample_resource(
     item: CanvasResampleResourceInput,
     scale: LayerTransform,
     mode: CanvasResamplingMode,
+    cancellation: CancellationToken | None,
 ) -> CanvasResampleResourceProduct:
     """Return one source-specific detached resampling product."""
     if isinstance(item.payload, SparseRasterSnapshot):
@@ -92,7 +96,7 @@ def _resample_resource(
             bounds,
             scale,
             mode,
-            QImage.Format.Format_ARGB32_Premultiplied,
+            cancellation,
         )
         payload = ColorRasterSurface(
             image,
@@ -105,13 +109,26 @@ def _resample_resource(
             max(1, round(item.payload.source_size.width() * scale.m11)),
             max(1, round(item.payload.source_size.height() * scale.m22)),
         )
-        payload = item.payload.image.scaled(
-            target,
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            _qt_mode(mode),
+        source_image = item.payload.image
+        payload = _project_image(
+            source_image,
+            RasterBounds(0, 0, source_image.width(), source_image.height()),
+            RasterBounds(0, 0, target.width(), target.height()),
+            LayerTransform(
+                m11=target.width() / source_image.width(),
+                m22=target.height() / source_image.height(),
+            ),
+            mode,
+            cancellation,
         )
     else:
-        payload = _resample_coverage(item.payload, item.target_id, scale, mode)
+        payload = _resample_coverage(
+            item.payload,
+            item.target_id,
+            scale,
+            mode,
+            cancellation,
+        )
     return CanvasResampleResourceProduct(
         item.source_id,
         item.target_id,
@@ -125,6 +142,7 @@ def _resample_coverage(
     target_id: uuid.UUID,
     scale: LayerTransform,
     mode: CanvasResamplingMode,
+    cancellation: CancellationToken | None,
 ) -> CoverageAssetSnapshot:
     """Scale raster coverage once while retaining semantic mask authorship."""
     surface = CoverageSurface.from_sparse_snapshot(snapshot.raster)
@@ -141,6 +159,7 @@ def _resample_coverage(
             target_bounds,
             extent_policy=source.extent_policy,
             smooth=mode is CanvasResamplingMode.SMOOTH,
+            cancellation=cancellation,
         )
         raster = CoverageSurface(
             projected.pixels,
@@ -162,6 +181,7 @@ def _resample_selection(
     snapshot: CoverageSnapshot | None,
     scale: LayerTransform,
     mode: CanvasResamplingMode,
+    cancellation: CancellationToken | None,
 ) -> CoverageSnapshot | None:
     """Scale evaluated selection coverage for immediate presentation."""
     if snapshot is None or snapshot.bounds is None:
@@ -173,6 +193,7 @@ def _resample_selection(
         destination,
         extent_policy=snapshot.extent_policy,
         smooth=mode is CanvasResamplingMode.SMOOTH,
+        cancellation=cancellation,
     )
 
 
@@ -213,25 +234,24 @@ def _project_image(
     target_bounds: RasterBounds,
     scale: LayerTransform,
     mode: CanvasResamplingMode,
-    image_format: QImage.Format,
+    cancellation: CancellationToken | None,
 ) -> QImage:
-    """Project pixels through the supported affine Qt primitive."""
-    return AffineImageResampler().project(
+    """Project pixels through the canonical native raster adapter."""
+    projector = NativeRasterProjector()
+    if scale.m12 == 0.0 and scale.m21 == 0.0 and scale.m11 > 0.0 and scale.m22 > 0.0:
+        return projector.scale(
+            image,
+            QSize(target_bounds.width, target_bounds.height),
+            linear=mode is CanvasResamplingMode.SMOOTH,
+            cancellation=cancellation,
+        )
+    return projector.project(
         image,
         source_bounds=source_bounds,
         transform=scale,
         destination_bounds=target_bounds,
-        image_format=image_format,
-        smooth=mode is CanvasResamplingMode.SMOOTH,
-    )
-
-
-def _qt_mode(mode: CanvasResamplingMode) -> Qt.TransformationMode:
-    """Map the public quality policy onto Qt's supported transformation modes."""
-    return (
-        Qt.TransformationMode.SmoothTransformation
-        if mode is CanvasResamplingMode.SMOOTH
-        else Qt.TransformationMode.FastTransformation
+        linear=mode is CanvasResamplingMode.SMOOTH,
+        cancellation=cancellation,
     )
 
 

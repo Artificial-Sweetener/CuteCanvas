@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPoint, QPointF
+
 from qpane import LayerSourcePoint, PanelPoint, SceneCoordinateSystem
 
 from .active_raster import ActiveRasterResolver, ActiveRasterSnapshot

@@ -37,12 +37,19 @@ class RenderTileProduct:
     source_rect: QRectF
     image: QImage
     image_source_rect: QRectF
+    source_clip_rect: QRectF | None = None
 
     def __post_init__(self) -> None:
         """Detach mutable Qt values from worker-owned handles."""
         object.__setattr__(self, "source_rect", QRectF(self.source_rect))
         object.__setattr__(self, "image", QImage(self.image))
         object.__setattr__(self, "image_source_rect", QRectF(self.image_source_rect))
+        if self.source_clip_rect is not None:
+            object.__setattr__(
+                self,
+                "source_clip_rect",
+                QRectF(self.source_clip_rect),
+            )
 
     @property
     def retained_bytes(self) -> int:
@@ -117,6 +124,14 @@ class RenderRefinement:
     ) -> RenderRefinement:
         """Return pending work with a complete covering fallback when available."""
         return cls(fallback, True, False)
+
+    @classmethod
+    def approximate(
+        cls,
+        products: tuple[RenderTileProduct, ...] | None,
+    ) -> RenderRefinement:
+        """Return a complete fallback when exact demand cannot be admitted."""
+        return cls(products, False, False)
 
     @classmethod
     def unavailable(cls) -> RenderRefinement:

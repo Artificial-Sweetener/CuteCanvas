@@ -24,9 +24,10 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
-from qpane import HybridPresentationStyle, HybridSource
 from qpane.sdk.raster import present_hybrid_pixels
 from qpane.sdk.scene import LayerSourceReference, RasterBounds
+
+from qpane import HybridPresentationStyle, HybridSource
 
 from ..coverage import CoverageSnapshot
 from ..resources import ProjectResourceReference

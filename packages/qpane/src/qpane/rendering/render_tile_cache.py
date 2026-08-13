@@ -96,6 +96,8 @@ class RenderTileCache:
             if product.key.source_kind == first.source_kind
             and product.key.source_id == first.source_id
             and product.key.fallback_key == first.fallback_key
+            and product.key.exact_sampling is first.exact_sampling
+            and product.key.sampling_grid == first.sampling_grid
         )
         revisions: list[Hashable] = [first.revision_key]
         for candidate in reversed(candidates):
@@ -233,4 +235,5 @@ def _clip_product_to_request(
         target,
         product.image,
         image_source_rect,
+        product.source_clip_rect,
     )

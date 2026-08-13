@@ -29,6 +29,7 @@ from cutecanvas.tools.selection_shapes import LassoSelectionTool, RectangleSelec
 from cutecanvas.vector.tools import VectorPathTool
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent
+
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

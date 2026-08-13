@@ -55,6 +55,7 @@ config = {
     "tile_size": "auto",  # Physical-viewport-aware tile edge; positive integers stay exact.
     "tile_overlap": 8,  # Overlap in pixels between tiles to avoid seams.
     "min_view_size_px": 128,  # Smallest pyramid/view size (px) before downsampling stops.
+    "viewport_reconstruction_space": "srgb_encoded",  # Filter sRGB RGBA8 viewport pixels in encoded space.
     "canvas_expansion_factor": 1.4,  # Pan margin multiplier (>1 lets you pan past edges).
     "safe_min_zoom": 0.001,  # Absolute minimum zoom clamp, regardless of content.
     "drag_out_enabled": True,  # Global gate for drag-out (disabled if False).

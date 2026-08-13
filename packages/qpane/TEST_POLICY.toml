@@ -50,6 +50,7 @@ proofs = ["integration", "qt"]
 name = "rendering"
 sources = [
   "packages/qpane/src/qpane/hybrid/**",
+  "packages/qpane/src/qpane/ferrastra/**",
   "packages/qpane/src/qpane/raster/**",
   "packages/qpane/src/qpane/rendering/**",
   "packages/qpane/src/qpane/scene/**",

@@ -23,10 +23,11 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRect
 from PySide6.QtGui import QTransform
-from qpane import ClipCoordinateSpace, LayerClip, PiecewiseLayerTransform
 from qpane.rendering.base_raster_fast_path import base_only_raster_item
 from qpane.rendering.panel_mapping import PiecewisePanelMapping
 from qpane_test_support.render_plan import make_render_plan
+
+from qpane import ClipCoordinateSpace, LayerClip, PiecewiseLayerTransform
 
 
 def test_base_fast_path_accepts_one_ordinary_affine_raster() -> None:

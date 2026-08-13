@@ -23,10 +23,7 @@ from ..rendering import (
     ViewportZoomMode,
 )
 from ..rendering.coordinates import PanelHitTest
-from ..rendering.layer_rasterization import (
-    rasterize_layer,
-    rasterize_region,
-)
+from ..rendering.layer_rasterization import rasterize_region
 from ..rendering.render_tile_geometry import RenderTileRequest
 from ..rendering.render_tile_types import (
     RegionSampleSource,
@@ -69,6 +66,5 @@ __all__ = (
     "SceneRegionRasterizer",
     "View",
     "ViewportZoomMode",
-    "rasterize_layer",
     "rasterize_region",
 )

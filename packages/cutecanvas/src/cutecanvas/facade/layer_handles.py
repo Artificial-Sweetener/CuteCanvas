@@ -21,6 +21,7 @@ import uuid
 
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QTransform
+
 from qpane import LayerMapping, LayerPresentationStyle
 
 from ..composition.geometry_policy import LayerGeometryPolicy

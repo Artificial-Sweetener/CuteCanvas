@@ -29,9 +29,10 @@ from ..selection import LayerCoverageProjector, PixelSelectionService
 from .layer_selection import SceneLayerSelectionController
 from .mutations import SceneMutationCoordinator
 from .pixel_owners import LayerPixelOwnerRegistry
+from .raster_patch import RasterPatch
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RasterPixelEdit:
     """Capture one source-local raster patch transition."""
 
@@ -39,13 +40,45 @@ class RasterPixelEdit:
     layer_id: uuid.UUID
     source: LayerSourceReference
     bounds: RasterBounds
-    before: np.ndarray
-    after: np.ndarray
+    _before: RasterPatch
+    _after: RasterPatch
 
-    def __post_init__(self) -> None:
-        """Detach patch arrays retained for chronological history."""
-        object.__setattr__(self, "before", np.array(self.before, copy=True, order="C"))
-        object.__setattr__(self, "after", np.array(self.after, copy=True, order="C"))
+    def __init__(
+        self,
+        scene_id: uuid.UUID,
+        layer_id: uuid.UUID,
+        source: LayerSourceReference,
+        bounds: RasterBounds,
+        before: np.ndarray | RasterPatch,
+        after: np.ndarray | RasterPatch,
+    ) -> None:
+        """Capture exact immutable patch payloads for chronological replay."""
+        object.__setattr__(self, "scene_id", scene_id)
+        object.__setattr__(self, "layer_id", layer_id)
+        object.__setattr__(self, "source", source)
+        object.__setattr__(self, "bounds", bounds)
+        object.__setattr__(
+            self,
+            "_before",
+            before if isinstance(before, RasterPatch) else RasterPatch.capture(before),
+        )
+        object.__setattr__(
+            self,
+            "_after",
+            after if isinstance(after, RasterPatch) else RasterPatch.capture(after),
+        )
+        if self._before.shape != self._after.shape:
+            raise ValueError("raster history patch shapes must match")
+
+    @property
+    def before(self) -> np.ndarray:
+        """Return a read-only exact view of the state before the edit."""
+        return self._before.array()
+
+    @property
+    def after(self) -> np.ndarray:
+        """Return a read-only exact view of the state after the edit."""
+        return self._after.array()
 
     @property
     def scope_id(self) -> uuid.UUID:
@@ -55,7 +88,7 @@ class RasterPixelEdit:
     @property
     def retained_bytes(self) -> int:
         """Return patch bytes retained for undo and redo."""
-        return int(self.before.nbytes + self.after.nbytes)
+        return self._before.retained_bytes + self._after.retained_bytes
 
     @property
     def retained_resources(self) -> tuple[LayerSourceReference, ...]:
@@ -146,17 +179,50 @@ class LayerPixelMutationCoordinator:
         if after is None:
             owner.restore_patch(layer, edit_bounds, before)
             return False
+        changed_patch = _changed_patch(edit_bounds, before, after)
+        if changed_patch is None:
+            return False
+        changed_bounds, changed_before, changed_after = changed_patch
         owner.finalize_patch_edit(layer)
         edit = RasterPixelEdit(
             scene_id=scene.scene_id,
             layer_id=layer.layer_id,
             source=layer.source,
-            bounds=edit_bounds,
-            before=before,
-            after=after,
+            bounds=changed_bounds,
+            before=changed_before,
+            after=changed_after,
         )
         self._edit_controller.record_applied(edit)
         self._changed(
             LayerPixelContentChange(edit.scene_id, edit.layer_id, edit.source)
         )
         return True
+
+
+def _changed_patch(
+    bounds: RasterBounds,
+    before: np.ndarray,
+    after: np.ndarray,
+) -> tuple[RasterBounds, np.ndarray, np.ndarray] | None:
+    """Return the minimal changed rectangle and its two exact pixel states."""
+    if before.shape != after.shape:
+        raise ValueError("captured raster edit patch shapes must match")
+    changed = before != after
+    if changed.ndim == 3:
+        changed = np.any(changed, axis=2)
+    positions = np.argwhere(changed)
+    if positions.size == 0:
+        return None
+    top, left = positions.min(axis=0)
+    bottom, right = positions.max(axis=0) + 1
+    changed_bounds = RasterBounds(
+        bounds.x + int(left),
+        bounds.y + int(top),
+        int(right - left),
+        int(bottom - top),
+    )
+    return (
+        changed_bounds,
+        before[top:bottom, left:right],
+        after[top:bottom, left:right],
+    )

@@ -36,24 +36,6 @@ from PySide6.QtGui import (
     QTransform,
 )
 from PySide6.QtWidgets import QWidget
-from qpane import (
-    ComparisonOrientation as ComparisonOrientation,
-)
-from qpane import (
-    DiagnosticRecord as DiagnosticRecord,
-)
-from qpane import (
-    LayerPresentationEffect as LayerPresentationEffect,
-)
-from qpane import (
-    LayerPresentationEffectKind as LayerPresentationEffectKind,
-)
-from qpane import (
-    LayerPresentationStyle as LayerPresentationStyle,
-)
-from qpane import (
-    PanelHitTest,
-)
 from qpane.sdk.execution import BackendSubmission as BackendSubmission
 from qpane.sdk.execution import DefaultExecutionPolicy
 from qpane.sdk.execution import DiagnosticsSubscription as DiagnosticsSubscription
@@ -97,8 +79,51 @@ from qpane.sdk.ui import (
 )
 from typing_extensions import Self
 
+from qpane import (
+    ComparisonOrientation as ComparisonOrientation,
+)
+from qpane import (
+    DiagnosticRecord as DiagnosticRecord,
+)
+from qpane import (
+    LayerPresentationEffect as LayerPresentationEffect,
+)
+from qpane import (
+    LayerPresentationEffectKind as LayerPresentationEffectKind,
+)
+from qpane import (
+    LayerPresentationStyle as LayerPresentationStyle,
+)
+from qpane import (
+    PanelHitTest,
+)
+
 from .composition.geometry_policy import LayerGeometryMode as LayerGeometryMode
 from .composition.geometry_policy import LayerGeometryPolicy as LayerGeometryPolicy
+from .composition.history_model import (
+    HistoryCommandMetadata as HistoryCommandMetadata,
+)
+from .composition.history_model import (
+    HistoryCommit as HistoryCommit,
+)
+from .composition.history_model import (
+    HistoryDurability as HistoryDurability,
+)
+from .composition.history_model import (
+    HistoryTruncation as HistoryTruncation,
+)
+from .composition.history_model import (
+    HistoryTruncationReason as HistoryTruncationReason,
+)
+from .composition.history_policy import (
+    CompositionHistoryPolicy as CompositionHistoryPolicy,
+)
+from .composition.history_policy import (
+    ExternalHistoryPolicy as ExternalHistoryPolicy,
+)
+from .composition.history_policy import (
+    SoftLimitHistoryPolicy as SoftLimitHistoryPolicy,
+)
 from .core import (
     CursorProvider,
     SceneOverlayDrawFn,
@@ -124,6 +149,7 @@ from .document import CanvasViewportInteraction as CanvasViewportInteraction
 from .document import CanvasViewportSource as CanvasViewportSource
 from .document import CanvasViewportSpec as CanvasViewportSpec
 from .document import CanvasViewSession as CanvasViewSession
+from .document import DocumentHistory as DocumentHistory
 from .document import ResolvedCanvasContent as ResolvedCanvasContent
 from .edit_sessions import EditorToolDescriptor as EditorToolDescriptor
 from .edit_sessions import EditSessionHistory as EditSessionHistory

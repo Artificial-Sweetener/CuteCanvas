@@ -13,17 +13,13 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Characterize Ferrastra's behavior-neutral Stage 0 package boundary."""
-
-# pyright: reportPrivateUsage=false
+"""Verify Ferrastra's independent wheel metadata and platform contract."""
 
 from __future__ import annotations
 
 import sys
 from typing import Any
 
-import ferrastra
-from ferrastra_test_support.contracts import declared_names
 from ferrastra_test_support.paths import package_root
 
 if sys.version_info >= (3, 11):
@@ -35,18 +31,6 @@ else:  # pragma: no cover - Python 3.10 compatibility
 def _metadata() -> dict[str, Any]:
     """Load Ferrastra's authoritative build metadata."""
     return tomllib.loads((package_root() / "pyproject.toml").read_text("utf-8"))
-
-
-def test_public_surface_contains_only_package_identity() -> None:
-    """Keep graphics behavior out of the Stage 0 package."""
-    assert ferrastra.__all__ == ["__version__"]
-
-
-def test_typed_contract_matches_runtime_exports() -> None:
-    """Keep the authoritative Python contract aligned with the runtime facade."""
-    contract = package_root() / "src/ferrastra/ferrastra.pyi"
-
-    assert declared_names(contract) == set(ferrastra.__all__)
 
 
 def test_ferrastra_declares_an_independent_maturin_wheel() -> None:

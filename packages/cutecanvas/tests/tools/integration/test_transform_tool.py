@@ -22,12 +22,13 @@ from cutecanvas.tools.affine_ports import TransformInteractionPort
 from cutecanvas.tools.transform import TransformTool
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
-from qpane import PointerDeviceKind, PointerPhase, PointerSample
 from qpane.scene.transform_geometry import (
     TransformHandle,
     TransformOperation,
     TransformOperationKind,
 )
+
+from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 
 def test_mouse_operations_resolve_handles_body_rotation_and_resolution() -> None:

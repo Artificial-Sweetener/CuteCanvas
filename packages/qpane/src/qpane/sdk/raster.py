@@ -13,15 +13,12 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Supported raster conversion and affine resampling primitives."""
+"""Supported raster representation-conversion primitives."""
 
 from ..hybrid.presentation import present_hybrid_pixels, present_hybrid_sample
-from ..raster.affine_resampling import AffineImageResampler
 from ..raster.image_conversion import (
     numpy_to_qimage_argb32,
-    numpy_to_qimage_argb32_at_size,
     numpy_to_qimage_grayscale8,
-    numpy_to_qimage_grayscale8_at_size,
     qimage_to_numpy_argb32,
     qimage_to_numpy_const_view_argb32,
     qimage_to_numpy_const_view_bgra32,
@@ -32,11 +29,8 @@ from ..raster.image_conversion import (
 )
 
 __all__ = (
-    "AffineImageResampler",
     "numpy_to_qimage_argb32",
-    "numpy_to_qimage_argb32_at_size",
     "numpy_to_qimage_grayscale8",
-    "numpy_to_qimage_grayscale8_at_size",
     "present_hybrid_pixels",
     "present_hybrid_sample",
     "qimage_to_numpy_argb32",

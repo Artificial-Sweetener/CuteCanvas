@@ -79,7 +79,7 @@ def test_product_readmes_group_badges_by_distribution_and_runtime() -> None:
             "license-GPL--3.0--or--later",
         ),
         "ferrastra": (
-            "stage-0",
+            "phase-3",
             "github/actions/workflow/status",
             "python-3.10%2B",
             "rust-1.93.1",
@@ -138,8 +138,8 @@ def test_root_readme_presents_cutecanvas_as_the_repository_identity() -> None:
     assert "## Contributing" in readme
 
 
-def test_public_product_readmes_wait_to_introduce_ferrastra() -> None:
-    """Keep an unimplemented engine out of current editor and viewer guides."""
+def test_public_editor_and_viewer_readmes_keep_engine_details_private() -> None:
+    """Describe public viewer and editor workflows without internal engine assembly."""
     for path in (_ROOT / "README.md", _ROOT / "packages/qpane/README.md"):
         assert "Ferrastra" not in path.read_text("utf-8"), path
 

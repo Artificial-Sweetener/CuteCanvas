@@ -23,6 +23,7 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 from qpane.scene.model import LayerKind
+from qpane.scene.raster_sampling import RasterPresentationSampling
 
 
 def test_high_zoom_mask_uses_native_samples_and_sharp_pixel_edges(
@@ -50,7 +51,10 @@ def test_high_zoom_mask_uses_native_samples_and_sharp_pixel_edges(
             item for item in plan.render_items if item.descriptor.kind is LayerKind.MASK
         )
         assert mask_items
-        assert all(not item.render_hint_enabled for item in mask_items)
+        assert all(
+            item.presentation_sampling is RasterPresentationSampling.NEAREST
+            for item in mask_items
+        )
         assert {
             round(
                 tile.image_source_rect.width() / tile.source_rect.width(),

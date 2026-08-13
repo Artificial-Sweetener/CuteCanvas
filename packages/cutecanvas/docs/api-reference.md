@@ -13,6 +13,19 @@ chronological history. Use `create_composition()`,
 `content_reference()`, `resource_reference()`, `resolve_content()`, and
 `close()`.
 
+`CanvasDocument(history_policy=..., history_committed=...,
+history_truncated=...)` accepts a host-provided retention policy and typed
+observers. `document.history` exposes metadata-only branches and validates
+replay by the current stable command identity. `SoftLimitHistoryPolicy` is the
+default; `ExternalHistoryPolicy` applies no private retention limit.
+
+`CompositionHistoryPolicy` is the injected eviction-selection protocol.
+`DocumentHistory` is the safe inspection and replay facade.
+`HistoryCommandMetadata` carries stable identity, scope, edit kind,
+`HistoryDurability`, retained size, and chronology. `HistoryCommit` and
+`HistoryTruncation` are the typed observer events;
+`HistoryTruncationReason` identifies the exact removal cause.
+
 `replace_composition_image(composition_id, image)` updates the embedded content
 and intrinsic bounds of an imported image composition while retaining its
 composition, layer, resource, masks, history, and mounted view state. It is a

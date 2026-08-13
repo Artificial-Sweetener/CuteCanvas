@@ -42,6 +42,7 @@ from ..scene.piecewise import PiecewiseLayerTransform, TriangularLayerMappingPat
 from ..scene.projective import ProjectiveLayerTransform
 from ..scene.providers import SceneContribution
 from ..scene.raster import RasterBounds
+from ..scene.raster_sampling import RasterExactSampling, RasterPresentationSampling
 from ..scene.registry import SceneProviderRegistry
 from ..scene.render_plan import (
     RasterLayerRenderItem,
@@ -92,8 +93,10 @@ __all__ = (
     "PiecewiseLayerTransform",
     "ProjectiveLayerTransform",
     "RasterBounds",
+    "RasterExactSampling",
     "RasterLayerRenderItem",
     "RasterPresentation",
+    "RasterPresentationSampling",
     "RasterProductPolicy",
     "RasterSourcePatch",
     "SampledLayerRenderItem",

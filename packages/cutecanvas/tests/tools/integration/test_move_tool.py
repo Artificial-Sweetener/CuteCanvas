@@ -24,6 +24,7 @@ from cutecanvas.tools.move import MoveTool
 from cutecanvas.tools.ports import MoveInteractionPort
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
+
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

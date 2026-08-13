@@ -34,7 +34,6 @@ from qpane.sdk.execution import (
     ExecutionState,
     ExecutionUrgency,
 )
-from qpane.sdk.rendering import rasterize_layer
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import CompositionLayerInstance, CompositionLayerStore
@@ -45,6 +44,7 @@ from ..resources.rasterization import (
     retarget_raster_transform,
 )
 from ..runtime.latest_requests import DocumentLatestRequestRegistry
+from .raster_product import rasterize_placed_image
 from .store import PlacedAssetStore
 from .workflow import PlacedAssetCompletion
 
@@ -146,7 +146,7 @@ class PlacedAssetRasterizationService:
                 urgency=ExecutionUrgency.FOREGROUND,
                 estimated_retained_bytes=byte_count,
             ),
-            work=lambda context: rasterize_layer(
+            work=lambda context: rasterize_placed_image(
                 source_image,
                 target_size,
                 context.cancellation,

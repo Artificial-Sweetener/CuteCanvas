@@ -81,7 +81,10 @@ I originally built QPane for my **Stable Diffusion frontend**, where the GPU is 
 QPane avoids Qt's item-heavy scene graph and uses its own raster-first scene model, closer to a map engine than a traditional canvas. Instead of rendering the image, QPane renders the *viewport*.
 *   **Software Tiling:** Large images are sliced into small CPU-resident tiles. Instead of thousands of `QGraphicsItem` objects, QPane resolves lightweight scene layers into visible tile work using raw coordinate math.
 *   **Viewport Culling:** Only the pixels currently visible on screen are processed. You can load a 5GB satellite scan, and QPane will only render the 1920x1080 pixels needed for your monitor.
-*   **Background Pyramids:** The execution runtime generates downsampled versions of your image away from the GUI thread. When you zoom out, QPane instantly swaps to a lower-resolution tier without stuttering over a 100MB image.
+*   **Background Pyramids:** The execution runtime generates exact, native Lanczos3 levels away from the GUI thread. When you zoom out, QPane instantly swaps to a lower-resolution tier without stuttering over a 100MB image.
+*   **Exact Settled Zoom:** Pyramid levels keep navigation immediate, then a
+    cancellable physical-grid refinement replaces them atomically at the exact
+    zoom, device-pixel ratio, translation phase, rotation, or skew you settled on.
 *   **Bit-Blit Scrolling:** When you pan, QPane doesn't redraw the screen. It shifts the existing pixel buffer and only renders the newly exposed "damage strips" at the edges. This keeps scrolling silky smooth even at high resolutions.
 
 ### 2. Smart Memory Management

@@ -25,6 +25,7 @@ from dataclasses import replace
 from PySide6.QtCore import QSize
 
 from ..scene.model import LayerDescriptor
+from ..scene.raster_sampling import RasterPresentationSampling
 from ..scene.render_plan import SampledLayerRenderItem
 from .panel_mapping import PanelLayerMapping
 
@@ -35,7 +36,7 @@ def reproject_sampled_fallback(
     descriptor: LayerDescriptor,
     transform: PanelLayerMapping,
     source_size: QSize,
-    render_hint_enabled: bool,
+    presentation_sampling: RasterPresentationSampling,
 ) -> SampledLayerRenderItem | None:
     """Reuse prior samples under current geometry when source pixels are unchanged."""
     prior = prior_items.get(descriptor.layer_id)
@@ -52,7 +53,7 @@ def reproject_sampled_fallback(
         placement=descriptor.placement,
         clip=descriptor.clip,
         source_size=QSize(source_size),
-        render_hint_enabled=render_hint_enabled,
+        presentation_sampling=presentation_sampling,
         mapping_clip_path=None,
         effect_clip_path=None,
     )

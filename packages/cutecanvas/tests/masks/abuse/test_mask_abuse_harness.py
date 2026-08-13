@@ -499,6 +499,7 @@ def test_expanding_mask_accepts_real_off_surface_stroke_and_recovers_pixels(
         visible = harness.wait_for_mask_tint(QPoint(250, 200), timeout_ms=1000)
         assert visible.latency_ms is not None
 
+        assert harness.viewer.undoSceneEdit()
         assert harness.viewer.undoMaskEdit()
         restored = harness.viewer.rasterSurfaceState(
             mask_info.scene_id,

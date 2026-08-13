@@ -26,7 +26,7 @@ _ROOT = repository_root()
 
 
 def test_repository_benchmark_manifest_is_complete() -> None:
-    """Keep the checked-in Stage 0 measurement contract valid."""
+    """Keep the checked-in operation measurement contracts valid."""
     assert validate_manifest() == []
 
 
@@ -37,3 +37,33 @@ def test_manifest_rejects_missing_tail_latency(tmp_path: Path) -> None:
     manifest.write_text(source.replace("[50, 95, 99]", "[50, 95]"), encoding="utf-8")
 
     assert "measurement.percentiles must be [50, 95, 99]" in validate_manifest(manifest)
+
+
+def test_manifest_rejects_incomplete_operation_registration(tmp_path: Path) -> None:
+    """Require executable budgets and adversarial cases for each operation."""
+    source = (_ROOT / "benchmarks/ferrastra_manifest.toml").read_text(encoding="utf-8")
+    manifest = tmp_path / "manifest.toml"
+    manifest.write_text(
+        source.replace("adversarial_inputs = [", "unregistered_adversarial_inputs = ["),
+        encoding="utf-8",
+    )
+
+    assert (
+        "registration.operations[0] is missing required field adversarial_inputs"
+        in validate_manifest(manifest)
+    )
+
+
+def test_manifest_rejects_nonpositive_controlled_scratch_budget(tmp_path: Path) -> None:
+    """Keep the executable workload's scratch admission explicit and positive."""
+    source = (_ROOT / "benchmarks/ferrastra_manifest.toml").read_text(encoding="utf-8")
+    manifest = tmp_path / "manifest.toml"
+    manifest.write_text(
+        source.replace("scratch_budget_bytes = 268435456", "scratch_budget_bytes = 0"),
+        encoding="utf-8",
+    )
+
+    assert (
+        "registration.operations[0].controlled_case.scratch_budget_bytes "
+        "must be a positive integer"
+    ) in validate_manifest(manifest)

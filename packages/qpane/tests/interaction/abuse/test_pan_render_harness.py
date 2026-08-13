@@ -21,13 +21,14 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
-from qpane import LayerPresentationStyle
 from qpane_test_support.pan_render_harness import (
     FrameArtifactDetector,
     HeadlessPanHarness,
     coordinate_fingerprint_image,
     random_walk_pans,
 )
+
+from qpane import LayerPresentationStyle
 
 
 def test_detector_accepts_identical_frames() -> None:
@@ -119,10 +120,10 @@ def test_headless_pan_harness_checks_only_selected_replay_steps(
     oracle_pans: list[QPointF] = []
     original_oracle = harness._capture_full_redraw_reference
 
-    def capture_oracle(buffer_pan: QPointF) -> QImage:
+    def capture_oracle(buffer_pan: QPointF, *, settle_exact: bool) -> QImage:
         """Record and delegate one selected clean redraw."""
         oracle_pans.append(QPointF(buffer_pan))
-        return original_oracle(buffer_pan)
+        return original_oracle(buffer_pan, settle_exact=settle_exact)
 
     monkeypatch.setattr(harness, "_capture_full_redraw_reference", capture_oracle)
     pans = tuple(QPointF(index * 7.25, index * -3.5) for index in range(6))

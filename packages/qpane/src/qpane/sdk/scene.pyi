@@ -45,6 +45,10 @@ from ..scene.piecewise import (
 from ..scene.projective import ProjectiveLayerTransform as ProjectiveLayerTransform
 from ..scene.providers import SceneContribution as SceneContribution
 from ..scene.raster import RasterBounds as RasterBounds
+from ..scene.raster_sampling import RasterExactSampling as RasterExactSampling
+from ..scene.raster_sampling import (
+    RasterPresentationSampling as RasterPresentationSampling,
+)
 from ..scene.registry import SceneProviderRegistry as SceneProviderRegistry
 from ..scene.render_plan import RasterLayerRenderItem as RasterLayerRenderItem
 from ..scene.render_plan import SampledLayerRenderItem as SampledLayerRenderItem

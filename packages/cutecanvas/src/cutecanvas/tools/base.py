@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from PySide6.QtCore import QPoint, Signal
+
 from qpane import CursorTool, PanZoomTool, ViewerTool, ViewerToolSignals
 
 from .cursor_feedback import ToolCursorStyle

@@ -18,11 +18,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QRect, QSize
-from qpane import QtOwnerDispatcher
 from qpane.execution import ExecutionUrgency
 from qpane.rendering.incremental_frame import IncrementalFrameRefiner
 from qpane_test_support.execution_backend import ControlledExecution
 from qpane_test_support.render_plan import make_render_plan
+
+from qpane import QtOwnerDispatcher
 
 
 def test_cancel_retires_result_already_queued_for_owner_adoption(qapp) -> None:

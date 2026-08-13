@@ -20,11 +20,12 @@ import types
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QRegion, Qt, QTransform
-from qpane.rendering import Renderer
 from qpane.rendering.navigation_plan import translated_navigation_plan
 from qpane.scene.render_plan import RenderStrategy
 from qpane_test_support.render_compare import checker_image
 from qpane_test_support.render_plan import make_render_plan
+
+from qpane.rendering import Renderer
 
 
 class _DummyRendererHost:

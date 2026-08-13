@@ -22,6 +22,8 @@ from pathlib import Path
 
 from .model import ProductContract
 
+_GENERATED_PYTHON_DIRECTORY_NAMES = frozenset({".venv", "__pycache__", "venv"})
+
 try:
     from tools.architecture.policy import load_policy
     from tools.architecture.python_validation import validate_python
@@ -42,7 +44,7 @@ def validate_boundaries(
         if diagnostic.severity == "error"
     ]
     root_examples = root / "examples"
-    if root_examples.exists() and any(root_examples.rglob("*.py")):
+    if _owns_python_examples(root_examples):
         errors.append("repository root must not own Python product examples")
     for product in products:
         examples = product.root / "examples"
@@ -59,6 +61,21 @@ def validate_boundaries(
                 f"{sorted(path.name for path in demos)}"
             )
     return errors
+
+
+def _owns_python_examples(examples: Path) -> bool:
+    """Return whether a directory contains source rather than generated environments."""
+    if not examples.exists():
+        return False
+    for path in examples.rglob("*.py"):
+        relative_parts = (part.casefold() for part in path.relative_to(examples).parts)
+        if all(
+            part not in _GENERATED_PYTHON_DIRECTORY_NAMES
+            and not part.startswith("venv-")
+            for part in relative_parts
+        ):
+            return True
+    return False
 
 
 def _forbidden_imports(source: Path, forbidden_root: str) -> list[str]:

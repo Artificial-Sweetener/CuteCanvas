@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import cutecanvas
 import pytest
-import qpane
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QColor, QImage
+
+import qpane
 
 
 def test_qpane_public_api_symbols() -> None:
@@ -113,6 +114,7 @@ def test_qpane_public_api_symbols() -> None:
         "RasterBounds",
         "RasterHitTestProvider",
         "RasterProductPolicy",
+        "RasterReconstructionSpace",
         "RasterSource",
         "RasterSourcePatch",
         "RasterSourceProvider",
@@ -194,6 +196,7 @@ def test_cutecanvas_public_api_symbols() -> None:
         "CanvasContentKind",
         "CanvasContentReference",
         "CanvasDocument",
+        "CompositionHistoryPolicy",
         "CanvasOverlayDrawFn",
         "CanvasDisplayScale",
         "CanvasOverlayState",
@@ -204,6 +207,8 @@ def test_cutecanvas_public_api_symbols() -> None:
         "DragSubject",
         "DiagnosticsSubscription",
         "DocumentPersistenceSnapshot",
+        "DocumentHistory",
+        "ExternalHistoryPolicy",
         "ExecutionBackend",
         "ExecutionRuntime",
         "ExecutionSnapshot",
@@ -228,6 +233,11 @@ def test_cutecanvas_public_api_symbols() -> None:
         "PixelSelectionMode",
         "PaintTargetKind",
         "FloatingPixelMode",
+        "HistoryCommandMetadata",
+        "HistoryCommit",
+        "HistoryDurability",
+        "HistoryTruncation",
+        "HistoryTruncationReason",
         "MaskInfo",
         "MaskExportSnapshot",
         "OutboundDragPayload",
@@ -236,12 +246,23 @@ def test_cutecanvas_public_api_symbols() -> None:
         "PlacedAssetMode",
         "PlacedAssetStatus",
         "ResolvedCanvasContent",
+        "SoftLimitHistoryPolicy",
         "warmSamDependencies",
     }
     assert expected.issubset(set(cutecanvas.__all__))
     assert "QPane" not in cutecanvas.__all__
     for symbol in expected:
         assert hasattr(cutecanvas, symbol)
+
+
+def test_cutecanvas_config_inherits_qpane_encoded_reconstruction_default() -> None:
+    """CuteCanvas must expose QPane's one viewport reconstruction policy unchanged."""
+    config = cutecanvas.Config()
+
+    assert (
+        config.viewport_reconstruction_space
+        is qpane.RasterReconstructionSpace.SRGB_ENCODED
+    )
 
 
 def test_qpane_mounts_a_scene_through_the_public_sdk(qapp) -> None:

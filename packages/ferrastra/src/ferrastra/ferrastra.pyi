@@ -14,4 +14,48 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from ._native import (
+    BufferError as BufferError,
+)
+from ._native import (
+    CancellationToken as CancellationToken,
+)
+from ._native import (
+    CompiledGraph as CompiledGraph,
+)
+from ._native import (
+    CoverageResult as CoverageResult,
+)
+from ._native import (
+    Engine as Engine,
+)
+from ._native import (
+    EvaluationBudget as EvaluationBudget,
+)
+from ._native import (
+    EvaluationError as EvaluationError,
+)
+from ._native import (
+    EvaluationRequirements as EvaluationRequirements,
+)
+from ._native import (
+    FerrastraError as FerrastraError,
+)
+from ._native import (
+    Graph as Graph,
+)
+from ._native import (
+    GraphBuilder as GraphBuilder,
+)
+from ._native import (
+    GraphError as GraphError,
+)
+from ._native import (
+    RasterResult as RasterResult,
+)
+from ._native import (
+    Region as Region,
+)
+from .reconstruction import RasterReconstructionSpace as RasterReconstructionSpace
+
 __version__: str

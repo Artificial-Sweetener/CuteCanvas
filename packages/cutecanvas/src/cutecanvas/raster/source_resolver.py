@@ -24,7 +24,6 @@ from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
-    numpy_to_qimage_argb32_at_size,
 )
 from qpane.sdk.scene import (
     LayerSourceReference,
@@ -41,9 +40,10 @@ from cutecanvas.scene.source_capabilities import PixelSampleGeometry
 from ..resources import ProjectResourceReference
 from .assets import EditableRasterAssetStore
 from .presentation_state import EditableRasterPresentationState
+from .preview_sampling import sample_argb32_preview
 
 _MAX_VISIBLE_PATCH_PRODUCTS = 4
-_MAX_DENSE_SAMPLE_DIMENSION = 32_768
+_MAX_DENSE_SAMPLE_BYTES = 128 * 1024 * 1024
 
 
 class EditableRasterSourceCapabilities:
@@ -84,13 +84,15 @@ class EditableRasterSourceCapabilities:
         *,
         scale: float | None = None,
     ) -> QImage | None:
-        """Return a dense small source or a sparse display sample."""
+        """Return a bounded dense source or defer to sparse patch presentation."""
         asset = self._asset(source)
         if asset is None:
             return None
+        bounds = asset.surface.bounds
+        if bounds.width * bounds.height * 4 > _MAX_DENSE_SAMPLE_BYTES:
+            return None
         if scale is not None:
             return asset.surface.sampled_qimage(scale)
-        bounds = asset.surface.bounds
         if asset.surface.sparse_tile_count(bounds) > _MAX_VISIBLE_PATCH_PRODUCTS:
             return None
         return asset.surface.presentation_qimage()
@@ -132,9 +134,9 @@ class EditableRasterSourceCapabilities:
         if asset is None:
             return ()
         surface_bounds = asset.surface.bounds
+        dense_bytes = surface_bounds.width * surface_bounds.height * 4
         if (
-            max(surface_bounds.width, surface_bounds.height)
-            <= _MAX_DENSE_SAMPLE_DIMENSION
+            dense_bytes <= _MAX_DENSE_SAMPLE_BYTES
             and asset.surface.sparse_tile_count(visible_bounds)
             > _MAX_VISIBLE_PATCH_PRODUCTS
         ):
@@ -175,7 +177,7 @@ class EditableRasterSourceCapabilities:
         return (
             numpy_to_qimage_argb32(pixels)
             if target_size is None
-            else numpy_to_qimage_argb32_at_size(pixels, target_size)
+            else sample_argb32_preview(pixels, target_size)
         )
 
     def present_transition_samples(

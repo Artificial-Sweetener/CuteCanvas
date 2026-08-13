@@ -39,6 +39,7 @@ from cutecanvas.tools.tools import Tools
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication
+
 from qpane import CursorTool, PanZoomTool, ViewerTool
 
 pytestmark = [

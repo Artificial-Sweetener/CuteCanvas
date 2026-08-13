@@ -102,7 +102,7 @@ path = "packages/cutecanvas/src/cutecanvas/masks/render_cache.py"
 kind = "remediation"
 justification = "Cache, live-preview, background colorization, and regional presentation state remain mixed pending live-preview extraction."
 review_by = 2026-12-15
-max_lines = 1253
+max_lines = 1248
 next_limit = 980
 debt = "CUTECANVAS-ARCH-004"
 

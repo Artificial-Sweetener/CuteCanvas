@@ -28,9 +28,10 @@ from cutecanvas.painting.tools import BrushTool, EraserTool
 from cutecanvas.tools.ports import PaintingInteractionPort
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
-from qpane import PointerDeviceKind, PointerPhase, PointerSample
 from qpane.raster.image_conversion import qimage_to_numpy_view_grayscale8
 from qpane.rendering.coordinates import PanelHitTest
+
+from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 
 class _WheelEventStub:

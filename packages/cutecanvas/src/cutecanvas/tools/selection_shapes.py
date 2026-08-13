@@ -30,7 +30,6 @@ from PySide6.QtGui import (
     QPen,
     QPolygonF,
 )
-from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from cutecanvas.coverage import (
     CoverageCombineMode,
@@ -39,6 +38,7 @@ from cutecanvas.coverage import (
     VectorCoverageItem,
 )
 from cutecanvas.cursor import EditorCursorIntent
+from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .base import BaseTool
 from .coverage_operation import resolve_coverage_operation

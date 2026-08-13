@@ -119,8 +119,8 @@ as ordinary raster, vector, and hybrid content.
 `View` owns viewport state used by the low-level engine, `Renderer` produces
 frames from compiled scenes, and `RenderingPresenter` coordinates publication
 without exposing half-finished work. `PyramidManager` owns multiresolution
-raster products, while `rasterize_layer()` and `rasterize_region()` produce
-detached bounded products inside an execution request. `ViewportZoomMode`
+raster products, while `rasterize_region()` produces detached bounded mixed-scene
+products inside an execution request. `ViewportZoomMode`
 names the authoritative fit, native-scale, and explicit zoom policies.
 
 `View.coordinates` and `QPane.coordinateSystem()` expose the same
@@ -339,9 +339,8 @@ physical-pixel boundary and returns that geometry as a
 
 ## Raster conversion
 
-`AffineImageResampler` performs bounded transform sampling for worker-side
-pixel operations. `qimage_to_numpy_argb32` and `qimage_to_numpy_grayscale8`
-return detached arrays. `qimage_to_numpy_const_view_argb32` provides a
+`qimage_to_numpy_argb32` and `qimage_to_numpy_grayscale8` return detached
+arrays. `qimage_to_numpy_const_view_argb32` provides a
 read-only zero-copy view and its normalized backing image.
 `qimage_to_numpy_const_view_bgra32` preserves compatible 32-bit storage when
 only channel values, rather than premultiplication, matter.
@@ -352,9 +351,8 @@ grayscale view. Each view requires the caller to retain its returned backing
 image for the view's lifetime.
 
 For the reverse direction, `numpy_to_qimage_argb32` and
-`numpy_to_qimage_grayscale8` preserve the array's intrinsic size, while
-`numpy_to_qimage_argb32_at_size` and `numpy_to_qimage_grayscale8_at_size`
-validate an explicit output extent. Keeping these conversions in QPane gives
+`numpy_to_qimage_grayscale8` preserve the array's intrinsic size. Keeping these
+conversions in QPane gives
 all raster consumers the same format, stride, ownership, and detachment rules.
 
 ## Semantic vector integration

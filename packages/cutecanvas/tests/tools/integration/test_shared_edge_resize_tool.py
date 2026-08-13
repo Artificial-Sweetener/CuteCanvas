@@ -30,6 +30,7 @@ from cutecanvas.tools.affine_ports import SharedEdgeResizePort
 from cutecanvas.tools.shared_edge_resize import SharedEdgeResizeTool
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
+
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

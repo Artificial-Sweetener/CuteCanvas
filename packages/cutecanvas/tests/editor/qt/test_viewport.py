@@ -17,6 +17,7 @@
 import pytest
 from cutecanvas import Config
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF
+
 from qpane.rendering import Viewport, ViewportZoomMode
 
 

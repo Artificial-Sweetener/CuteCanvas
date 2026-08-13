@@ -91,12 +91,20 @@ forbidden_imports = []
 [[python_layers]]
 name = "ferrastra-public-boundary"
 module_prefix = "ferrastra"
-allowed_internal = ["ferrastra._native"]
+allowed_internal = ["ferrastra._native", "ferrastra.reconstruction"]
 
 [[python_layers]]
 name = "qpane-ferrastra-adapter"
 module_prefix = "qpane.ferrastra"
-allowed_internal = ["qpane.ferrastra"]
+allowed_internal = [
+  "qpane.ferrastra",
+  "qpane.rendering.render_sampling_grid",
+  "qpane.rendering.render_tile_geometry",
+  "qpane.rendering.render_tile_types",
+  "qpane.scene.identity",
+  "qpane.scene.raster",
+  "qpane.scene.raster_sampling",
+]
 
 [[python_layers]]
 name = "cutecanvas-ferrastra-adapter"

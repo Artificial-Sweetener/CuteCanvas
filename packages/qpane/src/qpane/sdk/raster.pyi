@@ -16,16 +16,9 @@
 
 from ..hybrid.presentation import present_hybrid_pixels as present_hybrid_pixels
 from ..hybrid.presentation import present_hybrid_sample as present_hybrid_sample
-from ..raster.affine_resampling import AffineImageResampler as AffineImageResampler
 from ..raster.image_conversion import numpy_to_qimage_argb32 as numpy_to_qimage_argb32
 from ..raster.image_conversion import (
-    numpy_to_qimage_argb32_at_size as numpy_to_qimage_argb32_at_size,
-)
-from ..raster.image_conversion import (
     numpy_to_qimage_grayscale8 as numpy_to_qimage_grayscale8,
-)
-from ..raster.image_conversion import (
-    numpy_to_qimage_grayscale8_at_size as numpy_to_qimage_grayscale8_at_size,
 )
 from ..raster.image_conversion import qimage_to_numpy_argb32 as qimage_to_numpy_argb32
 from ..raster.image_conversion import (

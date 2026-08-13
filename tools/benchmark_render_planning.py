@@ -29,6 +29,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QImage, Qt
 from PySide6.QtWidgets import QApplication
+
 from qpane import (
     LayerTransform,
     QPane,

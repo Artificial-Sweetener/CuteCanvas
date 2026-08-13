@@ -1,0 +1,13 @@
+[package]
+name = "ferrastra-core"
+description = "Stable value and operation contracts for the Ferrastra graphics engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

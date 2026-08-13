@@ -21,7 +21,7 @@ path = "packages/qpane/src/qpane/core/config.py"
 kind = "remediation"
 justification = "Existing configuration ownership remains mixed while the cache-owned configuration slice is extracted."
 review_by = 2026-12-15
-max_lines = 845
+max_lines = 824
 next_limit = 610
 debt = "QPANE-ARCH-001"
 
@@ -56,22 +56,9 @@ path = "packages/qpane/src/qpane/rendering/presenter.py"
 kind = "remediation"
 justification = "The presenter retains mixed coordinate, buffer, refinement, effect, and paint responsibilities pending complete owner extraction."
 review_by = 2026-12-15
-max_lines = 1463
+max_lines = 1457
 next_limit = 1150
 debt = "QPANE-ARCH-003"
-
-[[waivers]]
-id = "QPANE-WAIVER-007"
-issue = "chore:QPANE-WAIVER-007"
-owner = "QPane pyramid rendering"
-rule = "STRUCT003"
-path = "packages/qpane/src/qpane/rendering/pyramid.py"
-kind = "remediation"
-justification = "Pyramid product, cache, and asynchronous retry lifecycles remain colocated until the work coordinator is extracted."
-review_by = 2026-12-15
-max_lines = 652
-next_limit = 480
-debt = "QPANE-ARCH-004"
 
 [[waivers]]
 id = "QPANE-WAIVER-008"
@@ -106,7 +93,7 @@ path = "packages/qpane/src/qpane/rendering/render_tiles.py"
 kind = "structural"
 justification = "RenderTileWorkCoordinator is the sole request-lifecycle owner for immediate, deferred, overview, detail, and prefetch tile work."
 review_by = 2026-12-15
-max_lines = 643
+max_lines = 652
 
 [[waivers]]
 id = "QPANE-WAIVER-011"

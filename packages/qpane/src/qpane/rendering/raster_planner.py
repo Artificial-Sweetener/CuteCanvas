@@ -21,20 +21,15 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
 from math import isclose
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, QSizeF, Qt
 from PySide6.QtGui import QImage, QPainter
 
-from ..scene.identity import (
-    SceneLayerAssetKey,
-    SceneLayerTileKey,
-    SourceRenderAssetKey,
-    source_render_asset_key,
-)
-from ..scene.model import LayerClip, LayerPlacement
+from ..core import Config
+from ..scene.identity import SceneLayerTileKey, source_render_asset_key
 from ..scene.raster import RasterBounds
+from ..scene.raster_sampling import RasterPresentationSampling
 from ..scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
@@ -50,16 +45,24 @@ from ..scene.source_capabilities import (
     RasterSourcePatch,
 )
 from .compiled_scene import CompiledRenderLayer, CompiledRenderScene
+from .exact_raster_refinement import ExactRasterRefinementPlanner, exact_frame_is_ready
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
-from .panel_mapping import PanelLayerMapping, detached_panel_mapping
+from .panel_mapping import PanelLayerMapping
 from .projective_visibility import visible_scene_raster_bounds
+from .raster_planning_products import (
+    RasterLayerGeometry,
+    RasterPlanningResult,
+    RasterSourceProduct,
+    RasterTilePlan,
+)
 from .raster_products import RasterRenderProductStore
 from .raster_sampling import (
-    smooth_raster_sampling_enabled,
-    smooth_raster_sampling_for_physical_scale,
+    raster_presentation_sampling,
+    raster_presentation_sampling_for_source_scale,
 )
 from .render_tile_geometry import scale_bucket
+from .render_tiles import RenderTileWorkCoordinator
 from .sampled_lattice import (
     sampled_source_lattice,
     source_sampling_phase_is_fractional,
@@ -75,62 +78,6 @@ _MAX_SPARSE_ATLAS_PIXELS = 4 * 1024 * 1024
 _MAX_SPARSE_ATLAS_EXPANSION = 4
 
 
-@dataclass(frozen=True, slots=True)
-class RasterLayerGeometry:
-    """Geometry mapping one layer's render-source pixels into the panel."""
-
-    scene_id: uuid.UUID
-    layer_id: uuid.UUID
-    asset_key: SceneLayerAssetKey
-    pyramid_asset_key: SourceRenderAssetKey
-    pyramid_scale: float
-    transform: PanelLayerMapping
-    placement: LayerPlacement
-    clip: LayerClip | None
-    source_size: QSize
-    tile_size: int
-    tile_overlap: int
-    visible_source_rect: QRectF
-
-    def __post_init__(self) -> None:
-        """Detach mutable Qt geometry from planner-owned frame values."""
-        object.__setattr__(self, "transform", detached_panel_mapping(self.transform))
-        object.__setattr__(self, "source_size", QSize(self.source_size))
-        object.__setattr__(
-            self,
-            "visible_source_rect",
-            QRectF(self.visible_source_rect),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class _RasterPlanningResult:
-    """Raster primitive plus tile keys requested while building it."""
-
-    item: RasterLayerRenderItem | SampledLayerRenderItem
-    visible_tile_keys: frozenset[SceneLayerTileKey]
-
-
-@dataclass(frozen=True, slots=True)
-class _RasterSourceProduct:
-    """One resolved raster sample and whether shared products may derive from it."""
-
-    image: QImage
-    scale: float
-    cacheable: bool
-
-
-@dataclass(frozen=True, slots=True)
-class _TilePlan:
-    """Tile payloads and worker-cancellation keys for one raster layer."""
-
-    tiles_to_draw: tuple[TileRenderData, ...]
-    visible_keys: frozenset[SceneLayerTileKey]
-    max_tile_cols: int
-    max_tile_rows: int
-    visible_tile_range: tuple[int, int, int, int] | None
-
-
 class RasterRenderPlanner:
     """Own viewport-dependent raster primitive and tile planning."""
 
@@ -142,6 +89,7 @@ class RasterRenderPlanner:
         products: RasterRenderProductStore,
         raster_sources: RasterPresentationRegistry,
         raster_patches: RasterPatchPresentationRegistry,
+        refinement: RenderTileWorkCoordinator,
         tile_manager_provider: Callable[[], TileManager],
         viewport: Viewport,
     ) -> None:
@@ -151,6 +99,11 @@ class RasterRenderPlanner:
         self._products = products
         self._raster_sources = raster_sources
         self._raster_patches = raster_patches
+        self._exact_refinement = ExactRasterRefinementPlanner(
+            projector=projector,
+            raster_sources=raster_sources,
+            refinement=refinement,
+        )
         self._tile_manager_provider = tile_manager_provider
         self._viewport = viewport
 
@@ -159,12 +112,19 @@ class RasterRenderPlanner:
         """Return the presenter's current authoritative tile manager."""
         return self._tile_manager_provider()
 
+    def apply_config(self, config: Config) -> None:
+        """Apply viewport reconstruction policy to exact raster products."""
+        self._exact_refinement.set_reconstruction_space(
+            config.viewport_reconstruction_space
+        )
+
     def build_frame_items(
         self,
         compiled: CompiledRenderScene,
         frame: RenderFrameGeometry,
         *,
         layers: tuple[CompiledRenderLayer, ...] | None = None,
+        allow_exact: bool = True,
     ) -> tuple[RasterLayerRenderItem | SampledLayerRenderItem, ...]:
         """Build ordered raster primitives for one viewport frame."""
         planned_layers = compiled.layers if layers is None else layers
@@ -175,8 +135,20 @@ class RasterRenderPlanner:
                 compiled=compiled,
                 layer=layer,
                 frame=frame,
+                allow_exact=allow_exact,
             )
         )
+        if not exact_frame_is_ready(results):
+            results = tuple(
+                result
+                for layer in planned_layers
+                for result in self._build_layer_items(
+                    compiled=compiled,
+                    layer=layer,
+                    frame=frame,
+                    allow_exact=False,
+                )
+            )
         visible_tile_keys = frozenset(
             key for result in results for key in result.visible_tile_keys
         )
@@ -283,7 +255,7 @@ class RasterRenderPlanner:
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
         qpane_rect: QRectF,
-        source_product: _RasterSourceProduct,
+        source_product: RasterSourceProduct,
     ) -> RasterLayerGeometry | None:
         """Resolve geometry from one already sampled dense or sparse product."""
         source_image = source_product.image
@@ -327,7 +299,8 @@ class RasterRenderPlanner:
         compiled: CompiledRenderScene,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
-    ) -> _RasterPlanningResult | None:
+        allow_exact: bool,
+    ) -> RasterPlanningResult | None:
         """Build one raster primitive and its requested tile identities."""
         source_product = self._source_image(compiled, layer, frame)
         if source_product is None:
@@ -337,6 +310,7 @@ class RasterRenderPlanner:
             layer=layer,
             frame=frame,
             source_product=source_product,
+            allow_exact=allow_exact,
         )
 
     def _build_layer_items(
@@ -345,11 +319,17 @@ class RasterRenderPlanner:
         compiled: CompiledRenderScene,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
-    ) -> tuple[_RasterPlanningResult, ...]:
+        allow_exact: bool,
+    ) -> tuple[RasterPlanningResult, ...]:
         """Build one dense item or one globally sampled sparse-patch batch."""
         patches = self._source_patches(compiled, layer, frame)
         if patches is None:
-            result = self._build_item(compiled=compiled, layer=layer, frame=frame)
+            result = self._build_item(
+                compiled=compiled,
+                layer=layer,
+                frame=frame,
+                allow_exact=allow_exact,
+            )
             return () if result is None else (result,)
         result = self._build_patch_item(
             compiled=compiled,
@@ -366,7 +346,7 @@ class RasterRenderPlanner:
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
         patches: tuple[RasterSourcePatch, ...],
-    ) -> _RasterPlanningResult | None:
+    ) -> RasterPlanningResult | None:
         """Build visible sparse patches on one logical source sampling lattice."""
         if not patches:
             return None
@@ -389,7 +369,7 @@ class RasterRenderPlanner:
             )
             else None
         )
-        resolved_patches: list[tuple[RasterSourcePatch, _RasterSourceProduct]] = []
+        resolved_patches: list[tuple[RasterSourcePatch, RasterSourceProduct]] = []
         for patch in patches:
             source_product = self._patch_product(layer, patch, frame)
             if source_product is not None and patch.sample_bounds is not None:
@@ -400,14 +380,14 @@ class RasterRenderPlanner:
             atlas_bounds=None if lattice is None else lattice.local_bounds,
         )
         if atlas_tile is not None:
-            return _RasterPlanningResult(
+            return RasterPlanningResult(
                 item=SampledLayerRenderItem(
                     descriptor=layer.descriptor,
                     transform=transform,
                     placement=layer.descriptor.placement,
                     clip=layer.descriptor.clip,
                     source_size=layer.source_size,
-                    render_hint_enabled=smooth_raster_sampling_enabled(
+                    presentation_sampling=raster_presentation_sampling(
                         transform,
                         frame.device_pixel_ratio,
                     ),
@@ -439,14 +419,14 @@ class RasterRenderPlanner:
             )
         if not tiles:
             return None
-        return _RasterPlanningResult(
+        return RasterPlanningResult(
             item=SampledLayerRenderItem(
                 descriptor=layer.descriptor,
                 transform=transform,
                 placement=layer.descriptor.placement,
                 clip=layer.descriptor.clip,
                 source_size=layer.source_size,
-                render_hint_enabled=smooth_raster_sampling_enabled(
+                presentation_sampling=raster_presentation_sampling(
                     transform,
                     frame.device_pixel_ratio,
                 ),
@@ -459,7 +439,7 @@ class RasterRenderPlanner:
     def _native_patch_atlas(
         self,
         layer: CompiledRenderLayer,
-        patches: tuple[tuple[RasterSourcePatch, _RasterSourceProduct], ...],
+        patches: tuple[tuple[RasterSourcePatch, RasterSourceProduct], ...],
         *,
         atlas_bounds: RasterBounds | None,
     ) -> SampledTileRenderData | None:
@@ -548,9 +528,26 @@ class RasterRenderPlanner:
         compiled: CompiledRenderScene,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
-        source_product: _RasterSourceProduct,
-    ) -> _RasterPlanningResult | None:
+        source_product: RasterSourceProduct,
+        allow_exact: bool,
+    ) -> RasterPlanningResult | None:
         """Build the sole raster primitive from one resolved source product."""
+        exact = (
+            self._exact_refinement.plan(
+                compiled=compiled,
+                layer=layer,
+                frame=frame,
+            )
+            if allow_exact
+            else None
+        )
+        if exact is not None and exact.item is not None:
+            return RasterPlanningResult(
+                item=exact.item,
+                visible_tile_keys=frozenset(),
+                exact_eligible=True,
+                exact_ready=True,
+            )
         source_image = source_product.image
         pyramid_scale = source_product.scale
         strategy = self._render_strategy(layer, frame, source_product)
@@ -566,22 +563,23 @@ class RasterRenderPlanner:
             frame.native_zoom,
             1e-9,
         )
-        render_hint_enabled = (
-            smooth_raster_sampling_for_physical_scale(relative_base_raster_scale)
+        presentation_sampling = (
+            raster_presentation_sampling_for_source_scale(relative_base_raster_scale)
             if layer.is_base_raster
-            else smooth_raster_sampling_enabled(transform, device_pixel_ratio)
+            else raster_presentation_sampling(transform, device_pixel_ratio)
         )
         phase_stable_item = self._phase_stable_dense_item(
             layer=layer,
             frame=frame,
             source_product=source_product,
             transform=transform,
-            render_hint_enabled=render_hint_enabled,
+            presentation_sampling=presentation_sampling,
         )
         if phase_stable_item is not None:
-            return _RasterPlanningResult(
+            return RasterPlanningResult(
                 item=phase_stable_item,
                 visible_tile_keys=frozenset(),
+                exact_eligible=bool(exact is not None and exact.eligible),
             )
         tile_plan = self._tile_plan(
             compiled=compiled,
@@ -592,7 +590,7 @@ class RasterRenderPlanner:
             transform=transform,
             strategy=strategy,
         )
-        return _RasterPlanningResult(
+        return RasterPlanningResult(
             item=RasterLayerRenderItem(
                 descriptor=layer.descriptor,
                 source_image=source_image,
@@ -603,7 +601,7 @@ class RasterRenderPlanner:
                 placement=layer.descriptor.placement,
                 clip=layer.descriptor.clip,
                 strategy=strategy,
-                render_hint_enabled=render_hint_enabled,
+                presentation_sampling=presentation_sampling,
                 debug_draw_tile_grid=frame.debug_draw_tile_grid,
                 tiles_to_draw=tile_plan.tiles_to_draw,
                 tile_size=frame.tile_size,
@@ -614,6 +612,7 @@ class RasterRenderPlanner:
                 is_base_raster=layer.is_base_raster,
             ),
             visible_tile_keys=tile_plan.visible_keys,
+            exact_eligible=bool(exact is not None and exact.eligible),
         )
 
     def _phase_stable_dense_item(
@@ -621,9 +620,9 @@ class RasterRenderPlanner:
         *,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
-        source_product: _RasterSourceProduct,
+        source_product: RasterSourceProduct,
         transform: PanelLayerMapping,
-        render_hint_enabled: bool,
+        presentation_sampling: RasterPresentationSampling,
     ) -> SampledLayerRenderItem | None:
         """Present patch-capable dense overlays on the shared source lattice."""
         source_image = source_product.image
@@ -652,7 +651,7 @@ class RasterRenderPlanner:
             placement=layer.descriptor.placement,
             clip=layer.descriptor.clip,
             source_size=layer.source_size,
-            render_hint_enabled=render_hint_enabled,
+            presentation_sampling=presentation_sampling,
             tiles=(
                 SampledTileRenderData(
                     source_image,
@@ -719,14 +718,14 @@ class RasterRenderPlanner:
         layer: CompiledRenderLayer,
         patch: RasterSourcePatch,
         frame: RenderFrameGeometry,
-    ) -> _RasterSourceProduct | None:
+    ) -> RasterSourceProduct | None:
         """Select shared LOD for one sparse patch through the common product store."""
         image = patch.image
         if image.isNull():
             return None
         policy = self._raster_sources.product_policy(layer.descriptor.source)
         if policy is RasterProductPolicy.VOLATILE:
-            return _RasterSourceProduct(image=image, scale=1.0, cacheable=False)
+            return RasterSourceProduct(image=image, scale=1.0, cacheable=False)
         sample_bounds = patch.sample_bounds
         layer_transform = layer.descriptor.transform
         if sample_bounds is None or layer_transform is None:
@@ -748,14 +747,14 @@ class RasterRenderPlanner:
             target_width=patch_placement.width * frame.zoom,
         )
         scale = selected.width() / image.width() if image.width() > 0 else 1.0
-        return _RasterSourceProduct(image=selected, scale=scale, cacheable=True)
+        return RasterSourceProduct(image=selected, scale=scale, cacheable=True)
 
     def _source_image(
         self,
         compiled: CompiledRenderScene,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
-    ) -> _RasterSourceProduct | None:
+    ) -> RasterSourceProduct | None:
         """Resolve the best-fit image and its scale from authoritative pixels."""
         source = layer.descriptor.source
         layer_to_panel = self._projector.layer_to_panel(
@@ -805,7 +804,7 @@ class RasterRenderPlanner:
             if layer.source_size.width() > 0
             else 1.0
         )
-        return _RasterSourceProduct(
+        return RasterSourceProduct(
             image=source_image,
             scale=pyramid_scale,
             cacheable=True,
@@ -815,14 +814,14 @@ class RasterRenderPlanner:
     def _direct_product(
         image: QImage | None,
         source_size: QSize,
-    ) -> _RasterSourceProduct | None:
+    ) -> RasterSourceProduct | None:
         """Return one uncached sampled product with its authoritative scale."""
         if image is None or image.isNull():
             return None
         pyramid_scale = (
             image.width() / source_size.width() if source_size.width() > 0 else 1.0
         )
-        return _RasterSourceProduct(
+        return RasterSourceProduct(
             image=image,
             scale=pyramid_scale,
             cacheable=False,
@@ -832,7 +831,7 @@ class RasterRenderPlanner:
         self,
         layer: CompiledRenderLayer,
         frame: RenderFrameGeometry,
-        source_product: _RasterSourceProduct,
+        source_product: RasterSourceProduct,
     ) -> RenderStrategy:
         """Return the direct or tiled strategy for a layer in one frame."""
         if not source_product.cacheable or not self._tile_manager.can_retain_tile(
@@ -888,10 +887,10 @@ class RasterRenderPlanner:
         pyramid_scale: float,
         transform: PanelLayerMapping,
         strategy: RenderStrategy,
-    ) -> _TilePlan:
+    ) -> RasterTilePlan:
         """Return tile payloads and visible identities for one raster layer."""
         if strategy == RenderStrategy.DIRECT:
-            return _TilePlan((), frozenset(), 0, 0, None)
+            return RasterTilePlan((), frozenset(), 0, 0, None)
         max_cols, max_rows = self._tile_manager.grid.dimensions_for(
             source_image.width(),
             source_image.height(),
@@ -931,7 +930,7 @@ class RasterRenderPlanner:
                     tiles_to_draw.append(
                         TileRenderData(tile_image, self.tile_draw_position(tile_key))
                     )
-        return _TilePlan(
+        return RasterTilePlan(
             tuple(tiles_to_draw),
             frozenset(visible_keys),
             max_cols,
@@ -1043,7 +1042,7 @@ def _rectf(bounds: RasterBounds) -> QRectF:
 
 def _compose_patch_atlas(
     atlas_bounds: RasterBounds,
-    patches: tuple[tuple[RasterSourcePatch, _RasterSourceProduct], ...],
+    patches: tuple[tuple[RasterSourcePatch, RasterSourceProduct], ...],
 ) -> QImage:
     """Combine sparse native cores into one transparent source-local image."""
     atlas = QImage(

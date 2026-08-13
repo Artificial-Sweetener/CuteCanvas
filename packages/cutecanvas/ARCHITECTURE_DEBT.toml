@@ -49,13 +49,13 @@ next_extraction = "Extract render scheduling, invalidation, prefetch, and genera
 id = "CUTECANVAS-ARCH-004"
 owner = "CuteCanvas mask presentation cache"
 paths = ["packages/cutecanvas/src/cutecanvas/masks/render_cache.py"]
-fingerprint = "sha256:e3ab8ec629287eaf9797d81c3eefbea67fe714d7cb0c149fa0d0ed334635178d"
+fingerprint = "sha256:022b8c287ff485007d6a6376bde4e94e2a30f3e4b51528d74382ab1665172894"
 issue = "chore:CUTECANVAS-ARCH-004"
 review_by = 2026-12-15
 responsibilities = [
   "render product cache admission and eviction",
   "live-preview raster, patch, and geometry presentation",
-  "asynchronous prefetch and native product adoption",
+  "asynchronous prefetch and exact native product adoption",
   "regional and history-driven presentation metrics",
 ]
 next_extraction = "Extract live-preview raster storage, stride policy, composition, invalidation, and settlement into a dedicated live-preview cache owner."

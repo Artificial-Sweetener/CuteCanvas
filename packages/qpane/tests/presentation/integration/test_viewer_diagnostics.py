@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtGui import QColor, QImage
-from qpane import DiagnosticRecord, QPane
 from qpane_test_support.timing import interaction_clock
+
+from qpane import DiagnosticRecord, QPane
 
 
 def _mounted_viewer(qapp) -> QPane:

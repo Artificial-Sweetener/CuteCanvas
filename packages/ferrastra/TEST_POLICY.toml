@@ -10,7 +10,7 @@ sources = [
   "packages/ferrastra/examples/**",
   "packages/ferrastra/pyproject.toml",
 ]
-proofs = ["packaging"]
+proofs = ["contract", "integration", "packaging"]
 
 [[areas]]
 name = "native"

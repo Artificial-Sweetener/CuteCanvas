@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage
-from qpane import PiecewiseLayerTransform, QPane, RasterSource, RenderLayer, RenderScene
 from qpane.rendering.scene_hit_testing import SceneRenderHitTester
+
+from qpane import PiecewiseLayerTransform, QPane, RasterSource, RenderLayer, RenderScene
 
 
 def test_piecewise_hit_test_rejects_panel_point_outside_layer(qapp) -> None:

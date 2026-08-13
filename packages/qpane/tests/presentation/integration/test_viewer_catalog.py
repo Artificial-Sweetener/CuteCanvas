@@ -24,6 +24,11 @@ from uuid import uuid4
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
+from qpane_test_support.timing import (
+    INTERACTIVE_PERFORMANCE,
+    average_interaction_latency_ms,
+)
+
 from qpane import (
     ComparisonOrientation,
     InspectionStateStore,
@@ -32,10 +37,6 @@ from qpane import (
     RenderLayer,
     RenderScene,
     ViewerCatalogEntry,
-)
-from qpane_test_support.timing import (
-    INTERACTIVE_PERFORMANCE,
-    average_interaction_latency_ms,
 )
 
 
@@ -449,11 +450,11 @@ def test_catalog_comparison_abuse_stays_synchronous_and_coherent(qapp) -> None:
     try:
         smaller_workload_ms = average_interaction_latency_ms(
             lambda: churn_catalog_comparison(120),
-            repetitions=2,
+            repetitions=8,
         )
         larger_workload_ms = average_interaction_latency_ms(
             lambda: churn_catalog_comparison(240),
-            repetitions=2,
+            repetitions=8,
         )
         qapp.processEvents()
 

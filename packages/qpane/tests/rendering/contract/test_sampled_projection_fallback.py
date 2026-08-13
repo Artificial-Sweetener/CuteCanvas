@@ -26,6 +26,7 @@ from qpane.rendering.sampled_projection_fallback import (
     reproject_sampled_fallback,
 )
 from qpane.scene.affine import LayerTransform
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import SampledLayerRenderItem
 from qpane_test_support.render_plan import make_render_plan
 
@@ -40,7 +41,7 @@ def test_source_compatible_samples_are_reprojected_under_current_geometry() -> N
         placement=raster.descriptor.placement,
         clip=raster.descriptor.clip,
         source_size=raster.source_image.size(),
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=(),
     )
     current_transform = QTransform.fromTranslate(18.0, -7.0)
@@ -54,14 +55,14 @@ def test_source_compatible_samples_are_reprojected_under_current_geometry() -> N
         descriptor=current_descriptor,
         transform=current_transform,
         source_size=prior.source_size,
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
     )
 
     assert fallback is not None
     assert fallback.descriptor is current_descriptor
     assert fallback.transform == current_transform
     assert fallback.tiles is prior.tiles
-    assert fallback.render_hint_enabled
+    assert fallback.presentation_sampling is RasterPresentationSampling.BILINEAR
 
 
 def test_viewport_only_projection_change_does_not_create_layer_fallback() -> None:
@@ -74,7 +75,7 @@ def test_viewport_only_projection_change_does_not_create_layer_fallback() -> Non
         placement=raster.descriptor.placement,
         clip=raster.descriptor.clip,
         source_size=raster.source_image.size(),
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=(),
     )
 
@@ -83,7 +84,7 @@ def test_viewport_only_projection_change_does_not_create_layer_fallback() -> Non
         descriptor=prior.descriptor,
         transform=QTransform.fromScale(5.0, 5.0),
         source_size=prior.source_size,
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
     )
 
     assert fallback is None
@@ -99,7 +100,7 @@ def test_changed_source_revision_rejects_prior_sampled_pixels() -> None:
         placement=raster.descriptor.placement,
         clip=raster.descriptor.clip,
         source_size=raster.source_image.size(),
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=(),
     )
 
@@ -111,7 +112,7 @@ def test_changed_source_revision_rejects_prior_sampled_pixels() -> None:
         ),
         transform=QTransform(),
         source_size=prior.source_size,
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
     )
 
     assert fallback is None

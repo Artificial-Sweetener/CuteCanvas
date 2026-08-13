@@ -2,30 +2,63 @@ schema_version = 1
 
 [[migrations]]
 id = "exact-pyramid-scaling"
-status = "planned"
+status = "migrated"
 owner = "ferrastra-raster"
 activation_phase = "Phase 2"
 forbidden = [
-  { path = "packages/qpane/src/qpane/**", pattern = "QImage.scaled" },
+  { path = "packages/qpane/src/qpane/rendering/pyramid*.py", pattern = ".scaled(" },
+  { path = "packages/qpane/src/qpane/rendering/pyramid*.py", pattern = "SmoothTransformation" },
 ]
 
 [[migrations]]
 id = "affine-raster-projection"
-status = "planned"
+status = "migrated"
 owner = "ferrastra-raster"
 activation_phase = "Phase 3"
 forbidden = [
-  { path = "packages/cutecanvas/src/cutecanvas/**", pattern = "AffineImageResampler" },
+  { path = "packages/cutecanvas/src/cutecanvas/**/*.py", pattern = "AffineImageResampler" },
+  { path = "packages/qpane/src/qpane/**/*.py", pattern = "AffineImageResampler" },
 ]
 
 [[migrations]]
 id = "scaled-image-conversion"
-status = "planned"
+status = "migrated"
 owner = "ferrastra-raster"
 activation_phase = "Phase 3"
 forbidden = [
-  { path = "packages/qpane/src/qpane/**", pattern = "numpy_to_qimage_rgb_at_size" },
-  { path = "packages/qpane/src/qpane/**", pattern = "numpy_to_qimage_rgba_at_size" },
+  { path = "packages/qpane/src/qpane/**/*.py", pattern = "numpy_to_qimage_argb32_at_size" },
+  { path = "packages/qpane/src/qpane/**/*.py", pattern = "numpy_to_qimage_grayscale8_at_size" },
+]
+
+[[migrations]]
+id = "coverage-resampling"
+status = "migrated"
+owner = "ferrastra-raster"
+activation_phase = "Phase 3"
+forbidden = [
+  { path = "packages/cutecanvas/src/cutecanvas/coverage/projection.py", pattern = "QPainter" },
+  { path = "packages/cutecanvas/src/cutecanvas/coverage/raster_sampling.py", pattern = ".scaled(" },
+]
+
+[[migrations]]
+id = "authoring-raster-projection"
+status = "migrated"
+owner = "ferrastra-raster"
+activation_phase = "Phase 3"
+forbidden = [
+  { path = "packages/cutecanvas/src/cutecanvas/editor/fragment_projection.py", pattern = "QPainter" },
+  { path = "packages/cutecanvas/src/cutecanvas/placed/**/*.py", pattern = "LayerRasterizer" },
+  { path = "packages/cutecanvas/src/cutecanvas/raster/color_surface.py", pattern = ".scaled(" },
+]
+
+[[migrations]]
+id = "mask-import-resampling"
+status = "migrated"
+owner = "ferrastra-raster"
+activation_phase = "Phase 3"
+forbidden = [
+  { path = "packages/cutecanvas/src/cutecanvas/masks/file_io.py", pattern = "TransformationMode" },
+  { path = "packages/cutecanvas/src/cutecanvas/masks/render_cache.py", pattern = ".scaled(" },
 ]
 
 [[migrations]]
@@ -34,7 +67,7 @@ status = "planned"
 owner = "ferrastra-paint"
 activation_phase = "Phase 7"
 forbidden = [
-  { path = "packages/cutecanvas/src/cutecanvas/painting/**", pattern = "drawEllipse" },
+  { path = "packages/cutecanvas/src/cutecanvas/painting/**/*.py", pattern = "drawEllipse" },
 ]
 
 [[migrations]]
@@ -43,5 +76,5 @@ status = "planned"
 owner = "ferrastra-raster"
 activation_phase = "Phase 5"
 forbidden = [
-  { path = "packages/cutecanvas/src/cutecanvas/coverage/**", pattern = "np.maximum" },
+  { path = "packages/cutecanvas/src/cutecanvas/coverage/**/*.py", pattern = "np.maximum" },
 ]

@@ -25,6 +25,7 @@ from demonstration.document_saves import (
     DocumentSaveResult,
 )
 from PySide6.QtGui import QColor, QImage
+
 from qpane import create_default_execution_runtime
 
 

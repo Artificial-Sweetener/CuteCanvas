@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 from cutecanvas import CuteCanvas, RasterExtentPolicy, VectorShapeKind
+from cutecanvas.placed import rasterization as placed_rasterization
 from cutecanvas_demo import ExampleOptions, ExampleWindow
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from demonstration.layer_inspector import RasterStorageProperties
@@ -31,7 +32,7 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMessageBox
-from qpane.rendering.layer_rasterization import LayerRasterizer
+from qpane.sdk.execution import CancellationToken
 
 
 def _wait_for(qapp, predicate, timeout: float = 3.0) -> None:
@@ -326,19 +327,23 @@ def test_demo_rasterized_placed_layer_is_immediately_pixel_editable(
             lambda *values: completions.append(tuple(values))
         )
         rasterization_started = threading.Event()
-        rasterize = LayerRasterizer.rasterize
+        rasterize = placed_rasterization.rasterize_placed_image
 
-        def held_rasterization(source: QImage, pixel_size: QSize) -> QImage:
+        def held_rasterization(
+            source: QImage,
+            pixel_size: QSize,
+            cancellation: CancellationToken,
+        ) -> QImage:
             """Hold the real worker so pre-completion UI behavior is observable."""
             rasterization_started.set()
             if not release_rasterization.wait(3.0):
                 raise TimeoutError("test did not release placed rasterization")
-            return rasterize(source, pixel_size)
+            return rasterize(source, pixel_size, cancellation)
 
         monkeypatch.setattr(
-            LayerRasterizer,
-            "rasterize",
-            staticmethod(held_rasterization),
+            placed_rasterization,
+            "rasterize_placed_image",
+            held_rasterization,
         )
         window.resize(900, 650)
         window.show()

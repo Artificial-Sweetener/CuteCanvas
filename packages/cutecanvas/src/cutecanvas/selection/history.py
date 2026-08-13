@@ -20,6 +20,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from cutecanvas.composition.history_model import (
+    HistoryDurability,
+    HistoryRetainedStorage,
+)
 from cutecanvas.coverage import CoverageDocument, RasterCoverageItem
 
 
@@ -38,16 +42,31 @@ class PixelSelectionEdit:
 
     @property
     def retained_bytes(self) -> int:
-        """Return detached coverage bytes retained by this command."""
-        return _document_bytes(self.before) + _document_bytes(self.after)
+        """Return unique immutable coverage bytes referenced by this command."""
+        return sum(item.retained_bytes for item in self.history_retained_storage)
+
+    @property
+    def history_durability(self) -> HistoryDurability:
+        """Keep selection chronology outside the durable edit budget."""
+        return HistoryDurability.TRANSIENT
+
+    @property
+    def history_retained_storage(self) -> tuple[HistoryRetainedStorage, ...]:
+        """Identify shared immutable arrays across adjacent selection revisions."""
+        storage: dict[int, HistoryRetainedStorage] = {}
+        for document in (self.before, self.after):
+            for item in _raster_items(document):
+                pixels = item.coverage.pixels
+                storage[id(pixels)] = HistoryRetainedStorage(id(pixels), pixels.nbytes)
+        return tuple(storage.values())
 
 
-def _document_bytes(document: CoverageDocument | None) -> int:
-    """Return detached raster storage retained by one authored document."""
+def _raster_items(
+    document: CoverageDocument | None,
+) -> tuple[RasterCoverageItem, ...]:
+    """Return raster items whose immutable arrays participate in sharing."""
     if document is None:
-        return 0
-    return sum(
-        int(item.coverage.pixels.nbytes)
-        for item in document.items
-        if isinstance(item, RasterCoverageItem)
+        return ()
+    return tuple(
+        item for item in document.items if isinstance(item, RasterCoverageItem)
     )

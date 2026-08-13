@@ -29,7 +29,26 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QCheckBox
 from qpane.features.registry import FeatureInstallError
 
+from qpane import RasterReconstructionSpace
+
 MB = 1024 * 1024
+
+
+def test_demo_config_exposes_encoded_default_and_linear_opt_in(qapp) -> None:
+    """CuteCanvas's normal dialog should expose QPane's live reconstruction choice."""
+    dialog = ConfigDialog(Config())
+    try:
+        widget = dialog._widgets["viewport_reconstruction_space"]
+        assert widget.currentText() == RasterReconstructionSpace.SRGB_ENCODED.value
+        widget.setCurrentText(RasterReconstructionSpace.SRGB_LINEAR.value)
+        assert (
+            dialog.result().values["viewport_reconstruction_space"]
+            == RasterReconstructionSpace.SRGB_LINEAR.value
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 def test_live_config_applies_without_rebuild(qapp):

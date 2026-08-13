@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QToolBar,
     QWidget,
 )
+
 from qpane import LayerPresentationStyle, QPane, RenderScene
 
 from .catalog import CatalogPanel

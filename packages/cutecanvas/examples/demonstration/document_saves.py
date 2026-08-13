@@ -26,6 +26,7 @@ from cutecanvas import (
     DocumentPersistenceSnapshot,
 )
 from PySide6.QtCore import QObject
+
 from qpane import (
     ExecutionRejected,
     ExecutionRequest,
