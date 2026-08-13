@@ -25,8 +25,10 @@ import random
 import sys
 import time
 from collections.abc import Callable, Collection, Sequence
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRect, QSize
@@ -396,70 +398,77 @@ class HeadlessPanHarness:
             hard_timeout_seconds=hard_timeout_seconds,
             initial_state=None,
         )
-        idle_since: float | None = None
+        progress_event = Event()
         view = qpane._rendering
-        while True:
-            self._settle_widget()
-            tile_metrics = view.presenter.tile_manager.snapshot_metrics()
-            pyramid_metrics = view.pyramids.snapshot_metrics()
-            refinement = view.presenter._render_refinement
-            pending_asset_keys = frozenset(view.pyramids.pending_asset_keys())
-            pending_retry_asset_keys = frozenset(
-                view.pyramids.pending_retry_asset_keys()
+        with closing(
+            qpane._execution_runtime.subscribe_diagnostics(
+                lambda _snapshots: progress_event.set()
             )
-            idle = (
-                not pending_asset_keys
-                and not pending_retry_asset_keys
-                and tile_metrics.active_jobs == 0
-                and tile_metrics.pending_retries == 0
-                and refinement.pending_count == 0
-                and not view.presenter.navigation_refinement_pending
-            )
-            now = time.perf_counter()
-            if idle:
-                idle_since = now if idle_since is None else idle_since
-                if now - idle_since >= 0.025:
-                    view.presenter.mark_dirty()
-                    qpane.update()
-                    self._settle_widget()
-                    return
-            else:
-                idle_since = None
-            execution_snapshots = qpane._execution_runtime.execution_snapshots()
-            progress_state = (
-                pending_asset_keys,
-                pending_retry_asset_keys,
-                pyramid_metrics.active_jobs,
-                pyramid_metrics.cache_bytes,
-                tile_metrics.active_jobs,
-                tile_metrics.pending_retries,
-                tile_metrics.cache_bytes,
-                tile_metrics.prefetch_completed,
-                tile_metrics.prefetch_failed,
-                refinement.pending_count,
-                bool(getattr(refinement, "prefetch_pending", False)),
-                view.presenter.navigation_refinement_pending,
-                execution_snapshots,
-            )
-            work_active = (
-                pyramid_metrics.active_jobs > 0
-                or tile_metrics.active_jobs > 0
-                or refinement.pending_count > 0
-                or any(
-                    snapshot.pending > 0 or snapshot.running > 0
-                    for snapshot in execution_snapshots
+        ):
+            idle_since: float | None = None
+            while True:
+                self._settle_widget()
+                tile_metrics = view.presenter.tile_manager.snapshot_metrics()
+                pyramid_metrics = view.pyramids.snapshot_metrics()
+                refinement = view.presenter._render_refinement
+                pending_asset_keys = frozenset(view.pyramids.pending_asset_keys())
+                pending_retry_asset_keys = frozenset(
+                    view.pyramids.pending_retry_asset_keys()
                 )
-            )
-            if not watchdog.permits_wait(
-                progress_state,
-                now=now,
-                work_active=work_active,
-            ):
-                raise TimeoutError(
-                    "pan harness raster products did not settle: "
-                    f"progress={progress_state!r}"
+                idle = (
+                    not pending_asset_keys
+                    and not pending_retry_asset_keys
+                    and tile_metrics.active_jobs == 0
+                    and tile_metrics.pending_retries == 0
+                    and refinement.pending_count == 0
+                    and not view.presenter.navigation_refinement_pending
                 )
-            QTest.qWait(1)
+                now = time.perf_counter()
+                if idle:
+                    idle_since = now if idle_since is None else idle_since
+                    if now - idle_since >= 0.025:
+                        view.presenter.mark_dirty()
+                        qpane.update()
+                        self._settle_widget()
+                        return
+                else:
+                    idle_since = None
+                execution_snapshots = qpane._execution_runtime.execution_snapshots()
+                progress_state = (
+                    pending_asset_keys,
+                    pending_retry_asset_keys,
+                    pyramid_metrics.active_jobs,
+                    pyramid_metrics.cache_bytes,
+                    tile_metrics.active_jobs,
+                    tile_metrics.pending_retries,
+                    tile_metrics.cache_bytes,
+                    tile_metrics.prefetch_completed,
+                    tile_metrics.prefetch_failed,
+                    refinement.pending_count,
+                    bool(getattr(refinement, "prefetch_pending", False)),
+                    view.presenter.navigation_refinement_pending,
+                    execution_snapshots,
+                )
+                work_active = (
+                    pyramid_metrics.active_jobs > 0
+                    or tile_metrics.active_jobs > 0
+                    or refinement.pending_count > 0
+                    or any(
+                        snapshot.pending > 0 or snapshot.running > 0
+                        for snapshot in execution_snapshots
+                    )
+                )
+                if not watchdog.permits_wait(
+                    progress_state,
+                    now=now,
+                    work_active=work_active,
+                ):
+                    raise TimeoutError(
+                        "pan harness raster products did not settle: "
+                        f"progress={progress_state!r}"
+                    )
+                progress_event.wait(0.005)
+                progress_event.clear()
 
     def _capture_full_redraw_reference(
         self,
