@@ -43,6 +43,8 @@ def test_ferrastra_declares_an_independent_maturin_wheel() -> None:
     }
     assert metadata["project"]["dependencies"] == []
     assert metadata["tool"]["maturin"]["module-name"] == "ferrastra._native"
+    assert metadata["tool"]["maturin"]["profile"] == "release"
+    assert metadata["tool"]["maturin"]["editable-profile"] == "release"
     source = package_root() / "src/ferrastra"
     assert (source / "py.typed").is_file()
     assert (source / "ferrastra.pyi").is_file()

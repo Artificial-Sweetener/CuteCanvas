@@ -37,8 +37,10 @@ Issues = "https://github.com/Artificial-Sweetener/CuteCanvas/issues"
 
 [tool.maturin]
 bindings = "pyo3"
+editable-profile = "release"
 manifest-path = "../../crates/ferrastra-python/Cargo.toml"
 module-name = "ferrastra._native"
+profile = "release"
 python-source = "src"
 strip = false
 
