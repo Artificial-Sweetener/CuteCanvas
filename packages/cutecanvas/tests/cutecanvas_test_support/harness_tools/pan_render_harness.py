@@ -255,8 +255,11 @@ class HeadlessPanHarness:
         return failures
 
     def close(self) -> None:
-        """Release the mounted widget and drain its deferred Qt cleanup."""
+        """Release both panes and join every harness-owned execution worker."""
         for pane in (self._reference_qpane, self._qpane):
+            runtime = pane._execution_runtime
+            pane._shutdown()
+            runtime.shutdown(wait=True)
             pane.close()
             pane.deleteLater()
         self._application.processEvents()
