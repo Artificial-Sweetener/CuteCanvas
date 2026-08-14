@@ -90,6 +90,13 @@ def test_release_credentials_are_scoped_to_the_jobs_that_use_them() -> None:
     assert "contents: read" in verification_job
     assert "pull-requests: read" in verification_job
 
+    finalize_job = release[
+        release.index("  finalize:") : release.index("  publish-waterfall:")
+    ]
+    assert "contents: write" in finalize_job
+    assert "statuses: write" in finalize_job
+    assert "statuses/${{ needs.prepare.outputs.candidate_sha }}" in finalize_job
+
     publication_job = publish[
         publish.index("  publish:") : publish.index("  verify-published:")
     ]
