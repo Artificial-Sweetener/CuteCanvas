@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v1.0.2 (2026-08-14)
+
+### Bug Fixes
+
+- Make workspace teardown deterministic
+  ([`5ec0267`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/5ec02672e659d26903c0f790240ff4873e26fd5c))
+
+### Testing
+
+- Isolate pointer latency from Qt pacing
+  ([`896c595`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/896c595d605ab28cab7fa0ab55cfa68cff674b01))
+
+- Join pan harness workers on teardown
+  ([`6aa27af`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/6aa27af5671f6752805a6fc637c99ba3c4f5c61e))
+
+- Make high-DPI navigation proof deterministic
+  ([`2181503`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/21815036828b2134c459a5d172768fb8f39b0e2c))
+
+
 ## v1.0.1 (2026-08-11)
 
 ### Bug Fixes
