@@ -18,13 +18,14 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
-from tools.release.candidate import synchronize_requirements
+from tools.release.candidate import run_release_command, synchronize_requirements
 from tools.release.compatibility import (
     STABLE_MAJOR_PRERELEASE_MINOR,
     CompatibilityPolicy,
@@ -186,6 +187,20 @@ def test_manifest_materialization_requires_one_plain_dependency(tmp_path: Path) 
     dependency = PlannedDependency("ferrastra", (1, 0, 0), ">=1.0.0,<2.0.0")
     with pytest.raises(ReleasePlanError, match="plain version range"):
         synchronize_requirements(manifest, (dependency,))
+
+
+def test_candidate_command_failure_preserves_actionable_stderr(tmp_path: Path) -> None:
+    """Expose the failed release boundary instead of an opaque subprocess error."""
+    with pytest.raises(ReleasePlanError, match="candidate commit was rejected"):
+        run_release_command(
+            (
+                sys.executable,
+                "-c",
+                "import sys; print('candidate commit was rejected', file=sys.stderr); "
+                "sys.exit(7)",
+            ),
+            cwd=tmp_path,
+        )
 
 
 def _plan(

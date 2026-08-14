@@ -46,6 +46,7 @@ def test_product_semantic_release_configuration_is_independent(product: str) -> 
     """Filter commits and tags through one product's own release history."""
     configuration = _semantic_release_configuration(product)
     assert configuration["commit_parser"] == "conventional-monorepo"
+    assert configuration["no_git_verify"] is True
     assert configuration["tag_format"] == f"{product}-v{{version}}"
     assert configuration["version_variables"] == []
     parser = configuration["commit_parser_options"]

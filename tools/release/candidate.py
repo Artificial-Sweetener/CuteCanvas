@@ -80,9 +80,9 @@ def prepare_candidate(root: Path, source_sha: str, output: Path) -> ReleasePlan:
         ]
         if not planned.direct:
             arguments.append("--patch")
-        _run(arguments, cwd=root)
+        run_release_command(arguments, cwd=root)
         commit_sha = _git(root, "rev-parse", "HEAD")
-        _run(["git", "tag", planned.tag, commit_sha], cwd=root)
+        run_release_command(["git", "tag", planned.tag, commit_sha], cwd=root)
         actual_version = _semantic_version(
             root,
             manifest.relative_to(root),
@@ -186,10 +186,10 @@ def finalize_candidate(root: Path, plan: ReleasePlan, remote: str = "origin") ->
         actual_commit = _git(root, "rev-parse", product.commit_sha)
         if actual_commit != product.commit_sha:
             raise ReleasePlanError(f"missing candidate commit for {product.name}")
-        _run(["git", "tag", product.tag, product.commit_sha], cwd=root)
+        run_release_command(["git", "tag", product.tag, product.commit_sha], cwd=root)
     refspecs = [f"{plan.candidate_sha}:refs/heads/main"]
     refspecs.extend(f"refs/tags/{product.tag}" for product in plan.products)
-    _run(["git", "push", "--atomic", remote, *refspecs], cwd=root)
+    run_release_command(["git", "push", "--atomic", remote, *refspecs], cwd=root)
 
 
 def write_github_outputs(plan: ReleasePlan, path: Path) -> None:
@@ -244,7 +244,7 @@ def _direct_version(
 
 def _semantic_version(root: Path, configuration: Path, flag: str) -> StableVersion:
     """Read one exact version from Python Semantic Release."""
-    output = _run(
+    output = run_release_command(
         [
             sys.executable,
             "-m",
@@ -284,19 +284,27 @@ def _requirement_or_none(value: str) -> Requirement | None:
 
 def _git(root: Path, *arguments: str) -> str:
     """Run Git and return stripped standard output."""
-    return _run(["git", *arguments], cwd=root).strip()
+    return run_release_command(["git", *arguments], cwd=root).strip()
 
 
-def _run(arguments: Sequence[str], *, cwd: Path) -> str:
+def run_release_command(arguments: Sequence[str], *, cwd: Path) -> str:
     """Run one required candidate command without invoking a shell."""
-    completed = subprocess.run(
-        list(arguments),
-        cwd=cwd,
-        env=os.environ.copy(),
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            list(arguments),
+            cwd=cwd,
+            env=os.environ.copy(),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        diagnostic = (error.stderr or error.stdout or "no command output").strip()
+        command = " ".join(arguments)
+        raise ReleasePlanError(
+            f"release command failed with exit code {error.returncode}: "
+            f"{command}\n{diagnostic}"
+        ) from error
     return completed.stdout
 
 
