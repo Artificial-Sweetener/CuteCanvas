@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 
 from PySide6.QtGui import QColor
+
 from qpane.sdk.scene import ClipCoordinateSpace, LayerClip, LayerInteractionPolicy
 
 from ..composition.layers import CompositionLayerInstance

@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,
@@ -33,8 +34,6 @@ from qpane.sdk.execution import (
     ExecutionUrgency,
 )
 from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
-
-from cutecanvas.types import RasterExtentPolicy
 
 from ..composition.edit_controller import CompositionEditController
 from ..resources import ProjectResourceReference

@@ -25,10 +25,13 @@ from dataclasses import dataclass
 from PySide6.QtCore import QRectF, QSize, QSizeF
 from PySide6.QtGui import QTransform
 
+from ..ferrastra.reconstruction import RasterReconstructionSpace
 from ..scene.raster import RasterBounds
+from ..scene.raster_sampling import RasterExactSampling
 from .panel_mapping import PanelLayerMapping
 from .projective_sampling import conservative_transform_scale
 from .projective_visibility import visible_source_rect
+from .render_sampling_grid import ExactSamplingGrid
 
 _TILE_PIXELS = 512
 _TILE_BLEED_PIXELS = 2
@@ -51,6 +54,11 @@ class RenderTileKey:
     scale: float
     column: int
     row: int
+    sampling_grid: ExactSamplingGrid | None = None
+    exact_sampling: RasterExactSampling | None = None
+    reconstruction_space: RasterReconstructionSpace = (
+        RasterReconstructionSpace.SRGB_ENCODED
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +82,9 @@ def visible_tile_requests(
     device_pixel_ratio: float,
     budget_bytes: int,
     maximum_scale: float | None = None,
+    reconstruction_space: RasterReconstructionSpace = (
+        RasterReconstructionSpace.SRGB_ENCODED
+    ),
 ) -> tuple[RenderTileRequest, ...] | None:
     """Build a bounded complete request on one stable source-local grid."""
     source_rect = _bounds_rect(bounds)
@@ -96,6 +107,7 @@ def visible_tile_requests(
             bounds,
             visible,
             scale,
+            reconstruction_space=reconstruction_space,
         )
         if (
             len(requests) <= _MAX_VISIBLE_TILES
@@ -127,6 +139,7 @@ def guarded_tile_requests(
     if visible.isEmpty():
         return visible_requests
     scale = visible_requests[0].key.scale
+    reconstruction_space = visible_requests[0].key.reconstruction_space
     span = _TILE_PIXELS / scale
     for rings in range(_PREFETCH_TILE_RINGS, 0, -1):
         guarded_visible = visible.adjusted(
@@ -143,6 +156,7 @@ def guarded_tile_requests(
             bounds,
             guarded_visible,
             scale,
+            reconstruction_space=reconstruction_space,
         )
         if (
             len(guarded) <= _MAX_VISIBLE_TILES
@@ -160,6 +174,10 @@ def overview_tile_requests(
     fallback_key: Hashable,
     bounds: RasterBounds,
     budget_bytes: int,
+    exact_sampling: RasterExactSampling | None = None,
+    reconstruction_space: RasterReconstructionSpace = (
+        RasterReconstructionSpace.SRGB_ENCODED
+    ),
 ) -> tuple[RenderTileRequest, ...]:
     """Return a low-density whole-source fallback within a strict small budget."""
     if budget_bytes <= 0 or bounds.width <= 0 or bounds.height <= 0:
@@ -185,6 +203,8 @@ def overview_tile_requests(
             bounds,
             source_rect,
             scale,
+            exact_sampling=exact_sampling,
+            reconstruction_space=reconstruction_space,
         )
         if (
             len(requests) <= _MAX_VISIBLE_TILES
@@ -277,6 +297,11 @@ def _requests_for_scale(
     bounds: RasterBounds,
     visible: QRectF,
     scale: float,
+    *,
+    exact_sampling: RasterExactSampling | None = None,
+    reconstruction_space: RasterReconstructionSpace = (
+        RasterReconstructionSpace.SRGB_ENCODED
+    ),
 ) -> tuple[RenderTileRequest, ...]:
     """Return deterministic requests covering one visible local rectangle."""
     span = _TILE_PIXELS / scale
@@ -308,6 +333,9 @@ def _requests_for_scale(
                         scale,
                         column,
                         row,
+                        None,
+                        exact_sampling,
+                        reconstruction_space,
                     ),
                     core,
                     paint,

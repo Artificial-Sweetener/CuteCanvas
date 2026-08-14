@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6.QtGui import QImage
+
 from qpane.sdk.execution import CancellationToken
 
 from . import service

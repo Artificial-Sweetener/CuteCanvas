@@ -19,11 +19,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QToolBar
 
+from cutecanvas import CuteCanvas
 from demonstration.canvas_geometry_dialog import CanvasGeometryDialog
 from demonstration.composition_tutorial import (
     CompositionTutorialController,

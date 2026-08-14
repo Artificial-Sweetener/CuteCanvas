@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QRectF
+
 from qpane.sdk.cache import CacheRegistry
 from qpane.sdk.execution import ExecutionScope
 from qpane.sdk.rendering import SceneCoordinateSystem

@@ -26,12 +26,6 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QRectF, QSize
-from qpane.sdk.raster import (
-    numpy_to_qimage_argb32,
-    qimage_to_numpy_argb32,
-)
-from qpane.sdk.scene import RasterBounds
-from qpane.sdk.vector import VectorDocument, VectorObject
 
 from cutecanvas.coverage import (
     CoverageAssetSnapshot,
@@ -39,6 +33,12 @@ from cutecanvas.coverage import (
     CoverageSnapshot,
 )
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.raster import (
+    numpy_to_qimage_argb32,
+    qimage_to_numpy_argb32,
+)
+from qpane.sdk.scene import RasterBounds
+from qpane.sdk.vector import VectorDocument, VectorObject
 
 from ..composition.layers import CompositionLayerInstance
 from ..composition.model import (

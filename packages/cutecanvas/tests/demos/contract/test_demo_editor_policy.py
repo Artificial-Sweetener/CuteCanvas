@@ -15,9 +15,10 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """Demo contracts for intentional public editor-policy controls."""
 
+from PySide6.QtWidgets import QMenu
+
 from cutecanvas import CuteCanvas, EditorCapability
 from demonstration.editor_policy_controls import EditorPolicyControls
-from PySide6.QtWidgets import QMenu
 
 
 def test_demo_editor_policy_menu_composes_public_capabilities(qapp) -> None:

@@ -21,6 +21,7 @@ from __future__ import annotations
 from threading import Lock
 
 from PySide6.QtCore import QObject
+
 from qpane.sdk.execution import ExecutionHandle, ExecutionRuntime, ExecutionScope
 
 from .document_runtime import CanvasDocumentRuntime

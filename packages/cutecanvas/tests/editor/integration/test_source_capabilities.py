@@ -21,8 +21,9 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from cutecanvas.scene.source_capabilities import EditorSourceCapabilities
 from PySide6.QtCore import QRectF, QSize
+
+from cutecanvas.scene.source_capabilities import EditorSourceCapabilities
 from qpane.scene.source_capabilities import LayerSourceCapabilities
 
 

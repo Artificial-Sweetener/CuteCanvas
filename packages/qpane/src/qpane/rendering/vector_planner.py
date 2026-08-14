@@ -27,7 +27,7 @@ from ..vector.tile_source import VectorRenderTileSource
 from .compiled_scene import CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
-from .raster_sampling import smooth_raster_sampling_enabled
+from .raster_sampling import raster_presentation_sampling
 from .render_tiles import RenderTileWorkCoordinator
 
 
@@ -118,7 +118,7 @@ class VectorRenderPlanner:
                         document.bounds.width,
                         document.bounds.height,
                     ),
-                    render_hint_enabled=smooth_raster_sampling_enabled(
+                    presentation_sampling=raster_presentation_sampling(
                         layer_to_panel,
                         frame.device_pixel_ratio,
                     ),

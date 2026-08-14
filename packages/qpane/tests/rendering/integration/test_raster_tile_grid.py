@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QApplication
+
 from qpane import Config
 from qpane.rendering.raster_tile_grid import (
     RasterTileGrid,

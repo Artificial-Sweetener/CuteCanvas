@@ -20,13 +20,14 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QVBoxLayout,
     QWidget,
 )
+
+from cutecanvas import CuteCanvas
 
 from .layer_inspector import RasterStorageProperties
 from .placed_asset_controls import PlacedAssetControls

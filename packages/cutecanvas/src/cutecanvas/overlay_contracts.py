@@ -23,6 +23,7 @@ from math import hypot
 
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage, QPainter, QTransform
+
 from qpane.sdk.types import OverlayState
 
 

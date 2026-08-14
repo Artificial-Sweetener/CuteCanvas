@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.coverage.spatial_constraint import (
     BoundsCoverageConstraint,

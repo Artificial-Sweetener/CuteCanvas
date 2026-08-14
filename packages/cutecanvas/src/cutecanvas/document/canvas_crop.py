@@ -23,6 +23,7 @@ from math import isfinite
 
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QPainterPath, QPolygonF
+
 from qpane.sdk.scene import (
     LayerEffectReference,
     LayerSourceReference,

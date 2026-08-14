@@ -20,9 +20,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from qpane.sdk.scene import LayerTransform, RasterBounds
-
 from cutecanvas.coverage import CoverageSnapshot
+from qpane.sdk.scene import LayerTransform, RasterBounds
 
 
 @dataclass(frozen=True, slots=True)

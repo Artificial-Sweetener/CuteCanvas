@@ -32,6 +32,7 @@ from .identity import SceneLayerAssetKey, SourceRenderAssetKey
 from .model import LayerClip, LayerDescriptor, LayerPlacement
 from .presentation_effects import LayerPresentationEffect
 from .raster import RasterBounds
+from .raster_sampling import RasterExactSampling, RasterPresentationSampling
 from .source_references import LayerSourceReference
 
 if TYPE_CHECKING:
@@ -86,7 +87,7 @@ class RasterLayerRenderItem:
     placement: LayerPlacement
     clip: LayerClip | None
     strategy: RenderStrategy
-    render_hint_enabled: bool
+    presentation_sampling: RasterPresentationSampling
     debug_draw_tile_grid: bool
     tiles_to_draw: tuple[TileRenderData, ...]
     tile_size: int
@@ -136,6 +137,7 @@ class SampledTileRenderData:
     image_source_rect: QRectF
     source_clip_rect: QRectF | None = None
     integer_origin_sampling: bool = False
+    exact_sampling: RasterExactSampling | None = None
 
     def __post_init__(self) -> None:
         """Detach mutable Qt values from the cache-owned product."""
@@ -174,6 +176,7 @@ class SampledTileRenderData:
                 else _rect_key(self.source_clip_rect)
             ),
             integer_origin_sampling=self.integer_origin_sampling,
+            exact_sampling=self.exact_sampling,
         )
 
 
@@ -186,6 +189,7 @@ class SampledTileGeometryKey:
     image_source_rect: tuple[float, float, float, float]
     source_clip_rect: tuple[float, float, float, float] | None
     integer_origin_sampling: bool
+    exact_sampling: RasterExactSampling | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +214,7 @@ class VectorLayerRenderItem:
     placement: LayerPlacement
     clip: LayerClip | None
     source_size: QSize
-    render_hint_enabled: bool
+    presentation_sampling: RasterPresentationSampling
     effect_clip_path: QPainterPath | None = None
     preview_picture: QPicture | None = None
     trailing_picture: QPicture | None = None
@@ -254,11 +258,12 @@ class SampledLayerRenderItem:
     placement: LayerPlacement
     clip: LayerClip | None
     source_size: QSize
-    render_hint_enabled: bool
+    presentation_sampling: RasterPresentationSampling
     tiles: tuple[SampledTileRenderData, ...]
     effect_clip_path: QPainterPath | None = None
     source_bounds: QRectF | None = None
     mapping_clip_path: QPainterPath | None = None
+    panel_space_products: bool = False
 
     def __post_init__(self) -> None:
         """Detach mutable Qt drawing and geometry values."""

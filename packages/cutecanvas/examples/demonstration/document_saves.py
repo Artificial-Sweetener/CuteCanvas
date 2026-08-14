@@ -21,11 +21,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from PySide6.QtCore import QObject
+
 from cutecanvas import (
     CompositionPersistenceFacade,
     DocumentPersistenceSnapshot,
 )
-from PySide6.QtCore import QObject
 from qpane import (
     ExecutionRejected,
     ExecutionRequest,

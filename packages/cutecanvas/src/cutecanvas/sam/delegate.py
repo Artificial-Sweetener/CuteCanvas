@@ -23,13 +23,13 @@ import uuid
 from typing import TYPE_CHECKING
 
 import numpy as np
-from qpane.sdk.cache import CachePriority, KeyedCacheConsumer
 
 from cutecanvas.sam.segmentation_request import (
     SmartSegmentationProduct,
     SmartSegmentationRequest,
 )
 from cutecanvas.selection.smart_segmentation import SmartSelectionResultCommitter
+from qpane.sdk.cache import CachePriority, KeyedCacheConsumer
 
 logger = logging.getLogger(__name__)
 

@@ -20,15 +20,16 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+
 from cutecanvas import LayerPolicy, MoveToolOptions
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
     interaction_clock,
     stable_latency_samples,
 )
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 

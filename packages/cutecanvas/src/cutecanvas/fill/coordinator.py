@@ -22,6 +22,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
+
+from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
+from cutecanvas.painting import PaintingCoordinator, PaintTargetContext
+from cutecanvas.selection import LayerCoverageProjector, PixelSelectionService
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,
@@ -33,10 +37,6 @@ from qpane.sdk.execution import (
     ExecutionState,
     ExecutionUrgency,
 )
-
-from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
-from cutecanvas.painting import PaintingCoordinator, PaintTargetContext
-from cutecanvas.selection import LayerCoverageProjector, PixelSelectionService
 
 from .evaluation import evaluate_flood_fill
 from .flood import FloodFillRequest

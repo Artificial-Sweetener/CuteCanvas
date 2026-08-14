@@ -23,6 +23,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect
+
 from qpane.sdk.scene import LayerMapping
 
 from ..composition.geometry_policy import LayerGeometryPolicy

@@ -22,9 +22,11 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
+
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.rendering.panel_mapping import PiecewisePanelMapping
 from qpane.scene.bilinear import BilinearLayerTransform
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import SampledLayerRenderItem, SampledTileRenderData
 from qpane_test_support.render_plan import make_render_plan
 
@@ -66,7 +68,7 @@ def test_repair_clip_selects_sample_from_its_finite_projective_patch(qapp) -> No
         placement=raster_item.placement,
         clip=None,
         source_size=QSize(960, 900),
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
         tiles=(
             SampledTileRenderData(
                 sample,

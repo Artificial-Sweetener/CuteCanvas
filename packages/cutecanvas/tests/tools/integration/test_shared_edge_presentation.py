@@ -21,10 +21,11 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.editor.shared_edge_geometry import SharedEdgeSeam, shared_edge_seam
 from cutecanvas.editor.shared_edge_presentation import SharedEdgePresentationProjector
 from cutecanvas.snapping.edge_model import OrientedEdge
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import LayerTransform
 
 

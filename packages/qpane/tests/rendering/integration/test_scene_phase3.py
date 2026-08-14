@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
+
 from qpane.rendering.sdk import RasterSource
 from qpane.scene.identity import SceneLayerAssetKey, SourceRenderAssetKey
 from qpane.scene.model import (
@@ -35,6 +36,7 @@ from qpane.scene.model import (
     SceneKind,
 )
 from qpane.scene.raster import RasterBounds
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
@@ -116,7 +118,7 @@ def test_scene_render_plan_keeps_ordered_items_and_base_item() -> None:
         placement=layer.placement,
         clip=layer.clip,
         strategy=RenderStrategy.DIRECT,
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
         debug_draw_tile_grid=False,
         tiles_to_draw=(),
         tile_size=0,
@@ -185,7 +187,7 @@ def test_raster_layer_render_item_validates_scale_and_tile_metadata() -> None:
             placement=layer.placement,
             clip=layer.clip,
             strategy=RenderStrategy.DIRECT,
-            render_hint_enabled=True,
+            presentation_sampling=RasterPresentationSampling.BILINEAR,
             debug_draw_tile_grid=False,
             tiles_to_draw=(),
             tile_size=0,
@@ -235,7 +237,7 @@ def test_render_plan_detaches_mutable_geometry_without_copying_images(
         placement=layer.placement,
         clip=layer.clip,
         strategy=RenderStrategy.TILE,
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
         debug_draw_tile_grid=False,
         tiles_to_draw=[tile],
         tile_size=4,

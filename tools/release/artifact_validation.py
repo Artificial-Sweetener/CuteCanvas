@@ -30,6 +30,11 @@ from .products import ReleaseProduct
 _REPOSITORY = "https://github.com/Artificial-Sweetener/CuteCanvas"
 _RELATIVE_MARKDOWN_LINK = re.compile(r"\]\((?!https?://|mailto:|#)[^)]+\)")
 _RELATIVE_HTML_SOURCE = re.compile(r"(?:src|href)=[\"'](?!https?://|mailto:|#)")
+_WHEEL_PLATFORM_PATTERNS = {
+    "linux-x64": re.compile(r"-(?:manylinux|musllinux)_[^.]*_x86_64\.whl$"),
+    "windows-x64": re.compile(r"-win_amd64\.whl$"),
+    "macos-arm64": re.compile(r"-macosx_[^.]*_arm64\.whl$"),
+}
 
 
 @dataclass(frozen=True)
@@ -49,19 +54,22 @@ def validate_artifacts(
     version: str,
     distribution: Path,
 ) -> tuple[str, ...]:
-    """Return every violation in one wheel and source distribution set."""
+    """Return every violation in a product's complete distribution set."""
     errors: list[str] = []
-    wheels = tuple(distribution.glob(f"{product.name}-*.whl"))
-    source_distributions = tuple(distribution.glob(f"{product.name}-*.tar.gz"))
-    if len(wheels) != 1:
-        errors.append(f"expected one {product.name} wheel, found {len(wheels)}")
+    wheels = tuple(sorted(distribution.glob(f"{product.name}-*.whl")))
+    source_distributions = tuple(sorted(distribution.glob(f"{product.name}-*.tar.gz")))
+    expected_wheels = len(product.wheel_platforms) or 1
+    if len(wheels) != expected_wheels:
+        errors.append(
+            f"expected {expected_wheels} {product.name} wheel(s), found {len(wheels)}"
+        )
     if len(source_distributions) != 1:
         errors.append(
             f"expected one {product.name} source distribution, "
             f"found {len(source_distributions)}"
         )
-    if len(wheels) == 1:
-        wheel = wheels[0]
+    errors.extend(_validate_wheel_platforms(wheels, product))
+    for wheel in wheels:
         errors.extend(_validate_metadata(read_wheel_metadata(wheel), product, version))
         errors.extend(_validate_wheel_contents(wheel, product))
     if len(source_distributions) == 1:
@@ -70,6 +78,22 @@ def validate_artifacts(
                 read_sdist_metadata(source_distributions[0]), product, version
             )
         )
+    return tuple(errors)
+
+
+def _validate_wheel_platforms(
+    wheels: tuple[Path, ...],
+    product: ReleaseProduct,
+) -> tuple[str, ...]:
+    """Return missing or duplicated native platform wheel violations."""
+    errors: list[str] = []
+    for platform in product.wheel_platforms:
+        pattern = _WHEEL_PLATFORM_PATTERNS[platform]
+        matches = tuple(wheel for wheel in wheels if pattern.search(wheel.name))
+        if len(matches) != 1:
+            errors.append(
+                f"expected one {product.name} {platform} wheel, found {len(matches)}"
+            )
     return tuple(errors)
 
 

@@ -20,12 +20,13 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QImage, QTransform
+
 from cutecanvas.resources.active_raster import ActiveRasterSnapshot
 from cutecanvas.resources.active_raster_coordinates import (
     ActiveRasterCoordinateProjection,
 )
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QImage, QTransform
 from qpane import LayerSourcePoint
 from qpane.sdk.rendering import (
     LayerCoordinateProjection,

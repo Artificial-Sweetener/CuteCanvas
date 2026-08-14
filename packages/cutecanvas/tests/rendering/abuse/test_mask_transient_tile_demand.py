@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import threading
 
-import cutecanvas.masks.strokes as strokes_module
 import pytest
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
+from PySide6.QtWidgets import QApplication
+
+import cutecanvas.masks.strokes as strokes_module
 from cutecanvas.masks.stroke_models import MaskStrokeJobResult, MaskStrokeJobSpec
 from cutecanvas.painting import BrushCompositor
 from cutecanvas_test_support.harness.abuse_model import (
@@ -31,8 +34,6 @@ from cutecanvas_test_support.harness.abuse_model import (
 )
 from cutecanvas_test_support.harness.input_driver import QtStrokeDriver
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize
-from PySide6.QtWidgets import QApplication
 from qpane.sdk.execution import CancellationToken
 
 _CENTER = QPoint(400, 300)

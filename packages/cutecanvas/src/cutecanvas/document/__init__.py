@@ -19,6 +19,7 @@ from .canvas_geometry import CanvasAnchor
 from .canvas_resampling import CanvasResamplingMode
 from .document import CanvasDocument
 from .events import DocumentChange, DocumentChangeKind, DocumentEventHub
+from .history import DocumentHistory
 from .references import (
     CanvasContentKind,
     CanvasContentReference,
@@ -58,5 +59,6 @@ __all__ = [
     "DocumentChange",
     "DocumentChangeKind",
     "DocumentEventHub",
+    "DocumentHistory",
     "ResolvedCanvasContent",
 ]

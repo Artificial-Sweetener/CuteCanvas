@@ -22,6 +22,7 @@ import uuid
 
 from PySide6.QtCore import QObject, QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
+
 from qpane import (
     BilinearLayerTransform,
     ComparisonOrientation,

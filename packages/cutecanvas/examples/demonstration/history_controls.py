@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas, EditSessionKind
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QLabel, QMainWindow, QMenu, QToolBar
+
+from cutecanvas import CuteCanvas, EditSessionKind
 
 _SESSION_LABELS = {
     EditSessionKind.TRANSFORM: "Transform",

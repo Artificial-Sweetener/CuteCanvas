@@ -25,10 +25,10 @@ from typing import TypeAlias
 import numpy as np
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QImage
-from qpane.sdk.raster import qimage_to_numpy_view_grayscale8
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.raster import qimage_to_numpy_view_grayscale8
+from qpane.sdk.scene import RasterBounds
 
 from ..raster.sparse_grid import (
     SparseRasterGrid,

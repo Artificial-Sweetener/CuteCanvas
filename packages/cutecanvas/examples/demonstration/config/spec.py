@@ -27,6 +27,7 @@ from cutecanvas import (
     Config,
     DiagnosticsDomain,
 )
+from qpane import RasterReconstructionSpace
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,9 @@ class SectionSpec:
 
 
 CACHE_MODE_OPTIONS: tuple[str, ...] = tuple(mode.value for mode in CacheMode)
+RECONSTRUCTION_SPACE_OPTIONS: tuple[str, ...] = tuple(
+    space.value for space in RasterReconstructionSpace
+)
 SAM_DOWNLOAD_MODE_OPTIONS: tuple[str, ...] = ("background", "blocking", "disabled")
 DIAGNOSTIC_DOMAIN_OPTIONS: tuple[tuple[str, str, str, str | None], ...] = (
     (
@@ -303,6 +307,16 @@ VIEWER_PREFETCH_FIELDS: tuple[FieldSpec, ...] = (
     ),
 )
 VIEWER_VIEWPORT_FIELDS: tuple[FieldSpec, ...] = (
+    FieldSpec(
+        path="viewport_reconstruction_space",
+        kind="combo",
+        options=RECONSTRUCTION_SPACE_OPTIONS,
+        tooltip=(
+            "Choose sRGB-encoded viewport filtering or opt into linear-light sRGB."
+        ),
+        label="Raster Reconstruction",
+        feature_namespace="core",
+    ),
     FieldSpec(
         path="tile_overlap",
         kind="spin",

@@ -48,6 +48,7 @@ config = {
     "tile_size": "auto",
     "tile_overlap": 8,
     "min_view_size_px": 128,
+    "viewport_reconstruction_space": "srgb_encoded",
     "canvas_expansion_factor": 1.4,
     "safe_min_zoom": 0.001,
     "drag_out_enabled": True,
@@ -148,6 +149,11 @@ not appear between independently sampled products.
 physical size. `canvas_expansion_factor` reserves navigation room outside the
 scene, and `safe_min_zoom` is the numerical floor applied before transform
 math. These values are renderer geometry, not document or layer bounds.
+
+`viewport_reconstruction_space` controls filtered viewport and pyramid
+reconstruction for sRGB premultiplied RGBA8. It defaults to `"srgb_encoded"`;
+set `"srgb_linear"` to opt into linear-light reconstruction. The two choices
+have distinct demand, work, cache, and product identities.
 
 ## Mouse and Zoom Feel
 

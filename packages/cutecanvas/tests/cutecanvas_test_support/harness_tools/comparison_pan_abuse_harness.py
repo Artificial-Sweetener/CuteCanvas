@@ -25,13 +25,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from cutecanvas.document import CanvasDocument
-from cutecanvas.presentation import CanvasWorkspace
 from PySide6.QtCore import QBuffer, QEvent, QIODevice, QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QImage, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from cutecanvas.document import CanvasDocument
+from cutecanvas.presentation import CanvasWorkspace
 from cutecanvas_test_support.harness_tools.pan_render_harness import (
     FrameArtifactDetector,
     FrameDifference,

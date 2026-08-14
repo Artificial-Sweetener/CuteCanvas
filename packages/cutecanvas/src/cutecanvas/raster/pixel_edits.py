@@ -20,7 +20,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import numpy as np
-from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_extraction import build_pixel_lift
@@ -31,6 +30,7 @@ from cutecanvas.scene.pixel_fragments import (
 )
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from ..resources import ProjectResourceReference
 from .assets import EditableRasterAssetStore

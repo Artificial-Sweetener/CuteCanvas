@@ -17,14 +17,18 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QImage, QPainter
-from qpane.sdk.raster import numpy_to_qimage_grayscale8
-from qpane.sdk.scene import RasterBounds
+from PySide6.QtGui import QImage
+
+from cutecanvas.ferrastra import NativeCoverageProjector
+from qpane.sdk.raster import (
+    numpy_to_qimage_grayscale8,
+    qimage_to_numpy_grayscale8,
+)
+from qpane.sdk.scene import LayerTransform, RasterBounds
 
 from .surface import CoverageSurface
 
@@ -38,16 +42,14 @@ class CoverageSurfaceSampler:
     def sample(self, source_rect: QRectF, pixel_size: QSize) -> QImage:
         """Return one filtered grayscale sample without dense-gap allocation."""
         bounds = RasterBounds.from_qrect(source_rect.toAlignedRect())
-        stride = _sample_stride(bounds, pixel_size)
         image = coverage_image(
-            self.surface.capture_region_strided(bounds, stride),
+            self.surface.capture_region(bounds),
         )
         return project_coverage_image(
             image,
             bounds,
             source_rect,
             pixel_size,
-            sample_stride=stride,
         )
 
 
@@ -56,8 +58,6 @@ def project_coverage_image(
     image_bounds: RasterBounds,
     source_rect: QRectF,
     pixel_size: QSize,
-    *,
-    sample_stride: int = 1,
 ) -> QImage:
     """Project integer-bounded coverage onto one exact sampling rectangle."""
     exact_rect = QRectF(
@@ -66,40 +66,28 @@ def project_coverage_image(
         float(image_bounds.width),
         float(image_bounds.height),
     )
-    if sample_stride == 1 and source_rect == exact_rect and pixel_size == image.size():
+    if source_rect == exact_rect and pixel_size == image.size():
         return image
-    target = QImage(pixel_size, QImage.Format_Grayscale8)
-    target.fill(0)
-    painter = QPainter(target)
-    try:
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        source_sample_rect = QRectF(
-            (source_rect.x() - image_bounds.x) / sample_stride,
-            (source_rect.y() - image_bounds.y) / sample_stride,
-            source_rect.width() / sample_stride,
-            source_rect.height() / sample_stride,
-        )
-        painter.drawImage(
-            QRectF(0.0, 0.0, float(pixel_size.width()), float(pixel_size.height())),
-            image,
-            source_sample_rect,
-        )
-    finally:
-        painter.end()
-    return target
+    destination_bounds = RasterBounds(
+        0,
+        0,
+        pixel_size.width(),
+        pixel_size.height(),
+    )
+    pixels = NativeCoverageProjector().project(
+        qimage_to_numpy_grayscale8(image),
+        source_bounds=image_bounds,
+        transform=LayerTransform(
+            m11=pixel_size.width() / source_rect.width(),
+            m22=pixel_size.height() / source_rect.height(),
+            dx=-source_rect.x() * pixel_size.width() / source_rect.width(),
+            dy=-source_rect.y() * pixel_size.height() / source_rect.height(),
+        ),
+        destination_bounds=destination_bounds,
+    )
+    return numpy_to_qimage_grayscale8(pixels)
 
 
 def coverage_image(pixels: np.ndarray) -> QImage:
     """Detach contiguous coverage pixels into a grayscale Qt image."""
     return numpy_to_qimage_grayscale8(pixels)
-
-
-def _sample_stride(bounds: RasterBounds, pixel_size: QSize) -> int:
-    """Bound sparse reads while retaining two source samples per output pixel."""
-    target_width = max(1, pixel_size.width() * 2)
-    target_height = max(1, pixel_size.height() * 2)
-    return max(
-        1,
-        math.ceil(bounds.width / target_width),
-        math.ceil(bounds.height / target_height),
-    )

@@ -28,13 +28,14 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QImage, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
-from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
+    wait_for_qt_condition,
 )
+from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 _RESULT_PREFIX = "HIGH_DPI_NAVIGATION_RESULT="
 
@@ -97,6 +98,12 @@ def _wait_for_navigation_settle(
     operation: str,
 ) -> None:
     """Finish every staged navigation owner before measuring another gesture."""
+    viewport = harness.viewer.view().viewport
+    if not wait_for_qt_condition(
+        lambda: not viewport._zoom_anim_pending,
+        timeout_seconds=20.0,
+    ):
+        raise RuntimeError(f"{operation} smooth zoom did not settle")
     if not harness.wait_for_render_refinement_idle(
         timeout_ms=20_000,
         include_prefetch=True,
@@ -196,6 +203,7 @@ def main() -> None:
 
             zoom_latencies: list[float] = []
             zoom_redraw_trace: list[dict[str, object]] = []
+            zoom_end_full_redraws = 0
             zoom_steps = (120, 120, -120, -120, 120, -120)
             for index, delta in enumerate(zoom_steps):
                 redraws_before_step = renderer.snapshot_metrics().full_redraws
@@ -206,11 +214,7 @@ def main() -> None:
                     QPoint(0, delta),
                     Qt.NoButton,
                     Qt.NoModifier,
-                    (
-                        Qt.ScrollPhase.ScrollBegin
-                        if index == 0
-                        else Qt.ScrollPhase.ScrollUpdate
-                    ),
+                    Qt.ScrollPhase.ScrollBegin,
                     False,
                 )
                 started = interaction_clock()
@@ -228,23 +232,23 @@ def main() -> None:
                         ),
                     }
                 )
-                QTest.qWait(35)
-            redraws_before_end = renderer.snapshot_metrics().full_redraws
-            wheel_end = QWheelEvent(
-                QPointF(center),
-                QPointF(viewer.mapToGlobal(center)),
-                QPoint(),
-                QPoint(),
-                Qt.NoButton,
-                Qt.NoModifier,
-                Qt.ScrollPhase.ScrollEnd,
-                False,
-            )
-            QApplication.sendEvent(viewer, wheel_end)
-            app.processEvents()
-            zoom_end_full_redraws = (
-                renderer.snapshot_metrics().full_redraws - redraws_before_end
-            )
+                redraws_before_end = renderer.snapshot_metrics().full_redraws
+                wheel_end = QWheelEvent(
+                    QPointF(center),
+                    QPointF(viewer.mapToGlobal(center)),
+                    QPoint(),
+                    QPoint(),
+                    Qt.NoButton,
+                    Qt.NoModifier,
+                    Qt.ScrollPhase.ScrollEnd,
+                    False,
+                )
+                QApplication.sendEvent(viewer, wheel_end)
+                app.processEvents()
+                zoom_end_full_redraws += (
+                    renderer.snapshot_metrics().full_redraws - redraws_before_end
+                )
+                _wait_for_navigation_settle(harness, f"wheel zoom step {index}")
             redraws_before_settle = renderer.snapshot_metrics().full_redraws
             _wait_for_navigation_settle(harness, "wheel zoom")
             zoom_settle_full_redraws = (

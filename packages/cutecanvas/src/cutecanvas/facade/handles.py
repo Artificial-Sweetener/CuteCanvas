@@ -22,6 +22,7 @@ from typing import Protocol
 
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QTransform
+
 from qpane import LayerMapping, LayerPresentationEffect, LayerPresentationStyle
 
 from ..composition.geometry_policy import LayerGeometryPolicy

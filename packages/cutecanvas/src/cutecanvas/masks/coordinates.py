@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Callable
 
 from PySide6.QtCore import QPoint, QPointF
+
 from qpane.sdk.rendering import (
     LayerLocalPoint,
     PanelPoint,

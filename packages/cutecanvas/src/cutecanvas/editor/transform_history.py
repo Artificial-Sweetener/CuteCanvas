@@ -20,9 +20,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from qpane.sdk.scene import LayerMapping
-
 from cutecanvas.edit_sessions import EditSessionKind
+from qpane.sdk.scene import LayerMapping
 
 from .provisional_history import (
     BoundedProvisionalHistory,

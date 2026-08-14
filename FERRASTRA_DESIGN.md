@@ -1568,20 +1568,21 @@ It does not contain kernels or QPane presentation behavior.
 
 ## 27. Current-code migration map
 
-This section identifies current responsibilities that Ferrastra should absorb. Symbols and file paths are from the current monorepo snapshot.
+This section identifies current ownership and the numerical responsibilities
+still scheduled for later phases.
 
-### 27.1 Phase-one exact resampling
+### 27.1 Exact resampling ownership
 
-| Current location | Current behavior | Final owner/action |
+| Current location | Current responsibility | Numerical owner |
 |---|---|---|
-| `packages/qpane/src/qpane/rendering/pyramid.py` | Generates pyramid levels with `QImage.scaled(..., SmoothTransformation)` | QPane retains level policy/cache; Ferrastra produces exact level pixels through `Lanczos3@1` or selected filter |
-| `packages/qpane/src/qpane/raster/affine_resampling.py` | Generic affine raster projection through QPainter | Replace implementation with Ferrastra transform operation; eventually remove generic numerical ownership from QPane SDK |
-| `packages/qpane/src/qpane/raster/image_conversion.py` | `*_at_size` helpers combine buffer conversion and Qt resampling | Split conversion from resampling; remove scaling behavior from conversion helpers |
-| `packages/cutecanvas/src/cutecanvas/coverage/projection.py` | Coverage NumPy → QImage → QPainter transform → NumPy | CuteCanvas adapter calls Ferrastra coverage transform directly |
-| `packages/cutecanvas/src/cutecanvas/editor/fragment_projection.py` | Commits transformed raster and coverage through QPane/Qt resampling | CuteCanvas owns command; Ferrastra owns exact raster and coverage projection |
-| `packages/qpane/src/qpane/rendering/layer_rasterization.py` and `packages/cutecanvas/src/cutecanvas/placed/rasterization.py` | Generic editable placed-image rasterization through QPainter | CuteCanvas calls Ferrastra directly; QPane retains mixed-scene rasterization only |
-| `packages/cutecanvas/src/cutecanvas/raster/color_surface.py` | Strided sparse sample followed by Qt smoothing | Exact sampled products come from Ferrastra; any crude preview is explicitly interactive only |
-| `packages/cutecanvas/src/cutecanvas/coverage/raster_sampling.py` | Strided coverage and QPainter scaling | Ferrastra coverage sampling operation |
+| `packages/qpane/src/qpane/rendering/pyramid.py` | Level policy, cache, cancellation, and publication | Ferrastra produces exact Lanczos3 level pixels |
+| `packages/qpane/src/qpane/rendering/exact_raster_refinement.py` | Settled viewport demand and atomic refinement adoption | Ferrastra produces exact axis-aligned and affine physical-grid pixels |
+| `packages/qpane/src/qpane/raster/image_conversion.py` | Buffer and QImage representation conversion | No numerical scaling occurs in conversion helpers |
+| `packages/cutecanvas/src/cutecanvas/ferrastra/` | Authoring-state adaptation into typed graphs | Ferrastra evaluates raster and Coverage8 products |
+| `packages/cutecanvas/src/cutecanvas/editor/fragment_projection.py` | Floating-fragment command and publication policy | Ferrastra evaluates raster and coverage projection |
+| `packages/cutecanvas/src/cutecanvas/placed/raster_product.py` | Placed-source graph adaptation | Ferrastra evaluates the placed raster product |
+| `packages/cutecanvas/src/cutecanvas/raster/color_surface.py` | Sparse editable source ownership and bounded sample admission | Ferrastra evaluates exact minification |
+| `packages/cutecanvas/src/cutecanvas/coverage/raster_sampling.py` | Sparse coverage demand adaptation | Ferrastra evaluates exact coverage sampling |
 
 ### 27.2 Foundational numerical migration
 
@@ -2022,26 +2023,14 @@ Exit criteria:
 - Repeated pyramid scales reuse products/coefficients.
 - Isolated Ferrastra and QPane wheels pass integration.
 
-### Phase 3 — Complete current exact-resampling ownership migration
+### Phase 3 — Exact-resampling ownership complete
 
-Migrate and delete old implementations for:
-
-- QPane affine raster projection.
-- QPane conversion helpers that scale.
-- CuteCanvas coverage projection.
-- CuteCanvas floating-fragment projection.
-- Placed-image rasterization.
-- Sparse editable-raster exact minification.
-- Sparse coverage exact sampling.
-- Mask import exact resampling.
-
-Introduce coverage-specific resampling rather than using photographic Lanczos by default.
-
-Exit criteria:
-
-- CuteCanvas no longer uses QPane as a generic numerical resampler.
-- QPane’s raster conversion helpers only adapt representation.
-- Ownership checker bans reintroduction of removed Qt numerical paths.
+QPane affine raster projection, conversion boundaries, CuteCanvas coverage and
+floating-fragment projection, placed-image rasterization, sparse raster and
+coverage sampling, and mask import resampling use Ferrastra-owned numerical
+operations. Coverage-specific nearest, linear, and area filters preserve scalar
+coverage semantics. QPane raster conversion helpers adapt representation only,
+and the ownership checker rejects the removed numerical paths.
 
 ### Phase 4 — NoHalo, LoHalo, and Color to Alpha
 

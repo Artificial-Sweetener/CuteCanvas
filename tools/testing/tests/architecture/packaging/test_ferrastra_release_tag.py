@@ -17,6 +17,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+import tools.check_ferrastra_release_tag as release_check
 from tools.check_ferrastra_release_tag import release_tag_error, workspace_version
 
 
@@ -36,3 +39,24 @@ def test_mismatched_release_tag_fails() -> None:
         "Ferrastra release tag must be 'ferrastra-v0.1.0', received "
         "'ferrastra-v0.2.0'"
     )
+
+
+def test_release_admission_rejects_pre_one_stable_tags() -> None:
+    """Keep Ferrastra's public lineage at 1.0.0 and later."""
+    with pytest.raises(ValueError, match=r"begin at 1\.0\.0"):
+        release_check.run("ferrastra-v0.1.0")
+
+
+def test_release_admission_rejects_existing_pypi_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never attempt to overwrite an immutable Ferrastra release."""
+
+    def existing_release(_name: str, _version: str) -> bool:
+        """Represent an already published immutable package version."""
+        return True
+
+    monkeypatch.setattr(release_check, "workspace_version", lambda: "1.0.0")
+    monkeypatch.setattr(release_check, "release_exists", existing_release)
+    with pytest.raises(SystemExit, match=r"ferrastra==1\.0\.0"):
+        release_check.run("ferrastra-v1.0.0", check_pypi=True)

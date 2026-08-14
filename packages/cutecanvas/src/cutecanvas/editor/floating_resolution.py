@@ -21,10 +21,9 @@ import uuid
 from collections.abc import Callable
 from typing import TypeAlias
 
-from qpane.sdk.scene import LayerDescriptor, LayerTransform
-
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
+from qpane.sdk.scene import LayerDescriptor, LayerTransform
 
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController
 from ..scene.pixel_owners import LayerPixelMutationOwner

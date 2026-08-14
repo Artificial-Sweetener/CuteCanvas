@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPoint, QPointF, QSize
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas_test_support.harness.abuse_model import (
     HarnessPoint,
     PointerKind,
@@ -26,8 +29,6 @@ from cutecanvas_test_support.harness.abuse_model import (
 )
 from cutecanvas_test_support.harness.input_driver import QtStrokeDriver
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from PySide6.QtCore import QPoint, QPointF, QSize
-from PySide6.QtWidgets import QApplication
 from qpane.rendering.render_tile_geometry import RenderTileRequest
 from qpane.rendering.render_tile_types import RenderTileProduct
 

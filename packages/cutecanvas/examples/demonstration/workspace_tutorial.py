@@ -26,15 +26,15 @@ import uuid
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QFileDialog, QWidget
+
 from cutecanvas import (
     CuteCanvas,
     ExecutionRuntime,
     LayerPolicy,
     prepare_document_restore,
 )
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QFileDialog, QWidget
-
 from demonstration.document_saves import (
     DocumentSaveCoordinator,
     DocumentSaveResult,

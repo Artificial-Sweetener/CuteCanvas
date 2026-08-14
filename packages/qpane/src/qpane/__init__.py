@@ -107,6 +107,7 @@ __all__ = [
     "RasterBounds",
     "RasterHitTestProvider",
     "RasterProductPolicy",
+    "RasterReconstructionSpace",
     "RasterSource",
     "RasterSourcePatch",
     "RasterSourceProvider",
@@ -176,6 +177,10 @@ _LAZY_SYMBOLS: dict[str, tuple[str, str]] = {
     "BackendSubmission": ("qpane.sdk.execution", "BackendSubmission"),
     "QPane": ("qpane.viewer", "QPane"),
     "Config": ("qpane.core.config", "Config"),
+    "RasterReconstructionSpace": (
+        "qpane.ferrastra.reconstruction",
+        "RasterReconstructionSpace",
+    ),
     "TileSizeSetting": ("qpane.core.config", "TileSizeSetting"),
     "CacheMode": ("qpane.types", "CacheMode"),
     "ClipCoordinateSpace": ("qpane.scene.model", "ClipCoordinateSpace"),

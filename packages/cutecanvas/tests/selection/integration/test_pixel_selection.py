@@ -21,6 +21,7 @@ import random
 import uuid
 
 import numpy as np
+
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from cutecanvas.selection import PixelSelectionService
 from cutecanvas.types import RasterExtentPolicy

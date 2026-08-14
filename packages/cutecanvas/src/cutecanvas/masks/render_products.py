@@ -22,12 +22,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from time import monotonic
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QImage
+
 from qpane.sdk.execution import CancellationToken
 
 from .mask import MaskAssetStore
 from .mask_controller import MaskController
+from .resampled_products import resample_mask_overlay
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,10 +106,10 @@ def build_mask_prefetch(
             )
             if target_size == image.size() or target_size.isEmpty():
                 continue
-            scaled_image = image.scaled(
+            scaled_image = resample_mask_overlay(
+                image,
                 target_size,
-                Qt.AspectRatioMode.IgnoreAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+                cancellation,
             )
             if not scaled_image.isNull():
                 scaled_outputs.append((scale_key, scaled_image))

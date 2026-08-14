@@ -17,10 +17,9 @@
 
 from __future__ import annotations
 
-from qpane.sdk.scene import RasterBounds
-
 from cutecanvas.raster.content_bounds import occupied_channel_bounds
 from cutecanvas.raster.sparse_grid import SparseRasterSnapshot
+from qpane.sdk.scene import RasterBounds
 
 from .content_bounds import occupied_coverage_bounds
 from .surface import CoverageSnapshot, CoverageStateSnapshot

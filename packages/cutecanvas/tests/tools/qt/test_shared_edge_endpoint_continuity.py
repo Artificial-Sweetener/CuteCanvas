@@ -22,12 +22,13 @@ import logging
 from typing import Protocol, cast
 
 import pytest
-from cutecanvas import LayerPolicy
-from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QPainterPath, QPainterPathStroker, QPolygonF
 from PySide6.QtTest import QTest
+
+from cutecanvas import LayerPolicy
+from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from qpane.rendering.view import View
 from qpane.sdk.scene import BilinearLayerTransform, PiecewiseLayerTransform
 

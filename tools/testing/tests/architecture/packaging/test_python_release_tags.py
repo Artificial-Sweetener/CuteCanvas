@@ -30,7 +30,7 @@ from tools.release.pypi import has_compatible_qpane_release
         ("qpane-v4.2.1", "qpane", (4, 2, 1)),
         ("cutecanvas-v1.0.0", "cutecanvas", (1, 0, 0)),
         ("cutecanvas-v2.3.4", "cutecanvas", (2, 3, 4)),
-        ("ferrastra-v0.1.0", "ferrastra", (0, 1, 0)),
+        ("ferrastra-v1.0.0", "ferrastra", (1, 0, 0)),
         ("ferrastra-v1.2.3", "ferrastra", (1, 2, 3)),
     ],
 )
@@ -54,18 +54,19 @@ def test_product_tags_resolve_independent_stable_versions(
         "qpane-v3.0",
         "cutecanvas-v1.0.0rc1",
         "ferrastra-v0.0.1",
+        "ferrastra-v0.9.9",
     ],
 )
 def test_invalid_or_regressive_python_release_tags_are_rejected(tag: str) -> None:
     """Reject ambiguous, incomplete, prerelease, and regressive tags."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="release"):
         release_from_tag(tag)
 
 
 def test_python_release_admission_rejects_ferrastra_tags() -> None:
     """Keep native-wheel admission separate from Python-only validation."""
-    with pytest.raises(ValueError):
-        python_release_from_tag("ferrastra-v0.1.0")
+    with pytest.raises(ValueError, match="Python release tag"):
+        python_release_from_tag("ferrastra-v1.0.0")
 
 
 def test_cutecanvas_requires_a_published_compatible_qpane_major() -> None:

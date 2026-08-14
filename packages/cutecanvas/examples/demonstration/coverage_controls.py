@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -29,6 +28,8 @@ from PySide6.QtWidgets import (
     QToolBar,
     QWidget,
 )
+
+from cutecanvas import CuteCanvas
 
 
 class CoverageControls(QObject):

@@ -23,6 +23,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 
 from PySide6.QtGui import QColor
+
 from qpane.sdk.scene import (
     LayerClip,
     LayerEffectReference,

@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF
+
 from qpane.sdk.scene import RasterBounds
 
 from .model import BrushDab

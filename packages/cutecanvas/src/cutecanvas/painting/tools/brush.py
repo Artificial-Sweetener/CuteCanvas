@@ -25,6 +25,12 @@ from typing import ClassVar
 
 from PySide6.QtCore import QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen
+
+from cutecanvas.painting import BrushOperation, BrushStrokeSegment, BrushStrokeSession
+from cutecanvas.tools.base import BaseTool
+from cutecanvas.tools.cursor_feedback import ToolCursorStyle
+from cutecanvas.tools.modifier_snapshot import alt_is_active, shift_is_active
+from cutecanvas.tools.ports import PaintingInteractionPort
 from qpane import (
     PanelHitTest,
     PointerDeviceKind,
@@ -32,12 +38,6 @@ from qpane import (
     PointerSample,
     ToolInputProfile,
 )
-
-from cutecanvas.painting import BrushOperation, BrushStrokeSegment, BrushStrokeSession
-from cutecanvas.tools.base import BaseTool
-from cutecanvas.tools.cursor_feedback import ToolCursorStyle
-from cutecanvas.tools.modifier_snapshot import alt_is_active, shift_is_active
-from cutecanvas.tools.ports import PaintingInteractionPort
 
 from .brush_preview import BrushPreview, BrushPreviewRenderer
 

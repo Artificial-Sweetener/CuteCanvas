@@ -18,9 +18,10 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
+
+from cutecanvas import CuteCanvas
 
 
 def test_mask_properties_refresh_avoids_direct_brush_cursor_calls(qapp) -> None:

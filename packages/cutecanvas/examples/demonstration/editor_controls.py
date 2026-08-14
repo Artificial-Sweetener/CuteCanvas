@@ -20,15 +20,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas import (
-    CuteCanvas,
-    EditorCursorIntent,
-    EditorIntent,
-    LayerEdgeModificationResult,
-    LayerPolicy,
-    PixelSelectionModificationResult,
-    RasterExtentPolicy,
-)
 from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QAction,
@@ -49,6 +40,16 @@ from PySide6.QtWidgets import (
     QToolBar,
     QToolButton,
     QWidget,
+)
+
+from cutecanvas import (
+    CuteCanvas,
+    EditorCursorIntent,
+    EditorIntent,
+    LayerEdgeModificationResult,
+    LayerPolicy,
+    PixelSelectionModificationResult,
+    RasterExtentPolicy,
 )
 
 from .history_controls import DemoHistoryControls

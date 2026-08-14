@@ -87,10 +87,10 @@ def test_main_bootstraps_before_importing_demo_window(monkeypatch) -> None:
     ]
 
 
-def test_demo_environment_installs_local_qpane_with_cutecanvas(
+def test_demo_environment_installs_local_products_with_cutecanvas(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """Provision the demo from both editable packages in the source checkout."""
+    """Provision the demo from every editable product in the source checkout."""
     package_root = tmp_path / "packages" / "cutecanvas"
     examples_root = package_root / "examples"
     examples_root.mkdir(parents=True)
@@ -117,6 +117,8 @@ def test_demo_environment_installs_local_qpane_with_cutecanvas(
             "-m",
             "pip",
             "install",
+            "-e",
+            str(tmp_path / "packages" / "ferrastra"),
             "-e",
             str(tmp_path / "packages" / "qpane"),
             "-e",

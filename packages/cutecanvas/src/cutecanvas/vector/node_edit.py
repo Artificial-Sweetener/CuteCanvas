@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QPainterPath
+
 from qpane.sdk.vector import (
     VectorNodeRole,
     VectorObject,

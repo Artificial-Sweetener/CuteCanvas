@@ -22,6 +22,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QRect, QRectF
 from PySide6.QtGui import QColor, QImage, QPainter
+
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.rendering.transient_raster import TransientRasterHandoff
 from qpane.scene.raster import RasterBounds

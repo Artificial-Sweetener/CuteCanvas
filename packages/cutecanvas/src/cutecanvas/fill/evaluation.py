@@ -17,9 +17,8 @@
 
 from __future__ import annotations
 
-from qpane.sdk.execution import CancellationToken
-
 from cutecanvas.coverage import CoverageSnapshot
+from qpane.sdk.execution import CancellationToken
 
 from .flood import FillCancelledError, FloodFillEngine, FloodFillRequest
 

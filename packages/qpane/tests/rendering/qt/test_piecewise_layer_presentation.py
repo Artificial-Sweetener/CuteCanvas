@@ -23,6 +23,7 @@ from collections.abc import Callable
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPathStroker
+
 from qpane import (
     BilinearLayerTransform,
     PiecewiseLayerTransform,

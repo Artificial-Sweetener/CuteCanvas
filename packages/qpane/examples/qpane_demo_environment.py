@@ -26,6 +26,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+from typing import Protocol
+
+
+class _FingerprintDigest(Protocol):
+    """Accept bytes contributing to one environment fingerprint."""
+
+    def update(self, value: bytes, /) -> None:
+        """Add bytes to the fingerprint state."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -59,6 +68,8 @@ class DemoEnvironmentManager:
         self._entry_point = entry_point.resolve()
         self._environment_root = self._entry_point.parent
         self._project_root = self._environment_root.parent
+        self._workspace_root = self._project_root.parent.parent
+        self._ferrastra_root = self._project_root.parent / "ferrastra"
 
     def environment_dir(self, tier: str) -> Path:
         """Return the isolated environment directory for a tier."""
@@ -126,9 +137,19 @@ class DemoEnvironmentManager:
             cwd=self._project_root,
         )
         self._tier(tier)
+        ferrastra_target = str(self._ferrastra_root)
         qpane_target = str(self._project_root)
         subprocess.run(
-            [str(python_path), "-m", "pip", "install", "-e", qpane_target],
+            [
+                str(python_path),
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ferrastra_target,
+                "-e",
+                qpane_target,
+            ],
             check=True,
             cwd=self._project_root,
         )
@@ -152,8 +173,29 @@ class DemoEnvironmentManager:
         """Hash install metadata that can change a tier's dependencies."""
         digest = hashlib.sha256()
         digest.update((self._project_root / "pyproject.toml").read_bytes())
+        self._update_ferrastra_fingerprint(digest)
         digest.update(tier.encode("utf-8"))
         return digest.hexdigest()
+
+    def _update_ferrastra_fingerprint(self, digest: _FingerprintDigest) -> None:
+        """Include native inputs whose changes require rebuilding Ferrastra."""
+        paths = [
+            self._workspace_root / "Cargo.toml",
+            self._workspace_root / "Cargo.lock",
+            self._workspace_root / "rust-toolchain.toml",
+            self._ferrastra_root / "pyproject.toml",
+        ]
+        paths.extend(sorted((self._ferrastra_root / "src").rglob("*.py")))
+        for crate in sorted((self._workspace_root / "crates").glob("ferrastra-*")):
+            paths.append(crate / "Cargo.toml")
+            paths.extend(sorted((crate / "src").rglob("*.rs")))
+        for path in paths:
+            if not path.is_file():
+                continue
+            digest.update(
+                path.relative_to(self._workspace_root).as_posix().encode("utf-8")
+            )
+            digest.update(path.read_bytes())
 
     def _write_fingerprint(self, tier: str) -> None:
         """Record the successfully installed metadata fingerprint."""

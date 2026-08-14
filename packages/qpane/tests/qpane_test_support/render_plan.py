@@ -23,6 +23,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage, Qt, QTransform
+
 from qpane.rendering.sdk import RasterSource
 from qpane.scene.identity import (
     SceneLayerAssetKey,
@@ -37,6 +38,7 @@ from qpane.scene.model import (
     SceneKind,
 )
 from qpane.scene.raster import RasterBounds
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     RasterLayerRenderItem,
     RenderStrategy,
@@ -56,7 +58,7 @@ def make_render_plan(
     transform: QTransform | None = None,
     zoom: float = 1.0,
     strategy: RenderStrategy = RenderStrategy.DIRECT,
-    render_hint_enabled: bool = False,
+    presentation_sampling: RasterPresentationSampling = RasterPresentationSampling.NEAREST,
     debug_draw_tile_grid: bool = False,
     tiles_to_draw: tuple[TileRenderData, ...] = (),
     tile_size: int = 64,
@@ -129,7 +131,7 @@ def make_render_plan(
         placement=layer.placement,
         clip=layer.clip,
         strategy=strategy,
-        render_hint_enabled=render_hint_enabled,
+        presentation_sampling=presentation_sampling,
         debug_draw_tile_grid=debug_draw_tile_grid,
         tiles_to_draw=tiles_to_draw,
         tile_size=tile_size,

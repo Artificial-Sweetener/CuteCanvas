@@ -22,6 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..composition import CompositionService
+from ..composition.history_model import HistoryCommit, HistoryTruncation
+from ..composition.history_policy import CompositionHistoryPolicy
 from ..placed.history import PlacedAssetEdit, PlacedAssetEditOwner
 from ..placed.store import PlacedAssetStore
 from ..raster.assets import EditableRasterAssetStore
@@ -62,6 +64,9 @@ class DocumentResourceCore:
         layers_changed: Callable[[uuid.UUID], None],
         pixel_selection_changed: Callable[[PixelSelectionState], None],
         resource_changed: Callable[[uuid.UUID], None],
+        history_policy: CompositionHistoryPolicy | None = None,
+        history_committed: Callable[[HistoryCommit], None] | None = None,
+        history_truncated: Callable[[HistoryTruncation], None] | None = None,
     ) -> DocumentResourceCore:
         """Construct one complete durable identity, payload, and history graph."""
         resources = ProjectResourceStore()
@@ -71,6 +76,9 @@ class DocumentResourceCore:
             layers_changed=layers_changed,
             source_kind=lambda source: _resolved_source_kind(resources, source),
             document_resources=composition_resources,
+            history_policy=history_policy,
+            history_committed=history_committed,
+            history_truncated=history_truncated,
         )
         lifecycle = ProjectResourceLifecycleOwner(resources)
         compositions.resource_lifetime.register_owner(lifecycle)

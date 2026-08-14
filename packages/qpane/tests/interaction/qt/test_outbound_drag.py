@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QWidget
+
 from qpane.sdk.ui import (
     DragSubject,
     OutboundDragController,

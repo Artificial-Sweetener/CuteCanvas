@@ -21,11 +21,11 @@ import uuid
 from dataclasses import dataclass
 
 from PySide6.QtGui import QImage
-from qpane.sdk.raster import numpy_to_qimage_argb32
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.resources import ProjectResourceKind, ProjectResourceStore
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.raster import numpy_to_qimage_argb32
+from qpane.sdk.scene import RasterBounds
 
 from .color_surface import ColorRasterSnapshot, ColorRasterSurface
 from .sparse_grid import SparseRasterSnapshot

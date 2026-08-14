@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, QSizeF
+
 from qpane.sdk.layout import (
     IncompleteRowAlignment,
     ResponsiveGridLayout,

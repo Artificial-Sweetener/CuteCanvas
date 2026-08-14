@@ -23,9 +23,11 @@ from dataclasses import replace
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage, Qt, QTransform
+
 from qpane.rendering.sampled_frame_continuity import SampledFrameContinuity
 from qpane.rendering.sdk import RasterSource
 from qpane.scene.raster import RasterBounds
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import SampledLayerRenderItem, SceneRenderPlan
 from qpane_test_support.render_plan import make_render_plan
 
@@ -141,7 +143,7 @@ def _sampled_plan(plan: SceneRenderPlan) -> SceneRenderPlan:
                 placement=descriptor.placement,
                 clip=descriptor.clip,
                 source_size=raster_item.source_image.size(),
-                render_hint_enabled=False,
+                presentation_sampling=RasterPresentationSampling.NEAREST,
                 tiles=(),
             ),
         ),

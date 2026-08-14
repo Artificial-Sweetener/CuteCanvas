@@ -22,6 +22,7 @@ from time import monotonic
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QRegion
 from PySide6.QtWidgets import QWidget
+
 from qpane import QPane, RasterSource, RenderLayer, RenderScene
 
 

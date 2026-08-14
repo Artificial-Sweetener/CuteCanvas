@@ -22,6 +22,8 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QTransform
+
+from cutecanvas.coverage import CoverageCombineMode
 from qpane.sdk.scene import (
     LayerInteractionPolicy,
     LayerPlacement,
@@ -35,8 +37,6 @@ from qpane.sdk.vector import (
     VectorStyle,
     VectorTextContent,
 )
-
-from cutecanvas.coverage import CoverageCombineMode
 
 from ..composition import CompositionService
 from ..scene.layer_selection import SceneLayerSelectionController

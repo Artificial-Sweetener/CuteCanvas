@@ -20,12 +20,12 @@ from __future__ import annotations
 from typing import Protocol
 
 import numpy as np
-from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_fragments import RasterPixelFragment, RasterPixelLift
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 
 class LayerPixelMutationOwner(Protocol):

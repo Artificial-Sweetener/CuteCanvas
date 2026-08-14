@@ -21,6 +21,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QMouseEvent
+
 from qpane.sdk.ui import DragSubject, OutboundMimeProvider
 
 if TYPE_CHECKING:

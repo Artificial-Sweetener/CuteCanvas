@@ -22,16 +22,6 @@ import uuid
 from collections.abc import Callable
 from typing import cast
 
-from cutecanvas import (
-    CanvasContentReference,
-    CanvasInspectionGroup,
-    CanvasWorkspace,
-    CuteCanvas,
-    DragSubject,
-    OutboundDragPayload,
-    OutboundMimeItem,
-    ResponsiveGridPolicy,
-)
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -43,6 +33,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cutecanvas import (
+    CanvasContentReference,
+    CanvasInspectionGroup,
+    CanvasWorkspace,
+    CuteCanvas,
+    DragSubject,
+    OutboundDragPayload,
+    OutboundMimeItem,
+    ResponsiveGridPolicy,
+)
 from demonstration.projection_tutorial import (
     ProjectionTutorialController,
 )

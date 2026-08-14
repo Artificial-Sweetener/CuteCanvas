@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+
 from qpane.sdk.scene import RasterBounds
 
 from .color_surface import ColorRasterSurface

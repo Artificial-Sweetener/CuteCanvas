@@ -47,6 +47,16 @@ _CONTRACT_FIELDS = {
     "semantic_id",
     "semantic_version",
 }
+_OPERATION_FIELDS = _CONTRACT_FIELDS | {
+    "adversarial_inputs",
+    "benchmark_cases",
+    "cancellation_latency_ms",
+    "controlled_case",
+    "latency_thresholds_ms",
+    "memory_ceiling_bytes",
+    "reference_result",
+    "thread_budget",
+}
 
 
 def validate_manifest(path: Path = _MANIFEST) -> list[str]:
@@ -80,6 +90,116 @@ def validate_manifest(path: Path = _MANIFEST) -> list[str]:
     operations = registration.get("operations")
     if not isinstance(operations, list):
         errors.append("registration.operations must be an array")
+    else:
+        for index, operation in enumerate(cast(list[object], operations)):
+            errors.extend(_operation_errors(operation, index))
+    return errors
+
+
+def _operation_errors(operation: object, index: int) -> list[str]:
+    """Return completeness errors for one registered operation contract."""
+    prefix = f"registration.operations[{index}]"
+    if not isinstance(operation, dict):
+        return [f"{prefix} must be a table"]
+    record = cast(dict[str, Any], operation)
+    errors = [
+        f"{prefix} is missing required field {key}"
+        for key in sorted(_OPERATION_FIELDS - set(record))
+    ]
+    text_fields = (
+        "semantic_id",
+        "output_product",
+        "demand",
+        "damage",
+        "memory_budget",
+        "cancellation",
+        "quality",
+        "conformance",
+        "reference_result",
+    )
+    errors.extend(
+        f"{prefix}.{key} must be a nonempty string"
+        for key in text_fields
+        if not isinstance(record.get(key), str) or not cast(str, record[key]).strip()
+    )
+    for key in ("input_products", "benchmark_cases", "adversarial_inputs"):
+        value = record.get(key)
+        items = cast(list[object], value) if isinstance(value, list) else []
+        if not items or not all(isinstance(item, str) and item for item in items):
+            errors.append(f"{prefix}.{key} must be a nonempty string array")
+    for key in ("semantic_version", "memory_ceiling_bytes", "thread_budget"):
+        value = record.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            errors.append(f"{prefix}.{key} must be a positive integer")
+    cancellation_latency = record.get("cancellation_latency_ms")
+    if (
+        not isinstance(cancellation_latency, (int, float))
+        or isinstance(cancellation_latency, bool)
+        or cancellation_latency <= 0
+    ):
+        errors.append(f"{prefix}.cancellation_latency_ms must be positive")
+    thresholds = record.get("latency_thresholds_ms")
+    if not isinstance(thresholds, dict):
+        errors.append(f"{prefix}.latency_thresholds_ms must be a table")
+    else:
+        threshold_values = cast(dict[str, object], thresholds)
+        if set(threshold_values) != {"p50", "p95", "p99"}:
+            errors.append(
+                f"{prefix}.latency_thresholds_ms must contain p50, p95, and p99"
+            )
+        elif not all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+            for value in threshold_values.values()
+        ):
+            errors.append(f"{prefix}.latency_thresholds_ms values must be positive")
+    errors.extend(_controlled_case_errors(record.get("controlled_case"), prefix))
+    return errors
+
+
+def _controlled_case_errors(value: object, prefix: str) -> list[str]:
+    """Return schema errors for one executable controlled benchmark case."""
+    case_prefix = f"{prefix}.controlled_case"
+    if not isinstance(value, dict):
+        return [f"{case_prefix} must be a table"]
+    case = cast(dict[str, object], value)
+    expected = {
+        "destination_height",
+        "destination_width",
+        "edge_mode",
+        "id",
+        "memory_budget_bytes",
+        "scratch_budget_bytes",
+        "source_height",
+        "source_width",
+        "working_space",
+    }
+    errors = (
+        [f"{case_prefix} must contain exactly {sorted(expected)}"]
+        if set(case) != expected
+        else []
+    )
+    errors.extend(
+        f"{case_prefix}.{key} must be a nonempty string"
+        for key in ("id", "edge_mode", "working_space")
+        if not isinstance(case.get(key), str) or not cast(str, case[key]).strip()
+    )
+    for key in (
+        "source_width",
+        "source_height",
+        "destination_width",
+        "destination_height",
+        "memory_budget_bytes",
+        "scratch_budget_bytes",
+    ):
+        item = case.get(key)
+        if not isinstance(item, int) or isinstance(item, bool) or item <= 0:
+            errors.append(f"{case_prefix}.{key} must be a positive integer")
+    if case.get("edge_mode") not in {"clamp", "reflect", "transparent", "wrap"}:
+        errors.append(f"{case_prefix}.edge_mode is unsupported")
+    if case.get("working_space") not in {"srgb_encoded", "srgb_linear"}:
+        errors.append(f"{case_prefix}.working_space is unsupported")
     return errors
 
 

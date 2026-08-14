@@ -18,12 +18,13 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+
 from cutecanvas.edit_sessions import EditSessionKind
 from cutecanvas.editor.session_coordination import EditSessionCoordinator
 from cutecanvas.tools.polygon_coverage import PolygonCoverageTool
 from cutecanvas.tools.ports import PixelSelectionInteractionPort
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
 from qpane.sdk.vector import VectorPathCommandKind
 
 

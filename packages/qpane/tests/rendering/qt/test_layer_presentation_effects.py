@@ -24,6 +24,7 @@ from dataclasses import replace
 import pytest
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPicture, QTransform
+
 from qpane import (
     LayerPresentationEffect,
     LayerPresentationStyle,
@@ -39,6 +40,7 @@ from qpane.rendering.presentation_effect_compositor import (
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import ClipCoordinateSpace, LayerClip, LayerKind
 from qpane.scene.raster import RasterBounds
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SampledTileRenderData,
@@ -301,7 +303,7 @@ def test_vector_effect_remains_stable_when_refined_tiles_replace_picture() -> No
         placement=raster_item.placement,
         clip=None,
         source_size=QSize(20, 20),
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
     )
     effect = LayerPresentationEffect(
         plan.scene_id,
@@ -352,7 +354,7 @@ def test_sampled_source_effect_uses_the_resolved_tile_alpha() -> None:
         placement=raster_item.placement,
         clip=None,
         source_size=QSize(20, 20),
-        render_hint_enabled=True,
+        presentation_sampling=RasterPresentationSampling.BILINEAR,
         tiles=(
             SampledTileRenderData(
                 sample,

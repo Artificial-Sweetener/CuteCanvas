@@ -20,6 +20,13 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage, QPixmap
 
+from cutecanvas.ferrastra import NativeCoverageProjector
+from qpane.sdk.raster import (
+    numpy_to_qimage_grayscale8,
+    qimage_to_numpy_grayscale8,
+)
+from qpane.sdk.scene import LayerTransform, RasterBounds
+
 
 class MaskImageLoader:
     """Load grayscale mask pixels from host-provided image files."""
@@ -37,12 +44,26 @@ class MaskImageLoader:
         """Detach, aspect-fit, and grayscale host-provided mask pixels."""
         if image.isNull() or not target_size.isValid() or target_size.isNull():
             return None
-        normalized = image.copy()
-        if normalized.size() != target_size:
-            normalized = normalized.scaled(
-                target_size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-            )
-        if normalized.format() != QImage.Format_Grayscale8:
-            normalized = normalized.convertToFormat(QImage.Format_Grayscale8)
-        return normalized
+        normalized = (
+            image.copy()
+            if image.format() == QImage.Format_Grayscale8
+            else image.convertToFormat(QImage.Format_Grayscale8)
+        )
+        fitted_size = normalized.size().scaled(
+            target_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+        )
+        if fitted_size == normalized.size():
+            return normalized
+        source_bounds = RasterBounds(0, 0, normalized.width(), normalized.height())
+        target_bounds = RasterBounds(0, 0, fitted_size.width(), fitted_size.height())
+        pixels = NativeCoverageProjector().project(
+            qimage_to_numpy_grayscale8(normalized),
+            source_bounds=source_bounds,
+            transform=LayerTransform(
+                m11=fitted_size.width() / normalized.width(),
+                m22=fitted_size.height() / normalized.height(),
+            ),
+            destination_bounds=target_bounds,
+        )
+        return numpy_to_qimage_grayscale8(pixels)

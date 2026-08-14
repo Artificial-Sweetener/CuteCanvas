@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.snapping import (
     SnapAxis,
     SnapCandidate,
@@ -28,7 +30,6 @@ from cutecanvas.snapping import (
 )
 from cutecanvas.snapping.scale import scene_units_per_device_pixel
 from cutecanvas_test_support.harness.timing import interaction_clock
-from PySide6.QtCore import QPointF, QRectF
 
 
 def test_snaps_sides_and_centers_independently() -> None:

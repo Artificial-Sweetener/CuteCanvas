@@ -22,10 +22,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from qpane.sdk.scene import LayerSourceReference, LayerTransform
-
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
+from qpane.sdk.scene import LayerSourceReference, LayerTransform
 
 from ..composition.edit_controller import CompositionEditController
 from ..composition.edit_history import CompositionEditCommand

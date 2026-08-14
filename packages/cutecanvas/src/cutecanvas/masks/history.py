@@ -341,12 +341,11 @@ class MaskHistory:
         scope_id = self._scope_for_mask(mask_id)
         if self._edits is None or scope_id is None:
             return None
-        execution = self._edits.undo_where(
-            scope_id,
-            lambda command: (
-                isinstance(command, MaskCompositionEdit) and command.mask_id == mask_id
-            ),
-        )
+        commands = self._edits.undo_commands(scope_id)
+        command = commands[-1] if commands else None
+        if not isinstance(command, MaskCompositionEdit) or command.mask_id != mask_id:
+            return None
+        execution = self._edits.undo(scope_id)
         return _history_change(execution.command, "undo") if execution.changed else None
 
     def redo(self, mask_id: uuid.UUID) -> MaskHistoryChange | None:
@@ -354,12 +353,11 @@ class MaskHistory:
         scope_id = self._scope_for_mask(mask_id)
         if self._edits is None or scope_id is None:
             return None
-        execution = self._edits.redo_where(
-            scope_id,
-            lambda command: (
-                isinstance(command, MaskCompositionEdit) and command.mask_id == mask_id
-            ),
-        )
+        commands = self._edits.redo_commands(scope_id)
+        command = commands[-1] if commands else None
+        if not isinstance(command, MaskCompositionEdit) or command.mask_id != mask_id:
+            return None
+        execution = self._edits.redo(scope_id)
         return _history_change(execution.command, "redo") if execution.changed else None
 
     def state(self, mask_id: uuid.UUID) -> MaskUndoState | None:

@@ -22,13 +22,13 @@ import uuid
 
 import numpy as np
 from PySide6.QtGui import QImage
-from qpane.sdk.raster import numpy_to_qimage_grayscale8
 
 from cutecanvas.coverage import (
     CoverageCombineMode,
     combine_coverage,
     normalize_coverage_array,
 )
+from qpane.sdk.raster import numpy_to_qimage_grayscale8
 
 from .image_ops import resize_mask_nearest
 from .mask import MaskAssetStore

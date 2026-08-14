@@ -33,9 +33,6 @@ from PySide6.QtGui import (
     QImage,
 )
 from PySide6.QtWidgets import QWidget
-from qpane.sdk.cache import CacheRegistry
-from qpane.sdk.diagnostics import DiagnosticsSnapshot
-from qpane.sdk.rendering import ViewportZoomMode
 
 from cutecanvas import ui
 from cutecanvas.core import (
@@ -66,14 +63,16 @@ from cutecanvas.resources import ProjectResourceKind
 from cutecanvas.resources.layer_operations import ResourceForkOwner
 from cutecanvas.types import DiagnosticsDomain
 from cutecanvas.vector.facade import VectorHostFacade
+from qpane.sdk.cache import CacheRegistry
+from qpane.sdk.diagnostics import DiagnosticsSnapshot
+from qpane.sdk.rendering import ViewportZoomMode
 
 if TYPE_CHECKING:
-    from qpane.sdk.rendering import Renderer
-
     from cutecanvas.masks.autosave import AutosaveManager
     from cutecanvas.masks.mask import MaskLayer
     from cutecanvas.masks.mask_service import MaskService
     from cutecanvas.sam.manager import SamManager
+    from qpane.sdk.rendering import Renderer
 
 
 class CanvasLifecycleMixin:

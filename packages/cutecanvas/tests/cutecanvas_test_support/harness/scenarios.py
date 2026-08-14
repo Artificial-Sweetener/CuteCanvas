@@ -84,8 +84,8 @@ def deterministic_abuse_actions() -> tuple[AbuseAction, ...]:
         ),
         PenLeaveAction(),
         WaitAction(wait_ms=850),
-        UndoAction(mask_index=1),
-        RedoAction(mask_index=1),
+        UndoAction(mask_index=0),
+        RedoAction(mask_index=0),
         StrokeAction(
             PointerKind.TOUCH,
             _points((80, 360), (180, 280), (280, 200), (380, 120)),
@@ -311,8 +311,8 @@ def touch_mouse_mask_switch_actions() -> tuple[AbuseAction, ...]:
         ),
         UndoAction(mask_index=0),
         UndoAction(mask_index=1),
-        RedoAction(mask_index=0),
         RedoAction(mask_index=1),
+        RedoAction(mask_index=0),
         IdleAction(wait_ms=25),
     )
 

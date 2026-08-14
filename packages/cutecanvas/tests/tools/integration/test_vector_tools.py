@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+
 from cutecanvas.tools.ports import VectorInteractionPort, VectorNodeInteractionPort
 from cutecanvas.vector.node_tool import VectorNodeTool
 from cutecanvas.vector.tools import VectorPathTool, VectorShapeTool
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
 
 
 def _mouse(

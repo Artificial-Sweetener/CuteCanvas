@@ -19,9 +19,45 @@ from __future__ import annotations
 
 from importlib.metadata import version
 
-from ._native import package_version as _native_package_version
+from ._native import (
+    BufferError,
+    CancellationToken,
+    CompiledGraph,
+    CoverageResult,
+    Engine,
+    EvaluationBudget,
+    EvaluationError,
+    EvaluationRequirements,
+    FerrastraError,
+    Graph,
+    GraphBuilder,
+    GraphError,
+    RasterResult,
+    Region,
+)
+from ._native import (
+    package_version as _native_package_version,
+)
+from .reconstruction import RasterReconstructionSpace
 
-__all__ = ["__version__"]
+__all__ = [
+    "BufferError",
+    "CancellationToken",
+    "CompiledGraph",
+    "CoverageResult",
+    "Engine",
+    "EvaluationBudget",
+    "EvaluationError",
+    "EvaluationRequirements",
+    "FerrastraError",
+    "Graph",
+    "GraphBuilder",
+    "GraphError",
+    "RasterReconstructionSpace",
+    "RasterResult",
+    "Region",
+    "__version__",
+]
 
 __version__ = version("ferrastra")
 

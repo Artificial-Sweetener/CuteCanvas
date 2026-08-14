@@ -17,6 +17,11 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QToolBar
+
 from cutecanvas import (
     CloneStampAlignment,
     CloneStampSampleMode,
@@ -26,10 +31,6 @@ from cutecanvas import (
 from cutecanvas_demo import ExampleOptions, ExampleWindow
 from demonstration.brush_controls import BrushControls
 from demonstration.clone_stamp_controls import CloneStampControls
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QToolBar
 
 
 def test_clone_stamp_action_selects_tool_before_a_raster_target_exists(qapp) -> None:

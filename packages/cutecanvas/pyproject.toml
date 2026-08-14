@@ -22,6 +22,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
+  "ferrastra>=0.1.0,<1.0.0",
   "qpane>=3.0.0,<4.0.0",
   "PySide6>=6.7.3",
   "numpy>=1.21",

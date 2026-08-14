@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QPolygonF, QTransform
+
 from qpane.rendering.projective_sampling import conservative_transform_scale
 from qpane.rendering.projective_visibility import visible_source_rect
 from qpane.rendering.render_tile_geometry import scale_bucket

@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 
 import pytest
+from PySide6.QtGui import QImage, Qt
+
 from cutecanvas import Config
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks.live_preview_store import MaskLivePreviewStore
@@ -28,7 +30,6 @@ from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.resources import ProjectResourceStore
 from cutecanvas_test_support.config import fixed_cache_config
-from PySide6.QtGui import QImage, Qt
 from qpane.cache.consumers import EvictableCacheConsumer
 from qpane.cache.coordinator import (
     CacheConsumerCallbacks,

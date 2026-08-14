@@ -18,6 +18,9 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QImage, QTransform
+
 from cutecanvas import (
     CloneStampAlignment,
     CloneStampSampleMode,
@@ -27,8 +30,6 @@ from cutecanvas import (
     EditSessionKind,
 )
 from cutecanvas_test_support.harness.timing import interaction_clock
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QImage, QTransform
 from qpane.sdk.rendering import PanelPoint, ScenePoint
 from qpane.sdk.scene import PiecewiseLayerTransform
 

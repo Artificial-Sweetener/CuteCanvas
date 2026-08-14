@@ -27,14 +27,14 @@ from typing import Any
 import numpy as np
 from PySide6.QtCore import QPoint, QRect, QSize
 from PySide6.QtGui import QImage
+
+from cutecanvas.coverage import CoverageItem, CoverageSnapshot, WritableCoverageRegion
+from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.raster import (
     numpy_to_qimage_grayscale8,
     qimage_to_numpy_grayscale8,
 )
 from qpane.sdk.scene import RasterBounds
-
-from cutecanvas.coverage import CoverageItem, CoverageSnapshot, WritableCoverageRegion
-from cutecanvas.types import RasterExtentPolicy
 
 from .history_presentation import MaskHistoryPresenter
 from .mask import MaskAssetStore, MaskLayer

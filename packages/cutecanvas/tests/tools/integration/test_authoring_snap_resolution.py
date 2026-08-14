@@ -21,6 +21,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.snapping.authoring import (
     AuthoringSnapCoordinator,
     AuthoringSnapSession,
@@ -38,7 +40,6 @@ from cutecanvas_test_support.harness.timing import (
     interaction_clock,
     tail_interaction_latency_ms,
 )
-from PySide6.QtCore import QPointF, QRectF
 
 
 def _snapshot(*candidates: SnapCandidate) -> SnapTargetSnapshot:

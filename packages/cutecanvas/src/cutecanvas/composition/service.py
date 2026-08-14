@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from PySide6.QtCore import QRectF
+
 from qpane.sdk.scene import (
     BilinearLayerTransform,
     LayerInteractionPolicy,
@@ -39,6 +40,8 @@ from ..types import (
 )
 from .edit_controller import CompositionEditController
 from .edit_history import CompositionEditHistory
+from .history_model import HistoryCommit, HistoryTruncation
+from .history_policy import CompositionHistoryPolicy
 from .layer_edits import (
     CompositionLayerEditService,
     CompositionLayerStackTransition,
@@ -68,6 +71,9 @@ class CompositionService:
         layers_changed: Callable[[uuid.UUID], None] | None = None,
         source_kind: Callable[[LayerSourceReference], str] | None = None,
         document_resources: CompositionResourceOwner | None = None,
+        history_policy: CompositionHistoryPolicy | None = None,
+        history_committed: Callable[[HistoryCommit], None] | None = None,
+        history_truncated: Callable[[HistoryTruncation], None] | None = None,
     ) -> None:
         """Initialize compositions with optional edit-history observation."""
         self._records: dict[uuid.UUID, CompositionRecord] = {}
@@ -86,7 +92,10 @@ class CompositionService:
         )
         self._source_kind = source_kind or (lambda source: source.kind)
         self._edit_history = CompositionEditHistory(
-            resource_lifetime=self._resource_lifetime
+            policy=history_policy,
+            resource_lifetime=self._resource_lifetime,
+            committed=history_committed,
+            truncated=history_truncated,
         )
         self._edit_controller = CompositionEditController(
             self._edit_history,

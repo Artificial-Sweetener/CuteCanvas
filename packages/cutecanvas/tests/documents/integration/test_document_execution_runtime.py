@@ -20,13 +20,14 @@ from __future__ import annotations
 import threading
 import time
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CanvasDocument, CanvasDocumentRuntime, CuteCanvas
 from cutecanvas_test_support.execution_backend import (
     ControllableExecutionBackend,
     InlineExecutionBackend,
 )
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.execution import (
     ExecutionLeaseRelease,
     ExecutionRequest,

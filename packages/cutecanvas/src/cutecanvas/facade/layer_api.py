@@ -23,9 +23,9 @@ import uuid
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerTransform, compose_layer_mappings
 
 from cutecanvas.types import LayerEdgeOperation
+from qpane.sdk.scene import LayerTransform, compose_layer_mappings
 
 
 class LayerApiMixin:

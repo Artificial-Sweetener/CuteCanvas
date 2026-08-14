@@ -23,10 +23,10 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QApplication
-from qpane.sdk.scene import SceneDescriptor
 
 from cutecanvas.scene.layer_geometry import LayerGeometryResolver
 from cutecanvas.selection import PixelSelectionService
+from qpane.sdk.scene import SceneDescriptor
 
 from .authoring import AuthoringSnapCoordinator
 from .candidates import SnapCandidateProvider

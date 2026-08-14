@@ -20,6 +20,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import (
     CanvasRenderVariant,
     CanvasViewportInteraction,
@@ -29,8 +32,6 @@ from cutecanvas import (
 )
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.document import CanvasDocument
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.rendering import ViewportZoomMode
 
 

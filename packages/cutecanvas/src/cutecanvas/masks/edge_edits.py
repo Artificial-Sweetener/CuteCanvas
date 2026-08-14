@@ -17,11 +17,10 @@
 
 from __future__ import annotations
 
-from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
-
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.editor.layer_edge_targets import LayerEdgeTargetSnapshot
 from cutecanvas.resources import ProjectResourceReference
+from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 from .canvas_aperture import ActiveMaskCanvasAperture
 from .mask_service import MaskService

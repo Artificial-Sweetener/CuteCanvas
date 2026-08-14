@@ -22,18 +22,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from cutecanvas import CuteCanvas
-from cutecanvas_test_support.harness import MountedQPaneHarness
-from cutecanvas_test_support.harness.abuse_model import (
-    HarnessPoint,
-    PointerKind,
-    StrokeAction,
-)
-from cutecanvas_test_support.harness.input_driver import QtStrokeDriver
-from cutecanvas_test_support.harness.timing import (
-    INTERACTIVE_PERFORMANCE,
-    interaction_clock,
-)
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QColor,
@@ -46,6 +34,19 @@ from PySide6.QtGui import (
 )
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import CuteCanvas
+from cutecanvas_test_support.harness import MountedQPaneHarness
+from cutecanvas_test_support.harness.abuse_model import (
+    HarnessPoint,
+    PointerKind,
+    StrokeAction,
+)
+from cutecanvas_test_support.harness.input_driver import QtStrokeDriver
+from cutecanvas_test_support.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    interaction_clock,
+)
 from qpane.scene.render_plan import SampledLayerRenderItem
 from qpane.sdk.raster import qimage_to_numpy_const_view_bgra32
 

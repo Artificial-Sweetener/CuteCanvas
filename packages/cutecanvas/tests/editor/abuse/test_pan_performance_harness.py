@@ -16,6 +16,9 @@
 
 """Tests for deterministic standalone pan-performance analysis helpers."""
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas_test_support.harness_tools.cutecanvas_pan_performance_harness import (
     compare_images,
     elliptical_pointer_path,
@@ -29,8 +32,11 @@ from cutecanvas_test_support.harness_tools.pan_performance_runtime import (
     PanFrameTiming,
     pointer_path,
 )
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
+from cutecanvas_test_support.harness_tools.pan_render_harness import (
+    HeadlessPanHarness,
+    _ProgressWatchdog,
+    coordinate_fingerprint_image,
+)
 
 
 def _frame(
@@ -76,6 +82,64 @@ def test_pointer_path_is_deterministic_bounded_and_starts_at_center() -> None:
     assert first[0].y() == size.height() // 2
     assert all(0 <= point.x() < size.width() for point in first)
     assert all(0 <= point.y() < size.height() for point in first)
+
+
+def test_headless_pan_harness_close_joins_every_owned_execution_worker(
+    qapp,
+    tmp_path,
+) -> None:
+    """Harness teardown must leave no native work competing with later tests."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(256, 256)),
+        viewport_size=QSize(96, 96),
+        artifact_root=tmp_path,
+    )
+    runtimes = (
+        harness._qpane._execution_runtime,
+        harness._reference_qpane._execution_runtime,
+    )
+    workers = tuple(
+        thread
+        for runtime in runtimes
+        for backend in runtime._backends
+        for thread in getattr(backend, "_threads", ())
+    )
+
+    harness.close()
+
+    assert all(runtime.is_closed for runtime in runtimes)
+    assert workers
+    assert not any(thread.is_alive() for thread in workers)
+
+
+def test_progress_watchdog_extends_only_after_observable_progress() -> None:
+    """A busy queue may continue only while its diagnostic state advances."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=30.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 0), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=9.98)
+    assert not watchdog.permits_wait(("pending", 1), now=9.99)
+
+
+def test_progress_watchdog_never_extends_past_hard_deadline() -> None:
+    """Continuous active work must not defeat the wait's absolute bound."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=12.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 0), now=4.0, work_active=True)
+    assert watchdog.permits_wait(("pending", 0), now=8.0, work_active=True)
+    assert not watchdog.permits_wait(("pending", 0), now=12.0, work_active=True)
 
 
 def test_cutecanvas_reproducer_path_retains_exact_large_first_jump() -> None:

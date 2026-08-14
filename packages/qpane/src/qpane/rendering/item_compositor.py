@@ -204,7 +204,7 @@ class SceneItemCompositor:
         """Draw one ordinary raster, isolating a transient pixel edit when active."""
         preview = self._transient_raster_contribution(plan, item)
         if isinstance(preview, TransientRasterResolvedContribution):
-            if item.render_hint_enabled:
+            if item.presentation_sampling.uses_bilinear_interpolation:
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             painter.setOpacity(item.descriptor.opacity)
             self.apply_raster_transform(painter, item)
@@ -230,7 +230,7 @@ class SceneItemCompositor:
                 prepare_item=self._prepare_raster_item,
             )
             return
-        if item.render_hint_enabled:
+        if item.presentation_sampling.uses_bilinear_interpolation:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         painter.setOpacity(item.descriptor.opacity)
         self.apply_raster_transform(painter, item)
@@ -256,7 +256,7 @@ class SceneItemCompositor:
         self._apply_layer_effects(painter, item)
         painter.setOpacity(item.descriptor.opacity)
         if item.refined_tiles:
-            if item.render_hint_enabled:
+            if item.presentation_sampling.uses_bilinear_interpolation:
                 painter.setRenderHint(
                     QPainter.RenderHint.SmoothPixmapTransform,
                     True,
@@ -312,7 +312,7 @@ class SceneItemCompositor:
         item: RasterLayerRenderItem | SampledLayerRenderItem,
     ) -> None:
         """Apply shared raster sampling, geometry, clipping, and effects."""
-        if item.render_hint_enabled:
+        if item.presentation_sampling.uses_bilinear_interpolation:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self.apply_raster_transform(painter, item)
         self._apply_layer_clip(painter, plan, item)

@@ -19,12 +19,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from cutecanvas import (
-    CanvasAnchor,
-    CanvasResamplingMode,
-    CanvasResamplingResult,
-    CuteCanvas,
-)
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (
     QComboBox,
@@ -36,6 +30,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QVBoxLayout,
+)
+
+from cutecanvas import (
+    CanvasAnchor,
+    CanvasResamplingMode,
+    CanvasResamplingResult,
+    CuteCanvas,
 )
 
 

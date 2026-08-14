@@ -22,6 +22,7 @@ import math
 import numpy as np
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
+
 from qpane.sdk.raster import numpy_to_qimage_argb32
 
 from .model import BrushPreset

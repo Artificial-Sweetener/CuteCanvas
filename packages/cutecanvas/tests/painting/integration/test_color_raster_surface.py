@@ -16,10 +16,11 @@
 """Tests for editable color-raster storage geometry."""
 
 import numpy as np
-from cutecanvas.raster.color_surface import ColorRasterSurface
-from cutecanvas.types import RasterExtentPolicy
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
+
+from cutecanvas.raster.color_surface import ColorRasterSurface
+from cutecanvas.types import RasterExtentPolicy
 from qpane.scene.raster import RasterBounds
 
 

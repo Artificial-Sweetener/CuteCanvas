@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+
 from qpane.cache.consumers import (
     EvictableCacheConsumer,
     KeyedCacheConsumer,

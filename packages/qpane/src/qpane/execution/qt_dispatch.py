@@ -75,10 +75,10 @@ class QtOwnerDispatcher(QObject):
 
         if not reason.strip():
             raise ValueError("dispatch reason must not be blank")
+        rejected: _PendingDispatch | None = None
         with self._lock:
             if self._closed or not self._receiver_is_valid():
                 should_discard = True
-                dispatch_id = -1
             else:
                 should_discard = False
                 self._next_id += 1
@@ -88,13 +88,14 @@ class QtOwnerDispatcher(QObject):
                     discarded=discarded,
                     reason=reason,
                 )
+                try:
+                    self._requested.emit(dispatch_id)
+                except RuntimeError:
+                    rejected = self._pending.pop(dispatch_id, None)
         if should_discard:
             _invoke_discard(discarded, reason=reason)
-            return
-        try:
-            self._requested.emit(dispatch_id)
-        except RuntimeError:
-            self._discard_id(dispatch_id)
+        elif rejected is not None:
+            _invoke_discard(rejected.discarded, reason=rejected.reason)
 
     @Slot(int)
     def _deliver(self, dispatch_id: int) -> None:
@@ -125,14 +126,6 @@ class QtOwnerDispatcher(QObject):
             self._pending.clear()
         for item in pending:
             _invoke_discard(item.discarded, reason=item.reason)
-
-    def _discard_id(self, dispatch_id: int) -> None:
-        """Discard one packet after Qt rejects signal publication."""
-
-        with self._lock:
-            pending = self._pending.pop(dispatch_id, None)
-        if pending is not None:
-            _invoke_discard(pending.discarded, reason=pending.reason)
 
     def _receiver_is_valid(self) -> bool:
         """Return whether Qt can still deliver to the bound receiver."""

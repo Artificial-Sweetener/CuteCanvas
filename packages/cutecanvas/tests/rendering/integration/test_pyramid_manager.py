@@ -22,10 +22,13 @@ import time
 import uuid
 
 import pytest
+from PySide6.QtGui import QImage, Qt
+
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.execution_backend import ControlledExecution
 from cutecanvas_test_support.render_plan import make_source_key
-from PySide6.QtGui import QImage, Qt
+from ferrastra import RasterReconstructionSpace
+from qpane import Config
 from qpane.rendering import PyramidManager, PyramidStatus
 
 
@@ -136,3 +139,29 @@ def test_revision_keys_never_adopt_into_each_other(qapp, sample_image: QImage) -
     assert manager.pyramid_for_asset(old_key).status is PyramidStatus.COMPLETE
     assert manager.pyramid_for_asset(new_key).status is PyramidStatus.COMPLETE
     assert old_key != new_key
+
+
+def test_reconstruction_change_cancels_stale_pyramid_and_rebuilds(
+    qapp, sample_image: QImage
+) -> None:
+    """A working-space change must invalidate work and adopt only the new identity."""
+    execution = ControlledExecution()
+    manager = _manager(execution)
+    key = make_source_key()
+    manager.generate_pyramid_for_asset(key, sample_image)
+
+    manager.apply_config(
+        Config(
+            cache={"mode": "hard", "budget_mb": 1024},
+            viewport_reconstruction_space=RasterReconstructionSpace.SRGB_LINEAR,
+        )
+    )
+
+    assert manager.pyramid_for_asset(key) is None
+    assert not execution.pending_jobs()
+    manager.generate_pyramid_for_asset(key, sample_image)
+    execution.run_all()
+    qapp.processEvents()
+    pyramid = manager.pyramid_for_asset(key)
+    assert pyramid is not None
+    assert pyramid.reconstruction_space is RasterReconstructionSpace.SRGB_LINEAR

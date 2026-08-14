@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import uuid
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.editor.shared_edge_geometry import shared_edge_seam
 from cutecanvas.editor.shared_edge_pivot import SharedEdgeHandle, shared_edge_pivots
 from cutecanvas.editor.shared_edge_session import SharedEdgeGestureSession
 from cutecanvas.snapping.edge_candidates import OrientedTargetSnapshot
 from cutecanvas.snapping.edge_model import OrientedEdge, quadrilateral_edges
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import LayerTransform
 
 

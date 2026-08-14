@@ -20,6 +20,9 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CanvasAnchor, CanvasDocument, CanvasResamplingMode
 from cutecanvas.composition.layers import CompositionLayerInstance
 from cutecanvas.coverage import CoverageSnapshot
@@ -29,8 +32,6 @@ from cutecanvas.document.canvas_crop import CanvasCropEffect
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.types import RasterExtentPolicy
 from cutecanvas.vector.effects import VectorMaskEffect
-from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import pytest
+
 from cutecanvas import Config, CuteCanvas
 from qpane.core.config import CacheSettings, PlaceholderSettings
 from qpane.types import (

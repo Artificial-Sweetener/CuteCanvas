@@ -21,10 +21,12 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
+
 from qpane import LayerPresentationStyle
 from qpane_test_support.pan_render_harness import (
     FrameArtifactDetector,
     HeadlessPanHarness,
+    _ProgressWatchdog,
     coordinate_fingerprint_image,
     random_walk_pans,
 )
@@ -75,6 +77,35 @@ def test_detector_honors_channel_tolerance() -> None:
     assert difference.detected is False
 
 
+def test_progress_watchdog_extends_only_after_observable_progress() -> None:
+    """A busy queue may continue only while its diagnostic state advances."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=30.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 0), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=4.99)
+    assert watchdog.permits_wait(("pending", 1), now=9.98)
+    assert not watchdog.permits_wait(("pending", 1), now=9.99)
+
+
+def test_progress_watchdog_never_extends_past_hard_deadline() -> None:
+    """Continuous active work must not defeat the wait's absolute bound."""
+    watchdog = _ProgressWatchdog.start(
+        now=0.0,
+        stall_timeout_seconds=5.0,
+        hard_timeout_seconds=12.0,
+        initial_state=("pending", 0),
+    )
+
+    assert watchdog.permits_wait(("pending", 0), now=4.0, work_active=True)
+    assert watchdog.permits_wait(("pending", 0), now=8.0, work_active=True)
+    assert not watchdog.permits_wait(("pending", 0), now=12.0, work_active=True)
+
+
 def test_headless_pan_harness_matches_clean_full_redraws(
     qapp,
     tmp_path: Path,
@@ -119,10 +150,10 @@ def test_headless_pan_harness_checks_only_selected_replay_steps(
     oracle_pans: list[QPointF] = []
     original_oracle = harness._capture_full_redraw_reference
 
-    def capture_oracle(buffer_pan: QPointF) -> QImage:
+    def capture_oracle(buffer_pan: QPointF, *, settle_exact: bool) -> QImage:
         """Record and delegate one selected clean redraw."""
         oracle_pans.append(QPointF(buffer_pan))
-        return original_oracle(buffer_pan)
+        return original_oracle(buffer_pan, settle_exact=settle_exact)
 
     monkeypatch.setattr(harness, "_capture_full_redraw_reference", capture_oracle)
     pans = tuple(QPointF(index * 7.25, index * -3.5) for index in range(6))
@@ -139,6 +170,35 @@ def test_headless_pan_harness_checks_only_selected_replay_steps(
     assert failures == []
     assert len(oracle_pans) == 2
     assert final_pan == pans[-1]
+
+
+def test_headless_pan_harness_close_joins_every_owned_execution_worker(
+    qapp,
+    tmp_path: Path,
+) -> None:
+    """Harness teardown must leave no native work competing with later tests."""
+    harness = HeadlessPanHarness(
+        qapp,
+        coordinate_fingerprint_image(QSize(256, 256)),
+        viewport_size=QSize(96, 96),
+        artifact_root=tmp_path,
+    )
+    runtimes = (
+        harness._qpane._execution_runtime,
+        harness._reference_qpane._execution_runtime,
+    )
+    workers = tuple(
+        thread
+        for runtime in runtimes
+        for backend in runtime._backends
+        for thread in getattr(backend, "_threads", ())
+    )
+
+    harness.close()
+
+    assert all(runtime.is_closed for runtime in runtimes)
+    assert workers
+    assert not any(thread.is_alive() for thread in workers)
 
 
 def test_headless_pan_harness_survives_accumulated_tiled_edge_repairs(

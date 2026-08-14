@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from cutecanvas.core.config import Config
 from cutecanvas.core.config_features import iter_descriptors
 from qpane.core.config import FeatureAwareConfig

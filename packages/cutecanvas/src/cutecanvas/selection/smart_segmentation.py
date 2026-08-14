@@ -20,11 +20,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import numpy as np
-from qpane.sdk.scene import RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageSnapshot, normalize_coverage_array
 from cutecanvas.sam.segmentation_request import SmartSegmentationRequest
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import RasterBounds, SceneDescriptor
 
 from .projection import LayerCoverageProjector
 from .service import PixelSelectionService

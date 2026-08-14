@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage
 
 
@@ -173,54 +172,6 @@ def numpy_to_qimage_argb32(array: np.ndarray) -> QImage:
     target, backing = qimage_to_numpy_view_argb32(image)
     np.copyto(target, contiguous)
     return backing
-
-
-def numpy_to_qimage_argb32_at_size(array: np.ndarray, size: QSize) -> QImage:
-    """Sample canonical BGRA pixels directly into a detached target image."""
-    if array.ndim != 3 or array.shape[2] != 4 or array.dtype != np.uint8:
-        raise ValueError("NumPy array must be uint8 with shape (height, width, 4)")
-    if size.isEmpty():
-        raise ValueError("target size must be positive")
-    contiguous = np.ascontiguousarray(array)
-    height, width, channels = contiguous.shape
-    borrowed = QImage(
-        contiguous.data,
-        width,
-        height,
-        channels * width,
-        QImage.Format_ARGB32_Premultiplied,
-    )
-    if borrowed.size() == size:
-        return borrowed.copy()
-    return borrowed.scaled(
-        size,
-        Qt.IgnoreAspectRatio,
-        Qt.SmoothTransformation,
-    )
-
-
-def numpy_to_qimage_grayscale8_at_size(array: np.ndarray, size: QSize) -> QImage:
-    """Sample canonical grayscale pixels directly into a detached target image."""
-    if array.ndim != 2 or array.dtype != np.uint8:
-        raise ValueError("NumPy array must be uint8 with shape (height, width)")
-    if size.isEmpty():
-        raise ValueError("target size must be positive")
-    contiguous = np.ascontiguousarray(array)
-    height, width = contiguous.shape
-    borrowed = QImage(
-        contiguous.data,
-        width,
-        height,
-        int(contiguous.strides[0]),
-        QImage.Format_Grayscale8,
-    )
-    if borrowed.size() == size:
-        return borrowed.copy()
-    return borrowed.scaled(
-        size,
-        Qt.IgnoreAspectRatio,
-        Qt.SmoothTransformation,
-    )
 
 
 def _prepare_grayscale_bits(image: QImage) -> tuple[QImage, object]:

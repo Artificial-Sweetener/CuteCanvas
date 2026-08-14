@@ -21,10 +21,11 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtGui import QImage
+
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.execution_backend import ControlledExecution
 from cutecanvas_test_support.render_plan import make_tile_key
-from PySide6.QtGui import QImage
 from qpane.cache.consumers import TileCacheConsumer
 from qpane.cache.coordinator import CacheCoordinator
 from qpane.rendering.pyramid import PyramidManager

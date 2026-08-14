@@ -20,10 +20,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
 from PySide6.QtGui import QCursor, QMouseEvent
 from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
+
+from cutecanvas import CuteCanvas
 
 logger = logging.getLogger(__name__)
 

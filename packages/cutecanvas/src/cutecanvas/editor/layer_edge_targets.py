@@ -21,10 +21,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
-from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
-
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.coverage.spatial_constraint import CoverageSpatialConstraint
+from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

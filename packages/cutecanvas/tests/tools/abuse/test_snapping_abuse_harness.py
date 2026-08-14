@@ -21,6 +21,10 @@ import uuid
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor
+from PySide6.QtTest import QTest
+
 from cutecanvas import LayerPolicy, VectorShapeKind, VectorStyle
 from cutecanvas.coverage import (
     CoverageCombineMode,
@@ -33,9 +37,6 @@ from cutecanvas_test_support.harness.timing import (
     interaction_clock,
     stable_latency_samples,
 )
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor
-from PySide6.QtTest import QTest
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 
 pytestmark = INTERACTIVE_PERFORMANCE

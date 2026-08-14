@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CuteCanvas
 from cutecanvas_demo import ExampleOptions, ExampleWindow
 from demonstration.canvas_geometry_dialog import CanvasGeometryDialog
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
 
 
 def test_demo_window_exposes_canvas_geometry_from_visible_menu(qapp) -> None:

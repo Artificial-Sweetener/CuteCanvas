@@ -21,6 +21,7 @@ import uuid
 
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor
+
 from qpane.sdk.scene import LayerTransform
 from qpane.sdk.vector import (
     VectorFillRule,

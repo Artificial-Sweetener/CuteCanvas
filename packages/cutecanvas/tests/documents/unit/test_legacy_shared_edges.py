@@ -21,6 +21,8 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QPointF
+
 from cutecanvas import LayerGeometryMode, RasterExtentPolicy
 from cutecanvas.composition.layers import CompositionLayerInstance
 from cutecanvas.coverage import CoverageAssetSnapshot, CoverageDocument
@@ -28,7 +30,6 @@ from cutecanvas.persistence.legacy_shared_edges import recover_legacy_layer_stac
 from cutecanvas.raster.sparse_grid import SparseRasterGrid
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.snapping.edge_model import polygon_edges
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import RasterBounds
 
 

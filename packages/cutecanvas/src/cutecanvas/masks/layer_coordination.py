@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor
+
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerInteractionPolicy,

@@ -94,11 +94,14 @@ class SampledItemCompositor:
         item: SampledLayerRenderItem,
     ) -> None:
         """Apply sampling, mapping, clipping, and effects for one sampled layer."""
-        if item.render_hint_enabled:
+        initial_transform = painter.worldTransform()
+        if item.presentation_sampling.uses_bilinear_interpolation:
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self._apply_transform(painter, item)
         self._apply_clip(painter, plan, item)
         self._apply_effects(painter, item)
+        if item.panel_space_products:
+            painter.setWorldTransform(initial_transform)
 
     def _draw_sampled_replacement(
         self,
@@ -243,6 +246,8 @@ def _source_clips(
     """Map optional panel repair clips into sampled source space."""
     if panel_clips is None:
         return None
+    if item.panel_space_products:
+        return panel_clips
     inverse, invertible = item.transform.inverted()
     if not invertible:
         return ()

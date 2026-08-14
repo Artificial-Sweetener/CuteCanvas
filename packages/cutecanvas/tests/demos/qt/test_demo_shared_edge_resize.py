@@ -21,11 +21,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtTest import QTest
+
 from cutecanvas import CuteCanvas, VectorShapeKind
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from demonstration.layer_policy import DemoLayerPolicyController
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtTest import QTest
 from qpane.sdk.scene import LayerDescriptor
 
 

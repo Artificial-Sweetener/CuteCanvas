@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRect
+
 from qpane.rendering.layer_clip_projection import source_clip_path
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import ClipCoordinateSpace, LayerClip

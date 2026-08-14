@@ -21,17 +21,15 @@ import math
 
 import numpy as np
 from PySide6.QtGui import QImage
-from qpane.sdk.raster import (
-    AffineImageResampler,
-    numpy_to_qimage_argb32,
-    numpy_to_qimage_grayscale8,
-    qimage_to_numpy_argb32,
-    qimage_to_numpy_grayscale8,
-)
-from qpane.sdk.scene import LayerPlacement, LayerTransform, RasterBounds
 
 from cutecanvas.coverage import CoverageSnapshot
+from cutecanvas.ferrastra import NativeCoverageProjector, NativeRasterProjector
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
+from qpane.sdk.raster import (
+    numpy_to_qimage_argb32,
+    qimage_to_numpy_argb32,
+)
+from qpane.sdk.scene import LayerPlacement, LayerTransform, RasterBounds
 
 
 class RasterFragmentProjector:
@@ -39,7 +37,8 @@ class RasterFragmentProjector:
 
     def __init__(self) -> None:
         """Create the shared affine image projection primitive."""
-        self._images = AffineImageResampler()
+        self._coverages = NativeCoverageProjector()
+        self._rasters = NativeRasterProjector()
 
     def project(
         self,
@@ -71,18 +70,15 @@ class RasterFragmentProjector:
                 coverage,
             )
         if fragment.pixel_format is RasterPixelFormat.COVERAGE8:
-            pixels = qimage_to_numpy_grayscale8(
-                self._images.project(
-                    numpy_to_qimage_grayscale8(fragment.pixels),
-                    source_bounds=moved_bounds,
-                    transform=source_to_destination,
-                    destination_bounds=destination_bounds,
-                    image_format=QImage.Format_Grayscale8,
-                )
+            materialized = self._coverages.project(
+                fragment.materialized_pixels(),
+                source_bounds=moved_bounds,
+                transform=source_to_destination,
+                destination_bounds=destination_bounds,
             )
         else:
             pixels = qimage_to_numpy_argb32(
-                self._images.project(
+                self._rasters.project(
                     numpy_to_qimage_argb32(fragment.pixels),
                     source_bounds=moved_bounds,
                     transform=source_to_destination,
@@ -90,15 +86,14 @@ class RasterFragmentProjector:
                     image_format=QImage.Format_ARGB32_Premultiplied,
                 )
             )
-        coverage_pixels = qimage_to_numpy_grayscale8(
-            self._images.project(
-                numpy_to_qimage_grayscale8(fragment.contribution_coverage.pixels),
-                source_bounds=moved_bounds,
-                transform=source_to_destination,
-                destination_bounds=destination_bounds,
-                image_format=QImage.Format_Grayscale8,
-            )
+        coverage_pixels = self._coverages.project(
+            fragment.contribution_coverage.pixels,
+            source_bounds=moved_bounds,
+            transform=source_to_destination,
+            destination_bounds=destination_bounds,
         )
+        if fragment.pixel_format is RasterPixelFormat.COVERAGE8:
+            pixels = _unassociate_coverage(materialized, coverage_pixels)
         supported = pixels != 0 if pixels.ndim == 2 else pixels[:, :, 3] != 0
         if not bool(np.all(supported)):
             coverage_pixels = np.where(
@@ -146,3 +141,19 @@ def _unit_integer_translation(transform: LayerTransform) -> tuple[int, int] | No
     ):
         return None
     return rounded_x, rounded_y
+
+
+def _unassociate_coverage(
+    contribution: np.ndarray,
+    selection: np.ndarray,
+) -> np.ndarray:
+    """Recover scalar payload whose later selection composite equals contribution."""
+    result = np.zeros_like(contribution)
+    supported = selection != 0
+    numerator = contribution[supported].astype(np.uint32) * 255
+    result[supported] = np.minimum(
+        255,
+        (numerator + selection[supported].astype(np.uint32) // 2)
+        // selection[supported].astype(np.uint32),
+    ).astype(np.uint8)
+    return result

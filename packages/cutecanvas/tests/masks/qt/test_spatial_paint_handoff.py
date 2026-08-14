@@ -18,11 +18,12 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import CuteCanvas
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from qpane.sdk.scene import BilinearLayerTransform
 
 

@@ -29,14 +29,15 @@ from ..hybrid.tile_source import HybridRenderTileSource
 from ..scene.identity import source_render_asset_key
 from ..scene.model import LayerDescriptor, LayerKind
 from ..scene.raster import RasterBounds
+from ..scene.raster_sampling import RasterPresentationSampling
 from ..scene.render_plan import SampledLayerRenderItem, SampledTileRenderData
 from .compiled_scene import CompiledRenderScene
 from .frame_geometry import RenderFrameGeometry
 from .frame_projector import SceneFrameProjector
 from .raster_products import RasterRenderProductStore
 from .raster_sampling import (
+    raster_presentation_sampling,
     raster_sample_scale_limit,
-    smooth_raster_sampling_enabled,
 )
 from .render_tile_geometry import scale_bucket
 from .render_tile_types import RenderTileBatchSource
@@ -101,7 +102,7 @@ class HybridRenderPlanner:
                 source_size=source_size,
                 frame=frame,
             )
-            render_hint_enabled = smooth_raster_sampling_enabled(
+            presentation_sampling = raster_presentation_sampling(
                 layer_to_panel,
                 frame.device_pixel_ratio,
             )
@@ -111,7 +112,7 @@ class HybridRenderPlanner:
                         layer,
                         source_size,
                         layer_to_panel,
-                        render_hint_enabled,
+                        presentation_sampling,
                         support_bounds_by_layer[layer.layer_id],
                         frame.device_pixel_ratio,
                     )
@@ -154,7 +155,7 @@ class HybridRenderPlanner:
                     descriptor=layer,
                     transform=layer_to_panel,
                     source_size=source_size,
-                    render_hint_enabled=render_hint_enabled,
+                    presentation_sampling=presentation_sampling,
                 )
                 if fallback is not None:
                     projection_fallbacks.append(fallback)
@@ -218,7 +219,7 @@ class HybridRenderPlanner:
                     placement=layer.placement,
                     clip=layer.clip,
                     source_size=source_size,
-                    render_hint_enabled=render_hint_enabled,
+                    presentation_sampling=presentation_sampling,
                     tiles=tiles,
                     source_bounds=source_bounds,
                 )
@@ -251,7 +252,7 @@ class HybridRenderPlanner:
         layer: LayerDescriptor,
         source_size: QSize,
         layer_to_panel: QTransform,
-        render_hint_enabled: bool,
+        presentation_sampling: RasterPresentationSampling,
         support_bounds: RasterBounds,
         device_pixel_ratio: float,
     ) -> SampledLayerRenderItem | None:
@@ -284,7 +285,7 @@ class HybridRenderPlanner:
             placement=layer.placement,
             clip=layer.clip,
             source_size=source_size,
-            render_hint_enabled=render_hint_enabled,
+            presentation_sampling=presentation_sampling,
             tiles=(tile,),
             source_bounds=tile.source_rect,
         )
@@ -345,7 +346,7 @@ class HybridRenderPlanner:
             source_size=source_size,
             frame=frame,
         )
-        render_hint_enabled = smooth_raster_sampling_enabled(
+        presentation_sampling = raster_presentation_sampling(
             layer_to_panel,
             frame.device_pixel_ratio,
         )
@@ -368,7 +369,7 @@ class HybridRenderPlanner:
                     descriptor=layer,
                     transform=layer_to_panel,
                     source_size=source_size,
-                    render_hint_enabled=render_hint_enabled,
+                    presentation_sampling=presentation_sampling,
                 ),
             )
         products = refinement.products or ()
@@ -379,7 +380,7 @@ class HybridRenderPlanner:
                 placement=layer.placement,
                 clip=layer.clip,
                 source_size=source_size,
-                render_hint_enabled=render_hint_enabled,
+                presentation_sampling=presentation_sampling,
                 tiles=tuple(
                     SampledTileRenderData(
                         product.image,

@@ -24,6 +24,7 @@ from math import isfinite
 
 from PySide6.QtCore import QPointF, QRect, QRectF
 from PySide6.QtGui import QImage
+
 from qpane.sdk.raster import qimage_to_numpy_grayscale8
 from qpane.sdk.scene import RasterBounds
 from qpane.sdk.vector import VectorShapeKind

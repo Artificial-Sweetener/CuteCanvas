@@ -104,7 +104,7 @@ jobs:
 
       - name: Validate Ferrastra release version
         if: steps.product.outputs.package == 'ferrastra'
-        run: python tools/check_ferrastra_release_tag.py "${{ env.RELEASE_TAG }}"
+        run: python -m tools.check_ferrastra_release_tag "${{ env.RELEASE_TAG }}" --check-pypi
 
   build-python:
     needs: select
@@ -134,7 +134,7 @@ jobs:
       - name: Validate selected distribution
         run: |
           python -m twine check --strict "packages/${{ needs.select.outputs.package }}/dist/"*
-          python tools/verify_python_release_artifacts.py "${{ env.RELEASE_TAG }}" "packages/${{ needs.select.outputs.package }}/dist"
+          python -m tools.verify_python_release_artifacts "${{ env.RELEASE_TAG }}" "packages/${{ needs.select.outputs.package }}/dist"
 
       - name: Upload selected distribution
         uses: actions/upload-artifact@v6
@@ -189,7 +189,7 @@ jobs:
           name: dist-ferrastra-${{ matrix.platform }}-${{ env.RELEASE_TAG }}
           path: packages/ferrastra/dist/*
 
-  publish:
+  validate-distribution:
     if: >-
       always() &&
       needs.select.result == 'success' &&
@@ -199,11 +199,44 @@ jobs:
       - build-python
       - build-ferrastra
     runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tagged release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download distribution
+        uses: actions/download-artifact@v7
+        with:
+          pattern: dist-${{ needs.select.outputs.package }}-*${{ env.RELEASE_TAG }}
+          path: dist/
+          merge-multiple: true
+
+      - name: Validate complete distribution
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}" "twine==${{ env.TWINE_VERSION }}" "readme-renderer[md]==${{ env.README_RENDERER_VERSION }}"
+          python -m twine check --strict "dist/"*
+          python -m tools.verify_python_release_artifacts "${{ env.RELEASE_TAG }}" dist
+
+  publish:
+    needs:
+      - select
+      - validate-distribution
+    if: >-
+      always() &&
+      needs.select.result == 'success' &&
+      needs.validate-distribution.result == 'success'
+    runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/project/${{ needs.select.outputs.package }}/
     steps:
-      - name: Download distribution
+      - name: Download validated distribution
         uses: actions/download-artifact@v7
         with:
           pattern: dist-${{ needs.select.outputs.package }}-*${{ env.RELEASE_TAG }}

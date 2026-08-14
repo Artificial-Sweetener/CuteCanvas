@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
-from cutecanvas.coverage import VectorCoverageItem
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt
 from PySide6.QtTest import QTest
+
+from cutecanvas.coverage import VectorCoverageItem
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 
 
 def test_polygon_selection_commits_one_retained_edit_with_undo_redo(qapp) -> None:

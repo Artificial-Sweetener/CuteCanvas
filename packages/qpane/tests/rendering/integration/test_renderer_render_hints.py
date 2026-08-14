@@ -29,9 +29,11 @@ from PySide6.QtGui import (
     Qt,
     QTransform,
 )
+
 from qpane.rendering import Renderer
 from qpane.rendering.item_compositor import SceneItemCompositor
 from qpane.scene.model import LayerKind
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SampledTileRenderData,
@@ -58,27 +60,33 @@ class _StubQPane:
         return self._view
 
 
-def _make_plan(qpane_rect: QRect, *, render_hint_enabled: bool):
+def _make_plan(qpane_rect: QRect, *, presentation_sampling: RasterPresentationSampling):
     """Build a one-layer render plan with the requested hint setting."""
     source_image = QImage(qpane_rect.size(), QImage.Format_ARGB32_Premultiplied)
     source_image.fill(Qt.white)
     return make_render_plan(
         qpane_rect,
         source_image=source_image,
-        render_hint_enabled=render_hint_enabled,
+        presentation_sampling=presentation_sampling,
         current_pan=QPointF(0.0, 0.0),
     )
 
 
-@pytest.mark.parametrize("render_hint_enabled, expected_calls", [(True, 1), (False, 0)])
+@pytest.mark.parametrize(
+    ("presentation_sampling", "expected_calls"),
+    (
+        (RasterPresentationSampling.BILINEAR, 1),
+        (RasterPresentationSampling.NEAREST, 0),
+    ),
+)
 def test_redraw_base_image_buffer_toggles_render_hint(
-    monkeypatch, render_hint_enabled, expected_calls
+    monkeypatch, presentation_sampling, expected_calls
 ):
     qpane_rect = QRect(0, 0, 48, 48)
     qpane = _StubQPane(qpane_rect.size())
     renderer = Renderer(qpane)
     renderer.allocate_buffers(qpane_rect.size(), 1.0)
-    plan = _make_plan(qpane_rect, render_hint_enabled=render_hint_enabled)
+    plan = _make_plan(qpane_rect, presentation_sampling=presentation_sampling)
     dirty_region = QRegion(qpane_rect)
     calls = []
     original = QPainter.setRenderHint
@@ -97,10 +105,16 @@ def test_redraw_base_image_buffer_toggles_render_hint(
     assert len(calls) == expected_calls
 
 
-@pytest.mark.parametrize("render_hint_enabled, expected_calls", [(True, 1), (False, 0)])
+@pytest.mark.parametrize(
+    ("presentation_sampling", "expected_calls"),
+    (
+        (RasterPresentationSampling.BILINEAR, 1),
+        (RasterPresentationSampling.NEAREST, 0),
+    ),
+)
 def test_repair_base_buffer_strips_toggles_render_hint(
     monkeypatch,
-    render_hint_enabled,
+    presentation_sampling,
     expected_calls,
 ) -> None:
     """Strip repair should honor the same sampling hint as complete frames."""
@@ -108,7 +122,7 @@ def test_repair_base_buffer_strips_toggles_render_hint(
     qpane = _StubQPane(qpane_rect.size())
     renderer = Renderer(qpane)
     renderer.allocate_buffers(qpane_rect.size(), 1.0)
-    plan = _make_plan(qpane_rect, render_hint_enabled=render_hint_enabled)
+    plan = _make_plan(qpane_rect, presentation_sampling=presentation_sampling)
     calls = []
     original = QPainter.setRenderHint
 
@@ -126,14 +140,20 @@ def test_repair_base_buffer_strips_toggles_render_hint(
     assert len(calls) == expected_calls
 
 
-@pytest.mark.parametrize("render_hint_enabled, expected_calls", [(True, 1), (False, 0)])
+@pytest.mark.parametrize(
+    ("presentation_sampling", "expected_calls"),
+    (
+        (RasterPresentationSampling.BILINEAR, 1),
+        (RasterPresentationSampling.NEAREST, 0),
+    ),
+)
 def test_sampled_layer_toggles_render_hint(
     monkeypatch,
-    render_hint_enabled: bool,
+    presentation_sampling: RasterPresentationSampling,
     expected_calls: int,
 ) -> None:
     """Sampled and mask layers should honor the shared raster sampling policy."""
-    plan = _sampled_plan(render_hint_enabled=render_hint_enabled)
+    plan = _sampled_plan(presentation_sampling=presentation_sampling)
     target = QImage(8, 4, QImage.Format.Format_ARGB32_Premultiplied)
     target.fill(Qt.GlobalColor.transparent)
     calls: list[bool] = []
@@ -160,7 +180,7 @@ def test_sampled_layer_toggles_render_hint(
 
 def test_sharp_sampled_layer_preserves_enlarged_source_pixels() -> None:
     """Close zoom should expose solid source pixels without filtered edge colors."""
-    plan = _sampled_plan(render_hint_enabled=False)
+    plan = _sampled_plan(presentation_sampling=RasterPresentationSampling.NEAREST)
     target = QImage(8, 4, QImage.Format.Format_ARGB32_Premultiplied)
     target.fill(Qt.GlobalColor.transparent)
     painter = QPainter(target)
@@ -173,7 +193,9 @@ def test_sharp_sampled_layer_preserves_enlarged_source_pixels() -> None:
     assert all(target.pixelColor(x, 1) == QColor("blue") for x in range(4, 8))
 
 
-def _sampled_plan(*, render_hint_enabled: bool) -> SceneRenderPlan:
+def _sampled_plan(
+    *, presentation_sampling: RasterPresentationSampling
+) -> SceneRenderPlan:
     """Return one enlarged two-pixel sampled layer."""
     source = QImage(2, 1, QImage.Format.Format_ARGB32_Premultiplied)
     source.setPixelColor(0, 0, QColor("red"))
@@ -186,7 +208,7 @@ def _sampled_plan(*, render_hint_enabled: bool) -> SceneRenderPlan:
         placement=raster_item.placement,
         clip=None,
         source_size=source.size(),
-        render_hint_enabled=render_hint_enabled,
+        presentation_sampling=presentation_sampling,
         tiles=(
             SampledTileRenderData(
                 source,

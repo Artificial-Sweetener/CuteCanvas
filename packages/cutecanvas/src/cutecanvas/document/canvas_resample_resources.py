@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 
 from PySide6.QtGui import QImage
+
 from qpane.sdk.scene import LayerTransform
 
 from ..composition.layers import CompositionLayerInstance

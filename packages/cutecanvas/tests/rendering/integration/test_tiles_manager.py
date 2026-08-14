@@ -23,10 +23,11 @@ import uuid
 from dataclasses import replace
 
 import pytest
+from PySide6.QtGui import QImage, Qt
+
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.execution_backend import ControlledExecution
 from cutecanvas_test_support.render_plan import make_tile_key
-from PySide6.QtGui import QImage, Qt
 from qpane.rendering import TileManager
 from qpane.rendering.raster_tile_grid import RasterTileGrid
 from qpane.rendering.tiles import Tile

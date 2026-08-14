@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QTimer
+
 from qpane.sdk.cache import CacheCoordinator
 from qpane.sdk.configuration import CacheSettings
 from qpane.sdk.execution import (

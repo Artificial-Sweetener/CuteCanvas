@@ -19,12 +19,13 @@
 from __future__ import annotations
 
 import pytest
-from cutecanvas import VectorShapeKind
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import VectorShapeKind
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 
 
 def _near_half_drag(viewer: object) -> tuple[object, object]:

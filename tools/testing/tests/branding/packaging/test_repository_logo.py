@@ -26,7 +26,7 @@ _ROOT = repository_root()
 _SVG_NAMESPACE = "{http://www.w3.org/2000/svg}"
 _PRODUCT_LOGOS = (
     ("cutecanvas", "0 0 1752 635"),
-    ("ferrastra", "0 0 1183 292"),
+    ("ferrastra", "0 0 1265 357"),
 )
 _REMOTE_LOGO_PATTERN = re.compile(
     r"https://raw\.githubusercontent\.com/Artificial-Sweetener/"
@@ -43,7 +43,7 @@ def test_root_readme_mounts_public_theme_specific_cutecanvas_vectors() -> None:
     assert '<source media="(prefers-color-scheme: light)"' in readme
     assert f'srcset="{base}-on-light.svg"' in readme
     assert 'alt="CuteCanvas — PySide6 Graphics Editor"' in readme
-    assert f'src="{base}.svg"' in readme
+    assert f'src="{base}-on-light.svg"' in readme
     assert 'width="640"' in readme
 
 
@@ -59,7 +59,7 @@ def test_package_readmes_mount_their_absolute_theme_specific_vectors() -> None:
         assert readme.startswith('<h1 align="center">\n  <picture>')
         assert f'srcset="{base}-on-dark.svg"' in readme
         assert f'srcset="{base}-on-light.svg"' in readme
-        assert f'src="{base}.svg"' in readme
+        assert f'src="{base}-on-light.svg"' in readme
         assert f'alt="{alt_text}"' in readme
         assert f'width="{width}"' in readme
 
@@ -103,8 +103,6 @@ def _read_vector(
     assert root.find(f"{_SVG_NAMESPACE}image") is None
     style = root.find(f"{_SVG_NAMESPACE}style")
     assert style is not None
-    paths = tuple(
-        element.attrib["d"] for element in root.findall(f"{_SVG_NAMESPACE}path")
-    )
+    paths = tuple(element.attrib["d"] for element in root.iter(f"{_SVG_NAMESPACE}path"))
     assert paths
     return paths, style.text or ""

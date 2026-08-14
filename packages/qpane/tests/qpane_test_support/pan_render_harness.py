@@ -25,14 +25,17 @@ import random
 import sys
 import time
 from collections.abc import Callable, Collection, Sequence
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRect, QSize
 from PySide6.QtGui import QImage, QRegion
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
 from qpane import QPane
 
 
@@ -61,6 +64,55 @@ class PanHarnessFailure:
     actual_pan: QPointF
     difference: FrameDifference
     artifact_directory: Path
+
+
+@dataclass
+class _ProgressWatchdog:
+    """Bound an asynchronous wait by both stalled and total wall time."""
+
+    stall_timeout_seconds: float
+    hard_deadline: float
+    stall_deadline: float
+    observed_state: object
+
+    @classmethod
+    def start(
+        cls,
+        *,
+        now: float,
+        stall_timeout_seconds: float,
+        hard_timeout_seconds: float,
+        initial_state: object,
+    ) -> _ProgressWatchdog:
+        """Create a watchdog whose first deadlines begin at ``now``."""
+        if stall_timeout_seconds <= 0.0:
+            raise ValueError("stall_timeout_seconds must be positive")
+        if hard_timeout_seconds < stall_timeout_seconds:
+            raise ValueError(
+                "hard_timeout_seconds must be at least stall_timeout_seconds"
+            )
+        return cls(
+            stall_timeout_seconds=stall_timeout_seconds,
+            hard_deadline=now + hard_timeout_seconds,
+            stall_deadline=now + stall_timeout_seconds,
+            observed_state=initial_state,
+        )
+
+    def permits_wait(
+        self,
+        state: object,
+        *,
+        now: float,
+        work_active: bool = False,
+    ) -> bool:
+        """Return whether progress, active work, and bounds permit waiting."""
+        if state != self.observed_state or work_active:
+            self.observed_state = state
+            self.stall_deadline = min(
+                self.hard_deadline,
+                now + self.stall_timeout_seconds,
+            )
+        return now < self.stall_deadline and now < self.hard_deadline
 
 
 class FrameArtifactDetector:
@@ -183,8 +235,10 @@ class HeadlessPanHarness:
             None if comparison_steps is None else frozenset(comparison_steps)
         )
         presenter = self._qpane._rendering.presenter
+        reference_presenter = self._reference_qpane._rendering.presenter
         if direct_navigation:
             presenter.begin_navigation_interaction()
+            reference_presenter.begin_navigation_interaction()
         try:
             for step_index, requested_pan in enumerate(pan_sequence):
                 requested_history.append(QPointF(requested_pan))
@@ -195,11 +249,16 @@ class HeadlessPanHarness:
                 actual_history.append(QPointF(actual_pan))
                 if selected_steps is not None and step_index not in selected_steps:
                     continue
+                if not direct_navigation:
+                    self._wait_for_raster_idle(self._qpane)
                 actual_frame = self.capture_settled_buffer(self._qpane)
                 renderer = presenter.renderer
                 buffer_pan = QPointF(renderer._buffer_pan)
                 valid_region = QRegion(renderer._buffer_valid_region)
-                expected_frame = self._capture_full_redraw_reference(buffer_pan)
+                expected_frame = self._capture_full_redraw_reference(
+                    buffer_pan,
+                    settle_exact=not direct_navigation,
+                )
                 visible_rect = QRect(
                     renderer.buffer_overscan_physical_px,
                     renderer.buffer_overscan_physical_px,
@@ -245,12 +304,16 @@ class HeadlessPanHarness:
         finally:
             if direct_navigation:
                 presenter.finish_navigation_interaction()
+                reference_presenter.finish_navigation_interaction()
                 self._settle_widget()
         return failures
 
     def close(self) -> None:
-        """Release the mounted widget and drain its deferred Qt cleanup."""
+        """Release both panes and join every harness-owned execution worker."""
         for pane in (self._reference_qpane, self._qpane):
+            runtime = pane._execution_runtime
+            pane._shutdown()
+            runtime.shutdown(wait=True)
             pane.close()
             pane.deleteLater()
         self._application.processEvents()
@@ -325,42 +388,131 @@ class HeadlessPanHarness:
         qpane: QPane,
         *,
         timeout_seconds: float = 5.0,
+        hard_timeout_seconds: float = 30.0,
     ) -> None:
-        """Settle asynchronous pyramid and tile products before comparisons."""
-        deadline = time.perf_counter() + timeout_seconds
-        idle_since: float | None = None
+        """Settle products unless work stalls or exceeds the hard deadline."""
+        started = time.perf_counter()
+        watchdog = _ProgressWatchdog.start(
+            now=started,
+            stall_timeout_seconds=timeout_seconds,
+            hard_timeout_seconds=hard_timeout_seconds,
+            initial_state=None,
+        )
+        progress_event = Event()
         view = qpane._rendering
-        while time.perf_counter() < deadline:
-            self._settle_widget()
-            tile_metrics = view.presenter.tile_manager.snapshot_metrics()
-            idle = (
-                not view.pyramids.pending_asset_keys()
-                and not view.pyramids.pending_retry_asset_keys()
-                and tile_metrics.active_jobs == 0
-                and tile_metrics.pending_retries == 0
+        with closing(
+            qpane._execution_runtime.subscribe_diagnostics(
+                lambda _snapshots: progress_event.set()
             )
-            now = time.perf_counter()
-            if idle:
-                idle_since = now if idle_since is None else idle_since
-                if now - idle_since >= 0.025:
-                    view.presenter.mark_dirty()
-                    qpane.update()
-                    self._settle_widget()
-                    return
-            else:
-                idle_since = None
-            QTest.qWait(1)
-        raise TimeoutError("pan harness raster products did not settle")
+        ):
+            idle_since: float | None = None
+            while True:
+                self._settle_widget()
+                tile_metrics = view.presenter.tile_manager.snapshot_metrics()
+                pyramid_metrics = view.pyramids.snapshot_metrics()
+                refinement = view.presenter._render_refinement
+                pending_asset_keys = frozenset(view.pyramids.pending_asset_keys())
+                pending_retry_asset_keys = frozenset(
+                    view.pyramids.pending_retry_asset_keys()
+                )
+                idle = (
+                    not pending_asset_keys
+                    and not pending_retry_asset_keys
+                    and tile_metrics.active_jobs == 0
+                    and tile_metrics.pending_retries == 0
+                    and refinement.pending_count == 0
+                    and not view.presenter.navigation_refinement_pending
+                )
+                now = time.perf_counter()
+                if idle:
+                    idle_since = now if idle_since is None else idle_since
+                    if now - idle_since >= 0.025:
+                        view.presenter.mark_dirty()
+                        qpane.update()
+                        self._settle_widget()
+                        return
+                else:
+                    idle_since = None
+                execution_snapshots = qpane._execution_runtime.execution_snapshots()
+                progress_state = (
+                    pending_asset_keys,
+                    pending_retry_asset_keys,
+                    pyramid_metrics.active_jobs,
+                    pyramid_metrics.cache_bytes,
+                    tile_metrics.active_jobs,
+                    tile_metrics.pending_retries,
+                    tile_metrics.cache_bytes,
+                    tile_metrics.prefetch_completed,
+                    tile_metrics.prefetch_failed,
+                    refinement.pending_count,
+                    bool(getattr(refinement, "prefetch_pending", False)),
+                    view.presenter.navigation_refinement_pending,
+                    execution_snapshots,
+                )
+                work_active = (
+                    pyramid_metrics.active_jobs > 0
+                    or tile_metrics.active_jobs > 0
+                    or refinement.pending_count > 0
+                    or any(
+                        snapshot.pending > 0 or snapshot.running > 0
+                        for snapshot in execution_snapshots
+                    )
+                )
+                if not watchdog.permits_wait(
+                    progress_state,
+                    now=now,
+                    work_active=work_active,
+                ):
+                    raise TimeoutError(
+                        "pan harness raster products did not settle: "
+                        f"progress={progress_state!r}"
+                    )
+                progress_event.wait(0.005)
+                progress_event.clear()
 
-    def _capture_full_redraw_reference(self, buffer_pan: QPointF) -> QImage:
+    def _capture_full_redraw_reference(
+        self,
+        buffer_pan: QPointF,
+        *,
+        settle_exact: bool,
+    ) -> QImage:
         """Render a clean reference at the incremental buffer's settled pan."""
         presenter = self._reference_qpane._rendering.presenter
+        if settle_exact:
+            self._wait_for_reference_products(buffer_pan)
         plan = presenter.calculateRenderPlan(use_pan=buffer_pan, is_blank=False)
         if plan is None:
             raise RuntimeError("QPane produced no render plan for the redraw oracle")
         presenter.renderer.markDirty()
         presenter.renderer.paint(plan)
         return self.capture_settled_buffer(self._reference_qpane)
+
+    def _wait_for_reference_products(
+        self,
+        buffer_pan: QPointF,
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        """Settle products requested on the redraw oracle's explicit pan grid."""
+        deadline = time.perf_counter() + timeout_seconds
+        idle_since: float | None = None
+        presenter = self._reference_qpane._rendering.presenter
+        while time.perf_counter() < deadline:
+            presenter.calculateRenderPlan(use_pan=buffer_pan, is_blank=False)
+            self._settle_widget()
+            idle = (
+                presenter._render_refinement.pending_count == 0
+                and not presenter.navigation_refinement_pending
+            )
+            now = time.perf_counter()
+            if idle:
+                idle_since = now if idle_since is None else idle_since
+                if now - idle_since >= 0.025:
+                    return
+            else:
+                idle_since = None
+            QTest.qWait(1)
+        raise TimeoutError("redraw oracle products did not settle")
 
     def _write_failure_artifacts(
         self,
@@ -459,8 +611,10 @@ def _copy_region_onto_reference(
     """Return actual valid pixels over an otherwise clean reference frame."""
     if actual.size() != reference.size():
         raise ValueError("actual and reference frame sizes must match")
-    actual_pixels = _rgba_pixels(actual)
-    combined = _rgba_pixels(reference)
+    actual_rgba = actual.convertToFormat(QImage.Format.Format_RGBA8888)
+    combined = reference.convertToFormat(QImage.Format.Format_RGBA8888)
+    actual_pixels = _rgba_pixel_view(actual_rgba)
+    combined_pixels = _rgba_pixel_view(combined, writable=True)
     bounds = QRect(0, 0, actual.width(), actual.height())
     for rect in region:
         clipped = rect.intersected(bounds)
@@ -468,24 +622,25 @@ def _copy_region_onto_reference(
             continue
         y_slice = slice(clipped.top(), clipped.bottom() + 1)
         x_slice = slice(clipped.left(), clipped.right() + 1)
-        combined[y_slice, x_slice] = actual_pixels[y_slice, x_slice]
-    return _image_from_rgba(combined)
+        combined_pixels[y_slice, x_slice] = actual_pixels[y_slice, x_slice]
+    return combined
+
+
+def _rgba_pixel_view(image: QImage, *, writable: bool = False) -> np.ndarray:
+    """Return a zero-copy height-by-width RGBA view over an encoded image."""
+    buffer = np.frombuffer(
+        image.bits() if writable else image.constBits(),
+        dtype=np.uint8,
+        count=image.sizeInBytes(),
+    )
+    rows = buffer.reshape(image.height(), image.bytesPerLine())
+    return rows[:, : image.width() * 4].reshape(image.height(), image.width(), 4)
 
 
 def _rgba_pixels(image: QImage) -> np.ndarray:
     """Return a copied height-by-width RGBA array for ``image``."""
     converted = image.convertToFormat(QImage.Format.Format_RGBA8888)
-    buffer = np.frombuffer(
-        converted.constBits(),
-        dtype=np.uint8,
-        count=converted.sizeInBytes(),
-    )
-    rows = buffer.reshape(converted.height(), converted.bytesPerLine())
-    return (
-        rows[:, : converted.width() * 4]
-        .reshape(converted.height(), converted.width(), 4)
-        .copy()
-    )
+    return _rgba_pixel_view(converted).copy()
 
 
 def _image_from_rgba(pixels: np.ndarray) -> QImage:

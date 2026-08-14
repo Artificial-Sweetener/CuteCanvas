@@ -24,6 +24,7 @@ from typing import Protocol
 import numpy as np
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
+
 from qpane.sdk.raster import qimage_to_numpy_view_grayscale8
 from qpane.sdk.scene import RasterBounds
 

@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas, LayerPolicy, PaintTargetKind
 from PySide6.QtCore import QObject
+
+from cutecanvas import CuteCanvas, LayerPolicy, PaintTargetKind
 
 
 class DemoLayerPolicyController(QObject):

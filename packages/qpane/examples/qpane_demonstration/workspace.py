@@ -23,6 +23,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
+
 from qpane import ExecutionRuntime, QPane, ViewerCatalogEntry
 
 from .catalog import CatalogPanel

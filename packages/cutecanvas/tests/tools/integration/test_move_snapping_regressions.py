@@ -18,13 +18,14 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.snapping.engine import SnapSession
 from cutecanvas.snapping.model import SnapCandidate, bounds_candidates
 from cutecanvas_test_support.harness.timing import (
     average_interaction_latency_ms,
     interaction_clock,
 )
-from PySide6.QtCore import QPointF, QRectF
 
 
 def test_moving_top_edge_acquires_document_center_while_left_edge_stays_snapped() -> (

@@ -26,9 +26,23 @@ target-version = ["py310"]
 [tool.ruff]
 target-version = "py310"
 preview = true
+src = [
+  "packages/cutecanvas/src",
+  "packages/cutecanvas/examples",
+  "packages/cutecanvas/tests",
+  "packages/ferrastra/src",
+  "packages/ferrastra/tests",
+  "packages/qpane/src",
+  "packages/qpane/examples",
+  "packages/qpane/tests",
+]
 
 [tool.ruff.lint]
 extend-select = ["E3", "TID251"]
+
+[tool.ruff.lint.isort]
+detect-same-package = false
+known-first-party = ["tools"]
 
 [tool.ruff.lint.per-file-ignores]
 "packages/qpane/src/qpane/__init__.py" = ["F822"]

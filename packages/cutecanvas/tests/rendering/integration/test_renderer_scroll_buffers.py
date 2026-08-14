@@ -20,6 +20,10 @@ import uuid
 from dataclasses import replace
 
 import pytest
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt, QTransform
+from PySide6.QtTest import QTest
+
 from cutecanvas import CuteCanvas
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas_test_support.harness.timing import wait_for_qt_condition
@@ -29,9 +33,6 @@ from cutecanvas_test_support.render_compare import (
     rendered_overscanned_widget_frame,
 )
 from cutecanvas_test_support.render_plan import make_render_plan
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QImage, QPainter, QRegion, Qt, QTransform
-from PySide6.QtTest import QTest
 from qpane import (
     ClipCoordinateSpace,
     LayerClip,
@@ -49,6 +50,7 @@ from qpane.rendering.navigation_plan import (
 from qpane.rendering.render import Renderer
 from qpane.scene.identity import scene_image_asset_key, source_render_asset_key
 from qpane.scene.model import LayerKind
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import (
     RenderStrategy,
     SampledLayerRenderItem,
@@ -270,7 +272,7 @@ def test_sampled_navigation_coverage_requires_a_complete_tile_union() -> None:
         placement=base_item.placement,
         clip=base_item.clip,
         source_size=QSize(128, 128),
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=(
             sampled_tile(QRectF(0.0, 0.0, 64.0, 64.0)),
             sampled_tile(QRectF(64.0, 0.0, 64.0, 64.0)),
@@ -300,7 +302,7 @@ def test_navigation_repair_accepts_spatial_sample_changes_for_one_revision() -> 
         placement=base_item.placement,
         clip=base_item.clip,
         source_size=QSize(128, 128),
-        render_hint_enabled=False,
+        presentation_sampling=RasterPresentationSampling.NEAREST,
         tiles=(
             SampledTileRenderData(
                 tile_image,

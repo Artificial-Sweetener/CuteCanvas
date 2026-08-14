@@ -22,6 +22,10 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
+from PySide6.QtTest import QSignalSpy, QTest
+from shiboken6 import delete
+
 from cutecanvas import (
     CanvasDocument,
     CanvasDocumentRuntime,
@@ -33,9 +37,6 @@ from cutecanvas import (
     PixelSelectionMode,
     VectorShapeKind,
 )
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt
-from PySide6.QtTest import QSignalSpy, QTest
-from shiboken6 import delete
 
 
 def test_mask_signals_ignore_a_destroyed_view(

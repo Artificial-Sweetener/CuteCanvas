@@ -22,10 +22,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtGui import QColor
-from qpane.sdk.scene import LayerDescriptor, LayerTransform, SceneDescriptor
 
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
+from qpane.sdk.scene import LayerDescriptor, LayerTransform, SceneDescriptor
 
 from ..composition.layers import (
     CompositionLayerInstance,

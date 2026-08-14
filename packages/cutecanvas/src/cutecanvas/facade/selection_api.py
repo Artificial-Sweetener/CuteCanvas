@@ -22,8 +22,6 @@ import uuid
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
-from qpane.sdk.raster import qimage_to_numpy_grayscale8
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from cutecanvas.editor import EditorOperation
@@ -33,6 +31,8 @@ from cutecanvas.types import (
     PixelSelectionSnapshot,
     RasterExtentPolicy,
 )
+from qpane.sdk.raster import qimage_to_numpy_grayscale8
+from qpane.sdk.scene import RasterBounds
 
 
 class SelectionApiMixin:

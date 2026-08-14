@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import ast
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def collect_test_modules(root: Path, policy: TestPolicy) -> tuple[Path, ...]:
 def validate_root_runtime_ownership(root: Path) -> None:
     """Reject product runtime tests or fixtures from the repository root."""
     legacy_root = root / "tests"
-    offenders = tuple(legacy_root.rglob("*.py")) if legacy_root.exists() else ()
+    offenders = _owned_python_files(legacy_root)
     if offenders:
         relative = ", ".join(str(path.relative_to(root)) for path in offenders)
         raise InventoryError(
@@ -55,15 +56,29 @@ def validate_root_runtime_ownership(root: Path) -> None:
             f"their tools; move product runtime tests and fixtures: {relative}"
         )
     example_root = root / "examples"
-    example_offenders = (
-        tuple(example_root.rglob("*.py")) if example_root.exists() else ()
-    )
+    example_offenders = _owned_python_files(example_root)
     if example_offenders:
         relative = ", ".join(str(path.relative_to(root)) for path in example_offenders)
         raise InventoryError(
             "product examples must live with their independently publishable "
             f"owner; move repository-root runtime examples: {relative}"
         )
+
+
+def _owned_python_files(root: Path) -> tuple[Path, ...]:
+    """Collect Python files without entering ignored local environments or caches."""
+    if not root.exists():
+        return ()
+    files: list[Path] = []
+    for current, directories, names in os.walk(root):
+        directories[:] = [
+            name
+            for name in directories
+            if name != "__pycache__" and name != ".venv" and not name.startswith("venv")
+        ]
+        current_path = Path(current)
+        files.extend(current_path / name for name in names if name.endswith(".py"))
+    return tuple(sorted(files))
 
 
 def _validate_test_modules(root: Path, policies: dict[str, TestPolicy]) -> None:

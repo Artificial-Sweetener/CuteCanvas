@@ -22,19 +22,6 @@ import statistics
 
 import numpy as np
 import pytest
-from cutecanvas import (
-    EditorIntent,
-    EditorTransformCommand,
-    EditorTransformTarget,
-    LayerPolicy,
-)
-from cutecanvas.editor.transform_interaction import TransformBoxPresentation
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from cutecanvas_test_support.harness.timing import (
-    INTERACTIVE_PERFORMANCE,
-    absolute_latency_assertions_are_isolated,
-    interaction_clock,
-)
 from PySide6.QtCore import (
     QLineF,
     QPoint,
@@ -48,6 +35,20 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import (
+    EditorIntent,
+    EditorTransformCommand,
+    EditorTransformTarget,
+    LayerPolicy,
+)
+from cutecanvas.editor.transform_interaction import TransformBoxPresentation
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
+from cutecanvas_test_support.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    absolute_latency_assertions_are_isolated,
+    interaction_clock,
+)
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.sdk.scene import RasterBounds
 

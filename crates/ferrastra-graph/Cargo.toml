@@ -1,0 +1,19 @@
+[package]
+name = "ferrastra-graph"
+description = "Typed immutable graph definitions and compilation for Ferrastra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+blake3.workspace = true
+ferrastra-core = { path = "../ferrastra-core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

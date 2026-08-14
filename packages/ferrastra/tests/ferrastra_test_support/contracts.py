@@ -27,8 +27,16 @@ def declared_names(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     names: set[str] = set()
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
             names.add(node.name)
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        elif isinstance(node, ast.ImportFrom):
+            names.update(
+                alias.asname for alias in node.names if alias.asname is not None
+            )
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and (not node.target.id.startswith("_") or node.target.id == "__version__")
+        ):
             names.add(node.target.id)
     return names

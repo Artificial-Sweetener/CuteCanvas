@@ -21,6 +21,7 @@ from collections.abc import Callable
 from threading import Event, Lock, get_ident
 
 import pytest
+
 from qpane.sdk.execution import (
     BackendSubmission,
     CompletionDispatcher,

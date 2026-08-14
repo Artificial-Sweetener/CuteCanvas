@@ -22,6 +22,9 @@ from types import MethodType, SimpleNamespace
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QObject, QPoint
+from PySide6.QtGui import QImage, Qt
+
 from cutecanvas import RasterExtentPolicy
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks import autosave_coordination
@@ -46,8 +49,6 @@ from cutecanvas_test_support.mask_workflow import (
 from cutecanvas_test_support.mask_workflow import (
     queue_pending_stroke as _queue_pending_stroke,
 )
-from PySide6.QtCore import QObject, QPoint
-from PySide6.QtGui import QImage, Qt
 from qpane.raster.image_conversion import numpy_to_qimage_grayscale8
 from qpane.scene.raster import RasterBounds
 

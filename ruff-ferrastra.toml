@@ -1,11 +1,16 @@
 target-version = "py310"
 preview = true
 line-length = 100
+src = [
+  "packages/ferrastra/src",
+  "packages/ferrastra/tests",
+]
 include = [
   "packages/ferrastra/**/*.py",
   "packages/ferrastra/**/*.pyi",
   "tools/architecture/**/*.py",
   "tools/check_ferrastra_*.py",
+  "tools/ferrastra_benchmarks.py",
   "tools/ferrastra_ownership.py",
   "tools/verify_ferrastra_wheel.py",
   "tests/test_ferrastra_*.py",
@@ -44,6 +49,10 @@ ignore = [
   # The public package boundary validates native/Python version agreement.
   "RUF067",
 ]
+
+[lint.isort]
+detect-same-package = false
+known-first-party = ["tools"]
 
 [lint.per-file-ignores]
 "**/tests/*.py" = ["PLC2701"]

@@ -22,11 +22,12 @@ import math
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtTest import QTest
+
 from cutecanvas import LayerGeometryMode, LayerPolicy
 from cutecanvas.masks.projection import project_mask_coverage_to_scene
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtTest import QTest
 from qpane.sdk.scene import BilinearLayerTransform, PiecewiseLayerTransform
 
 

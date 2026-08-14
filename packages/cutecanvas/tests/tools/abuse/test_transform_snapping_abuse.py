@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import uuid
 
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.scene.transform_session import LayerTransformBoxState
 from cutecanvas.snapping import SnapConfiguration
 from cutecanvas.snapping.candidates import SnapTargetSnapshot
@@ -29,7 +31,6 @@ from cutecanvas_test_support.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     average_interaction_latency_ms,
 )
-from PySide6.QtCore import QPointF, QRectF
 from qpane.sdk.scene import (
     LayerTransform,
     TransformHandle,

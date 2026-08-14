@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas
-from demonstration.brush_controls import BrushControls
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QColorDialog, QToolBar
+
+from cutecanvas import CuteCanvas
+from demonstration.brush_controls import BrushControls
 
 
 def test_brush_bar_distinguishes_raster_mask_and_selection_color_semantics(

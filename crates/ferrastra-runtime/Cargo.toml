@@ -1,0 +1,19 @@
+[package]
+name = "ferrastra-runtime"
+description = "Bounded spatial graph evaluation runtime for Ferrastra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+blake3.workspace = true
+ferrastra-core = { path = "../ferrastra-core" }
+ferrastra-graph = { path = "../ferrastra-graph" }
+ferrastra-store = { path = "../ferrastra-store" }
+
+[lints]
+workspace = true

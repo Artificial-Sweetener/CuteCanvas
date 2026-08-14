@@ -21,11 +21,12 @@ import uuid
 from pathlib import Path
 
 import numpy as np
-from cutecanvas import CuteCanvas
-from cutecanvas.masks.mask import MaskAssetStore
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import CuteCanvas
+from cutecanvas.masks.mask import MaskAssetStore
 from qpane.sdk.scene import RasterBounds
 
 

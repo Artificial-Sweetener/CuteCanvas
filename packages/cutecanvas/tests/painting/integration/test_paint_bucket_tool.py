@@ -17,11 +17,12 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
+
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.tools.paint_bucket import PaintBucketTool
 from cutecanvas.tools.ports import PaintBucketInteractionPort
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
 
 
 def test_first_bucket_click_uses_pointer_alt_snapshot() -> None:

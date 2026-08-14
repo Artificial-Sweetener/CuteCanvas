@@ -21,10 +21,11 @@ import time
 from dataclasses import dataclass
 
 import numpy as np
-from cutecanvas import LayerPolicy, RasterExtentPolicy
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
+
+from cutecanvas import LayerPolicy, RasterExtentPolicy
 from qpane.raster.image_conversion import (
     qimage_to_numpy_argb32,
     qimage_to_numpy_grayscale8,

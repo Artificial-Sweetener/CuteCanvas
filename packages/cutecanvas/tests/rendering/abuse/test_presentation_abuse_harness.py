@@ -20,13 +20,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from cutecanvas import CuteCanvas
-from cutecanvas.document import CanvasDocument, CanvasInspectionGroup
-from cutecanvas.presentation import CanvasWorkspace
-from cutecanvas_test_support.harness.timing import (
-    INTERACTIVE_PERFORMANCE,
-    average_interaction_latency_ms,
-)
 from PySide6.QtCore import (
     QCoreApplication,
     QElapsedTimer,
@@ -36,8 +29,20 @@ from PySide6.QtCore import (
     QSize,
 )
 from PySide6.QtGui import QColor, QImage, QPainter
+
+from cutecanvas import CuteCanvas
+from cutecanvas.document import CanvasDocument, CanvasInspectionGroup
+from cutecanvas.presentation import CanvasWorkspace
+from cutecanvas_test_support.harness.timing import (
+    INTERACTIVE_PERFORMANCE,
+    average_interaction_latency_ms,
+)
 from qpane.scene import ClipCoordinateSpace, RenderStrategy
-from qpane.scene.render_plan import SceneRenderItem, SceneRenderPlan
+from qpane.scene.render_plan import (
+    SampledLayerRenderItem,
+    SceneRenderItem,
+    SceneRenderPlan,
+)
 from qpane.sdk.rendering import ViewportZoomMode
 from qpane.sdk.types import ComparisonOrientation
 
@@ -421,7 +426,9 @@ def _wait_for_dense_comparison_pixels(
         assert plan is not None
         if require_tiled:
             assert all(
-                item.strategy is RenderStrategy.TILE for item in plan.render_items
+                isinstance(item, SampledLayerRenderItem)
+                or item.strategy is RenderStrategy.TILE
+                for item in plan.render_items
             )
         frame = pane.grab().toImage()
         mismatch = _first_dense_comparison_mismatch(plan, frame, sources)
@@ -469,11 +476,9 @@ def _first_dense_comparison_mismatch(
         for x in range(19, frame.width() - 19, 41):
             point = QPointF(float(x), float(y))
             use_secondary = x >= divider_x if clip.width < 1.0 else y >= divider_y
-            primary_product_point = inverse.map(point)
-            primary_point = primary_product_point / max(
-                primary.pyramid_scale,
-                1e-9,
-            )
+            primary_point = inverse.map(point)
+            if not isinstance(primary, SampledLayerRenderItem):
+                primary_point /= max(primary.pyramid_scale, 1e-9)
             normalized_x = primary_point.x() / primary_source.width()
             normalized_y = primary_point.y() / primary_source.height()
             if not (0.0 <= normalized_x < 1.0 and 0.0 <= normalized_y < 1.0):
@@ -498,9 +503,21 @@ def _first_dense_comparison_mismatch(
                 continue
             expected = source.pixelColor(source_x, source_y)
             actual = frame.pixelColor(x, y)
-            if actual != expected:
+            if not _colors_match_reconstruction(expected, actual):
                 return point, expected, actual
     return None
+
+
+def _colors_match_reconstruction(expected: QColor, actual: QColor) -> bool:
+    """Allow only the one-code-value rounding bound of RGBA8 reconstruction."""
+    return all(
+        abs(expected_channel - actual_channel) <= 1
+        for expected_channel, actual_channel in zip(
+            expected.getRgb(),
+            actual.getRgb(),
+            strict=True,
+        )
+    )
 
 
 def _projected_comparison_divider(

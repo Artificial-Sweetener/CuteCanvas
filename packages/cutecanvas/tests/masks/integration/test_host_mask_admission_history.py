@@ -19,9 +19,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cutecanvas import CuteCanvas, RasterExtentPolicy
 from PySide6.QtCore import QRectF, QSize, QTemporaryDir
 from PySide6.QtGui import QImage
+
+from cutecanvas import CuteCanvas, RasterExtentPolicy
 
 
 def test_host_mask_survives_exhaustive_edit_undo(qapp) -> None:

@@ -18,9 +18,10 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QImage
+
+from cutecanvas import CuteCanvas
 
 
 def _image() -> QImage:

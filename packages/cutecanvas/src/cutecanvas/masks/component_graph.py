@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QImage
+
 from qpane.sdk.execution import ExecutionScope
 
 from ..types import DiagnosticsDomain

@@ -17,13 +17,6 @@
 
 from __future__ import annotations
 
-from cutecanvas import (
-    CloneStampAlignment,
-    CloneStampSampleMode,
-    CloneStampState,
-    CloneStampTransform,
-    CuteCanvas,
-)
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -32,6 +25,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QToolBar,
+)
+
+from cutecanvas import (
+    CloneStampAlignment,
+    CloneStampSampleMode,
+    CloneStampState,
+    CloneStampTransform,
+    CuteCanvas,
 )
 
 

@@ -24,16 +24,16 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
+
+from cutecanvas.types import RasterExtentPolicy
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
-    numpy_to_qimage_argb32_at_size,
     qimage_to_numpy_argb32,
     qimage_to_numpy_view_argb32,
 )
 from qpane.sdk.scene import RasterBounds
 
-from cutecanvas.types import RasterExtentPolicy
-
+from .preview_sampling import sample_argb32_preview
 from .sparse_grid import SparseRasterGrid, SparseRasterSnapshot, SparseRasterTile
 
 
@@ -292,7 +292,7 @@ class ColorRasterSurface:
             return 0 if visible is None else self._grid.count_tiles(visible)
 
     def sampled_qimage(self, scale: float) -> QImage:
-        """Return a display sample without materializing transparent gaps."""
+        """Return a bounded approximation for volatile presentation."""
         normalized_scale = min(1.0, max(1e-6, float(scale)))
         with self._lock:
             target_size = QSize(
@@ -301,7 +301,7 @@ class ColorRasterSurface:
             )
             stride = max(1, int(1.0 / normalized_scale))
             pixels = self._grid.read_strided(self._bounds, stride)
-        return numpy_to_qimage_argb32_at_size(pixels, target_size)
+        return sample_argb32_preview(pixels, target_size)
 
     def presentation_tiles(
         self,

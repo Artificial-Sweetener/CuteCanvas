@@ -35,7 +35,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qpane import Config
+
+from qpane import Config, RasterReconstructionSpace
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.webp *.tif *.tiff)"
 
@@ -86,6 +87,7 @@ class ViewerSettingsDialog(QDialog):
             touch_inertia_enabled=self.touch_inertia.isChecked(),
             drag_out_enabled=self.drag_out.isChecked(),
             draw_tile_grid=self.tile_grid.isChecked(),
+            viewport_reconstruction_space=self.reconstruction_space.currentData(),
             tile_size=(
                 "auto"
                 if self.tile_size_mode.currentData() == "auto"
@@ -159,6 +161,15 @@ class ViewerSettingsDialog(QDialog):
             )
         )
         self.tile_grid = QCheckBox("Draw renderer tile boundaries")
+        self.reconstruction_space = QComboBox()
+        self.reconstruction_space.addItem(
+            "sRGB encoded (default)",
+            RasterReconstructionSpace.SRGB_ENCODED,
+        )
+        self.reconstruction_space.addItem(
+            "Linear-light sRGB",
+            RasterReconstructionSpace.SRGB_LINEAR,
+        )
         form.addRow(note)
         form.addRow("Cache policy", self.cache_mode)
         form.addRow("Hard cache cap", self.cache_budget)
@@ -166,6 +177,7 @@ class ViewerSettingsDialog(QDialog):
         form.addRow("Tile sizing", self.tile_size_mode)
         form.addRow("Fixed tile edge", self.tile_size)
         form.addRow("Tile diagnostics", self.tile_grid)
+        form.addRow("Raster reconstruction", self.reconstruction_space)
         return tab
 
     def _build_placeholder_tab(self) -> QWidget:
@@ -215,6 +227,10 @@ class ViewerSettingsDialog(QDialog):
         self.touch_inertia.setChecked(bool(config.touch_inertia_enabled))
         self.drag_out.setChecked(bool(config.drag_out_enabled))
         self.tile_grid.setChecked(bool(config.draw_tile_grid))
+        reconstruction_index = self.reconstruction_space.findData(
+            config.viewport_reconstruction_space
+        )
+        self.reconstruction_space.setCurrentIndex(max(0, reconstruction_index))
         self.cache_mode.setCurrentText(str(config.cache.mode))
         self.cache_budget.setValue(int(config.cache.budget_mb or 1024))
         self.prefetch_depth.setValue(max(0, int(config.cache.prefetch.pyramids)))

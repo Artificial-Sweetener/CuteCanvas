@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from typing import Protocol
 
 from PySide6.QtCore import QPointF, QRectF, QSizeF
+
 from qpane.sdk.inspection import (
     InspectionTarget,
     InspectionUpdate,

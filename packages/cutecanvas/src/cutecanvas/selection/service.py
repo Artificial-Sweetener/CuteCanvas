@@ -21,7 +21,6 @@ import uuid
 from collections.abc import Callable
 
 import numpy as np
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.coverage import (
     CoverageCombineMode,
@@ -32,6 +31,7 @@ from cutecanvas.coverage import (
     RasterCoverageItem,
 )
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import RasterBounds
 
 from .history import PixelSelectionEdit
 from .model import PixelSelectionState

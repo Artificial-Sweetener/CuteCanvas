@@ -51,11 +51,12 @@ host-policy, or document authority. Ferrastra imports no Qt, QPane, CuteCanvas,
 application, document, viewport, tool, history, or presentation concepts. Only
 `ferrastra-python` may use PyO3.
 
-Stage 0 intentionally exposes package identity without graphics or language
-behavior. It may contain non-production schemas and fixtures that prove planned
-contracts, but no parser, placeholder graph API, mock production operation, or
-empty language crate. Add a crate only with executable code for its declared
-responsibility, and declare every operation contract before implementation.
+Ferrastra exposes implemented graph, raster, coverage, runtime, source-editing,
+reconstruction, and diagnostic contracts through its stable public package.
+It contains no placeholder graph API, mock production operation, speculative
+contract, or empty language crate. Add a crate only with executable code for its
+declared responsibility, and declare every operation contract before
+implementation.
 Crate and adapter edges are enforced by `ARCHITECTURE_POLICY.toml`; numerical
 migrations are activated in `FERRASTRA_OWNERSHIP.toml` when their canonical owner
 moves to Ferrastra.

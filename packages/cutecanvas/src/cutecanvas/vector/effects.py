@@ -22,6 +22,7 @@ from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QPainterPath
+
 from qpane.sdk.scene import (
     LayerEffectReference,
     LayerSourceReference,

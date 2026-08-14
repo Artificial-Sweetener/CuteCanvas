@@ -20,12 +20,13 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QObject
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.selection import PixelSelectionState, SelectionBoundaryBuilder
 from cutecanvas.types import RasterExtentPolicy
 from cutecanvas.ui.editor_overlays import PixelSelectionOverlayRenderer
-from PySide6.QtCore import QObject
-from PySide6.QtWidgets import QApplication
 from qpane.scene.raster import RasterBounds
 
 

@@ -20,7 +20,11 @@ from __future__ import annotations
 from pathlib import Path
 from types import ModuleType
 
-from tools.trinity.boundaries import _forbidden_imports, _private_dependency_imports
+from tools.trinity.boundaries import (
+    _forbidden_imports,
+    _owns_python_examples,
+    _private_dependency_imports,
+)
 from tools.trinity.configuration import _compare_mapping, validate_configuration
 from tools.trinity.demo import validate_demo
 from tools.trinity.model import ProductContract, repository_products
@@ -112,6 +116,22 @@ def test_dependency_sdk_import_passes(tmp_path: Path) -> None:
     )
 
     assert _private_dependency_imports(source, "qpane") == []
+
+
+def test_root_example_validation_ignores_generated_environments(
+    tmp_path: Path,
+) -> None:
+    """Local environments beneath the former root must not become product source."""
+    examples = tmp_path / "examples"
+    environment = examples / "venv-qpane" / "Lib" / "site-packages"
+    environment.mkdir(parents=True)
+    (environment / "dependency.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    assert not _owns_python_examples(examples)
+
+    (examples / "product_demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    assert _owns_python_examples(examples)
 
 
 def test_sdk_runtime_export_missing_from_stub_fails() -> None:

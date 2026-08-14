@@ -56,6 +56,7 @@ from .core import (
     OverlayRegistry,
     SceneOverlayDrawFn,
 )
+from .core.viewer_lifetime import ViewerLifetime
 from .execution import (
     DefaultExecutionPolicy,
     ExecutionRuntime,
@@ -251,10 +252,9 @@ class QPane(QWidget):
         self._comparison.changed.connect(self.comparisonChanged)
         self._rendering.sceneChanged.connect(self._handle_rendering_scene_changed)
         self._rendering.zoomChanged.connect(self.zoomChanged)
-        self._rendering.diagnosticsDirty.connect(
-            self._viewer_diagnostics.mark_render_dirty
-        )
-        self.destroyed.connect(self._shutdown)
+        mark_diagnostics_dirty = self._viewer_diagnostics.mark_render_dirty
+        self._rendering.diagnosticsDirty.connect(mark_diagnostics_dirty)
+        self._lifetime = ViewerLifetime(self, self._shutdown)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
@@ -806,7 +806,7 @@ class QPane(QWidget):
             getattr(self, "_owns_execution_runtime", False)
             and execution_runtime is not None
         ):
-            execution_runtime.shutdown(wait=False)
+            execution_runtime.shutdown(wait=True)
 
     def _is_drag_out_allowed(self) -> bool:
         """Return whether current content fits and host drag-out is enabled."""

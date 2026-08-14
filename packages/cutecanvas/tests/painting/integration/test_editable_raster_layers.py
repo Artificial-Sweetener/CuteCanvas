@@ -20,14 +20,15 @@ from __future__ import annotations
 import time
 import uuid
 
+from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QSignalSpy, QTest
+
 from cutecanvas import (
     LayerGeometryMode,
     LayerGeometryPolicy,
     LayerPolicy,
 )
-from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QSignalSpy, QTest
 from qpane.scene.raster import RasterBounds
 from qpane.scene.render_plan import SampledLayerRenderItem
 
@@ -121,6 +122,40 @@ def test_editable_raster_deletes_soft_selection_and_undoes_chronologically(
     redone = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
     assert redone is not None
     assert 126 <= redone.pixelColor(1, 1).alpha() <= 128
+
+
+def test_full_selection_delete_is_exact_and_repeated_delete_adds_no_history(
+    qpane_with_mask,
+) -> None:
+    """Full Delete must undo exactly and a transparent repeat must be a no-op."""
+    qpane, _manager, _image_id = qpane_with_mask
+    scene = qpane.currentScene()
+    assert scene is not None
+    layer_id = qpane.addEditableRasterLayer(_opaque_image(8, 8), label="Paint")
+    assert layer_id is not None
+    assert qpane.setSelectedLayer(scene.scene_id, layer_id)
+    assert qpane.selectAllPixels()
+    before = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
+    assert before is not None
+    history = qpane.compositionService().edit_controller
+    depth_before_delete = len(history.undo_commands(scene.scene_id))
+
+    assert qpane.deleteSelectedPixels()
+    cleared = qpane.editableRasterLayerImage(scene.scene_id, layer_id)
+    assert cleared is not None
+    assert all(
+        cleared.pixelColor(x, y).alpha() == 0
+        for y in range(cleared.height())
+        for x in range(cleared.width())
+    )
+    assert len(history.undo_commands(scene.scene_id)) == depth_before_delete + 1
+
+    assert not qpane.deleteSelectedPixels()
+    assert len(history.undo_commands(scene.scene_id)) == depth_before_delete + 1
+    assert qpane.undoSceneEdit()
+    assert qpane.editableRasterLayerImage(scene.scene_id, layer_id) == before
+    assert qpane.redoSceneEdit()
+    assert qpane.editableRasterLayerImage(scene.scene_id, layer_id) == cleared
 
 
 def test_delete_key_clears_selection_independently_of_active_tool(

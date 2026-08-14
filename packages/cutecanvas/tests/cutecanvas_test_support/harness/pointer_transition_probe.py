@@ -20,10 +20,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QMouseEvent, QPointerEvent
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import CuteCanvas
 
 
 @dataclass(frozen=True, slots=True)

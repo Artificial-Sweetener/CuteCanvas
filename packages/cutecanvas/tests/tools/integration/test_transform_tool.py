@@ -17,11 +17,12 @@
 
 import uuid
 
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QKeyEvent, QMouseEvent
+
 from cutecanvas.editor.transform_interaction import TransformBoxPresentation
 from cutecanvas.tools.affine_ports import TransformInteractionPort
 from cutecanvas.tools.transform import TransformTool
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QMouseEvent
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 from qpane.scene.transform_geometry import (
     TransformHandle,

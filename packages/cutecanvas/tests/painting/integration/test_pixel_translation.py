@@ -22,6 +22,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas.coverage import CoverageAsset, CoverageSnapshot, CoverageSurface
 from cutecanvas.masks.mask import MaskLayer
 from cutecanvas.masks.pixel_edits import MaskLayerPixelMutationOwner
@@ -31,7 +33,6 @@ from cutecanvas.raster.pixel_translation import ColorPixelTranslator
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.scene.pixel_fragments import RasterPixelFormat, RasterPixelFragment
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtGui import QColor, QImage
 from qpane.scene.model import LayerDescriptor
 from qpane.scene.raster import RasterBounds
 

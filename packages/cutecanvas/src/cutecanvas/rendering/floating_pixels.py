@@ -23,10 +23,9 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
+
 from qpane.sdk.raster import (
     numpy_to_qimage_argb32,
-    numpy_to_qimage_grayscale8_at_size,
-    qimage_to_numpy_grayscale8,
 )
 from qpane.sdk.scene import (
     RasterBounds,
@@ -40,6 +39,7 @@ from qpane.sdk.scene import (
     TransientSampledResolvedContribution,
 )
 
+from ..raster.preview_sampling import sample_coverage_preview
 from ..scene.pixel_fragments import RasterPixelFormat
 from ..scene.pixel_move_preview import RasterPixelMovePreview
 from ..scene.pixel_transitions import RasterPixelTransition
@@ -260,9 +260,7 @@ def _alpha_mask(coverage: np.ndarray, target_size: QSize) -> QImage:
         mask = QImage(target_size, QImage.Format_ARGB32_Premultiplied)
         mask.fill(0xFF000000)
         return mask
-    sampled = qimage_to_numpy_grayscale8(
-        numpy_to_qimage_grayscale8_at_size(coverage, target_size)
-    )
+    sampled = sample_coverage_preview(coverage, target_size)
     pixels = np.zeros((*sampled.shape, 4), dtype=np.uint8)
     pixels[:, :, 3] = sampled
     return numpy_to_qimage_argb32(pixels)

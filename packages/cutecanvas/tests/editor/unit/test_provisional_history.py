@@ -21,6 +21,7 @@ import random
 from typing import cast
 
 import pytest
+
 from cutecanvas.editor.provisional_history import BoundedProvisionalHistory
 
 

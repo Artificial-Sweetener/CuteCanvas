@@ -23,6 +23,14 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from cutecanvas.coverage import (
+    CoverageEdgeModificationRequest,
+    CoverageFilterCancelledError,
+    CoverageSnapshot,
+    build_coverage_edge_modification,
+)
+from cutecanvas.coverage.spatial_constraint import coverage_change_respects_constraint
+from cutecanvas.types import LayerEdgeOperation
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,
@@ -34,15 +42,6 @@ from qpane.sdk.execution import (
     ExecutionState,
     ExecutionUrgency,
 )
-
-from cutecanvas.coverage import (
-    CoverageEdgeModificationRequest,
-    CoverageFilterCancelledError,
-    CoverageSnapshot,
-    build_coverage_edge_modification,
-)
-from cutecanvas.coverage.spatial_constraint import coverage_change_respects_constraint
-from cutecanvas.types import LayerEdgeOperation
 
 from .coverage_modification_contracts import (
     CoverageModificationPreviewResult,

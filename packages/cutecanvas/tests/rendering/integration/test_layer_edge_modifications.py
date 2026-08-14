@@ -22,13 +22,14 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
+from PySide6.QtGui import QColor
+from PySide6.QtTest import QSignalSpy
+
 from cutecanvas import (
     LayerEdgeModificationResult,
     LayerEdgeOperation,
     RasterExtentPolicy,
 )
-from PySide6.QtGui import QColor
-from PySide6.QtTest import QSignalSpy
 from qpane.sdk.raster import numpy_to_qimage_grayscale8
 from qpane.sdk.scene import RasterBounds
 

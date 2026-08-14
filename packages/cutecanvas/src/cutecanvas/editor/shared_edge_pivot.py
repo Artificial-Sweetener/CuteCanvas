@@ -24,12 +24,12 @@ from dataclasses import dataclass
 from enum import Enum
 
 from PySide6.QtCore import QPointF
+
+from cutecanvas.snapping.edge_model import OrientedEdge
 from qpane.sdk.scene import (
     LayerMapping,
     PiecewiseLayerTransform,
 )
-
-from cutecanvas.snapping.edge_model import OrientedEdge
 
 from .shared_edge_collapse import joined_edge_mapping
 from .shared_edge_geometry import SharedEdgeSeam

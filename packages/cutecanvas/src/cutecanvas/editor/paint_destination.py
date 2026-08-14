@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Callable
 
 from PySide6.QtCore import QRectF, QSize
+
 from qpane.sdk.scene import LayerInteractionPolicy, SceneDescriptor
 
 from ..painting import PaintingCoordinator

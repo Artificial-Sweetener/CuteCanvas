@@ -23,8 +23,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from cutecanvas.sam import service
 from PySide6.QtCore import QStandardPaths
+
+from cutecanvas.sam import service
 
 
 class _RecordingPredictor:

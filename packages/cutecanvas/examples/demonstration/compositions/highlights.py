@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import uuid
 
-from cutecanvas import CuteCanvas, LayerEffectHandle, LayerHandle
 from PySide6.QtGui import QColor
+
+from cutecanvas import CuteCanvas, LayerEffectHandle, LayerHandle
 
 LayerTarget = tuple[uuid.UUID, uuid.UUID]
 

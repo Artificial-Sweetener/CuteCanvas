@@ -23,16 +23,36 @@ from dataclasses import replace
 from PySide6.QtCore import QPoint, QPointF
 from PySide6.QtGui import QTransform
 
-from ..scene.render_plan import SceneRenderItem
+from ..scene.render_plan import SampledLayerRenderItem, SceneRenderItem
 from .panel_mapping import PanelLayerMapping, PiecewisePanelMapping
 from .raster_sampling import device_aligned_raster_transform
 
 
 def translate_render_item(item: SceneRenderItem, delta: QPointF) -> SceneRenderItem:
     """Translate one immutable item in logical painter coordinates."""
+    translated_tiles = (
+        tuple(
+            replace(
+                tile,
+                source_rect=tile.source_rect.translated(delta),
+                source_clip_rect=(
+                    None
+                    if tile.source_clip_rect is None
+                    else tile.source_clip_rect.translated(delta)
+                ),
+            )
+            for tile in item.tiles
+        )
+        if isinstance(item, SampledLayerRenderItem) and item.panel_space_products
+        else None
+    )
     transform = item.transform
     if isinstance(transform, PiecewisePanelMapping):
-        return replace(item, transform=transform.translated(delta))
+        return replace(
+            item,
+            transform=transform.translated(delta),
+            **({"tiles": translated_tiles} if translated_tiles is not None else {}),
+        )
     translated = QTransform(
         transform.m11(),
         transform.m12(),
@@ -44,7 +64,11 @@ def translate_render_item(item: SceneRenderItem, delta: QPointF) -> SceneRenderI
         transform.dy() + delta.y(),
         transform.m33(),
     )
-    return replace(item, transform=translated)
+    return replace(
+        item,
+        transform=translated,
+        **({"tiles": translated_tiles} if translated_tiles is not None else {}),
+    )
 
 
 def retained_mapping_delta(

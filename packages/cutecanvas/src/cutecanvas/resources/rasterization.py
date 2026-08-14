@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QSize
+
 from qpane.sdk.scene import LayerTransform
 
 from ..composition.layers import CompositionLayerStore

@@ -21,6 +21,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QPen
+
 from qpane import CursorInteractionPort, NavigationInteractionPort
 from qpane.sdk.vector import VectorShapeKind
 

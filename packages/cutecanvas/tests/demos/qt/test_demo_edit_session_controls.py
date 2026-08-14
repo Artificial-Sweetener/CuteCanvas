@@ -17,6 +17,11 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QToolBar
+
 from cutecanvas import (
     CuteCanvas,
     EditorTransformCommand,
@@ -25,10 +30,6 @@ from cutecanvas import (
     VectorShapeKind,
 )
 from cutecanvas_demo import ExampleOptions, ExampleWindow
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QToolBar
 
 
 def test_demo_exposes_contextual_apply_and_cancel_for_transform(

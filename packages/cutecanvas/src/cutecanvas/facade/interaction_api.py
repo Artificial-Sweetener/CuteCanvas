@@ -20,8 +20,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from PySide6.QtGui import QPainter
-from qpane.sdk.overlays import OverlayDrawFn, SceneOverlayDrawFn
-from qpane.sdk.types import OverlayState
 
 from cutecanvas.core import (
     CursorProvider,
@@ -35,6 +33,8 @@ from cutecanvas.overlay_contracts import (
     CanvasOverlayState,
 )
 from cutecanvas.tools import Tools
+from qpane.sdk.overlays import OverlayDrawFn, SceneOverlayDrawFn
+from qpane.sdk.types import OverlayState
 
 from .edit_session_api import EditSessionApiMixin
 

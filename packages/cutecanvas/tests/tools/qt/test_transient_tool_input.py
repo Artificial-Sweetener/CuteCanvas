@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import pytest
+
 from cutecanvas.tools.tools import Tools
 from cutecanvas.tools.transient_input import TransientToolInput
 

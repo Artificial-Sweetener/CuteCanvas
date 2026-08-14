@@ -20,6 +20,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor
+
 from qpane.sdk.scene import LayerTransform
 
 from .model import BrushDab, BrushOperation

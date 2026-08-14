@@ -21,6 +21,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPoint, QPointF, QRect
 from PySide6.QtGui import QTransform
+
 from qpane import PiecewiseLayerTransform
 from qpane.rendering.navigation_plan import (
     retained_raster_navigation_delta,

@@ -21,6 +21,10 @@ import statistics
 import uuid
 from pathlib import Path
 
+from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import CuteCanvas, LayerPolicy
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas_test_support.execution_backend import ControllableExecutionBackend
@@ -30,9 +34,6 @@ from cutecanvas_test_support.harness.timing import (
     absolute_latency_assertions_are_isolated,
     interaction_clock,
 )
-from PySide6.QtCore import QRectF, QSize
-from PySide6.QtGui import QColor, QImage, QTransform
-from PySide6.QtWidgets import QApplication
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.sdk.execution import ExecutionRuntime
 

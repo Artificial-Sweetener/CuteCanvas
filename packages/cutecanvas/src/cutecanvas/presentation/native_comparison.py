@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import QVBoxLayout, QWidget
+
 from qpane import QPane
 from qpane.sdk.types import (
     ComparisonOrientation,

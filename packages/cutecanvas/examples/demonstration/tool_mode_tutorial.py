@@ -19,10 +19,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas, EditorTransformTarget
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QToolBar
 
+from cutecanvas import CuteCanvas, EditorTransformTarget
 from demonstration.brush_controls import BrushControls
 from demonstration.clone_stamp_controls import CloneStampControls
 from demonstration.coverage_controls import CoverageControls

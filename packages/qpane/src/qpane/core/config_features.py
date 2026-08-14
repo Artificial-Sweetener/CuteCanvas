@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from ..ferrastra.reconstruction import RasterReconstructionSpace
 from .config import CacheSettings, Config, TileSizeSetting
 from .config_schema import ConfigFeatureRegistry, FeatureConfigDescriptor
 
@@ -40,6 +41,9 @@ class CoreConfigSlice:
     tile_size: TileSizeSetting = _BASE_CONFIG.tile_size
     tile_overlap: int = _BASE_CONFIG.tile_overlap
     min_view_size_px: int = _BASE_CONFIG.min_view_size_px
+    viewport_reconstruction_space: RasterReconstructionSpace = (
+        _BASE_CONFIG.viewport_reconstruction_space
+    )
     canvas_expansion_factor: float = _BASE_CONFIG.canvas_expansion_factor
     safe_min_zoom: float = _BASE_CONFIG.safe_min_zoom
     drag_out_enabled: bool = _BASE_CONFIG.drag_out_enabled
@@ -78,6 +82,13 @@ def _validate_core_config(settings: CoreConfigSlice) -> None:
         raise ValueError("tile_overlap must be non-negative and smaller than tile_size")
     if settings.min_view_size_px <= 0:
         raise ValueError("min_view_size_px must be greater than 0")
+    if not isinstance(
+        settings.viewport_reconstruction_space,
+        RasterReconstructionSpace,
+    ):
+        raise TypeError(
+            "viewport_reconstruction_space must be a RasterReconstructionSpace"
+        )
     if settings.canvas_expansion_factor <= 0:
         raise ValueError("canvas_expansion_factor must be greater than 0")
     if settings.safe_min_zoom <= 0:

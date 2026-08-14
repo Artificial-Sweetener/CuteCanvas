@@ -20,15 +20,16 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     interaction_clock,
     wait_for_qt_condition,
 )
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.sdk.scene import BilinearLayerTransform
 
 pytestmark = INTERACTIVE_PERFORMANCE

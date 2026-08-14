@@ -20,9 +20,9 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerTransform, TransformOperation
 
 from cutecanvas.types import EditorTransformCommand
+from qpane.sdk.scene import LayerTransform, TransformOperation
 
 
 def command_transform(

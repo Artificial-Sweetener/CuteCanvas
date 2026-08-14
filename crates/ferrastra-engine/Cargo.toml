@@ -1,0 +1,20 @@
+[package]
+name = "ferrastra-engine"
+description = "Stable high-level Rust assembly for Ferrastra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+ferrastra-core = { path = "../ferrastra-core" }
+ferrastra-graph = { path = "../ferrastra-graph" }
+ferrastra-raster = { path = "../ferrastra-raster" }
+ferrastra-runtime = { path = "../ferrastra-runtime" }
+ferrastra-store = { path = "../ferrastra-store" }
+
+[lints]
+workspace = true

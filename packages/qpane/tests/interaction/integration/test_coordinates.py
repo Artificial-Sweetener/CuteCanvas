@@ -21,6 +21,7 @@ import uuid
 import pytest
 from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, QSizeF
 from PySide6.QtGui import QImage
+
 from qpane.rendering.coordinates import (
     CoordinateContext,
     LogicalPoint,

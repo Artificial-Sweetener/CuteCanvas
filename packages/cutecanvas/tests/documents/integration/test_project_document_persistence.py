@@ -23,11 +23,12 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import CuteCanvas, prepare_document_restore
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.harness.timing import completion_clock
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QColor, QImage
 
 
 def _image(color: str, width: int = 64, height: int = 48) -> QImage:

@@ -23,6 +23,8 @@ from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage
+
+from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from qpane.sdk.execution import (
     CancellationToken,
     ExecutionHandle,
@@ -37,8 +39,6 @@ from qpane.sdk.execution import (
 )
 from qpane.sdk.scene import LayerPlacement, LayerTransform, RasterBounds
 from qpane.sdk.vector import VectorDocument
-
-from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 
 from ..composition.layer_edits import CompositionLayerEditService
 from ..composition.layers import (

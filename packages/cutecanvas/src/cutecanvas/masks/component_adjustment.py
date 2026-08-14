@@ -21,10 +21,10 @@ import logging
 import uuid
 
 from PySide6.QtCore import QPoint
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.coverage import CoverageSnapshot, reframe_coverage_snapshot
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import RasterBounds
 
 from .image_ops import adjust_connected_component, connected_component_extent
 from .mask import MaskAssetStore

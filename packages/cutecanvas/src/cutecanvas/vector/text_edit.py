@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QLineF, QPointF, QRectF
 from PySide6.QtGui import QPolygonF
+
 from qpane.sdk.scene import LayerTransform
 from qpane.sdk.vector import (
     SemanticTextLayoutCache,

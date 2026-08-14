@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.cursor import EditorCursorIntent
 from cutecanvas.resources import ProjectResourceReference

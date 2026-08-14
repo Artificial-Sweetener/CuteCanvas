@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Hashable
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, runtime_checkable
@@ -39,24 +39,19 @@ from ..execution import (
     ExecutionState,
     ExecutionUrgency,
 )
-from ..scene.raster import RasterBounds
+from ..ferrastra.reconstruction import RasterReconstructionSpace
+from ..scene.raster_sampling import RasterExactSampling
+from . import render_tile_types as tile_types
 from .panel_mapping import PanelLayerMapping, detached_panel_mapping
+from .render_cancellation import RenderCancellation
+from .render_refinement_demand import RenderRefinementDemandPlanner
 from .render_tile_cache import RenderTileCache
 from .render_tile_geometry import (
     RenderTileKey,
     RenderTileRequest,
     estimated_request_bytes,
     guarded_tile_requests,
-    overview_tile_requests,
     unique_requests,
-)
-from .render_tile_geometry import (
-    visible_tile_requests as _visible_tile_requests,
-)
-from .render_tile_types import (
-    RenderRefinement,
-    RenderTileBatchSource,
-    RenderTileProduct,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +59,7 @@ logger = logging.getLogger(__name__)
 _REFINEMENT_CHUNK_TILES = 4
 _PREFETCH_CHUNK_TILES = 1
 _PREFETCH_SETTLE_MS = 150
+_TileProduct = tile_types.RenderTileProduct
 
 
 @runtime_checkable
@@ -73,7 +69,7 @@ class _ImmediateTileSource(Protocol):
     def immediate_products(
         self,
         requests: tuple[RenderTileRequest, ...],
-    ) -> tuple[RenderTileProduct, ...] | None:
+    ) -> tuple[tile_types.RenderTileProduct, ...] | None:
         """Return immediate products or decline synchronous derivation."""
         ...
 
@@ -87,31 +83,31 @@ class _RefinementLane(str, Enum):
 
 
 def _render_tiles(
-    source: RenderTileBatchSource,
+    source: tile_types.RenderTileBatchSource,
     requests: tuple[RenderTileRequest, ...],
     cancellation: CancellationToken,
     *,
     chunk_size: int = _REFINEMENT_CHUNK_TILES,
-) -> tuple[RenderTileProduct, ...]:
+) -> tuple[tile_types.RenderTileProduct, ...]:
     """Evaluate one complete refinement batch cooperatively."""
+    render_cancellation = RenderCancellation(cancellation)
     batches: OrderedDict[float, list[RenderTileRequest]] = OrderedDict()
     for request in requests:
         batches.setdefault(request.key.scale, []).append(request)
-    products: list[RenderTileProduct] = []
+    products: list[tile_types.RenderTileProduct] = []
     for batch in batches.values():
         for offset in range(0, len(batch), chunk_size):
             cancellation.raise_if_cancelled()
             products.extend(
                 source.render_tiles(
                     tuple(batch[offset : offset + chunk_size]),
-                    lambda: cancellation.is_cancelled,
+                    render_cancellation,
                 )
             )
     cancellation.raise_if_cancelled()
-    result = tuple(products)
-    if len(result) != len(requests):
+    if len(products) != len(requests):
         raise RuntimeError("render refinement returned an incomplete tile batch")
-    return result
+    return tuple(products)
 
 
 @dataclass(slots=True)
@@ -120,37 +116,26 @@ class _PendingTiles:
 
     signature: tuple[RenderTileKey, ...]
     retained_signature: tuple[RenderTileKey, ...]
-    source: RenderTileBatchSource
+    source: tile_types.RenderTileBatchSource
     lane: _RefinementLane
-    handle: ExecutionHandle[tuple[RenderTileProduct, ...], object] | None = None
+    handle: ExecutionHandle[tuple[_TileProduct, ...], object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class _DeferredTiles:
     """Retain latest detail work until stable continuity pixels are available."""
 
-    source: RenderTileBatchSource
+    source: tile_types.RenderTileBatchSource
     requests: tuple[RenderTileRequest, ...]
     required_signature: tuple[RenderTileKey, ...]
     retained_signature: tuple[RenderTileKey, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class _OverviewRequestBatch:
-    """Cache source-wide fallback geometry until its render identity changes."""
-
-    revision_key: Hashable
-    fallback_key: Hashable
-    bounds: RasterBounds
-    budget_bytes: int
-    requests: tuple[RenderTileRequest, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class _DeferredPrefetch:
     """Retain the latest settled-view guard request for one source."""
 
-    source: RenderTileBatchSource
+    source: tile_types.RenderTileBatchSource
     source_to_panel: PanelLayerMapping
     panel_rect: QRectF
     visible_requests: tuple[RenderTileRequest, ...]
@@ -182,11 +167,11 @@ class RenderTileWorkCoordinator:
         )
         self._cache = cache
         self._ready = ready
+        self._demand = RenderRefinementDemandPlanner()
         self._pending: dict[tuple[str, uuid.UUID, _RefinementLane], _PendingTiles] = {}
         self._deferred: dict[tuple[str, uuid.UUID, _RefinementLane], _DeferredTiles] = (
             {}
         )
-        self._overview_requests: dict[tuple[str, uuid.UUID], _OverviewRequestBatch] = {}
         self._deferred_prefetch: dict[tuple[str, uuid.UUID], _DeferredPrefetch] = {}
         self._rejected: set[tuple[RenderTileKey, ...]] = set()
         self._prefetch_timer = QTimer()
@@ -225,11 +210,35 @@ class RenderTileWorkCoordinator:
 
     def suspend_for_navigation(self) -> None:
         """Cancel sampled refinement while viewport input owns responsiveness."""
+        self._suspend(abandon_current=False)
+
+    def suspend_for_interaction(self) -> None:
+        """Retire incomplete products when host interaction pins visible pixels."""
+        self._suspend(abandon_current=True)
+
+    def _suspend(self, *, abandon_current: bool) -> None:
+        """Cancel derived work and optionally prevent the same batch from returning."""
         if self._closed:
             return
         self._navigation_suspended = True
         self._prefetch_timer.stop()
         self._deferred_prefetch.clear()
+        if abandon_current:
+            self._rejected.update(
+                pending.retained_signature
+                for pending in self._pending.values()
+                if _uses_exact_sampling_grid(pending.retained_signature)
+            )
+            self._rejected.update(
+                deferred.retained_signature
+                for deferred in self._deferred.values()
+                if _uses_exact_sampling_grid(deferred.retained_signature)
+            )
+            self._deferred = {
+                identity: deferred
+                for identity, deferred in self._deferred.items()
+                if not _uses_exact_sampling_grid(deferred.retained_signature)
+            }
         for identity in tuple(self._pending):
             self._cancel(identity)
 
@@ -238,46 +247,58 @@ class RenderTileWorkCoordinator:
         if self._closed or not self._navigation_suspended:
             return
         self._navigation_suspended = False
+        deferred_sources = {
+            (source_kind, source_id)
+            for source_kind, source_id, lane in self._deferred
+            if lane is _RefinementLane.DETAIL
+        }
+        for source_kind, source_id in deferred_sources:
+            self._start_deferred_detail(source_kind, source_id)
 
     def request(
         self,
         *,
-        source: RenderTileBatchSource,
+        source: tile_types.RenderTileBatchSource,
         source_to_panel: PanelLayerMapping,
         panel_rect: QRectF,
         device_pixel_ratio: float,
         maximum_scale: float | None = None,
-    ) -> RenderRefinement:
+        exact_physical_grid: bool = False,
+        exact_sampling: RasterExactSampling | None = None,
+        reconstruction_space: RasterReconstructionSpace = (
+            RasterReconstructionSpace.SRGB_ENCODED
+        ),
+    ) -> tile_types.RenderRefinement:
         """Return, schedule, or explicitly decline one visible tile set."""
         if self._cache.budget_bytes <= 0:
-            return RenderRefinement.unavailable()
-        overview_requests = self._overview_requests_for(source)
-        overview_bytes = estimated_request_bytes(overview_requests)
-        detail_budget_bytes = max(0, self._cache.budget_bytes - overview_bytes)
-        visible_requests = _visible_tile_requests(
-            source_kind=source.source_kind,
-            source_id=source.source_id,
-            revision_key=source.revision_key,
-            fallback_key=source.fallback_key,
-            bounds=source.bounds,
+            return tile_types.RenderRefinement.unavailable()
+        demand = self._demand.plan(
+            source=source,
             source_to_panel=source_to_panel,
             panel_rect=panel_rect,
             device_pixel_ratio=device_pixel_ratio,
-            budget_bytes=detail_budget_bytes,
+            budget_bytes=self._cache.budget_bytes,
             maximum_scale=maximum_scale,
+            exact_physical_grid=exact_physical_grid,
+            exact_sampling=exact_sampling,
+            reconstruction_space=reconstruction_space,
         )
-        if visible_requests is None:
-            visible_requests = overview_requests
+        overview_requests = demand.overview
+        visible_requests = demand.visible
         visible_signature = tuple(request.key for request in visible_requests)
         if not visible_signature:
-            return RenderRefinement.ready(())
+            return tile_types.RenderRefinement.ready(())
         overview_signature = tuple(request.key for request in overview_requests)
         cached = self._cache.products(visible_signature)
         if cached is None and isinstance(source, _ImmediateTileSource):
             immediate = source.immediate_products(visible_requests)
             if immediate is not None:
                 self._cache.admit(immediate, retain_keys=visible_signature)
-                return RenderRefinement.ready(immediate)
+                return (
+                    tile_types.RenderRefinement.ready(immediate)
+                    if demand.exact_available
+                    else tile_types.RenderRefinement.approximate(immediate)
+                )
         if not self._navigation_suspended:
             self._ensure_work(
                 lane=_RefinementLane.CONTINUITY,
@@ -332,7 +353,11 @@ class RenderTileWorkCoordinator:
                     required_signature=visible_signature,
                     retained_signature=detail_retained_signature,
                 )
-        if cached is not None and not self._navigation_suspended:
+        if (
+            cached is not None
+            and not self._navigation_suspended
+            and not exact_physical_grid
+        ):
             self._schedule_prefetch(
                 source=source,
                 source_to_panel=source_to_panel,
@@ -342,10 +367,14 @@ class RenderTileWorkCoordinator:
             )
         identity = (source.source_kind, source.source_id)
         if cached is not None:
-            return RenderRefinement.ready(cached)
+            return (
+                tile_types.RenderRefinement.ready(cached)
+                if demand.exact_available
+                else tile_types.RenderRefinement.approximate(cached)
+            )
         fallback = self._cache.presentation_products(visible_requests)
         if fallback is not None:
-            return RenderRefinement.waiting(fallback)
+            return tile_types.RenderRefinement.waiting(fallback)
         work_available = (
             any(identity_key[:2] == identity for identity_key in self._pending)
             or any(identity_key[:2] == identity for identity_key in self._deferred)
@@ -356,16 +385,16 @@ class RenderTileWorkCoordinator:
         )
         if self._closed or not work_available:
             return (
-                RenderRefinement.waiting(fallback)
+                tile_types.RenderRefinement.waiting(fallback)
                 if fallback
-                else RenderRefinement.unavailable()
+                else tile_types.RenderRefinement.unavailable()
             )
-        return RenderRefinement.waiting(fallback)
+        return tile_types.RenderRefinement.waiting(fallback)
 
     def _schedule_prefetch(
         self,
         *,
-        source: RenderTileBatchSource,
+        source: tile_types.RenderTileBatchSource,
         source_to_panel: PanelLayerMapping,
         panel_rect: QRectF,
         visible_requests: tuple[RenderTileRequest, ...],
@@ -401,7 +430,7 @@ class RenderTileWorkCoordinator:
     def _ensure_prefetch(
         self,
         *,
-        source: RenderTileBatchSource,
+        source: tile_types.RenderTileBatchSource,
         source_to_panel: PanelLayerMapping,
         panel_rect: QRectF,
         visible_requests: tuple[RenderTileRequest, ...],
@@ -411,7 +440,12 @@ class RenderTileWorkCoordinator:
         overview_bytes = estimated_request_bytes(
             tuple(
                 request
-                for request in self._overview_requests_for(source)
+                for request in self._demand.overview_for(
+                    source,
+                    self._cache.budget_bytes,
+                    None,
+                    visible_requests[0].key.reconstruction_space,
+                )
                 if request.key in frozenset(overview_signature)
             )
         )
@@ -427,7 +461,10 @@ class RenderTileWorkCoordinator:
             visible_requests=visible_requests,
         )
         occupied = frozenset(
-            (*overview_signature, *(request.key for request in visible_requests))
+            (
+                *overview_signature,
+                *(request.key for request in visible_requests),
+            )
         )
         prefetch_requests = tuple(
             request
@@ -464,44 +501,11 @@ class RenderTileWorkCoordinator:
             for key in required_signature
         )
 
-    def _overview_requests_for(
-        self,
-        source: RenderTileBatchSource,
-    ) -> tuple[RenderTileRequest, ...]:
-        """Return cached whole-source request geometry for one render revision."""
-        identity = (source.source_kind, source.source_id)
-        current = self._overview_requests.get(identity)
-        budget_bytes = self._cache.budget_bytes
-        if (
-            current is not None
-            and current.revision_key == source.revision_key
-            and current.fallback_key == source.fallback_key
-            and current.bounds == source.bounds
-            and current.budget_bytes == budget_bytes
-        ):
-            return current.requests
-        requests = overview_tile_requests(
-            source_kind=source.source_kind,
-            source_id=source.source_id,
-            revision_key=source.revision_key,
-            fallback_key=source.fallback_key,
-            bounds=source.bounds,
-            budget_bytes=budget_bytes // 2,
-        )
-        self._overview_requests[identity] = _OverviewRequestBatch(
-            source.revision_key,
-            source.fallback_key,
-            source.bounds,
-            budget_bytes,
-            requests,
-        )
-        return requests
-
     def _ensure_work(
         self,
         *,
         lane: _RefinementLane,
-        source: RenderTileBatchSource,
+        source: tile_types.RenderTileBatchSource,
         requests: tuple[RenderTileRequest, ...],
         required_signature: tuple[RenderTileKey, ...],
         retained_signature: tuple[RenderTileKey, ...],
@@ -581,7 +585,7 @@ class RenderTileWorkCoordinator:
     def _defer_detail(
         self,
         *,
-        source: RenderTileBatchSource,
+        source: tile_types.RenderTileBatchSource,
         requests: tuple[RenderTileRequest, ...],
         required_signature: tuple[RenderTileKey, ...],
         retained_signature: tuple[RenderTileKey, ...],
@@ -616,7 +620,7 @@ class RenderTileWorkCoordinator:
             self._cancel(identity)
         self._deferred.clear()
         self._deferred_prefetch.clear()
-        self._overview_requests.clear()
+        self._demand.clear()
         self._rejected.clear()
         self._execution_scope.close(reason="render_refinement_shutdown")
 
@@ -624,7 +628,7 @@ class RenderTileWorkCoordinator:
         self,
         identity: tuple[str, uuid.UUID, _RefinementLane],
         expected: _PendingTiles,
-        products: tuple[RenderTileProduct, ...],
+        products: tuple[tile_types.RenderTileProduct, ...],
     ) -> None:
         """Publish only the exact latest complete request for a source."""
         pending = self._pending.get(identity)
@@ -650,8 +654,8 @@ class RenderTileWorkCoordinator:
     def _settle_request(
         self,
         identity: tuple[str, uuid.UUID, _RefinementLane],
-        handle: ExecutionHandle[tuple[RenderTileProduct, ...], object],
-        outcome: ExecutionOutcome[tuple[RenderTileProduct, ...]],
+        handle: ExecutionHandle[tuple[tile_types.RenderTileProduct, ...], object],
+        outcome: ExecutionOutcome[tuple[tile_types.RenderTileProduct, ...]],
     ) -> None:
         """Release failed or cancelled refinement state without stale adoption."""
         if outcome.state == ExecutionState.SUCCEEDED:
@@ -704,3 +708,8 @@ class RenderTileWorkCoordinator:
             return
         if pending.handle is not None:
             pending.handle.cancel(reason="render_refinement_superseded")
+
+
+def _uses_exact_sampling_grid(signature: tuple[RenderTileKey, ...]) -> bool:
+    """Return whether a batch represents settled physical-grid sampling."""
+    return any(key.sampling_grid is not None for key in signature)

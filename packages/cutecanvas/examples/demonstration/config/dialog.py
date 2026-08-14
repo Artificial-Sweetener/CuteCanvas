@@ -23,7 +23,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
-from cutecanvas import Config
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -46,6 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cutecanvas import Config
 from demonstration.config.spec import (
     _ALL_FIELDS,
     _CONFIG_FIELDS,

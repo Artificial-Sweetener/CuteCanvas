@@ -19,6 +19,10 @@
 import logging
 
 import pytest
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas.tools import ToolDependencies
 from cutecanvas.tools.affine_ports import (
     SharedEdgeResizePort,
@@ -36,9 +40,6 @@ from cutecanvas.tools.ports import (
     tool_activation_ports,
 )
 from cutecanvas.tools.tools import Tools
-from PySide6.QtCore import QEvent, QPointF, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QApplication
 from qpane import CursorTool, PanZoomTool, ViewerTool
 
 pytestmark = [

@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import uuid
 
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QImage, QPainter
+
 from cutecanvas.editor.shared_edge_presentation import (
     SharedEdgeHandlePresentation,
     SharedEdgePresentation,
 )
 from cutecanvas.ui.shared_edge import SharedEdgeRenderer
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QImage, QPainter
 
 
 def test_shared_edge_feedback_draws_no_line_to_unmatched_participant_corner(

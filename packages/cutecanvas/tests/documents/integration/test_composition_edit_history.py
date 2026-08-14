@@ -20,8 +20,15 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from PySide6.QtCore import QRectF
+
+from cutecanvas import CanvasDocument, ExternalHistoryPolicy
 from cutecanvas.composition.edit_controller import CompositionEditController
 from cutecanvas.composition.edit_history import CompositionEditHistory
+from cutecanvas.composition.history_model import (
+    HistoryDurability,
+    HistoryTruncationReason,
+)
 from cutecanvas.composition.resource_lifetime import (
     CompositionResourceLifetime,
     ResourceLeaseKind,
@@ -50,6 +57,16 @@ class _ResourceCommand:
     scope_id: uuid.UUID
     retained_bytes: int
     retained_resources: tuple[ProjectResourceReference, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _TransientCommand:
+    """Representative non-durable selection-state transition."""
+
+    scope_id: uuid.UUID
+    label: str
+    retained_bytes: int
+    history_durability: HistoryDurability = HistoryDurability.TRANSIENT
 
 
 def _placement_edit(scope_id: uuid.UUID, x: float) -> LayerMappingEdit:
@@ -206,3 +223,106 @@ def test_history_releases_resource_leases_on_branch_discard_and_eviction() -> No
     history.clear_scope(scope_id)
     assert lifetime.total_leases(second_source) == 0
     assert released == [first, second]
+
+
+def test_durable_commit_is_current_and_identity_replayable_under_all_soft_limits() -> (
+    None
+):
+    """Every accepted durable command must survive enforcement as current undo."""
+    for command_limit in (0, 1, 3):
+        for byte_limit in (0, 1, 8):
+            for retained_bytes in (0, 1, 16):
+                scope_id = uuid.uuid4()
+                history = CompositionEditHistory(
+                    command_limit=command_limit,
+                    byte_limit=byte_limit,
+                )
+                controller = CompositionEditController(history)
+                controller.register_handler(
+                    _TestCommand,
+                    undo=lambda _command: True,
+                    redo=lambda _command: True,
+                )
+                for index in range(5):
+                    command = _TestCommand(
+                        scope_id,
+                        f"edit-{index}",
+                        retained_bytes,
+                    )
+                    commit = controller.record_applied(command)
+                    candidate = history.undo_entry(scope_id)
+                    assert candidate is not None
+                    assert candidate.metadata.command_id == commit.metadata.command_id
+                    assert candidate.command is command
+                    assert controller.undo_identity(
+                        scope_id,
+                        commit.metadata.command_id,
+                    ).changed
+                    assert history.redo_entry(scope_id) is candidate
+                    assert controller.redo_identity(
+                        scope_id,
+                        commit.metadata.command_id,
+                    ).changed
+                    assert history.undo_entry(scope_id) is candidate
+
+
+def test_policy_truncation_reports_exact_identity_and_reason() -> None:
+    """Policy eviction must publish all removed identities with one typed reason."""
+    scope_id = uuid.uuid4()
+    truncations = []
+    history = CompositionEditHistory(
+        command_limit=1,
+        byte_limit=1024,
+        truncated=truncations.append,
+    )
+    first = history.record_applied(_TestCommand(scope_id, "first", 1))
+    second = history.record_applied(_TestCommand(scope_id, "second", 1))
+
+    assert second.metadata.sequence_number > first.metadata.sequence_number
+    assert len(truncations) == 1
+    assert truncations[0].reason is HistoryTruncationReason.COMMAND_LIMIT
+    assert tuple(item.command_id for item in truncations[0].evicted) == (
+        first.metadata.command_id,
+    )
+
+
+def test_transient_pressure_does_not_consume_durable_retention_budget() -> None:
+    """Selection-like churn must not evict the newest durable edit guarantee."""
+    scope_id = uuid.uuid4()
+    history = CompositionEditHistory(command_limit=1, byte_limit=1)
+    durable_commit = history.record_applied(_TestCommand(scope_id, "delete", 128))
+
+    for index in range(20):
+        history.record_applied(_TransientCommand(scope_id, f"selection-{index}", 128))
+
+    retained_ids = {
+        entry.metadata.command_id for entry in history.undo_entries(scope_id)
+    }
+    assert durable_commit.metadata.command_id in retained_ids
+
+
+def test_canvas_document_external_history_observes_and_replays_exact_identity() -> None:
+    """External policy mode must expose safe replay without private limits."""
+    commits = []
+    document = CanvasDocument(
+        history_policy=ExternalHistoryPolicy(),
+        history_committed=commits.append,
+    )
+    scope_id = document.create_composition(QRectF(0.0, 0.0, 32.0, 32.0))
+    controller = document.resources.compositions.edit_controller
+    controller.register_handler(
+        _TestCommand,
+        undo=lambda _command: True,
+        redo=lambda _command: True,
+    )
+    for index in range(150):
+        controller.record_applied(_TestCommand(scope_id, f"edit-{index}", 1 << 20))
+
+    candidate = document.history.undo_candidate(scope_id)
+    assert candidate is not None
+    assert len(commits) == 150
+    assert len(document.history.undo_entries(scope_id)) == 150
+    assert not document.history.undo(scope_id, uuid.uuid4())
+    assert document.history.undo(scope_id, candidate.command_id)
+    assert not document.history.redo(scope_id, uuid.uuid4())
+    assert document.history.redo(scope_id, candidate.command_id)

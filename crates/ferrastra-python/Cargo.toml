@@ -14,6 +14,9 @@ name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+ferrastra-core = { path = "../ferrastra-core" }
+ferrastra-engine = { path = "../ferrastra-engine" }
+ferrastra-graph = { path = "../ferrastra-graph" }
 pyo3.workspace = true
 
 [lints]

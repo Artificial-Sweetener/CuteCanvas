@@ -17,10 +17,11 @@
 
 from __future__ import annotations
 
-from cutecanvas_demo import ExampleOptions, ExampleWindow
 from PySide6.QtCore import QRectF
 from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QFileDialog
+
+from cutecanvas_demo import ExampleOptions, ExampleWindow
 
 
 def test_demo_opens_multi_view_inspection_for_shared_document(qapp) -> None:

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QPointF
 from PySide6.QtGui import QColor
+
 from qpane.sdk.rendering import (
     LayerLocalPoint,
     PanelPoint,

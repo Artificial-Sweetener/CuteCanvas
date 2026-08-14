@@ -66,9 +66,9 @@ def test_dynamic_python_versions_remain_tag_owned() -> None:
 
 
 def test_ferrastra_release_updates_cargo_version_and_lock_together() -> None:
-    """Keep the native package version and resolved workspace synchronized."""
+    """Keep stable native package and resolved workspace versions synchronized."""
     configuration = _semantic_release_configuration("ferrastra")
-    assert configuration["allow_zero_version"] is True
+    assert configuration["allow_zero_version"] is False
     assert set(configuration["commit_parser_options"]["path_filters"]) == {
         "packages/ferrastra",
         "crates",

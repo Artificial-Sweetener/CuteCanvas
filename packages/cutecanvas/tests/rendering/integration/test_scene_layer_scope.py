@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from cutecanvas import CuteCanvas
 from PySide6.QtGui import QImage, Qt
+
+from cutecanvas import CuteCanvas
 from qpane.scene.model import LayerKind
 
 

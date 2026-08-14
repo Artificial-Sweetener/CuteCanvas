@@ -21,9 +21,9 @@ import uuid
 from collections.abc import Callable
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 from cutecanvas.coverage.containment import coverage_contains
+from qpane.sdk.scene import LayerDescriptor, SceneDescriptor
 
 from ..painting.targets import (
     PaintTargetContext,

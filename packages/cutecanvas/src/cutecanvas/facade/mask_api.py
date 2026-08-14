@@ -194,9 +194,8 @@ class MaskApiMixin:
         if "sam" not in self.installedFeatures:
             return False, "SAM tools disabled in this mode."
         try:
-            from qpane.sdk.features import FeatureInstallError
-
             from cutecanvas.masks.sam_feature import install_sam_feature
+            from qpane.sdk.features import FeatureInstallError
 
             self._masks_controller.detachSamManager()
             install_sam_feature(self)

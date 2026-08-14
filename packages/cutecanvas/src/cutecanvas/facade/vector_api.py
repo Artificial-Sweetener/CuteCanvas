@@ -28,16 +28,6 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QTransform,
 )
-from qpane.sdk.scene import LayerInteractionPolicy
-from qpane.sdk.vector import (
-    TextFontResolution,
-    VectorParagraphStyle,
-    VectorPathCommand,
-    VectorShapeKind,
-    VectorStyle,
-    VectorTextContent,
-    VectorTextStyle,
-)
 
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.types import (
@@ -49,6 +39,16 @@ from cutecanvas.vector.public import (
     VectorNodeSelectionSnapshot,
     VectorSelectionSnapshot,
     VectorTextEditSnapshot,
+)
+from qpane.sdk.scene import LayerInteractionPolicy
+from qpane.sdk.vector import (
+    TextFontResolution,
+    VectorParagraphStyle,
+    VectorPathCommand,
+    VectorShapeKind,
+    VectorStyle,
+    VectorTextContent,
+    VectorTextStyle,
 )
 
 

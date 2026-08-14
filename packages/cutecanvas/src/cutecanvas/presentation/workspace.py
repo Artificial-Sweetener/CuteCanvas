@@ -21,9 +21,10 @@ import uuid
 from collections.abc import Iterable
 from typing import cast
 
-from PySide6.QtCore import QPoint, QRectF, Signal
+from PySide6.QtCore import QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QStackedLayout, QWidget
+
 from qpane.sdk.execution import (
     DefaultExecutionPolicy,
     ExecutionRuntime,
@@ -95,6 +96,7 @@ class CanvasWorkspace(QWidget):
                 for fast presentation switching. Visible targets are additional.
         """
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         if document_runtime is not None and (
             execution_runtime is not None or execution_policy is not None
         ):

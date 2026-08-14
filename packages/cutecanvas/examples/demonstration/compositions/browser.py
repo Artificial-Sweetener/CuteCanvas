@@ -20,12 +20,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas import (
-    CompositionEntry,
-    CompositionLayerEntry,
-    CompositionSnapshot,
-    CuteCanvas,
-)
 from PySide6.QtCore import QEvent, QItemSelectionModel, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QDropEvent
 from PySide6.QtWidgets import (
@@ -37,6 +31,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cutecanvas import (
+    CompositionEntry,
+    CompositionLayerEntry,
+    CompositionSnapshot,
+    CuteCanvas,
+)
 from demonstration.compositions.highlights import LayerBrowserHighlights
 
 FocusPolicy = Callable[[str], None]

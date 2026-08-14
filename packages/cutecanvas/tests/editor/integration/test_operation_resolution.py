@@ -20,6 +20,8 @@ from __future__ import annotations
 import uuid
 
 import numpy as np
+from PySide6.QtCore import QPointF
+
 from cutecanvas import EditorCapability
 from cutecanvas.composition.geometry_policy import LayerGeometryPolicy
 from cutecanvas.coverage import CoverageSnapshot
@@ -43,7 +45,6 @@ from cutecanvas.scene.pixel_owners import LayerPixelOwnerRegistry
 from cutecanvas.scene.source_capabilities import EditorSourceCapabilities
 from cutecanvas.selection import PixelSelectionService
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QPointF
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import (
     LayerContentCapabilities,

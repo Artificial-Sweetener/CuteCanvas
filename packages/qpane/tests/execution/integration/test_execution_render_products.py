@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 
 from PySide6.QtGui import QColor, QImage
+
 from qpane import Config
 from qpane.rendering import PyramidManager, PyramidStatus, TileManager
 from qpane.rendering.raster_tile_grid import RasterTileGrid
@@ -126,6 +127,46 @@ def test_pyramid_generation_adopts_detached_product(qapp) -> None:
     assert completed.status == PyramidStatus.COMPLETE
     assert completed.levels
     assert manager.cache_usage_bytes > 0
+
+
+def test_completed_pyramid_is_reused_for_the_same_source_revision(qapp) -> None:
+    """Treat one source asset identity as the authoritative reusable product key."""
+    backend = ControllableExecutionBackend()
+    runtime = ExecutionRuntime(backend)
+    scope = runtime.open_scope(owner_id="pyramid-reuse-test")
+    manager = PyramidManager(
+        Config(min_view_size_px=16, cache=_DETERMINISTIC_CACHE),
+        execution_scope=scope,
+    )
+    source = _source_key()
+    manager.generate_pyramid_for_asset(source, _image(128))
+    backend.run_next()
+    completed = manager.pyramid_for_asset(source)
+
+    manager.generate_pyramid_for_asset(source, _image(256))
+
+    assert manager.pyramid_for_asset(source) is completed
+    assert backend.pending_count == 0
+
+
+def test_generating_pyramid_coalesces_repeated_source_requests(qapp) -> None:
+    """Keep one generation request authoritative until its product is adopted."""
+    backend = ControllableExecutionBackend()
+    runtime = ExecutionRuntime(backend)
+    scope = runtime.open_scope(owner_id="pyramid-coalescing-test")
+    manager = PyramidManager(
+        Config(min_view_size_px=16, cache=_DETERMINISTIC_CACHE),
+        execution_scope=scope,
+    )
+    source = _source_key()
+
+    manager.generate_pyramid_for_asset(source, _image(128))
+    manager.generate_pyramid_for_asset(source, _image(128))
+
+    assert backend.pending_count == 1
+    pending = manager.pyramid_for_asset(source)
+    assert pending is not None
+    assert pending.status == PyramidStatus.GENERATING
 
 
 def test_pyramid_shutdown_releases_completed_products(qapp) -> None:

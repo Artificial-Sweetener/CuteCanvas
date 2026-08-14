@@ -25,11 +25,6 @@ from PySide6.QtCore import (
     QRectF,
 )
 from PySide6.QtGui import QColor
-from qpane.sdk.raster import (
-    numpy_to_qimage_grayscale8,
-)
-from qpane.sdk.rendering import ViewportZoomMode
-from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from cutecanvas.composition import CompositionRecord
 from cutecanvas.composition.layers import CompositionLayerInstance
@@ -62,6 +57,11 @@ from cutecanvas.vector.conversion import (
     VectorConversionCompletion,
     VectorConversionKind,
 )
+from qpane.sdk.raster import (
+    numpy_to_qimage_grayscale8,
+)
+from qpane.sdk.rendering import ViewportZoomMode
+from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from .scene_interaction_sync import synchronize_scene_interactions
 from .viewport_activation import resolve_viewport_activation

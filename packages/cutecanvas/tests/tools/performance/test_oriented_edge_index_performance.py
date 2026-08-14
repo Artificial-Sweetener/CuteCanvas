@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.snapping.edge_index import OrientedEdgeIndex
 from cutecanvas.snapping.edge_model import OrientedEdge
 from cutecanvas_test_support.harness.timing import (
@@ -25,7 +27,6 @@ from cutecanvas_test_support.harness.timing import (
     interaction_clock,
     tail_interaction_latency_ms,
 )
-from PySide6.QtCore import QPointF
 
 pytestmark = INTERACTIVE_PERFORMANCE
 

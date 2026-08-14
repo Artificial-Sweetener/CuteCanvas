@@ -20,8 +20,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from qpane.sdk.scene import SceneDescriptor
-
 from cutecanvas.scene.mapping_mutations import (
     LayerMappingMutationOwner,
     LayerMappingValue,
@@ -31,6 +29,7 @@ from cutecanvas.scene.mapping_preview import (
     SceneLayerMappingPreview,
 )
 from cutecanvas.scene.mutations import SceneMutationStatus
+from qpane.sdk.scene import SceneDescriptor
 
 from .shared_edge_history import SharedEdgeMappings
 

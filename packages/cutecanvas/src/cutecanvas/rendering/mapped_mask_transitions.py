@@ -22,13 +22,6 @@ from collections.abc import Callable
 
 import numpy as np
 from PySide6.QtCore import QRectF
-from qpane.sdk.scene import (
-    BilinearLayerTransform,
-    LayerDescriptor,
-    LayerTransform,
-    PiecewiseLayerTransform,
-    RasterBounds,
-)
 
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.coverage.bilinear_resampling import (
@@ -38,6 +31,13 @@ from cutecanvas.coverage.piecewise_resampling import (
     project_scene_coverage_to_piecewise_layer,
 )
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerDescriptor,
+    LayerTransform,
+    PiecewiseLayerTransform,
+    RasterBounds,
+)
 
 from ..masks.live_preview_raster import LiveMaskPreviewPatches
 from ..scene.pixel_transitions import RasterPixelTransition

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import pytest
+
 from cutecanvas.core.config_features import (
     BRUSH_DESCRIPTOR,
     MASK_DESCRIPTOR,

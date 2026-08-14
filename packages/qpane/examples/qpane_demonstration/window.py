@@ -27,6 +27,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QIcon, QImage
 from PySide6.QtWidgets import QMainWindow, QSplitter, QVBoxLayout, QWidget
+
 from qpane import QPane, ViewerCatalogEntry, create_default_execution_runtime
 
 from .catalog import CatalogPanel

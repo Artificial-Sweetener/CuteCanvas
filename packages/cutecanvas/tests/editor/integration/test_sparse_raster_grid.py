@@ -16,6 +16,7 @@
 """Adversarial contracts for sparse editable raster storage."""
 
 import numpy as np
+
 from cutecanvas.raster.sparse_grid import (
     SparseRasterGrid,
     reframe_sparse_raster_snapshot,

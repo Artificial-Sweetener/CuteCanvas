@@ -162,6 +162,9 @@ from .execution import (
 from .execution import (
     retry_summary_records as retry_summary_records,
 )
+from .ferrastra.reconstruction import (
+    RasterReconstructionSpace as RasterReconstructionSpace,
+)
 from .hybrid import HybridCombineMode as HybridCombineMode
 from .hybrid import HybridDocument as HybridDocument
 from .hybrid import HybridPresentationStyle as HybridPresentationStyle

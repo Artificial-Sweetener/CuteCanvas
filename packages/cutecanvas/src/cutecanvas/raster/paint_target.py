@@ -21,11 +21,11 @@ from collections.abc import Callable
 
 import numpy as np
 from PySide6.QtGui import QColor
-from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
 from cutecanvas.fill.sources import SparseFloodFillPixelSource
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import LayerDescriptor, RasterBounds, SceneDescriptor
 
 from ..painting import (
     BrushCompositor,

@@ -30,7 +30,6 @@ from PySide6.QtGui import (
     QColor,
     QImage,
 )
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.composition.public_policy import (
     internal_layer_policy,
@@ -54,6 +53,7 @@ from cutecanvas.types import (
     PaintTargetSnapshot,
     RasterExtentPolicy,
 )
+from qpane.sdk.scene import RasterBounds
 
 
 class RasterApiMixin:

@@ -19,11 +19,12 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPointF
+
 from cutecanvas.persistence.layer_mapping_codec import (
     decode_layer_mapping,
     encode_layer_mapping,
 )
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import BilinearLayerTransform, PiecewiseLayerTransform
 
 

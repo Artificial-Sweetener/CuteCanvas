@@ -4,6 +4,19 @@ CuteCanvas starts with practical desktop defaults. `Config` lets an application
 change memory limits, navigation feel, brush input, mask autosave, optional
 model setup, diagnostics, and background-work limits in one validated snapshot.
 
+Viewport tiles and pyramids reconstruct sRGB premultiplied RGBA8 pixels in
+encoded space by default. Linear-light sRGB reconstruction is an explicit live
+setting and does not change document pixels:
+
+```python
+from cutecanvas import Config
+from qpane import RasterReconstructionSpace
+
+config = Config(
+    viewport_reconstruction_space=RasterReconstructionSpace.SRGB_LINEAR,
+)
+```
+
 ## Create a Configuration
 
 Build a `Config`, adjust it, and pass it to the widget:

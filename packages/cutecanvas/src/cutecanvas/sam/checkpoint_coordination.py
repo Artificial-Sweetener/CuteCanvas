@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QObject
+
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionOutcome,

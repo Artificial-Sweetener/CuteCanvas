@@ -12,8 +12,11 @@ responsive layout contract.
 - `QPane(execution_policy=...)` configures an owned standalone runtime, while
   `QPane(execution_runtime=...)` participates in a host-owned runtime.
 - `Config` owns detached viewer and rendering settings.
-- `CacheMode`, `ZoomMode`, and `ViewportZoomMode` describe cache and viewport
+- `CacheMode`, `ZoomMode`, `ViewportZoomMode`, and `RasterReconstructionSpace` describe cache and viewport
   behavior.
+- `Config.viewport_reconstruction_space` defaults to `SRGB_ENCODED` for exact
+  filtered tiles and pyramid products. `SRGB_LINEAR` is an explicit opt-in;
+  nearest source-pixel magnification is unchanged.
 - `PanelHitTest` carries exact panel, scene, and source coordinates.
 
 ### Viewer facade
@@ -259,9 +262,17 @@ root facade and declarative SDK above.
 - `SceneCoordinateProjection` and `LayerCoordinateProjection` are immutable
   per-frame projection values for advanced renderer integrations.
 - `PyramidManager` owns multiresolution product scheduling and cache-backed
-  source pyramids.
-- `rasterize_layer` scales one detached raster source under a caller-provided
-  cancellation token.
+  source pyramids. Exact levels use canonical Lanczos3 products while QPane
+  retains level selection, cancellation, cache, and Qt presentation ownership.
+- Settled affine raster layers are evaluated directly on the physical panel
+  sampling grid. Pyramid products remain immediate navigation previews until
+  the complete exact tile batch is ready for atomic publication.
+- `RasterPresentationSampling` identifies immediate `NEAREST` or `BILINEAR`
+  presentation. `RasterExactSampling` identifies settled `NEAREST`, `LANCZOS3`,
+  or `AFFINE_BILINEAR` products. The base-image threshold is source-native:
+  100% maps one source pixel to one device pixel, and nearest sampling begins at
+  200% on every display density. Exact sampling and physical-grid phase are part
+  of cache and adopted-product identity.
 - `rasterize_region` samples one bounded `RegionSampleSource` under a
   caller-provided cancellation token.
 - `CacheRegistry`, `CacheCoordinator`, and `CachePriority` coordinate byte-bounded product stores.
@@ -344,7 +355,6 @@ root facade and declarative SDK above.
 
 ### Raster and vector helpers
 
-- `AffineImageResampler` performs bounded worker-side affine sampling.
 - `qimage_to_numpy_argb32` and `qimage_to_numpy_grayscale8` return detached arrays.
 - `qimage_to_numpy_const_view_argb32` exposes normalized premultiplied BGRA pixels; `qimage_to_numpy_const_view_bgra32` preserves compatible 32-bit storage to avoid needless large-image conversion.
 - `qimage_to_numpy_view_argb32` exposes a writable scoped zero-copy view;
@@ -355,7 +365,8 @@ root facade and declarative SDK above.
 - `present_hybrid_sample` evaluates and presents one hybrid document over an
   explicit source rectangle and output size while preserving its stable
   source-space sampling grid.
-- `numpy_to_qimage_argb32`, `numpy_to_qimage_grayscale8`, `numpy_to_qimage_argb32_at_size`, and `numpy_to_qimage_grayscale8_at_size` create validated QImage values.
+- `numpy_to_qimage_argb32` and `numpy_to_qimage_grayscale8` create validated
+  intrinsic-size QImage values without performing numerical scaling.
 - `VectorPresentationSnapshot`, `SemanticTextLayoutCache`, `TextFontResolution`, and `text_caret_rect` share immutable vector presentation and text layout.
 - `VectorNodeRole`, `object_path`, and `object_contains` provide semantic node and geometry queries.
 - `painted_document_path` and `draw_vector_document` share authoritative painted vector geometry.

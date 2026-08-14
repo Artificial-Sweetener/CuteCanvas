@@ -21,6 +21,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from PySide6.QtCore import QCoreApplication, QPointF
+from PySide6.QtGui import QImage, Qt
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import CuteCanvas
 from cutecanvas.masks import install as mask_install
 from cutecanvas.masks.live_preview_store import MaskLivePreviewStore
@@ -28,10 +32,6 @@ from cutecanvas.masks.mask import MaskAssetStore
 from cutecanvas.masks.mask_controller import MaskController
 from cutecanvas.masks.mask_service import MaskService
 from cutecanvas.painting import BrushStrokeSegment
-from PySide6.QtCore import QCoreApplication, QPointF
-from PySide6.QtGui import QImage, Qt
-from PySide6.QtWidgets import QApplication
-
 from cutecanvas_test_support.config import fixed_cache_config
 from cutecanvas_test_support.execution_backend import TestExecution
 

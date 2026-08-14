@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import sys
 
-from cutecanvas import CuteCanvas
 from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import (
     QColor,
@@ -46,6 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cutecanvas import CuteCanvas
 from demonstration.touch_and_pen import build_touch_mask_editor
 
 

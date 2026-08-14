@@ -25,9 +25,8 @@ from PySide6.QtCore import QPoint, QPointF, QRect
 from PySide6.QtGui import QColor, QPen
 
 if TYPE_CHECKING:
-    from qpane.sdk.rendering import PanelHitTest, ViewportZoomMode
-
     from cutecanvas.coverage import CoverageCombineMode, CoverageSnapshot
+    from qpane.sdk.rendering import PanelHitTest, ViewportZoomMode
 
 
 class ToolDependencies(TypedDict, total=False):

@@ -21,9 +21,8 @@ import uuid
 from collections.abc import Callable
 from math import ceil, floor
 
-from qpane.sdk.scene import RasterBounds, SceneDescriptor
-
 from cutecanvas.coverage import CoverageCombineMode, CoverageItem, CoverageSnapshot
+from qpane.sdk.scene import RasterBounds, SceneDescriptor
 
 from ..scene.canvas_bounds import scene_raster_bounds
 from ..scene.layer_selection import SceneLayerSelection, SceneLayerSelectionController

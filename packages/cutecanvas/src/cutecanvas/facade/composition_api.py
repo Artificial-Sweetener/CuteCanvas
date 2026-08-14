@@ -29,12 +29,6 @@ from PySide6.QtGui import (
     QImage,
     QTransform,
 )
-from qpane.sdk.scene import (
-    BilinearLayerTransform,
-    LayerMapping,
-    LayerPlacement,
-    PiecewiseLayerTransform,
-)
 
 from cutecanvas.composition.geometry_policy import LayerGeometryPolicy
 from cutecanvas.composition.public_layer_mapping import (
@@ -52,6 +46,12 @@ from cutecanvas.types import (
     LayerPolicy,
     LayerSelectionSnapshot,
     SceneSnapshot,
+)
+from qpane.sdk.scene import (
+    BilinearLayerTransform,
+    LayerMapping,
+    LayerPlacement,
+    PiecewiseLayerTransform,
 )
 
 

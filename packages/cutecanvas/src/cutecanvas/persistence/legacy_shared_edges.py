@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QPointF
+
 from qpane.sdk.scene import LayerTransform
 
 from ..composition.geometry_policy import LayerGeometryMode, LayerGeometryPolicy

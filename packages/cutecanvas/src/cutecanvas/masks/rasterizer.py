@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QColor, QImage
+
 from qpane import HybridPresentationStyle
 from qpane.sdk.raster import present_hybrid_pixels, qimage_to_numpy_grayscale8
 

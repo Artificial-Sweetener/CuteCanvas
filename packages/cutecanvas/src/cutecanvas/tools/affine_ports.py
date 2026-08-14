@@ -22,10 +22,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import TransformModifiers, TransformOperation
 
 from cutecanvas.editor.shared_edge_presentation import SharedEdgePresentation
 from cutecanvas.editor.transform_interaction import TransformBoxPresentation
+from qpane.sdk.scene import TransformModifiers, TransformOperation
 
 
 def _false() -> bool:

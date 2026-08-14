@@ -22,10 +22,10 @@ import uuid
 from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF
-from qpane.sdk.scene import LayerTransform
 
 from cutecanvas.snapping.engine import SnapEngine
 from cutecanvas.snapping.model import SnapCandidate, SnapGrid, SnapResult
+from qpane.sdk.scene import LayerTransform
 
 from .document import CoverageDocument
 from .evaluation import CoverageDocumentEvaluator

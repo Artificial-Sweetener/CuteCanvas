@@ -26,6 +26,11 @@ import uuid
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QTransform, QWheelEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas.coverage import CoverageGeometryFactory
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from cutecanvas_test_support.harness.timing import (
@@ -37,10 +42,6 @@ from cutecanvas_test_support.harness.timing import (
     tail_interaction_latency_ms,
 )
 from cutecanvas_test_support.repository import repository_root
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QTransform, QWheelEvent
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane import (
     HybridDocument,
     HybridPresentationStyle,
@@ -745,7 +746,6 @@ def test_reported_high_dpi_five_x_mask_navigation_is_fluid() -> None:
     environment = os.environ.copy()
     # The subprocess owns Qt independently while retaining the hosted CPU-clock
     # policy when CI executes other jobs on the same runner.
-    environment.pop("PYTEST_XDIST_WORKER", None)
     environment.update(
         {
             "QT_QPA_PLATFORM": "offscreen",

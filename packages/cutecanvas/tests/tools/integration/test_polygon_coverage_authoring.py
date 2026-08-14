@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from cutecanvas.tools.polygon_coverage_session import PolygonCoverageSession
 from PySide6.QtCore import QPointF
+
+from cutecanvas.tools.polygon_coverage_session import PolygonCoverageSession
 
 
 def test_earlier_vertex_can_move_before_polygon_is_finished() -> None:

@@ -22,6 +22,9 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QImage
+
 from cutecanvas import Config
 from cutecanvas.core.config_features import MaskConfigSlice
 from cutecanvas.masks import activation as activation_module
@@ -35,8 +38,6 @@ from cutecanvas.masks.render_products import (
     PrefetchedOverlay,
 )
 from cutecanvas.resources import ProjectResourceStore
-from PySide6.QtCore import QRect
-from PySide6.QtGui import QImage
 from qpane.types import DiagnosticRecord
 
 

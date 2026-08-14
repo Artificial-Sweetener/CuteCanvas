@@ -22,6 +22,7 @@ import zipfile
 from dataclasses import fields
 
 import numpy as np
+
 from qpane.sdk.scene import LayerTransform, RasterBounds
 
 from ..coverage import (

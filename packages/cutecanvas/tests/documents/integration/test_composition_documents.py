@@ -17,9 +17,10 @@
 
 from __future__ import annotations
 
-from cutecanvas import CompositionPolicy, CuteCanvas, LayerPolicy
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage
+
+from cutecanvas import CompositionPolicy, CuteCanvas, LayerPolicy
 
 
 def _image(color: str, width: int = 80, height: int = 60) -> QImage:

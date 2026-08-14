@@ -22,9 +22,9 @@ import uuid
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF
-from qpane.sdk.scene import LayerMapping
 
 from cutecanvas.snapping.edge_model import OrientedEdge
+from qpane.sdk.scene import LayerMapping
 
 from .shared_edge_participant import (
     SharedEdgeParticipant,

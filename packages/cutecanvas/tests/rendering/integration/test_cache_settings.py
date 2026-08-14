@@ -22,6 +22,7 @@ import json
 import logging
 
 import pytest
+
 import qpane.core.config as cache_config_module
 from cutecanvas import Config, CuteCanvas
 from qpane.core.config import CacheSettings as CacheConfig

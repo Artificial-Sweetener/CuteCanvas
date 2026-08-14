@@ -26,6 +26,11 @@ from pathlib import Path
 from typing import Protocol, cast
 
 import pytest
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import LayerPolicy
 from cutecanvas.scene.mapping_preview import SceneLayerMappingPreview
 from cutecanvas_test_support.harness.mounted_qpane import (
@@ -33,10 +38,6 @@ from cutecanvas_test_support.harness.mounted_qpane import (
     PresentedMaskFrame,
 )
 from cutecanvas_test_support.repository import repository_root
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.rendering.view import View
 from qpane.sdk.scene import PiecewiseLayerTransform
 

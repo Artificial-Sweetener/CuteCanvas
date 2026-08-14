@@ -19,12 +19,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cutecanvas import CuteCanvas
-from cutecanvas.document import CanvasContentKind, CanvasDocument
-from cutecanvas.presentation import CanvasWorkspace
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QContextMenuEvent, QImage, QMouseEvent
 from PySide6.QtTest import QSignalSpy
+
+from cutecanvas import CuteCanvas
+from cutecanvas.document import CanvasContentKind, CanvasDocument
+from cutecanvas.presentation import CanvasWorkspace
 
 
 @dataclass

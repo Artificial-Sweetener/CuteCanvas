@@ -23,6 +23,7 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.rendering.render_tile_cache import RenderTileCache
 from qpane.rendering.render_tile_geometry import (

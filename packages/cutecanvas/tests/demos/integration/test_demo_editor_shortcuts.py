@@ -20,6 +20,11 @@ from __future__ import annotations
 import time
 
 import numpy as np
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionToolButton, QWidget
+
 from cutecanvas import CuteCanvas
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas_demo import ExampleOptions, ExampleWindow
@@ -28,10 +33,6 @@ from cutecanvas_test_support.harness.timing import (
     interaction_clock,
 )
 from demonstration.editor_controls import _CenteredMenuToolButton
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QMouseEvent
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionToolButton, QWidget
 from qpane.raster.image_conversion import qimage_to_numpy_argb32
 from qpane.scene.raster import RasterBounds
 

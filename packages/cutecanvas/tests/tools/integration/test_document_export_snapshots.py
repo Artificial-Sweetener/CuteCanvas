@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import uuid
 
-from cutecanvas import CanvasDocument, CuteCanvas
 from PySide6.QtGui import QColor, QImage
+
+from cutecanvas import CanvasDocument, CuteCanvas
 
 
 def _image(color: str = "royalblue") -> QImage:

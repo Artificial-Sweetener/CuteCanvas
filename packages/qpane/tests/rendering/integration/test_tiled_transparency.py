@@ -20,7 +20,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRect
 from PySide6.QtGui import QColor, QImage, QPainter, Qt, QTransform
+
 from qpane.rendering.item_compositor import SceneItemCompositor
+from qpane.scene.raster_sampling import RasterPresentationSampling
 from qpane.scene.render_plan import RenderStrategy, SceneRenderPlan, TileRenderData
 from qpane_test_support.render_compare import assert_images_match
 from qpane_test_support.render_plan import make_render_plan
@@ -133,7 +135,7 @@ def test_translucent_tile_coverage_stays_exact_under_fractional_transform() -> N
             viewport,
             source_image=source,
             transform=transform,
-            render_hint_enabled=True,
+            presentation_sampling=RasterPresentationSampling.BILINEAR,
         )
     )
     tiled = _draw(
@@ -142,7 +144,7 @@ def test_translucent_tile_coverage_stays_exact_under_fractional_transform() -> N
             source_image=source,
             transform=transform,
             strategy=RenderStrategy.TILE,
-            render_hint_enabled=True,
+            presentation_sampling=RasterPresentationSampling.BILINEAR,
             tiles_to_draw=_tiles(source, tile_size=64, overlap=8),
             tile_size=64,
             tile_overlap=8,

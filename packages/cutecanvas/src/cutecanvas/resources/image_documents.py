@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
+
 from qpane.sdk.scene import LayerInteractionPolicy
 
 from ..composition.model import CompositionDocumentPolicy

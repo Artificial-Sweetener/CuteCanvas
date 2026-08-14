@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from cutecanvas_test_support.harness.timing import INTERACTIVE_PERFORMANCE
 from cutecanvas_test_support.repository import repository_root
 

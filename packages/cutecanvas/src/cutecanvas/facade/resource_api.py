@@ -22,6 +22,7 @@ import math
 import uuid
 
 from PySide6.QtCore import QRectF, QSize
+
 from qpane.sdk.scene import LayerPlacement, LayerTransform, RasterBounds
 
 from ..composition.public_policy import internal_layer_policy

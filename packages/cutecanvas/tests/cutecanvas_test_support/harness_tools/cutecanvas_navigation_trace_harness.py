@@ -61,13 +61,6 @@ if __name__ == "__main__":
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from demonstration.navigation_trace import (
-    NavigationState,
-    NavigationTrace,
-    NavigationTraceEvent,
-    load_navigation_trace,
-    sha256_file,
-)
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QImage,
@@ -80,6 +73,22 @@ from PySide6.QtGui import (
 )
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas_test_support.harness_tools.cutecanvas_pan_performance_harness import (
+    DocumentPanHarness,
+    LatencySummary,
+    _plan_transforms,
+    compare_images,
+    save_difference_artifacts,
+    summarize_latencies,
+)
+from demonstration.navigation_trace import (
+    NavigationState,
+    NavigationTrace,
+    NavigationTraceEvent,
+    load_navigation_trace,
+    sha256_file,
+)
 from qpane.rendering.navigation_buffer import navigation_buffer_transform
 from qpane.rendering.navigation_plan import (
     navigation_products_match,
@@ -91,15 +100,6 @@ from qpane.scene.render_plan import (
     SampledLayerRenderItem,
     SceneRenderPlan,
     VectorLayerRenderItem,
-)
-
-from cutecanvas_test_support.harness_tools.cutecanvas_pan_performance_harness import (
-    DocumentPanHarness,
-    LatencySummary,
-    _plan_transforms,
-    compare_images,
-    save_difference_artifacts,
-    summarize_latencies,
 )
 
 _SETTLED_CORRECTNESS_TOLERANCE = 1

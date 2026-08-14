@@ -19,6 +19,9 @@ from dataclasses import fields
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QColor
+
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.sam.segmentation_request import (
     SmartSegmentationProduct,
@@ -26,8 +29,6 @@ from cutecanvas.sam.segmentation_request import (
 )
 from cutecanvas.tools.ports import SmartSegmentationInteractionPort
 from cutecanvas.tools.smart_segmentation import SmartMaskTool, SmartSelectTool
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor
 from qpane import PointerDeviceKind, PointerPhase, PointerSample
 
 

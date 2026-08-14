@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
+
 from qpane.sdk.execution import (
     ExecutionHandle,
     ExecutionLeaseRelease,

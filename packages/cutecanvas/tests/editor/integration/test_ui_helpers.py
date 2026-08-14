@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from cutecanvas import Config, CuteCanvas
 from PySide6.QtCore import QSize, QSizeF
+
+from cutecanvas import Config, CuteCanvas
 from qpane.rendering import ViewportZoomMode
 from qpane.ui import dragdrop
 from qpane.ui.dragdrop import drag_out_image, is_drag_out_allowed

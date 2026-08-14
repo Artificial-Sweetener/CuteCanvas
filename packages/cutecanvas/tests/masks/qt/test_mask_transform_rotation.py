@@ -22,6 +22,11 @@ from collections import deque
 from itertools import pairwise
 
 import numpy as np
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QTransform
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import (
     BrushPreset,
     EditorTransformCommand,
@@ -30,10 +35,6 @@ from cutecanvas import (
 )
 from cutecanvas.editor.transform_interaction import TransformBoxPresentation
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QTransform
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
 from qpane.sdk.raster import qimage_to_numpy_argb32, qimage_to_numpy_grayscale8
 
 

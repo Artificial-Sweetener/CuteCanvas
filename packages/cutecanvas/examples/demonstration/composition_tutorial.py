@@ -25,10 +25,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
+from cutecanvas import CuteCanvas
 from demonstration.composition_properties_dialog import (
     CompositionPropertiesDialog,
 )

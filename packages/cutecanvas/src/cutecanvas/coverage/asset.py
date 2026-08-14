@@ -23,10 +23,10 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
-from qpane.sdk.raster import numpy_to_qimage_grayscale8
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.raster import numpy_to_qimage_grayscale8
+from qpane.sdk.scene import RasterBounds
 
 from ..raster.sparse_grid import SparseRasterSnapshot
 from .content_bounds import occupied_coverage_bounds

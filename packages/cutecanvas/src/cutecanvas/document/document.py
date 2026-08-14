@@ -18,11 +18,14 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from math import ceil
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
 
+from ..composition.history_model import HistoryCommit, HistoryTruncation
+from ..composition.history_policy import CompositionHistoryPolicy
 from ..composition.public_policy import (
     internal_document_policy,
     internal_layer_policy,
@@ -47,6 +50,7 @@ from ..types import (
 from ..vector.document_core import VectorDocumentCore
 from .canvas_geometry_api import CanvasDocumentGeometryMixin
 from .events import DocumentChange, DocumentChangeKind, DocumentEventHub
+from .history import DocumentHistory
 from .references import (
     CanvasContentKind,
     CanvasContentReference,
@@ -57,8 +61,14 @@ from .references import (
 class CanvasDocument(CanvasDocumentGeometryMixin):
     """Own editable content and history independently of any QWidget."""
 
-    def __init__(self) -> None:
-        """Construct durable editable state without process-runtime ownership."""
+    def __init__(
+        self,
+        *,
+        history_policy: CompositionHistoryPolicy | None = None,
+        history_committed: Callable[[HistoryCommit], None] | None = None,
+        history_truncated: Callable[[HistoryTruncation], None] | None = None,
+    ) -> None:
+        """Construct durable editable state with optional history coordination."""
         self._document_id = uuid.uuid4()
         self._events = DocumentEventHub()
         self._content_revisions: dict[uuid.UUID, int] = {}
@@ -70,6 +80,13 @@ class CanvasDocument(CanvasDocumentGeometryMixin):
             layers_changed=self._events.layers_changed,
             pixel_selection_changed=self._events.selection_changed,
             resource_changed=self._events.resource_changed,
+            history_policy=history_policy,
+            history_committed=history_committed,
+            history_truncated=history_truncated,
+        )
+        self._history = DocumentHistory(
+            self._resources.compositions.edit_history,
+            self._resources.compositions.edit_controller,
         )
         self._vectors = VectorDocumentCore.create(
             compositions=self._resources.compositions,
@@ -138,6 +155,11 @@ class CanvasDocument(CanvasDocumentGeometryMixin):
     def events(self) -> DocumentEventHub:
         """Return the document change subscription owner."""
         return self._events
+
+    @property
+    def history(self) -> DocumentHistory:
+        """Return metadata-only inspection and identity-safe replay."""
+        return self._history
 
     @property
     def resources(self) -> DocumentResourceCore:

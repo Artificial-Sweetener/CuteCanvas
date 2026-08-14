@@ -22,6 +22,7 @@ import math
 import pytest
 from PySide6.QtCore import QPointF, QRect
 from PySide6.QtGui import QTransform
+
 from qpane.scene.affine import LayerTransform
 from qpane.scene.model import LayerPlacement
 from qpane.scene.raster import RasterBounds

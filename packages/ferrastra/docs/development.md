@@ -4,10 +4,10 @@ Ferrastra is built as a Cargo workspace and packaged with PyO3 and maturin. The
 Python package treats `ferrastra._native` as private; callers use only the typed
 `ferrastra` facade.
 
-The active crate inventory and every future dependency edge are defined in the
-repository architecture policy. A crate is created only when executable code
-for that owner begins. This keeps Stage 0 enforceable without empty framework
-scaffolding.
+The active crate inventory and every dependency edge are defined in the
+repository architecture policy. Each crate has one executable owner: core
+contracts, graphs, stores, runtime orchestration, raster operations, engine
+assembly, or Python boundary adaptation.
 
 The complete architecture, operation-entry checklist, conformance categories,
 waiver policy, and migration phases are documented in the repository
@@ -35,6 +35,19 @@ Run the cross-language policy, strict Python, and packaging gates with:
 .venv\Scripts\python -m pyright -p pyright-ferrastraconfig.json
 .venv\Scripts\python tools\verify_ferrastra_wheel.py
 ```
+
+Measure the checked-in Lanczos3 latency, memory, cancellation, and deterministic
+thread-budget contract against an optimized native build with:
+
+```powershell
+Push-Location packages\ferrastra
+..\..\.venv\Scripts\python -m maturin develop --release
+Pop-Location
+.venv\Scripts\python tools\ferrastra_benchmarks.py
+```
+
+The executable case and all acceptance limits come from
+`benchmarks/ferrastra_manifest.toml`.
 
 ## Supported native platforms
 

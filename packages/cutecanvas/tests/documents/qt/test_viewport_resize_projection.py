@@ -25,6 +25,10 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
+from PySide6.QtCore import QPointF, QSize
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QApplication
+
 from cutecanvas import CanvasInspectionGroup, CuteCanvas
 from cutecanvas.document import CanvasDocument, CanvasViewSession
 from cutecanvas_test_support.harness.viewport_resize_probe import (
@@ -32,9 +36,6 @@ from cutecanvas_test_support.harness.viewport_resize_probe import (
     ViewportResizeObservation,
 )
 from cutecanvas_test_support.repository import repository_root
-from PySide6.QtCore import QPointF, QSize
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication
 from qpane import QPane
 from qpane.sdk.rendering import ViewportZoomMode
 

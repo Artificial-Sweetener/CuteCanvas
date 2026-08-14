@@ -10,6 +10,7 @@ sources = [
   "ARCHITECTURE_DEBT.toml",
   "ARCHITECTURE_POLICY.toml",
   "ARCHITECTURE_WAIVERS.toml",
+  "FERRASTRA_OWNERSHIP.toml",
   "pyright-ferrastraconfig.json",
   "ruff-ferrastra.toml",
   "rustfmt.toml",

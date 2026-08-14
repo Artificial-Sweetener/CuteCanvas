@@ -21,7 +21,6 @@ import uuid
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPointF, QRect, QRectF
-from qpane.sdk.scene import LayerDescriptor, LayerTransform
 
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.coverage.containment import coverage_contains
@@ -29,6 +28,7 @@ from cutecanvas.scene.pixel_fragments import RasterPixelLift
 from cutecanvas.scene.pixel_move_preview import RasterPixelMovePreview
 from cutecanvas.scene.pixel_transitions import RasterPixelTransition
 from cutecanvas.types import RasterExtentPolicy
+from qpane.sdk.scene import LayerDescriptor, LayerTransform
 
 from ..scene.layer_selection import SceneLayerSelection
 from ..selection import LayerCoverageProjector, PixelSelectionState

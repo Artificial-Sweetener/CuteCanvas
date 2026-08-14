@@ -20,7 +20,6 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 
-from cutecanvas import CuteCanvas, RasterExtentPolicy, RasterSurfaceSnapshot
 from PySide6.QtCore import QRect
 from PySide6.QtWidgets import (
     QComboBox,
@@ -34,6 +33,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from cutecanvas import CuteCanvas, RasterExtentPolicy, RasterSurfaceSnapshot
 
 _PAD_INCREMENT = 32
 _COORDINATE_LIMIT = 1_000_000_000

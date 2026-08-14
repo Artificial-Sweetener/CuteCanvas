@@ -20,6 +20,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.scene.transform_session import LayerTransformBoxState
 from cutecanvas.snapping import SnapConfiguration
 from cutecanvas.snapping.candidates import SnapTargetSnapshot
@@ -32,7 +34,6 @@ from cutecanvas.snapping.model import (
     bounds_candidates,
 )
 from cutecanvas.snapping.transform_scale import TransformScaleSnapSession
-from PySide6.QtCore import QPointF, QRectF
 from qpane.sdk.scene import (
     AffineTransformGeometry,
     LayerTransform,

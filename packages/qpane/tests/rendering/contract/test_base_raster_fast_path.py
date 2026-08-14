@@ -23,6 +23,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRect
 from PySide6.QtGui import QTransform
+
 from qpane import ClipCoordinateSpace, LayerClip, PiecewiseLayerTransform
 from qpane.rendering.base_raster_fast_path import base_only_raster_item
 from qpane.rendering.panel_mapping import PiecewisePanelMapping

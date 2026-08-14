@@ -24,10 +24,10 @@ from typing import ClassVar
 
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter
-from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from cutecanvas.coverage import CoverageCombineMode
 from cutecanvas.cursor import EditorCursorIntent
+from qpane import PointerPhase, PointerSample, ToolInputProfile
 
 from .base import BaseTool
 from .coverage_operation import resolve_coverage_gesture_operation

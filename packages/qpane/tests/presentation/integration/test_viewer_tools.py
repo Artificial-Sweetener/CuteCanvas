@@ -23,6 +23,7 @@ import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QImage, QMouseEvent, QWheelEvent
 from PySide6.QtTest import QTest
+
 from qpane import QPane
 from qpane.interaction import NavigationInteractionPort, PanZoomTool, ViewerTool
 from qpane.rendering import ViewportZoomMode

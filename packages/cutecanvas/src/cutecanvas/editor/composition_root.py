@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QRect, QRectF
+
 from qpane.sdk.cache import CacheRegistry, cache_detail_provider
 from qpane.sdk.diagnostics import Diagnostics
 from qpane.sdk.execution import ExecutionScope

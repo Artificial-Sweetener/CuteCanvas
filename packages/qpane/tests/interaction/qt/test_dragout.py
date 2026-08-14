@@ -22,6 +22,7 @@ from typing import ClassVar
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
+
 from qpane.rendering import ViewportZoomMode
 from qpane.ui.dragdrop import is_drag_out_allowed
 from qpane.ui.dragout import maybeStartDrag

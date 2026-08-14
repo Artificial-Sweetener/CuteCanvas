@@ -21,6 +21,11 @@ from collections.abc import Iterator
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLineEdit
+from shiboken6 import isValid
+
 from cutecanvas import CuteCanvas, PixelSelectionMode
 from cutecanvas_test_support.harness.abuse_model import (
     HarnessPoint,
@@ -29,11 +34,7 @@ from cutecanvas_test_support.harness.abuse_model import (
 )
 from cutecanvas_test_support.harness.input_driver import QtStrokeDriver
 from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit
 from qpane.sdk.vector import VectorShapeKind
-from shiboken6 import isValid
 
 
 @pytest.fixture()

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
 from .edit_history import CompositionEditCommand, CompositionEditHistory
+from .history_model import HistoryCommit
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +78,11 @@ class CompositionEditController:
             raise ValueError(f"edit handler already registered for {command_type!r}")
         self._handlers[command_type] = handler
 
-    def record_applied(self, command: CompositionEditCommand) -> None:
+    def record_applied(self, command: CompositionEditCommand) -> HistoryCommit:
         """Append an already-applied command to the chronological history."""
-        self._history.record_applied(command)
+        commit = self._history.record_applied(command)
         self._notify_changed(command.scope_id)
+        return commit
 
     def can_undo(self, scope_id: uuid.UUID) -> bool:
         """Return whether the next undo command has an installed handler."""
@@ -112,32 +114,44 @@ class CompositionEditController:
         self._notify_changed(command.scope_id)
         return CompositionEditExecution(command=command, changed=True)
 
-    def undo_where(
+    def undo_identity(
         self,
         scope_id: uuid.UUID,
-        predicate: Callable[[CompositionEditCommand], bool],
+        command_id: uuid.UUID,
     ) -> CompositionEditExecution:
-        """Undo the latest matching command for a legacy domain facade."""
-        command = self._history.undo_candidate_where(scope_id, predicate)
+        """Undo only when ``command_id`` is the current command for ``scope_id``."""
+        entry = self._history.undo_entry(scope_id)
+        command = (
+            entry.command
+            if entry is not None and entry.metadata.command_id == command_id
+            else None
+        )
         handler = self._handler_for(command)
         if command is None or handler is None or not handler[0](command):
             return CompositionEditExecution(command=command, changed=False)
-        self._history.commit_selective_undo(command)
+        if not self._history.commit_undo_identity(scope_id, command_id):
+            return CompositionEditExecution(command=command, changed=False)
         self._publish_completion(command, "undo")
         self._notify_changed(command.scope_id)
         return CompositionEditExecution(command=command, changed=True)
 
-    def redo_where(
+    def redo_identity(
         self,
         scope_id: uuid.UUID,
-        predicate: Callable[[CompositionEditCommand], bool],
+        command_id: uuid.UUID,
     ) -> CompositionEditExecution:
-        """Redo the latest matching command for a legacy domain facade."""
-        command = self._history.redo_candidate_where(scope_id, predicate)
+        """Redo only when ``command_id`` is the current command for ``scope_id``."""
+        entry = self._history.redo_entry(scope_id)
+        command = (
+            entry.command
+            if entry is not None and entry.metadata.command_id == command_id
+            else None
+        )
         handler = self._handler_for(command)
         if command is None or handler is None or not handler[1](command):
             return CompositionEditExecution(command=command, changed=False)
-        self._history.commit_selective_redo(command)
+        if not self._history.commit_redo_identity(scope_id, command_id):
+            return CompositionEditExecution(command=command, changed=False)
         self._publish_completion(command, "redo")
         self._notify_changed(command.scope_id)
         return CompositionEditExecution(command=command, changed=True)

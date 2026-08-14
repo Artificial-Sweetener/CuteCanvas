@@ -16,16 +16,17 @@
 
 """Tests for the no-hardware touch and active-pen demonstration."""
 
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QImage
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+
 from cutecanvas import CuteCanvas
 from demonstration.touch_and_pen import build_touch_mask_editor
 from demonstration.touch_and_pen_simulator import (
     build_touch_input_simulator,
     create_simulator_image,
 )
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QImage
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
 
 def test_touch_mask_editor_mouse_touch_mouse_cursor_lifecycle(qapp) -> None:

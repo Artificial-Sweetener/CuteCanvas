@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import time
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import (
     CanvasDocument,
     CanvasDocumentRuntime,
@@ -26,8 +29,6 @@ from cutecanvas import (
     CuteCanvas,
 )
 from cutecanvas_test_support.execution_backend import ControllableExecutionBackend
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.execution import ExecutionRuntime
 
 

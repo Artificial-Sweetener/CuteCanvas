@@ -21,8 +21,6 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from qpane.sdk.scene import RasterBounds
-
 from cutecanvas.coverage import (
     CoverageEdgeModificationRequest,
     CoverageSnapshot,
@@ -30,6 +28,7 @@ from cutecanvas.coverage import (
 )
 from cutecanvas.coverage.spatial_constraint import BoundsCoverageConstraint
 from cutecanvas.types import LayerEdgeOperation
+from qpane.sdk.scene import RasterBounds
 
 
 @dataclass(frozen=True, slots=True)

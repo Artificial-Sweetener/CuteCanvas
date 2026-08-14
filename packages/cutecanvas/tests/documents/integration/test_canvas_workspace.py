@@ -20,6 +20,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
+from PySide6.QtTest import QSignalSpy, QTest
+from PySide6.QtWidgets import QWidget
+from shiboken6 import isValid
+
 from cutecanvas import (
     CanvasComparisonOverlayState,
     CanvasComparisonZoomGesture,
@@ -32,14 +38,9 @@ from cutecanvas import (
 )
 from cutecanvas.document import CanvasDocument
 from cutecanvas.presentation import CanvasWorkspace
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
-from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QWidget
 from qpane.sdk.execution import create_default_execution_runtime
 from qpane.sdk.layout import ResponsiveGridPolicy, ResponsiveGridTopology
 from qpane.sdk.types import ComparisonOrientation
-from shiboken6 import isValid
 
 
 def _document() -> tuple[CanvasDocument, tuple]:
@@ -85,6 +86,27 @@ def test_parent_deletion_closes_workspace_owners_before_qt_children(qapp) -> Non
     assert validity_at_close == [True]
     assert not isValid(workspace)
     document.close()
+
+
+def test_closed_workspace_is_deleted_before_another_workspace_is_created(qapp) -> None:
+    """Closing a terminal workspace must release its native widget allocation."""
+    document, identifiers = _document()
+    workspace = CanvasWorkspace(document=document, features=())
+    workspace.setSinglePresentation(identifiers[0])
+    workspace.show()
+    qapp.processEvents()
+
+    workspace.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+    assert not isValid(workspace)
+    replacement = CanvasWorkspace(document=document, features=())
+    try:
+        assert isValid(replacement)
+    finally:
+        replacement.close()
+        document.close()
 
 
 def test_workspace_switches_presentations_without_mutating_document(qapp) -> None:

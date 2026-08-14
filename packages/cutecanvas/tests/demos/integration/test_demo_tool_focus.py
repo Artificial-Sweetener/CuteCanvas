@@ -16,11 +16,12 @@
 
 """Demo window tests covering tool focus during document navigation."""
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage
+
 from cutecanvas import CuteCanvas, LayerPolicy
 from cutecanvas.sam.manager import SamManager
 from cutecanvas_demo import ExampleOptions, ExampleWindow
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage
 
 
 def _solid_image() -> QImage:

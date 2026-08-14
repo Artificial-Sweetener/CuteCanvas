@@ -17,6 +17,9 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPen
+
 from cutecanvas import (
     CuteCanvas,
     LayerPolicy,
@@ -24,8 +27,6 @@ from cutecanvas import (
     VectorShapeKind,
     VectorStyle,
 )
-from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPen
 
 
 def seed_welcome_document(canvas: CuteCanvas) -> None:

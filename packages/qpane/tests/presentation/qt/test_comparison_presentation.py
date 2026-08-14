@@ -24,6 +24,7 @@ import pytest
 from PySide6.QtCore import QElapsedTimer, QLineF, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
+
 from qpane import ComparisonOrientation, QPane, RenderScene
 from qpane.scene.render_plan import SceneRenderPlan
 

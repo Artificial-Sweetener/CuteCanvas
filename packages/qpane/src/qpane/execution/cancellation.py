@@ -17,7 +17,11 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from threading import Lock
+
+logger = logging.getLogger(__name__)
 
 
 class CancellationToken:
@@ -29,6 +33,7 @@ class CancellationToken:
         self._is_cancelled = False
         self._reason: str | None = None
         self._lock = Lock()
+        self._callbacks: set[Callable[[], None]] = set()
 
     @property
     def is_cancelled(self) -> bool:
@@ -60,7 +65,29 @@ class CancellationToken:
                 return False
             self._is_cancelled = True
             self._reason = reason
-            return True
+            callbacks = tuple(self._callbacks)
+            self._callbacks.clear()
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                logger.exception("Cancellation subscriber failed")
+        return True
+
+    def subscribe(self, callback: Callable[[], None]) -> Callable[[], None]:
+        """Notify a bounded collaborator and return its unsubscription."""
+        with self._lock:
+            if not self._is_cancelled:
+                self._callbacks.add(callback)
+
+                def unsubscribe() -> None:
+                    """Remove the callback when its bounded work has completed."""
+                    with self._lock:
+                        self._callbacks.discard(callback)
+
+                return unsubscribe
+        callback()
+        return lambda: None
 
 
 __all__ = ["CancellationToken"]

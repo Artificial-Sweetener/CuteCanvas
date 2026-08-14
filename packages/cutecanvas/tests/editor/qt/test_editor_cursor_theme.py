@@ -22,13 +22,14 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import QWidget
+
 from cutecanvas.cursor import EditorCursorIntent
 from cutecanvas.tools.cursor_controller import EditorCursorController
 from cutecanvas.tools.smart_segmentation import SmartMaskTool, SmartSelectTool
 from cutecanvas.ui.cursor_builder import CursorBuilder
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QWidget
 
 if TYPE_CHECKING:
     from cutecanvas.canvas import CuteCanvas

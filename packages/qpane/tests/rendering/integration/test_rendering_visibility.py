@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize
 from PySide6.QtGui import QTransform
+
 from qpane.rendering.visibility import visible_source_rect_for_layer
 from qpane.scene.model import ClipCoordinateSpace, LayerClip, LayerPlacement
 

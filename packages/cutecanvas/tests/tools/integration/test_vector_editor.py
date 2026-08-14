@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import time
 
+from PySide6.QtCore import QPointF, QRectF, QSize
+from PySide6.QtGui import QColor, QTransform
+
 from cutecanvas import (
     VectorFillRule,
     VectorPathCommand,
@@ -26,8 +29,6 @@ from cutecanvas import (
     VectorShapeKind,
     VectorStyle,
 )
-from PySide6.QtCore import QPointF, QRectF, QSize
-from PySide6.QtGui import QColor, QTransform
 from qpane.scene.render_plan import RasterLayerRenderItem, VectorLayerRenderItem
 
 

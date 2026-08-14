@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 
 from PySide6.QtCore import QSize
+
 from qpane.sdk.scene import (
     RasterLayerRenderItem,
     SampledLayerRenderItem,

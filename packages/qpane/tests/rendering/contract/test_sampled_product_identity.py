@@ -22,6 +22,7 @@ from dataclasses import replace
 
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor, QImage
+
 from qpane.sdk.scene import SampledTileRenderData
 
 

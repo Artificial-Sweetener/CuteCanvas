@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
-from cutecanvas.document.canvas_crop import CanvasCropEffect, CanvasCropRenderOwner
 from PySide6.QtCore import QPointF
+
+from cutecanvas.document.canvas_crop import CanvasCropEffect, CanvasCropRenderOwner
 from qpane.sdk.scene import RasterBounds
 
 

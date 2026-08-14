@@ -18,10 +18,11 @@
 from __future__ import annotations
 
 import numpy as np
+from PySide6.QtCore import QPointF, QRectF
+
 from cutecanvas.coverage import CoverageSnapshot
 from cutecanvas.selection import SelectionBoundaryBuilder, SelectionGeometryRasterizer
 from cutecanvas.types import RasterExtentPolicy
-from PySide6.QtCore import QPointF, QRectF
 from qpane.scene.raster import RasterBounds
 
 

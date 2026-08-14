@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from PySide6.QtCore import QRectF, QSize
+
 from qpane.sdk.scene import LayerPlacement
 
 from ..document import CanvasContentKind, CanvasContentReference

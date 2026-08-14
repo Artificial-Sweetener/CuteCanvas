@@ -22,9 +22,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
-from qpane.sdk.scene import RasterBounds
 
 from cutecanvas.types import LayerEdgeOperation
+from qpane.sdk.scene import RasterBounds
 
 from .filters import dilate_coverage, erode_coverage, feather_coverage
 from .spatial_constraint import (

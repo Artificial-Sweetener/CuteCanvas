@@ -126,7 +126,7 @@ case_isolated_proofs = ["abuse"]
         load_policy_file(policy_path)
 
 
-@pytest.mark.parametrize("legacy_directory", ("tests", "examples"))
+@pytest.mark.parametrize("legacy_directory", ["tests", "examples"])
 def test_root_runtime_ownership_rejects_python_artifacts(
     tmp_path: Path,
     legacy_directory: str,
@@ -136,8 +136,24 @@ def test_root_runtime_ownership_rejects_python_artifacts(
     directory.mkdir()
     (directory / "runtime_fixture.py").write_text("value = 1\n", encoding="utf-8")
 
-    with pytest.raises(InventoryError, match="repository-root|product examples"):
+    with pytest.raises(InventoryError, match=r"repository-root|product examples"):
         validate_root_runtime_ownership(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "generated_directory",
+    ["examples/venv-core", "examples/__pycache__", "tests/.venv"],
+)
+def test_root_runtime_ownership_ignores_generated_python_environments(
+    tmp_path: Path,
+    generated_directory: str,
+) -> None:
+    """Keep ignored environments and caches outside the product-example inventory."""
+    directory = tmp_path / generated_directory
+    directory.mkdir(parents=True)
+    (directory / "generated.py").write_text("value = 1\n", encoding="utf-8")
+
+    validate_root_runtime_ownership(tmp_path)
 
 
 def test_import_checker_rejects_downstream_test_dependency(tmp_path: Path) -> None:

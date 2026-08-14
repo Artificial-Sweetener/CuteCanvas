@@ -23,12 +23,13 @@ import time
 import uuid
 from pathlib import Path
 
+from PySide6.QtCore import QThread
+from PySide6.QtGui import QColor, QImage
+
 from cutecanvas import Config
 from cutecanvas.sam.manager import SamManager
 from cutecanvas_demo import ExampleOptions, ExampleWindow
 from demonstration.workers import ImageLoadCoordinator
-from PySide6.QtCore import QThread
-from PySide6.QtGui import QColor, QImage
 from qpane.sdk.execution import create_default_execution_runtime
 
 

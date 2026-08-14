@@ -21,11 +21,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
+from PySide6.QtCore import QPointF
+
 from cutecanvas.editor.shared_edge_discovery import SharedEdgeDiscovery
 from cutecanvas.resources import ProjectResourceReference
 from cutecanvas.snapping.edge_index import OrientedEdgeIndex
 from cutecanvas.snapping.edge_model import OrientedEdge
-from PySide6.QtCore import QPointF
 from qpane.sdk.scene import (
     LayerDescriptor,
     LayerInteractionPolicy,

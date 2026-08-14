@@ -18,12 +18,13 @@
 from __future__ import annotations
 
 import numpy as np
-from cutecanvas import FloatingPixelMode, LayerPolicy, RasterExtentPolicy
-from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
+
+from cutecanvas import FloatingPixelMode, LayerPolicy, RasterExtentPolicy
+from cutecanvas_test_support.harness.mounted_qpane import MountedQPaneHarness
 
 
 def _soft_rgba_payload() -> QImage:

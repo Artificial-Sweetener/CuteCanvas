@@ -21,9 +21,6 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from qpane.sdk.execution import ExecutionScope
-from qpane.sdk.scene import SceneDescriptor
-
 from cutecanvas.coverage import CoverageEdgeModificationRequest, CoverageSnapshot
 from cutecanvas.coverage.spatial_constraint import CoverageSpatialConstraint
 from cutecanvas.runtime.coverage_modification_contracts import (
@@ -35,6 +32,8 @@ from cutecanvas.runtime.coverage_modification_preview import (
 from cutecanvas.runtime.latest_requests import DocumentLatestRequestRegistry
 from cutecanvas.scene.layer_edge_preview import LayerEdgePreviewStore
 from cutecanvas.types import LayerEdgeModificationResult, LayerEdgeOperation
+from qpane.sdk.execution import ExecutionScope
+from qpane.sdk.scene import SceneDescriptor
 
 from .layer_edge_targets import LayerEdgeEditRegistry, ResolvedLayerEdgeTarget
 

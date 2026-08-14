@@ -25,6 +25,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QImage, QTransform
+
 from qpane.sdk.rendering import (
     RenderTileProduct,
     RenderTileRequest,

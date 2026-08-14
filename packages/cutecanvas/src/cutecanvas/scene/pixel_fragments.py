@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
+
 from qpane.sdk.scene import RasterBounds
 
 from ..coverage import CoverageSnapshot

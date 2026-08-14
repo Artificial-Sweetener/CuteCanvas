@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QRect, QSize
+
 from qpane import QtOwnerDispatcher
 from qpane.execution import ExecutionUrgency
 from qpane.rendering.incremental_frame import IncrementalFrameRefiner

@@ -12,18 +12,26 @@ packages, documentation, demos, and test suites. QPane is the PySide6 viewer and
 rendering SDK. CuteCanvas builds editable documents, layers, tools, masks,
 selections, painting, history, and persistence on that renderer.
 
-Ferrastra is at Stage 0. Its native package, stable-ABI Python boundary,
-architecture checks, and cross-platform build requirements exist, but it does
-not provide graphics behavior to either Python product yet. The detailed native
-work belongs to [FERRASTRA_DESIGN.md](FERRASTRA_DESIGN.md); R-Candy's language and
-structured-authoring work belongs to [RCANDY_DESIGN.md](RCANDY_DESIGN.md).
+Ferrastra has completed its typed spatial graph baseline and the exact
+resampling ownership migration. Its Rust and Python surfaces construct and
+serialize the same immutable graph, retain canonical raster and Coverage8
+sources, and evaluate regional Lanczos3, sampled-view, raster-affine, and
+coverage-affine products under explicit cancellation and memory limits. QPane
+uses exact native products for pyramids and settled physical-grid refinement
+while retaining viewport demand, cache, worker, retained-frame, and Qt
+presentation policy. CuteCanvas constructs focused Ferrastra graphs for
+coverage, floating fragments, placed images, sparse samples, canvas resize, and
+mask import while retaining documents, tools, history, policy, and publication.
+The detailed native work belongs to
+[FERRASTRA_DESIGN.md](FERRASTRA_DESIGN.md); R-Candy's language and structured-
+authoring work belongs to [RCANDY_DESIGN.md](RCANDY_DESIGN.md).
 
 ## First Native Slice
 
 The first Ferrastra behavior is deliberately small and complete instead of a
 wide collection of placeholder APIs.
 
-Phase 1 establishes the typed spatial graph, stable identities, validation,
+Phase 1 established the typed spatial graph, stable identities, validation,
 demand, damage, cancellation, memory admission, deterministic products, and
 equivalent Rust and Python graph construction. Its first executable graph is:
 
@@ -31,30 +39,34 @@ equivalent Rust and Python graph construction. Its first executable graph is:
 RasterSource -> Identity -> Output
 ```
 
-Phase 2 adds one production operation, Lanczos3 resampling, and uses it for
-QPane pyramid generation. That vertical slice includes the scalar oracle,
-optimized CPU implementation, tile-seam equivalence, alpha and color contracts,
-Python binding, QPane adapter, isolated wheels, and deletion of the exact Qt
-pyramid-scaling path it replaces.
+Phase 2 established Lanczos3 resampling as the first production operation and
+uses it for QPane pyramid generation. The completed vertical slice includes the
+scalar oracle, optimized CPU implementation, tile-seam equivalence, alpha and
+color contracts, request-owned memory admission, Python binding, QPane adapter,
+controlled performance limits, isolated wheels, and deletion of the exact Qt
+pyramid-scaling path it replaced.
 
-This is the first point where Ferrastra affects QPane at runtime. Until that
-slice lands, the existing Python and Qt implementations remain authoritative.
+Ferrastra now owns exact pyramid resampling. QPane owns source-revision product
+reuse, background work, cancellation, caches, level selection, and Qt
+presentation around those immutable native products.
 
-## Finish Exact Resampling Ownership
+## Exact Resampling Ownership
 
-After the first slice proves the graph and runtime in production, migrate the
-remaining exact resampling work one owner at a time:
-
-- QPane affine raster projection and scaling conversions;
-- CuteCanvas coverage and floating-fragment projection;
-- placed-image rasterization;
-- sparse raster and coverage sampling; and
-- mask import resampling.
-
-Each migration characterizes the existing result, adds the native operation and
-adapter, migrates every caller, and deletes the implementation it replaces.
-Coverage receives coverage-appropriate sampling rather than inheriting a
-photographic filter by accident.
+Phase 3 completed QPane affine raster projection and scaling-conversion cleanup,
+CuteCanvas coverage and floating-fragment projection, placed-image
+rasterization, sparse raster and coverage sampling, and mask import resampling.
+Interactive navigation keeps immediate pyramid previews; settled frames publish
+complete exact physical-grid products atomically. Coverage uses dedicated
+nearest, linear, and area sampling with range-preserving scalar semantics.
+QPane defines raster sampling relative to the source-native 1:1 point, where one
+source pixel occupies one device pixel. Below 200%, immediate presentation uses
+bilinear interpolation while settled axis-aligned products use Lanczos3 and
+settled affine products use affine bilinear sampling. At and above 200%, both
+immediate and settled products use nearest-neighbor sampling. Display density
+does not move this source-native threshold. Sampling operation and physical-grid
+phase participate in tile, cache, work, fallback, and adopted-product identity,
+so an incompatible reconstruction or stale pan phase cannot replace a nearest
+frame.
 
 ## Grow the Operation Library
 

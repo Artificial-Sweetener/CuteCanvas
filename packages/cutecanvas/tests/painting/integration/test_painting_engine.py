@@ -23,6 +23,9 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QPointF, QRect, QRectF
+from PySide6.QtGui import QColor, QImage, QPainter, QTransform
+
 from cutecanvas import (
     BrushDynamics as PublicBrushDynamics,
 )
@@ -54,8 +57,6 @@ from cutecanvas.painting.rendering import (
 )
 from cutecanvas.raster.color_surface import ColorRasterSurface
 from cutecanvas.raster.revision_reader import RasterRevisionReader
-from PySide6.QtCore import QPointF, QRect, QRectF
-from PySide6.QtGui import QColor, QImage, QPainter, QTransform
 from qpane.sdk.scene import (
     BilinearLayerTransform,
     LayerTransform,

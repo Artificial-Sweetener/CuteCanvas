@@ -22,6 +22,7 @@ import uuid
 import pytest
 from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtGui import QColor, QImage, QTransform
+
 from qpane import (
     HybridDocument,
     HybridPresentationStyle,
