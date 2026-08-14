@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v3.0.2 (2026-08-14)
+
+### Bug Fixes
+
+- Keep vector refinement responsive under isolated CI
+  ([`4200845`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/4200845c8a8d2242947b762c7364900ec05ed424))
+
+- **repo**: Make release commits independent of developer hooks
+  ([`00cb3ca`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/00cb3caac414a7440bb23025c6c86046592811b7))
+
+- **repo**: Publish dependency-compatible release waterfalls
+  ([`144515f`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/144515f4850c9d0e99be31582de6faca1a4d18c7))
+
+### Testing
+
+- Wait for completed diagnostics snapshot
+  ([`afec856`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/afec856a131c2345bc55e018f2965c8b4e6bc3e5))
+
+
 ## v3.0.1 (2026-08-14)
 
 ### Bug Fixes

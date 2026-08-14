@@ -22,7 +22,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-  "ferrastra>=1.0.0,<2.0.0",
+  "ferrastra>=1.0.1,<2.0.0",
   "PySide6>=6.7.3",
   "numpy>=1.21",
   "psutil>=5.9",
