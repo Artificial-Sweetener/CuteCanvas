@@ -21,6 +21,9 @@ import ast
 import importlib
 from typing import Any
 
+import pytest
+from packaging.requirements import Requirement
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -59,10 +62,20 @@ def test_cutecanvas_wheel_discovers_only_cutecanvas_packages() -> None:
     assert patterns == ["cutecanvas", "cutecanvas.*"]
 
 
-def test_cutecanvas_declares_a_bounded_qpane_dependency() -> None:
-    """State the compatible QPane release series explicitly."""
-    dependencies = _metadata()["project"]["dependencies"]
-    assert "qpane>=3.0.0,<4.0.0" in dependencies
+@pytest.mark.parametrize("name", ["ferrastra", "qpane"])
+def test_cutecanvas_declares_one_plain_bounded_product_dependency(name: str) -> None:
+    """Keep each planned product edge explicit and structurally unambiguous."""
+    dependencies = [
+        Requirement(value)
+        for value in _metadata()["project"]["dependencies"]
+        if Requirement(value).name.lower() == name
+    ]
+    assert len(dependencies) == 1
+    dependency = dependencies[0]
+    assert not dependency.extras
+    assert dependency.marker is None
+    assert dependency.url is None
+    assert {item.operator for item in dependency.specifier} >= {">=", "<"}
 
 
 def test_cutecanvas_versions_use_the_cutecanvas_release_tag_namespace() -> None:
@@ -83,7 +96,13 @@ def test_cutecanvas_declares_every_imported_runtime_distribution() -> None:
         str(item).split(">", 1)[0].lower()
         for item in _metadata()["project"]["dependencies"]
     }
-    assert {"qpane", "pyside6", "numpy", "typing-extensions"} <= dependencies
+    assert {
+        "ferrastra",
+        "qpane",
+        "pyside6",
+        "numpy",
+        "typing-extensions",
+    } <= dependencies
 
 
 def test_cutecanvas_runtime_does_not_require_opencv() -> None:

@@ -206,7 +206,7 @@ git diff --check
 
 When Ferrastra packaging or its public boundary changes, run
 `.venv\Scripts\python tools\verify_ferrastra_wheel.py`. When QPane or CuteCanvas
-packaging changes, run `.venv\Scripts\python tools\verify_python_wheels.py`.
+packaging changes, run `.venv\Scripts\python -m tools.verify_python_wheels`.
 The verifier installs QPane without CuteCanvas, then installs CuteCanvas against
 the exact QPane wheel and version range declared in its metadata.
 
@@ -248,15 +248,29 @@ expands that change through the dependency waterfall:
 
 A downstream product with no direct semantic change receives a patch release.
 Its own feature or breaking release takes precedence over that propagated patch.
-CI verifies the complete source tree and installs CuteCanvas against the exact
-QPane wheel built from that tree before creating product tags. It versions the
-entire waterfall before publishing its first artifact, then publishes the exact
-tags in the order Ferrastra, QPane, CuteCanvas. Directly pushed product tags and
-manual recovery runs enter the same verified publisher.
+One immutable release plan records the verified source commit, every prospective
+version, the exact upstream version and policy-derived range for each dependency
+edge, candidate commits, tags, and artifact hashes. Release CI materializes all
+downstream requirements and release commits on a reversible candidate branch.
+It builds independent products and native platforms in parallel, validates the
+complete wheel and source-distribution graph, and resolves the released stack in
+one clean offline pip transaction before atomically advancing `main` and creating
+the product tags.
 
-Publication is immutable. CI rejects an existing version, an invalid or
-regressive product tag, unavailable public dependencies, mismatched artifact
-metadata, sibling-package wheel contents, and package READMEs that rely on
-repository-relative links. PyPI publication uses the protected `pypi`
-environment and Trusted Publishing; a successful Python publication creates
-package-scoped GitHub release notes from user-facing Conventional Commits.
+The trusted publisher downloads the prevalidated artifacts from the owning
+release run and publishes them in the order Ferrastra, QPane, CuteCanvas. A
+manual recovery identifies that release run and its sealed recovery identity;
+it can resume absent files only when every existing PyPI filename and hash still
+matches the plan. Product-tag pushes do not bypass release planning. Cheap plan
+and invariant checks run before expensive work, product and platform builds run
+in parallel, and the release path reuses artifacts rather than rebuilding them.
+Required PR feedback targets 15 minutes and the complete automated release path
+targets 30 minutes.
+
+Publication is immutable. CI rejects stale or overlapping plans, invalid or
+regressive tags, unavailable exact dependencies, source/wheel/sdist metadata
+drift, unplanned or altered artifacts, sibling-package wheel contents, and
+package READMEs that rely on repository-relative links. PyPI publication uses
+the protected `pypi` environment and Trusted Publishing; successful publication
+creates package-scoped GitHub release notes from user-facing Conventional
+Commits and persists a plan-bound publication receipt.

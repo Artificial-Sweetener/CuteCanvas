@@ -24,7 +24,12 @@ from pathlib import Path
 import pytest
 
 from tools.testing.cli import _print_selection
-from tools.testing.execution import group_paths, run_isolated_groups, run_selection
+from tools.testing.execution import (
+    group_paths,
+    run_isolated_groups,
+    run_parallel_isolated_groups,
+    run_selection,
+)
 from tools.testing.model import SelectionReason
 from tools.testing.model import TestGroup as _TestGroup
 from tools.testing.model import TestSelection as _TestSelection
@@ -136,6 +141,42 @@ def test_isolated_gate_stops_after_the_first_failed_group() -> None:
     assert sum("pytest" in command for command in commands) == 2
 
 
+def test_ci_gate_parallelizes_groups_but_serializes_strong_cases() -> None:
+    """Reduce latency without allowing abuse or performance cases to contend."""
+    policies = load_policies(repository_root())
+    commands: list[tuple[str, ...]] = []
+
+    def concurrent_runner(command: Sequence[str], root: Path) -> int:
+        """Capture aggregate and strongly isolated CI commands."""
+        assert root == repository_root()
+        commands.append(tuple(command))
+        return 0
+
+    def one_node(path: str, root: Path) -> tuple[int, tuple[str, ...]]:
+        """Represent each strongly isolated group with one case."""
+        assert root == repository_root()
+        return 0, (f"{path}/test_case.py::test_case",)
+
+    assert (
+        run_parallel_isolated_groups(
+            repository_root(),
+            policies,
+            runner=concurrent_runner,
+            node_collector=one_node,
+            workers=4,
+        )
+        == 0
+    )
+    pytest_commands = [command for command in commands if "pytest" in command]
+    ordinary = next(command for command in pytest_commands if "-n" in command)
+    assert ordinary[3:6] == ("-n", "auto", "--maxprocesses=4")
+    assert "--basetemp=.pytest-tmp-ci-ordinary" in ordinary
+    strong = [command for command in pytest_commands if "::" in command[-1]]
+    assert strong
+    assert all("-n" not in command for command in strong)
+    assert len({command[3] for command in strong}) == len(strong)
+
+
 def test_native_commit_gate_denies_warnings_and_dependency_risk() -> None:
     """Keep Ferrastra commit selection aligned with every native safety gate."""
     policies = load_policies(repository_root())
@@ -214,7 +255,9 @@ def test_python_packaging_commit_builds_isolated_consumer_wheels() -> None:
         )
         == 0
     )
-    assert any(command[-1] == "tools/verify_python_wheels.py" for command in commands)
+    assert any(
+        command[-2:] == ("-m", "tools.verify_python_wheels") for command in commands
+    )
 
 
 def test_large_selection_reports_facts_without_repeating_every_edge(

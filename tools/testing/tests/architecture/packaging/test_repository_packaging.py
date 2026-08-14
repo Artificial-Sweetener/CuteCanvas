@@ -54,10 +54,10 @@ def test_repository_bootstrap_installs_all_editable_packages() -> None:
 def test_ferrastra_ci_and_dependency_policy_cover_minimum_native_targets() -> None:
     """Keep build, verification, and dependency graphs on the same platforms."""
     verify_workflow = (_ROOT / ".github/workflows/verify.yml").read_text("utf-8")
-    publish_workflow = (_ROOT / ".github/workflows/publish.yml").read_text("utf-8")
+    release_workflow = (_ROOT / ".github/workflows/release.yml").read_text("utf-8")
     for runner in ("windows-2025", "ubuntu-24.04", "macos-15"):
         assert runner in verify_workflow
-        assert runner in publish_workflow
+        assert runner in release_workflow
 
     deny_policy = _metadata(_ROOT / "deny.toml")
     assert deny_policy["graph"]["targets"] == [

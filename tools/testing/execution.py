@@ -79,7 +79,7 @@ def run_selection(
             return result
     if commit and _requires_python_wheel_gate(selection):
         result = active_runner(
-            (sys.executable, "tools/verify_python_wheels.py"),
+            (sys.executable, "-m", "tools.verify_python_wheels"),
             root,
         )
         if result:
@@ -159,6 +159,92 @@ def run_isolated_groups(
                 if result:
                     return result
     return 0
+
+
+def run_parallel_isolated_groups(
+    root: Path,
+    policies: dict[str, TestPolicy],
+    *,
+    runner: CommandRunner | None = None,
+    node_collector: TestNodeCollector | None = None,
+    workers: int = _MAX_PARALLEL_TEST_PROCESSES,
+) -> int:
+    """Run ordinary proofs through xdist and strong isolation serially."""
+    if workers < 1:
+        raise ValueError("parallel isolated test workers must be positive")
+    active_runner = runner or _run_command
+    active_collector = node_collector or _collect_test_nodes
+    result = active_runner(
+        (sys.executable, "tools/check_architecture.py"),
+        root,
+    )
+    if result:
+        return result
+    collection_status, ordinary, strongly_isolated = _ci_targets(
+        root,
+        policies,
+        active_collector,
+    )
+    if collection_status:
+        return collection_status
+    result = active_runner(
+        (
+            sys.executable,
+            "-m",
+            "pytest",
+            "-n",
+            "auto",
+            f"--maxprocesses={workers}",
+            "--basetemp=.pytest-tmp-ci-ordinary",
+            *ordinary,
+        ),
+        root,
+    )
+    if result:
+        return result
+    for command in strongly_isolated:
+        result = active_runner(command, root)
+        if result:
+            return result
+    return 0
+
+
+def _ci_targets(
+    root: Path,
+    policies: dict[str, TestPolicy],
+    collector: TestNodeCollector,
+) -> tuple[int, tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    """Build aggregate ordinary paths and collision-free isolated case commands."""
+    ordinary: list[str] = []
+    strong: list[tuple[str, ...]] = []
+    index = 0
+    for product in sorted(policies):
+        policy = policies[product]
+        for area in policy.areas:
+            for proof in area.proofs:
+                group = TestGroup(product, area.name, proof)
+                path = group_paths(frozenset({group}), policies)[0]
+                if proof in area.case_isolated_proofs:
+                    status, node_ids = collector(path, root)
+                    if status:
+                        return status, (), ()
+                    for node_id in node_ids:
+                        strong.append(_isolated_command(node_id, index))
+                        index += 1
+                    continue
+                ordinary.append(path)
+    return 0, tuple(ordinary), tuple(strong)
+
+
+def _isolated_command(target: str, index: int) -> tuple[str, ...]:
+    """Return one pytest command with a process-private temporary directory."""
+    return (
+        sys.executable,
+        "-m",
+        "pytest",
+        f"--basetemp=.pytest-tmp-ci-{index}",
+        target,
+    )
 
 
 def _collect_test_nodes(path: str, root: Path) -> tuple[int, tuple[str, ...]]:

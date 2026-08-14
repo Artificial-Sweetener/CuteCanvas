@@ -21,11 +21,14 @@ import pytest
 
 import tools.check_ferrastra_release_tag as release_check
 from tools.check_ferrastra_release_tag import release_tag_error, workspace_version
+from tools.release.products import PRODUCTS, parse_stable_version
 
 
-def test_workspace_version_is_the_stage_zero_package_version() -> None:
-    """Read the release version from the authoritative Cargo workspace."""
-    assert workspace_version() == "0.1.0"
+def test_workspace_version_is_in_ferrastras_stable_public_line() -> None:
+    """Read a canonical non-regressive version from the Cargo workspace."""
+    assert (
+        parse_stable_version(workspace_version()) >= PRODUCTS["ferrastra"].first_release
+    )
 
 
 def test_matching_release_tag_passes() -> None:

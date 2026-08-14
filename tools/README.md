@@ -19,35 +19,42 @@ consumer contract subscriptions, instead of requiring private pytest node IDs.
 .venv\Scripts\python tools\test.py staged --commit
 ```
 
-`verify_python_wheels.py` builds QPane and CuteCanvas, proves QPane imports
-without CuteCanvas installed, then installs CuteCanvas against that exact QPane
-wheel with only declared dependencies. `verify_ferrastra_wheel.py` performs the
-equivalent direct-wheel and source-derived-wheel proof for Ferrastra.
+`verify_python_wheels.py` builds the complete local product wheelhouse, downloads
+declared third-party wheels, and performs clean offline pip transactions. It
+proves QPane imports without CuteCanvas and proves CuteCanvas resolves against
+the exact built QPane and Ferrastra wheels without dependency bypasses.
+`verify_ferrastra_wheel.py` performs the equivalent direct-wheel and
+source-derived-wheel proof for Ferrastra.
 
 ## Product releases
 
 Ferrastra, QPane, and CuteCanvas use independent semantic-version histories.
 Every successful `main` push runs the package-local Python Semantic Release
-configuration for each product. A Ferrastra release cascades through QPane and
-CuteCanvas; a QPane release cascades through CuteCanvas; and a CuteCanvas release
-remains local to CuteCanvas. A downstream product receives at least a patch
-release without replacing a larger semantic change of its own. CI verifies and
-versions the complete waterfall before publishing its tags in dependency order.
-Release CI calls these tools before and after trusted publication:
+configuration for each product. The side-effect-free planner expands direct
+semantic changes through the product dependency DAG and derives each downstream
+requirement from the exact planned upstream version and its explicit edge
+policy. A downstream product receives a patch release without replacing a
+larger semantic change of its own.
+
+CI materializes release commits on a reversible candidate lineage, builds every
+planned distribution in parallel, seals artifact hashes, and proves full offline
+resolver closure. Only then does it atomically advance `main` and create tags.
+Trusted Publishing consumes those exact artifacts in dependency order. Partial
+PyPI publication resumes only from the same recovery identity and matching
+hashes. The primary release tools are:
 
 ```powershell
-.venv\Scripts\python tools\check_python_release.py qpane-v3.0.0
-.venv\Scripts\python tools\verify_python_release_artifacts.py qpane-v3.0.0 packages\qpane\dist
+.venv\Scripts\python -m tools.prepare_release --source-sha <sha> --output release-plan.json
+.venv\Scripts\python -m tools.manage_release_plan seal release-plan.json distributions sealed-plan.json
+.venv\Scripts\python -m tools.verify_release_closure sealed-plan.json distributions release-closure
 .venv\Scripts\python tools\generate_release_notes.py qpane-v3.0.0 release-notes.md
 ```
 
-`check_python_release.py --check-pypi` rejects immutable Python version reuse
-and requires a compatible public QPane release before CuteCanvas publication.
-`verify_python_release_artifacts.py` checks wheel and source-distribution names,
-versions, dependencies, repository metadata, Markdown portability, and product
-contents. `generate_release_notes.py` selects user-facing Conventional Commits
-that touch the released product since its preceding product tag. QPane's first
-product-prefixed release uses the legacy `v2.1.1` tag as its comparison base.
+`admit_release_publication.py` verifies the sealed identity, tag commit,
+dependency publication order, filenames, hashes, and current PyPI state before
+Trusted Publishing runs. `generate_release_notes.py` selects user-facing
+Conventional Commits that touch the released product since its preceding product
+tag.
 
 ## Architecture governance
 

@@ -31,8 +31,8 @@ from tools.release.orchestration import (
     PublicationError,
     confirm_verified_orchestrator,
     dispatch_publication_waterfall,
-    release_tags_from_environment,
 )
+from tools.release.plan import load_release_plan
 
 
 def _required_environment(name: str) -> str:
@@ -47,13 +47,15 @@ def run(arguments: list[str] | None = None) -> None:
     """Run the requested release-publication orchestration command."""
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
-    subcommands.add_parser(
+    dispatch = subcommands.add_parser(
         "dispatch", help="publish every versioned product in dependency order"
     )
+    dispatch.add_argument("plan", type=Path)
     verify = subcommands.add_parser(
         "verify", help="confirm an active release run completed repository verification"
     )
     verify.add_argument("run_id", type=int)
+    verify.add_argument("recovery_id")
     options = parser.parse_args(arguments)
 
     gateway = GitHubActionsGateway(
@@ -66,15 +68,18 @@ def run(arguments: list[str] | None = None) -> None:
             gateway,
             run_id=options.run_id,
             repository=_required_environment("GITHUB_REPOSITORY"),
+            recovery_id=options.recovery_id,
         )
         print(f"SUCCESS: release workflow run {options.run_id} passed verification.")
         return
 
-    tags = release_tags_from_environment(os.environ)
+    plan = load_release_plan(options.plan)
+    tags = tuple(product.tag for product in plan.products)
     dispatch_publication_waterfall(
         gateway,
         tags,
         orchestrator_run_id=_required_environment("GITHUB_RUN_ID"),
+        recovery_id=plan.recovery_id,
     )
 
 

@@ -54,7 +54,7 @@ def test_product_semantic_release_configuration_is_independent(product: str) -> 
     assert configuration["changelog"]["mode"] == "update"
     assert (
         configuration["changelog"]["default_templates"]["changelog_file"]
-        == "CHANGELOG.md"
+        == f"packages/{product}/CHANGELOG.md"
     )
 
 
@@ -63,6 +63,7 @@ def test_dynamic_python_versions_remain_tag_owned() -> None:
     for product in ("qpane", "cutecanvas"):
         configuration = _semantic_release_configuration(product)
         assert configuration["version_toml"] == []
+        assert configuration["assets"] == [f"packages/{product}/pyproject.toml"]
 
 
 def test_ferrastra_release_updates_cargo_version_and_lock_together() -> None:
@@ -76,8 +77,6 @@ def test_ferrastra_release_updates_cargo_version_and_lock_together() -> None:
         "Cargo.lock",
         "rust-toolchain.toml",
     }
-    assert configuration["version_toml"] == [
-        "../../Cargo.toml:workspace.package.version"
-    ]
+    assert configuration["version_toml"] == ["Cargo.toml:workspace.package.version"]
     assert "Cargo.lock" in configuration["assets"]
     assert "cargo check --workspace --all-features" in configuration["build_command"]

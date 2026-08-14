@@ -13,79 +13,324 @@ concurrency:
   group: release-main
   cancel-in-progress: false
 
+env:
+  PIP_VERSION: "26.1.2"
+  BUILD_VERSION: "1.5.0"
+  PACKAGING_VERSION: "26.3"
+  PYTHON_SEMANTIC_RELEASE_VERSION: "10.6.1"
+  TWINE_VERSION: "7.0.0"
+  README_RENDERER_VERSION: "45.0"
+
 jobs:
-  verify:
-    uses: ./.github/workflows/verify.yml
-
-  version-ferrastra:
-    needs: verify
-    uses: ./.github/workflows/version-product.yml
-    with:
-      product: ferrastra
-      first_bump: "major"
-      release_initial: true
-      expected_head: ${{ github.sha }}
-    secrets: inherit
-
-  version-qpane:
-    needs: version-ferrastra
-    uses: ./.github/workflows/version-product.yml
-    with:
-      product: qpane
-      first_bump: "major"
-      release_initial: true
-      legacy_anchor: "v2.1.1"
-      cascade_patch: ${{ needs.version-ferrastra.outputs.released == 'true' }}
-      expected_head: ${{ needs.version-ferrastra.outputs.head_sha }}
-    secrets: inherit
-
-  version-cutecanvas:
-    needs: version-qpane
-    uses: ./.github/workflows/version-product.yml
-    with:
-      product: cutecanvas
-      first_bump: "major"
-      release_initial: true
-      cascade_patch: ${{ needs.version-qpane.outputs.released == 'true' }}
-      expected_head: ${{ needs.version-qpane.outputs.head_sha }}
-    secrets: inherit
-
-  publish-waterfall:
-    needs:
-      - version-ferrastra
-      - version-qpane
-      - version-cutecanvas
-    if: >-
-      always() &&
-      needs.version-ferrastra.result == 'success' &&
-      needs.version-qpane.result == 'success' &&
-      needs.version-cutecanvas.result == 'success' &&
-      (needs.version-ferrastra.outputs.released == 'true' ||
-      needs.version-qpane.outputs.released == 'true' ||
-      needs.version-cutecanvas.outputs.released == 'true')
+  prepare:
+    name: Prepare immutable candidate
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    permissions:
-      actions: write
-      contents: read
+    timeout-minutes: 10
+    outputs:
+      released: ${{ steps.plan.outputs.released }}
+      plan_id: ${{ steps.plan.outputs.plan_id }}
+      candidate_sha: ${{ steps.plan.outputs.candidate_sha }}
+      candidate_ref: ${{ steps.candidate.outputs.candidate_ref }}
+      python_matrix: ${{ steps.plan.outputs.python_matrix }}
+      ferrastra_released: ${{ steps.plan.outputs.ferrastra_released }}
+      ferrastra_version: ${{ steps.plan.outputs.ferrastra_version }}
+      qpane_version: ${{ steps.plan.outputs.qpane_version }}
+      cutecanvas_version: ${{ steps.plan.outputs.cutecanvas_version }}
     steps:
-      - name: Check out the versioned release lineage
+      - name: Check out the exact main source and release history
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.version-cutecanvas.outputs.head_sha }}
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install the release planner
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          python -m pip install "packaging==${{ env.PACKAGING_VERSION }}" "python-semantic-release==${{ env.PYTHON_SEMANTIC_RELEASE_VERSION }}"
+
+      - name: Plan versions, synchronize manifests, and create local release commits
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "semantic-release"
+          git config user.email "semantic-release@users.noreply.github.com"
+          python -m tools.prepare_release --source-sha "${{ github.sha }}" --output "${{ runner.temp }}/release-plan.json"
+
+      - name: Push reversible candidate lineage
+        id: candidate
+        if: steps.plan.outputs.released == 'true'
+        shell: bash
+        run: |
+          candidate_ref="release-candidate/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git push origin "HEAD:refs/heads/$candidate_ref"
+          echo "candidate_ref=$candidate_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Upload unsealed candidate plan
+        if: steps.plan.outputs.released == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: candidate-plan-${{ steps.plan.outputs.plan_id }}
+          path: ${{ runner.temp }}/release-plan.json
+          if-no-files-found: error
+          retention-days: 30
+
+  verify:
+    name: Verify candidate
+    needs: prepare
+    if: needs.prepare.outputs.released == 'true'
+    uses: ./.github/workflows/verify.yml
+    with:
+      source_ref: ${{ needs.prepare.outputs.candidate_sha }}
+      qpane_version: ${{ needs.prepare.outputs.qpane_version }}
+      cutecanvas_version: ${{ needs.prepare.outputs.cutecanvas_version }}
+    secrets: inherit
+
+  build-python:
+    name: Build ${{ matrix.product }} candidate
+    needs: prepare
+    if: needs.prepare.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        product: ${{ fromJSON(needs.prepare.outputs.python_matrix) }}
+    env:
+      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE: ${{ needs.prepare.outputs.qpane_version }}
+      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS: ${{ needs.prepare.outputs.cutecanvas_version }}
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: packages/${{ matrix.product }}/pyproject.toml
+
+      - name: Build and check distribution
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}" "build==${{ env.BUILD_VERSION }}" "twine==${{ env.TWINE_VERSION }}" "readme-renderer[md]==${{ env.README_RENDERER_VERSION }}"
+          python -m build "packages/${{ matrix.product }}"
+          python -m twine check --strict "packages/${{ matrix.product }}/dist/"*
+
+      - name: Upload immutable candidate distribution
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-${{ needs.prepare.outputs.plan_id }}-${{ matrix.product }}
+          path: packages/${{ matrix.product }}/dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  build-ferrastra:
+    name: Build Ferrastra candidate (${{ matrix.platform }})
+    needs: prepare
+    if: needs.prepare.outputs.ferrastra_released == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: windows-2025
+            platform: windows-x64
+          - os: macos-15
+            platform: macos-arm64
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: Cargo.lock
+
+      - name: Build native candidate
+        working-directory: packages/ferrastra
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}" maturin==1.14.1
+          python -m maturin build --release --out dist
+
+      - name: Build source distribution
+        if: runner.os == 'Linux'
+        working-directory: packages/ferrastra
+        run: python -m maturin sdist --out dist
+
+      - name: Upload immutable native distribution
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-${{ needs.prepare.outputs.plan_id }}-ferrastra-${{ matrix.platform }}
+          path: packages/ferrastra/dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  candidate-gate:
+    name: Candidate gate
+    needs:
+      - prepare
+      - verify
+      - build-python
+      - build-ferrastra
+    if: >-
+      always() &&
+      needs.prepare.outputs.released == 'true' &&
+      needs.verify.result == 'success' &&
+      needs.build-python.result == 'success' &&
+      (needs.build-ferrastra.result == 'success' ||
+      needs.build-ferrastra.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      recovery_id: ${{ steps.identity.outputs.recovery_id }}
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Download candidate plan
+        uses: actions/download-artifact@v7
+        with:
+          name: candidate-plan-${{ needs.prepare.outputs.plan_id }}
+          path: plan
+
+      - name: Download QPane candidate
+        if: needs.prepare.outputs.qpane_version != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: release-${{ needs.prepare.outputs.plan_id }}-qpane
+          path: distributions/qpane
+
+      - name: Download CuteCanvas candidate
+        if: needs.prepare.outputs.cutecanvas_version != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: release-${{ needs.prepare.outputs.plan_id }}-cutecanvas
+          path: distributions/cutecanvas
+
+      - name: Download Ferrastra candidates
+        if: needs.prepare.outputs.ferrastra_released == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          pattern: release-${{ needs.prepare.outputs.plan_id }}-ferrastra-*
+          path: distributions/ferrastra
+          merge-multiple: true
+
+      - name: Seal artifacts and prove clean resolver closure
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}" "twine==${{ env.TWINE_VERSION }}" "readme-renderer[md]==${{ env.README_RENDERER_VERSION }}"
+          python -m twine check --strict distributions/*/*
+          python -m tools.manage_release_plan seal plan/release-plan.json distributions sealed-release-plan.json
+          python -m tools.verify_release_closure sealed-release-plan.json distributions "${{ runner.temp }}/release-closure"
+
+      - name: Derive sealed recovery identity
+        id: identity
+        shell: bash
+        run: |
+          recovery_id="$(python -c "from pathlib import Path; from tools.release.plan import load_release_plan; print(load_release_plan(Path('sealed-release-plan.json')).recovery_id)")"
+          echo "recovery_id=$recovery_id" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sealed release plan
+        uses: actions/upload-artifact@v6
+        with:
+          name: sealed-plan-${{ steps.identity.outputs.recovery_id }}
+          path: sealed-release-plan.json
+          if-no-files-found: error
+          retention-days: 30
+
+  finalize:
+    name: Finalize release lineage
+    needs:
+      - prepare
+      - candidate-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact candidate and tags
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Publish the versioned product waterfall
+      - name: Download sealed plan
+        uses: actions/download-artifact@v7
+        with:
+          name: sealed-plan-${{ needs.candidate-gate.outputs.recovery_id }}
+
+      - name: Atomically push verified main and product tags
+        run: python -m tools.manage_release_plan finalize sealed-release-plan.json
+
+  publish-waterfall:
+    name: Publish sealed waterfall
+    needs:
+      - prepare
+      - candidate-gate
+      - finalize
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out finalized release tools
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download sealed plan
+        uses: actions/download-artifact@v7
+        with:
+          name: sealed-plan-${{ needs.candidate-gate.outputs.recovery_id }}
+
+      - name: Publish each product in dependency order
         env:
           GH_TOKEN: ${{ github.token }}
-          FERRASTRA_RELEASED: ${{ needs.version-ferrastra.outputs.released }}
-          FERRASTRA_RELEASE_TAG: ${{ needs.version-ferrastra.outputs.release_tag }}
-          QPANE_RELEASED: ${{ needs.version-qpane.outputs.released }}
-          QPANE_RELEASE_TAG: ${{ needs.version-qpane.outputs.release_tag }}
-          CUTECANVAS_RELEASED: ${{ needs.version-cutecanvas.outputs.released }}
-          CUTECANVAS_RELEASE_TAG: ${{ needs.version-cutecanvas.outputs.release_tag }}
-        run: python tools/release_publications.py dispatch
+        run: python -m tools.release_publications dispatch sealed-release-plan.json
+
+  cleanup-candidate:
+    name: Remove reversible candidate branch
+    needs:
+      - prepare
+      - finalize
+      - publish-waterfall
+    if: always() && needs.finalize.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete finalized candidate branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${{ needs.prepare.outputs.candidate_ref }}"

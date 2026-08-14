@@ -18,16 +18,11 @@
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
+from tools.release.candidate import read_product_requirements
 from tools.release.products import format_version, python_release_from_tag
 from tools.release.pypi import (
-    has_compatible_qpane_release,
+    has_compatible_release,
     published_stable_versions,
     release_exists,
 )
@@ -41,15 +36,19 @@ def run(tag: str, *, check_pypi: bool) -> None:
         raise RuntimeError(
             f"PyPI already contains immutable release {product.name}=={version_text}"
         )
-    if (
-        check_pypi
-        and product.name == "cutecanvas"
-        and not has_compatible_qpane_release(published_stable_versions("qpane"))
-    ):
-        raise RuntimeError(
-            "CuteCanvas requires a published qpane>=3.0.0,<4.0.0 release; "
-            "publish QPane before CuteCanvas"
+    if check_pypi:
+        requirements = read_product_requirements(
+            product.package_path / "pyproject.toml"
         )
+        for dependency in product.dependencies:
+            published = published_stable_versions(dependency.name)
+            specifier = requirements[dependency.name]
+            if not has_compatible_release(published, specifier):
+                raise RuntimeError(
+                    f"{product.display_name} requires a published "
+                    f"{dependency.name}{specifier} release; publish a compatible "
+                    f"{dependency.name} before {product.name}"
+                )
     print(f"SUCCESS: {tag} admits {product.name}=={version_text} for artifact build.")
 
 

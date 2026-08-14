@@ -2,6 +2,22 @@ name: Verify
 
 on:
   workflow_call:
+    inputs:
+      source_ref:
+        description: Exact source commit to verify
+        required: false
+        default: ""
+        type: string
+      qpane_version:
+        description: Exact candidate QPane version for wheel verification
+        required: false
+        default: ""
+        type: string
+      cutecanvas_version:
+        description: Exact candidate CuteCanvas version for wheel verification
+        required: false
+        default: ""
+        type: string
   workflow_dispatch:
 
 permissions:
@@ -15,9 +31,12 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -66,6 +85,7 @@ jobs:
   tests:
     name: Tests (${{ matrix.platform }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -90,6 +110,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -118,7 +140,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Run test suite
-        run: python tools/test.py isolated
+        run: python tools/test.py ci
 
       - name: Run mounted CuteCanvas abuse profile
         env:
@@ -136,6 +158,7 @@ jobs:
   rust:
     name: Rust (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -149,6 +172,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.93.1 --profile minimal --component rustfmt,clippy
@@ -166,6 +191,7 @@ jobs:
   ferrastra-wheel:
     name: Ferrastra wheel (${{ matrix.platform }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -194,6 +220,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.93.1 --profile minimal
@@ -219,9 +247,15 @@ jobs:
   python-wheels:
     name: QPane and CuteCanvas wheel integration
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE: ${{ inputs.qpane_version }}
+      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS: ${{ inputs.cutecanvas_version }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -255,6 +289,7 @@ jobs:
       - ferrastra-wheel
       - python-wheels
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require every verification job
         env:
