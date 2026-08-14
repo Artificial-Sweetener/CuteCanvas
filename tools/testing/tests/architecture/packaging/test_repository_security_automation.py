@@ -84,6 +84,12 @@ def test_release_credentials_are_scoped_to_the_jobs_that_use_them() -> None:
     assert "contents: write" not in publish_defaults
     assert "id-token: write" not in publish_defaults
 
+    verification_job = release[
+        release.index("  verify:") : release.index("  build-python:")
+    ]
+    assert "contents: read" in verification_job
+    assert "pull-requests: read" in verification_job
+
     publication_job = publish[
         publish.index("  publish:") : publish.index("  verify-published:")
     ]
