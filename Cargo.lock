@@ -61,11 +61,11 @@ dependencies = [
 
 [[package]]
 name = "ferrastra-core"
-version = "0.1.0"
+version = "1.0.0"
 
 [[package]]
 name = "ferrastra-engine"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ferrastra-core",
  "ferrastra-graph",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "ferrastra-graph"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "blake3",
  "ferrastra-core",
@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "ferrastra-python"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ferrastra-core",
  "ferrastra-engine",
@@ -96,14 +96,14 @@ dependencies = [
 
 [[package]]
 name = "ferrastra-raster"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ferrastra-core",
 ]
 
 [[package]]
 name = "ferrastra-runtime"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "blake3",
  "ferrastra-core",
@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "ferrastra-store"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "blake3",
  "ferrastra-core",
