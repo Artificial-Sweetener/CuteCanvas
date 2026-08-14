@@ -63,6 +63,7 @@ sources = [
   "packages/cutecanvas/src/cutecanvas/scene/**",
 ]
 proofs = ["abuse", "contract", "integration", "qt"]
+case_isolated_proofs = ["abuse"]
 
 [[areas]]
 name = "sam"
