@@ -29,6 +29,7 @@ from cutecanvas_test_support.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     interaction_clock,
     tail_interaction_latency_ms,
+    tail_latency_sample_count,
 )
 from qpane.sdk.scene import LayerTransform
 
@@ -71,7 +72,7 @@ def test_dormant_irregular_translation_geometry_remains_interactive() -> None:
     assert seam is not None
     latencies: list[float] = []
     batch_size = 16
-    for batch in range(150):
+    for batch in range(tail_latency_sample_count(quantile=0.99)):
         started = interaction_clock()
         for offset in range(batch_size):
             sample = batch * batch_size + offset
@@ -122,7 +123,7 @@ def test_four_participant_group_translation_remains_interactive() -> None:
 
     latencies: list[float] = []
     batch_size = 16
-    for batch in range(150):
+    for batch in range(tail_latency_sample_count(quantile=0.99)):
         started = interaction_clock()
         for offset in range(batch_size):
             sample = batch * batch_size + offset
