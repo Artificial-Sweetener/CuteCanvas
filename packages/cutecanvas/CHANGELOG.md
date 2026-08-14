@@ -2,6 +2,38 @@
 
 <!-- version list -->
 
+## v1.0.3 (2026-08-14)
+
+### Bug Fixes
+
+- **qpane**: Keep vector refinement responsive under isolated CI
+  ([`4200845`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/4200845c8a8d2242947b762c7364900ec05ed424))
+
+- **repo**: Make release commits independent of developer hooks
+  ([`00cb3ca`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/00cb3caac414a7440bb23025c6c86046592811b7))
+
+- **repo**: Publish dependency-compatible release waterfalls
+  ([`144515f`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/144515f4850c9d0e99be31582de6faca1a4d18c7))
+
+- **repo**: Seal derived release manifests
+  ([#6](https://github.com/Artificial-Sweetener/CuteCanvas/pull/6),
+  [`4bc32a8`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/4bc32a81589f8cf3c77a1c49ed8ef938fd6fde69))
+
+- **repository**: Keep hosted Qt verification fast and stable
+  ([`722d295`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/722d295425c64adc415ed2056e236a7e7aff476e))
+
+### Testing
+
+- Isolate rendering abuse lifetimes
+  ([`9300118`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/9300118d36caa6e4b98f48c8c79ba8eaeaaedb91))
+
+- Make layer failure proof deterministic
+  ([`3d06e89`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/3d06e890890aafd762ff78a099bdfc9f379ec590))
+
+- Shut down high-DPI harness workers
+  ([`75f7d36`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/75f7d36dc7955298693cc83fd9dc8236f09fc501))
+
+
 ## v1.0.2 (2026-08-14)
 
 ### Bug Fixes
