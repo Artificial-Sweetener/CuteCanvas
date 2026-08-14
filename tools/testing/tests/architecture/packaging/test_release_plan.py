@@ -25,7 +25,11 @@ import pytest
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
-from tools.release.candidate import run_release_command, synchronize_requirements
+from tools.release.candidate import (
+    materialize_release_derivatives,
+    run_release_command,
+    synchronize_requirements,
+)
 from tools.release.compatibility import (
     STABLE_MAJOR_PRERELEASE_MINOR,
     CompatibilityPolicy,
@@ -39,6 +43,7 @@ from tools.release.plan import (
     load_release_plan,
     save_release_plan,
 )
+from tools.release.products import ReleaseProduct
 
 _SHA = "a" * 40
 _CURRENT = {
@@ -222,6 +227,86 @@ def test_candidate_command_cannot_claim_parent_action_outputs(
 
     assert observed.strip() == ""
     assert not output.exists()
+
+
+def test_release_derivatives_are_amended_into_one_clean_product_commit(
+    tmp_path: Path,
+) -> None:
+    """Bind generated manifests to the product commit before its SHA is recorded."""
+    _initialize_git_repository(tmp_path)
+    derivative = tmp_path / "derived.lock"
+    derivative.write_text("version=1\n", encoding="utf-8")
+    run_release_command(("git", "add", "derived.lock"), cwd=tmp_path)
+    run_release_command(("git", "commit", "-m", "release product"), cwd=tmp_path)
+    original_sha = run_release_command(("git", "rev-parse", "HEAD"), cwd=tmp_path)
+    product = ReleaseProduct(
+        name="example",
+        display_name="Example",
+        package_path=Path("packages/example"),
+        first_release=(1, 0, 0),
+        release_derivative_paths=(Path("derived.lock"),),
+        release_derivative_commands=(
+            (
+                sys.executable,
+                "-c",
+                "from pathlib import Path; "
+                "Path('derived.lock').write_text('version=2\\n', encoding='utf-8')",
+            ),
+        ),
+    )
+
+    materialize_release_derivatives(tmp_path, product)
+
+    assert (
+        run_release_command(("git", "rev-parse", "HEAD"), cwd=tmp_path) != original_sha
+    )
+    assert run_release_command(("git", "status", "--porcelain"), cwd=tmp_path) == ""
+    assert (
+        run_release_command(("git", "show", "HEAD:derived.lock"), cwd=tmp_path)
+        == "version=2\n"
+    )
+
+
+def test_release_derivatives_reject_undeclared_mutations(tmp_path: Path) -> None:
+    """Fail closed before amending when a generator escapes its owned paths."""
+    _initialize_git_repository(tmp_path)
+    derivative = tmp_path / "derived.lock"
+    derivative.write_text("version=1\n", encoding="utf-8")
+    run_release_command(("git", "add", "derived.lock"), cwd=tmp_path)
+    run_release_command(("git", "commit", "-m", "release product"), cwd=tmp_path)
+    original_sha = run_release_command(("git", "rev-parse", "HEAD"), cwd=tmp_path)
+    product = ReleaseProduct(
+        name="example",
+        display_name="Example",
+        package_path=Path("packages/example"),
+        first_release=(1, 0, 0),
+        release_derivative_paths=(Path("derived.lock"),),
+        release_derivative_commands=(
+            (
+                sys.executable,
+                "-c",
+                "from pathlib import Path; "
+                "Path('derived.lock').write_text('version=2\\n', encoding='utf-8'); "
+                "Path('escaped.txt').write_text('unexpected', encoding='utf-8')",
+            ),
+        ),
+    )
+
+    with pytest.raises(ReleasePlanError, match="expected"):
+        materialize_release_derivatives(tmp_path, product)
+
+    assert (
+        run_release_command(("git", "rev-parse", "HEAD"), cwd=tmp_path) == original_sha
+    )
+
+
+def _initialize_git_repository(path: Path) -> None:
+    """Create one isolated repository for release-commit proofs."""
+    run_release_command(("git", "init", "--initial-branch=main"), cwd=path)
+    run_release_command(("git", "config", "user.name", "Release Test"), cwd=path)
+    run_release_command(
+        ("git", "config", "user.email", "release-test@example.invalid"), cwd=path
+    )
 
 
 def _plan(
