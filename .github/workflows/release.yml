@@ -83,6 +83,7 @@ jobs:
     if: needs.prepare.outputs.released == 'true'
     permissions:
       contents: read
+      pull-requests: read
     uses: ./.github/workflows/verify.yml
     with:
       source_ref: ${{ needs.prepare.outputs.candidate_sha }}
