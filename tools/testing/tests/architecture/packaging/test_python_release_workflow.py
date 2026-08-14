@@ -193,6 +193,15 @@ def test_every_release_tool_invocation_has_its_pinned_runtime() -> None:
             )
 
 
+def test_every_verify_checkout_fetches_product_version_tags() -> None:
+    """Keep editable SCM versions compatible after synchronized releases."""
+    workflow = _workflow("verify.yml")
+    checkout_count = workflow.count("uses: actions/checkout@v6")
+    assert checkout_count > 0
+    assert workflow.count("fetch-depth: 0") == checkout_count
+    assert workflow.count("fetch-tags: true") == checkout_count
+
+
 def test_publisher_has_no_tag_or_unplanned_direct_entry_point() -> None:
     """Require all automatic and manual recovery runs to name one sealed plan."""
     workflow = _workflow("publish.yml")
