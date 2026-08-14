@@ -27,6 +27,7 @@ from PySide6.QtWidgets import QApplication
 
 from cutecanvas import CuteCanvas
 from cutecanvas.core import config
+from cutecanvas_test_support.execution_backend import TestExecution
 from cutecanvas_test_support.harness.process_lock import (
     interactive_performance_isolation,
 )
@@ -96,6 +97,21 @@ def qpane_with_mask(
 ) -> Iterator[tuple[CuteCanvas, object, object]]:
     """Provide the package-owned deterministic mask workflow fixture."""
     yield from provision_canvas_with_mask(qapp, monkeypatch)
+
+
+@pytest.fixture
+def controlled_qpane_with_mask(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[CuteCanvas, object, object, TestExecution]]:
+    """Provide a mounted mask workflow with explicitly activated execution."""
+    execution = TestExecution(auto_finish=False)
+    provision = provision_canvas_with_mask(qapp, monkeypatch, executor=execution)
+    canvas, manager, composition_id = next(provision)
+    try:
+        yield canvas, manager, composition_id, execution
+    finally:
+        provision.close()
 
 
 @pytest.fixture(scope="session", autouse=True)

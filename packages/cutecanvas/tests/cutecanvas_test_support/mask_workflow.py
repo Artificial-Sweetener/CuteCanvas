@@ -105,6 +105,8 @@ def queue_pending_stroke(
 def provision_canvas_with_mask(
     application: QApplication,
     monkeypatch: Any,
+    *,
+    executor: TestExecution | None = None,
 ) -> Iterator[tuple[CuteCanvas, MaskAssetStore, object]]:
     """Yield a mounted mask-enabled canvas with deterministic collaborators."""
     manager_box: dict[str, MaskAssetStore] = {}
@@ -140,7 +142,11 @@ def provision_canvas_with_mask(
         canvas.refreshMaskAutosavePolicy()
 
     monkeypatch.setattr(mask_install, "install_mask_feature", install_mask_feature)
-    canvas = CuteCanvas(config=fixed_cache_config(), features=("mask",))
+    canvas = CuteCanvas(
+        config=fixed_cache_config(),
+        features=("mask",),
+        execution_runtime=None if executor is None else executor.runtime,
+    )
     canvas.resize(32, 32)
     canvas.applySettings(mask_autosave_enabled=True)
     image = QImage(8, 8, QImage.Format_ARGB32)
@@ -150,3 +156,5 @@ def provision_canvas_with_mask(
         yield canvas, manager_box["manager"], composition_id
     finally:
         cleanup_canvas(canvas, application)
+        if executor is not None:
+            executor.close()

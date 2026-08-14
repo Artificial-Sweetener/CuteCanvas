@@ -108,7 +108,7 @@ def test_layer_edge_preview_and_commit_cannot_escape_canvas_aperture(
 
 def test_layer_edge_preview_rejects_product_that_escapes_canvas_aperture(
     qapp,
-    qpane_with_mask,
+    controlled_qpane_with_mask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The shared preview owner must fail closed before presenting a bad product."""
@@ -116,7 +116,7 @@ def test_layer_edge_preview_rejects_product_that_escapes_canvas_aperture(
     from cutecanvas.coverage import CoverageSnapshot
     from cutecanvas.runtime import coverage_modification_preview
 
-    canvas, manager, composition_id = qpane_with_mask
+    canvas, manager, composition_id, execution = controlled_qpane_with_mask
     mask_id = manager.create_mask_from_image(
         numpy_to_qimage_grayscale8(np.full((4, 4), 255, dtype=np.uint8))
     )
@@ -150,7 +150,9 @@ def test_layer_edge_preview_rejects_product_that_escapes_canvas_aperture(
     session_id = canvas.beginLayerEdgePreview(info.scene_id, info.layer_id)
     assert session_id is not None
     assert canvas.updateLayerEdgePreview(session_id, LayerEdgeOperation.EXPAND, 1)
-    assert completed.wait(3000)
+    assert execution.pending_count == 1
+    execution.run_all()
+    _wait_for(qapp, lambda: completed.count() == 1)
     result = completed.at(0)[0]
     assert isinstance(result, LayerEdgeModificationResult)
     assert not result.succeeded
