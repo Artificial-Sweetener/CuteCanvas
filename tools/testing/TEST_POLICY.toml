@@ -26,6 +26,7 @@ sources = [
   ".github/**",
   ".gitignore",
   ".pre-commit-config.yaml",
+  "constraints*.txt",
   "pyproject.toml",
   "requirements*.txt",
   "tools/**",

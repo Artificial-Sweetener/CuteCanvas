@@ -140,7 +140,7 @@ def test_candidate_artifacts_build_in_parallel_and_are_reused() -> None:
     assert (
         "release-${{ needs.prepare.outputs.plan_id }}-${{ matrix.product }}" in release
     )
-    assert "actions/download-artifact@v7" in publish
+    assert "actions/download-artifact@" in publish
     assert "run-id: ${{ env.ORCHESTRATOR_RUN_ID }}" in publish
     assert "python -m build" not in publish
     assert "maturin build" not in publish
@@ -177,7 +177,7 @@ def test_every_release_tool_invocation_has_its_pinned_runtime() -> None:
     )
     job_pattern = re.compile(r"^  [a-z][a-z0-9-]+:\s*$", re.MULTILINE)
     install_runtime_pattern = re.compile(
-        r'python -m pip install[^\n]*"packaging==\$\{\{ env\.PACKAGING_VERSION \}\}"'
+        r"python -m pip install[^\n]*--constraint constraints-tooling\.txt[^\n]*packaging"
     )
     for workflow_name in ("release.yml", "publish.yml"):
         workflow = _workflow(workflow_name)
@@ -196,7 +196,7 @@ def test_every_release_tool_invocation_has_its_pinned_runtime() -> None:
 def test_every_verify_checkout_fetches_product_version_tags() -> None:
     """Keep editable SCM versions compatible after synchronized releases."""
     workflow = _workflow("verify.yml")
-    checkout_count = workflow.count("uses: actions/checkout@v6")
+    checkout_count = workflow.count("uses: actions/checkout@")
     assert checkout_count > 0
     assert workflow.count("fetch-depth: 0") == checkout_count
     assert workflow.count("fetch-tags: true") == checkout_count
@@ -220,7 +220,7 @@ def test_exact_state_admission_precedes_trusted_publication() -> None:
     """Permit skip-existing only after exact names and hashes are checked."""
     workflow = _workflow("publish.yml")
     admit = workflow.index("python -m tools.admit_release_publication")
-    publish = workflow.index("pypa/gh-action-pypi-publish@release/v1")
+    publish = workflow.index("pypa/gh-action-pypi-publish@")
     audit = workflow.index("  verify-published:")
     release = workflow.index("  release-product:")
     assert admit < publish < audit < release

@@ -1,15 +1,20 @@
+-c constraints-tooling.txt
 -e ./packages/qpane
 -e ./packages/cutecanvas
 -e ./packages/ferrastra
-pytest==9.1.1
-pytest-xdist==3.8.0
-ruff==0.15.22
-black==26.5.1
-build==1.5.0
-packaging==26.3
-python-semantic-release==10.6.1
-twine==7.0.0
-readme-renderer[md]==45.0
-maturin==1.14.1
-pyright==1.1.411
-tomli==2.4.1
+setuptools
+setuptools-scm
+wheel
+pytest
+pytest-xdist
+ruff
+black
+build
+packaging
+python-semantic-release
+twine
+readme-renderer[md]
+maturin
+pyright
+tomli
+pip-audit

@@ -1,0 +1,18 @@
+# Repository-owned development, verification, and release tool versions.
+pip==26.1.2
+setuptools==83.0.0
+setuptools-scm==10.2.0
+wheel==0.47.0
+pytest==9.1.1
+pytest-xdist==3.8.0
+ruff==0.15.22
+black==26.5.1
+build==1.5.0
+packaging==26.3
+python-semantic-release==10.6.1
+twine==7.0.0
+readme-renderer==45.0
+maturin==1.14.1
+pyright==1.1.411
+tomli==2.4.1
+pip-audit==2.10.1
