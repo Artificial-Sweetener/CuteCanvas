@@ -13,10 +13,11 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Protect automatic independent product releases from the main branch."""
+"""Protect the fast transactional release workflow and trusted publisher."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -27,9 +28,10 @@ from tools.release.orchestration import (
     PublicationRun,
     confirm_verified_orchestrator,
     dispatch_publication_waterfall,
-    release_tags_from_environment,
 )
 from tools.testing.policy import repository_root
+
+_RECOVERY = "abcdef0123456789abcdef0123456789"
 
 
 class _ActionsGateway:
@@ -40,40 +42,46 @@ class _ActionsGateway:
         outcomes: Mapping[str, str] | None = None,
         workflow_run: Mapping[str, Any] | None = None,
         workflow_jobs: Sequence[Mapping[str, Any]] = (),
+        workflow_artifacts: Sequence[Mapping[str, Any]] = (),
     ) -> None:
         """Create a fake gateway with publication and orchestrator outcomes."""
-        self.dispatched: list[tuple[str, str]] = []
+        self.dispatched: list[tuple[str, str, str]] = []
         self._outcomes = dict(outcomes or {})
         self._workflow_run = dict(workflow_run or {})
         self._workflow_jobs = tuple(workflow_jobs)
+        self._workflow_artifacts = tuple(workflow_artifacts)
 
-    def dispatch_publication(self, tag: str, orchestrator_run_id: str) -> None:
+    def dispatch_publication(
+        self,
+        tag: str,
+        orchestrator_run_id: str,
+        recovery_id: str,
+    ) -> None:
         """Record one publication dispatch."""
-        self.dispatched.append((tag, orchestrator_run_id))
+        self.dispatched.append((tag, orchestrator_run_id, recovery_id))
 
     def publication_runs(self, tag: str) -> tuple[PublicationRun, ...]:
         """Return a completed run only after its tag is dispatched."""
-        dispatch_index = next(
+        match = next(
             (
-                index
-                for index, (candidate, _run_id) in enumerate(self.dispatched, start=1)
+                (index, recovery)
+                for index, (candidate, _run, recovery) in enumerate(
+                    self.dispatched, start=1
+                )
                 if candidate == tag
             ),
             None,
         )
-        if dispatch_index is None:
+        if match is None:
             return ()
-        orchestrator_run_id = next(
-            run_id for candidate, run_id in self.dispatched if candidate == tag
-        )
-        conclusion = self._outcomes.get(tag, "success")
+        run_id, recovery = match
         return (
             PublicationRun(
-                run_id=dispatch_index,
-                display_title=f"Publish {tag} from release {orchestrator_run_id}",
+                run_id=run_id,
+                display_title=f"Publish {tag} from {recovery}",
                 status="completed",
-                conclusion=conclusion,
-                url=f"https://example.invalid/runs/{dispatch_index}",
+                conclusion=self._outcomes.get(tag, "success"),
+                url=f"https://example.invalid/runs/{run_id}",
             ),
         )
 
@@ -85,243 +93,173 @@ class _ActionsGateway:
         """Return configured orchestrator jobs."""
         return self._workflow_jobs
 
-
-def test_main_push_versions_the_complete_waterfall_before_publication() -> None:
-    """Version every downstream product before publishing the first artifact."""
-    workflow = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
-    assert "branches: [main]" in workflow
-    assert "uses: ./.github/workflows/verify.yml" in workflow
-
-    ferrastra = workflow.index("  version-ferrastra:")
-    qpane = workflow.index("  version-qpane:")
-    cutecanvas = workflow.index("  version-cutecanvas:")
-    publisher = workflow.index("  publish-waterfall:")
-    assert ferrastra < qpane < cutecanvas < publisher
-    assert workflow.count("uses: ./.github/workflows/version-product.yml") == 3
-    assert "uses: ./.github/workflows/publish.yml" not in workflow
-    assert "python tools/release_publications.py dispatch" in workflow[publisher:]
-    assert 'legacy_anchor: "v2.1.1"' in workflow
-    assert 'first_bump: "minor"' not in workflow
-    assert workflow.count('first_bump: "major"') == 3
+    def workflow_artifacts(self, run_id: int) -> Sequence[Mapping[str, Any]]:
+        """Return configured orchestrator artifacts."""
+        return self._workflow_artifacts
 
 
-def test_release_admits_ferrastras_stable_initial_publication() -> None:
-    """Publish Ferrastra 1.0.0 through the verified product waterfall."""
-    release = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
-    ferrastra = release[
-        release.index("  version-ferrastra:") : release.index("  version-qpane:")
-    ]
-    qpane = release[
-        release.index("  version-qpane:") : release.index("  version-cutecanvas:")
-    ]
-    cutecanvas = release[
-        release.index("  version-cutecanvas:") : release.index("  publish-waterfall:")
-    ]
-    version = (repository_root() / ".github/workflows/version-product.yml").read_text(
-        "utf-8"
-    )
-
-    assert "release_initial: true" in ferrastra
-    assert "release_initial: true" in qpane
-    assert "release_initial: true" in cutecanvas
-    assert "release_initial:" in version
-    assert "if: steps.lineage.outputs.enabled == 'true'" in version
+def test_main_release_builds_and_seals_before_atomic_finalization() -> None:
+    """Keep every irreversible Git or PyPI action behind whole-stack proof."""
+    workflow = _workflow("release.yml")
+    prepare = workflow.index("  prepare:")
+    verify = workflow.index("  verify:")
+    python_build = workflow.index("  build-python:")
+    native_build = workflow.index("  build-ferrastra:")
+    gate = workflow.index("  candidate-gate:")
+    finalize = workflow.index("  finalize:")
+    publish = workflow.index("  publish-waterfall:")
+    assert prepare < verify < python_build < native_build < gate < finalize < publish
+    assert "python -m tools.manage_release_plan seal" in workflow[gate:finalize]
+    assert "python -m tools.verify_release_closure" in workflow[gate:finalize]
+    assert "python -m tools.manage_release_plan finalize" in workflow[finalize:publish]
+    assert "git push --atomic" not in workflow
+    assert "uses: ./.github/workflows/version-product.yml" not in workflow
+    assert "cascade_patch" not in workflow
 
 
-def test_upstream_releases_force_downstream_patch_waterfalls() -> None:
-    """Cascade Ferrastra through QPane and every QPane release through CuteCanvas."""
-    workflow = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
-    qpane = workflow[workflow.index("  version-qpane:") :]
-    cutecanvas = workflow[workflow.index("  version-cutecanvas:") :]
-    assert "cascade_patch:" in qpane
-    assert "needs.version-ferrastra.outputs.released == 'true'" in qpane
-    assert "cascade_patch:" in cutecanvas
-    assert "needs.version-qpane.outputs.released == 'true'" in cutecanvas
+def test_candidate_lineage_is_exact_and_reversible() -> None:
+    """Build from one source SHA without exposing final tags before validation."""
+    workflow = _workflow("release.yml")
+    prepare = workflow[workflow.index("  prepare:") : workflow.index("  verify:")]
+    assert "ref: main" in prepare
+    assert '--source-sha "${{ github.sha }}"' in prepare
+    assert "release-candidate/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" in prepare
+    assert 'git push origin "HEAD:refs/heads/$candidate_ref"' in prepare
+    assert "refs/tags/" not in prepare
+    assert "cleanup-candidate:" in workflow
+    assert "git/refs/heads/${{ needs.prepare.outputs.candidate_ref }}" in workflow
 
 
-def test_waterfall_versions_only_the_verified_release_lineage() -> None:
-    """Pass each release commit to the next product instead of rereading moving main."""
-    workflow = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
-    assert "expected_head: ${{ github.sha }}" in workflow
-    assert "expected_head: ${{ needs.version-ferrastra.outputs.head_sha }}" in workflow
-    assert "expected_head: ${{ needs.version-qpane.outputs.head_sha }}" in workflow
-
-
-def test_version_workflow_uses_python_semantic_release_to_push_product_tags() -> None:
-    """Keep semantic version calculation, release commits, and tags in PSR."""
-    workflow = (repository_root() / ".github/workflows/version-product.yml").read_text(
-        "utf-8"
-    )
-    assert 'PYTHON_SEMANTIC_RELEASE_VERSION: "10.6.1"' in workflow
-    assert "working-directory: packages/${{ inputs.product }}" in workflow
-    assert "python -m semantic_release -v version" in workflow
-    assert "--no-vcs-release" in workflow
-    assert 'remote_tags="$(git ls-remote --tags origin' in workflow
-    assert "released=" in workflow
-    assert "release_tag=" in workflow
-    assert "EXPECTED_HEAD" in workflow
-    assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"' in workflow
-    assert "head_sha=" in workflow
-
-
-def test_cascade_patch_never_downgrades_a_larger_product_release() -> None:
-    """Force a patch only when semantic-release finds no direct product release."""
-    workflow = (repository_root() / ".github/workflows/version-product.yml").read_text(
-        "utf-8"
-    )
-    assert "cascade_patch:" in workflow
-    assert "DIRECT_VERSION" in workflow
-    assert "LAST_RELEASED_VERSION" in workflow
-    assert 'if [ "$DIRECT_VERSION" = "$LAST_RELEASED_VERSION" ]' in workflow
-    assert 'arguments+=("--patch")' in workflow
-
-
-def test_release_verification_installs_the_exact_workspace_python_stack() -> None:
-    """Prove CuteCanvas against the QPane wheel from the release source tree."""
-    workflow = (repository_root() / ".github/workflows/verify.yml").read_text("utf-8")
-    wheel_job = workflow.index("  python-wheels:")
-    gate = workflow.index("  gate:")
-    assert wheel_job < gate
-    assert "python tools/verify_python_wheels.py" in workflow[wheel_job:gate]
-    assert "- python-wheels" in workflow[gate:]
-    assert "PYTHON_WHEELS_RESULT" in workflow[gate:]
-
-
-def test_publish_workflow_validates_before_trusted_publication() -> None:
-    """Require tag, index, artifact, and Markdown proof before PyPI upload."""
-    workflow = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
-    admission = workflow.index("python tools/check_python_release.py")
-    build = workflow.index(
-        'python -m build "packages/${{ needs.select.outputs.package }}"'
-    )
-    artifact = workflow.index("python -m tools.verify_python_release_artifacts")
-    publish = workflow.index("pypa/gh-action-pypi-publish@release/v1")
-    assert admission < build < artifact < publish
-    assert '"readme-renderer[md]==${{ env.README_RENDERER_VERSION }}"' in workflow
-    assert "python -m twine check --strict" in workflow
-    assert "  validate-distribution:" in workflow
-    assert "needs.validate-distribution.result == 'success'" in workflow
+def test_candidate_artifacts_build_in_parallel_and_are_reused() -> None:
+    """Avoid serial rebuilds while binding every publisher to sealed bytes."""
+    release = _workflow("release.yml")
+    publish = _workflow("publish.yml")
+    assert "matrix:\n        product:" in release
+    assert "matrix:\n        include:" in release
+    assert "needs: prepare" in release
     assert (
-        'python -m tools.check_ferrastra_release_tag "${{ env.RELEASE_TAG }}" '
-        "--check-pypi"
-    ) in workflow
-    assert "skip-existing: false" in workflow
-
-
-def test_waterfall_dispatches_the_trusted_publisher_as_a_top_level_workflow() -> None:
-    """Keep PyPI attestations bound to publish.yml for automatic releases."""
-    release = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
-    publish = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
-
-    assert "actions: write" in release
-    assert "uses: ./.github/workflows/publish.yml" not in release
-    assert "python tools/release_publications.py dispatch" in release
-    assert "workflow_call:" not in publish
-    assert "workflow_dispatch:" in publish
-    assert "orchestrator_run_id:" in publish
-    assert "from release ${{ inputs.orchestrator_run_id || 'direct' }}" in publish
-    assert "RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}" in publish
-    assert "ref: ${{ env.RELEASE_TAG }}" in publish
-    assert "tags:" in publish
-
-
-def test_orchestrated_publish_requires_active_release_gate() -> None:
-    """Reject caller claims that are not backed by the running release gate."""
-    workflow = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
-    assert "if: inputs.orchestrator_run_id == ''" in workflow
-    assert "if: inputs.orchestrator_run_id != ''" in workflow
-    assert "python tools/release_publications.py verify" in workflow
-    assert "actions: read" in workflow
-
-
-def test_release_plan_preserves_dependency_order_and_product_identity() -> None:
-    """Translate version outputs into the exact Ferrastra-to-CuteCanvas waterfall."""
-    environment = {
-        "FERRASTRA_RELEASED": "true",
-        "FERRASTRA_RELEASE_TAG": "ferrastra-v1.0.0",
-        "QPANE_RELEASED": "true",
-        "QPANE_RELEASE_TAG": "qpane-v3.0.1",
-        "CUTECANVAS_RELEASED": "true",
-        "CUTECANVAS_RELEASE_TAG": "cutecanvas-v1.0.2",
-    }
-    assert release_tags_from_environment(environment) == (
-        "ferrastra-v1.0.0",
-        "qpane-v3.0.1",
-        "cutecanvas-v1.0.2",
+        "release-${{ needs.prepare.outputs.plan_id }}-${{ matrix.product }}" in release
     )
+    assert "actions/download-artifact@v7" in publish
+    assert "run-id: ${{ env.ORCHESTRATOR_RUN_ID }}" in publish
+    assert "python -m build" not in publish
+    assert "maturin build" not in publish
 
-    environment["QPANE_RELEASE_TAG"] = "cutecanvas-v1.0.2"
-    with pytest.raises(PublicationError, match="selected cutecanvas, expected qpane"):
-        release_tags_from_environment(environment)
+
+def test_release_closure_is_one_clean_offline_transaction() -> None:
+    """Reject sequential installs or dependency-resolution bypasses."""
+    verifier = (repository_root() / "tools/release/closure.py").read_text("utf-8")
+    assert "venv.EnvBuilder(with_pip=True)" in verifier
+    assert '"--no-index"' in verifier
+    assert '"--find-links"' in verifier
+    assert '"--no-deps"' not in verifier
+    assert verifier.count('"pip",\n        "install"') == 1
 
 
-def test_publication_waterfall_waits_and_stops_on_the_first_failure() -> None:
-    """Never publish a downstream product after an upstream publication fails."""
-    gateway = _ActionsGateway(outcomes={"qpane-v3.0.1": "failure"})
-    tags = ("ferrastra-v1.0.0", "qpane-v3.0.1", "cutecanvas-v1.0.2")
+def test_publisher_has_no_tag_or_unplanned_direct_entry_point() -> None:
+    """Require all automatic and manual recovery runs to name one sealed plan."""
+    workflow = _workflow("publish.yml")
+    triggers = workflow[workflow.index("on:") : workflow.index("permissions:")]
+    assert "workflow_dispatch:" in triggers
+    assert "push:" not in triggers
+    assert "orchestrator_run_id:" in triggers
+    assert "recovery_id:" in triggers
+    assert triggers.count("required: true") == 3
+    assert "sealed-plan-${{ env.RECOVERY_ID }}" in workflow
+    assert '--recovery-id "$RECOVERY_ID"' in workflow
+    assert '--release-tag "$RELEASE_TAG"' in workflow
 
-    with pytest.raises(
-        PublicationError,
-        match=r"qpane-v3\.0\.1 completed with 'failure'",
-    ):
+
+def test_exact_state_admission_precedes_trusted_publication() -> None:
+    """Permit skip-existing only after exact names and hashes are checked."""
+    workflow = _workflow("publish.yml")
+    admit = workflow.index("python -m tools.admit_release_publication")
+    publish = workflow.index("pypa/gh-action-pypi-publish@release/v1")
+    audit = workflow.index("  verify-published:")
+    release = workflow.index("  release-product:")
+    assert admit < publish < audit < release
+    assert "skip-existing: true" in workflow[publish:audit]
+    assert "PyPI state complete" in workflow[audit:release]
+    assert "publication-receipt-${{ env.RECOVERY_ID }}" in workflow
+
+
+def test_release_workflows_enforce_sub_hour_job_budgets() -> None:
+    """Prevent accidental hour-long serial jobs in the release critical path."""
+    for name in ("release.yml", "publish.yml", "verify.yml"):
+        workflow = _workflow(name)
+        timeouts = [
+            int(value) for value in re.findall(r"timeout-minutes: (\d+)", workflow)
+        ]
+        assert timeouts
+        assert max(timeouts) <= 30
+    release = _workflow("release.yml")
+    verify = _workflow("verify.yml")
+    assert "timeout-minutes: 30" in release[release.index("  publish-waterfall:") :]
+    assert "python tools/test.py ci" in verify
+
+
+def test_verification_uses_exact_candidate_ref_and_versions() -> None:
+    """Keep candidate wheel metadata exact without prematurely pushing tags."""
+    workflow = _workflow("verify.yml")
+    assert "source_ref:" in workflow
+    assert "ref: ${{ inputs.source_ref || github.sha }}" in workflow
+    assert "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE" in workflow
+    assert "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS" in workflow
+    assert "python -m tools.verify_python_wheels" in workflow
+    assert "python tools/verify_python_wheels.py" not in workflow
+
+
+def test_publication_waterfall_stops_on_first_failure() -> None:
+    """Never publish downstream after an upstream publication failure."""
+    gateway = _ActionsGateway(outcomes={"qpane-v3.0.2": "failure"})
+    tags = ("ferrastra-v1.0.0", "qpane-v3.0.2", "cutecanvas-v1.0.3")
+    with pytest.raises(PublicationError, match=r"qpane-v3\.0\.2 completed"):
         dispatch_publication_waterfall(
             gateway,
             tags,
             orchestrator_run_id="12345",
+            recovery_id=_RECOVERY,
             pause=lambda _seconds: None,
         )
-
     assert gateway.dispatched == [
-        ("ferrastra-v1.0.0", "12345"),
-        ("qpane-v3.0.1", "12345"),
+        ("ferrastra-v1.0.0", "12345", _RECOVERY),
+        ("qpane-v3.0.2", "12345", _RECOVERY),
     ]
 
 
-def test_verified_orchestrator_must_be_this_active_release_run() -> None:
-    """Admit duplicate-verification bypass only for a successful release gate."""
+def test_recovery_requires_successful_finalization_and_owned_sealed_plan() -> None:
+    """Accept completed failed waterfalls but reject foreign recovery identities."""
     run = {
         "path": ".github/workflows/release.yml",
-        "status": "in_progress",
+        "status": "completed",
+        "conclusion": "failure",
         "repository": {"full_name": "Artificial-Sweetener/CuteCanvas"},
     }
-    jobs = ({"name": "verify / Gate", "status": "completed", "conclusion": "success"},)
-    gateway = _ActionsGateway(workflow_run=run, workflow_jobs=jobs)
+    jobs = (
+        {"name": "Candidate gate", "conclusion": "success"},
+        {"name": "Finalize release lineage", "conclusion": "success"},
+    )
+    artifacts = ({"name": f"sealed-plan-{_RECOVERY}", "expired": False},)
+    gateway = _ActionsGateway(
+        workflow_run=run,
+        workflow_jobs=jobs,
+        workflow_artifacts=artifacts,
+    )
     confirm_verified_orchestrator(
         gateway,
         run_id=12345,
         repository="Artificial-Sweetener/CuteCanvas",
+        recovery_id=_RECOVERY,
     )
-
-    run["status"] = "completed"
-    with pytest.raises(PublicationError, match="must be in_progress"):
+    with pytest.raises(PublicationError, match="does not own active artifact"):
         confirm_verified_orchestrator(
-            _ActionsGateway(workflow_run=run, workflow_jobs=jobs),
+            gateway,
             run_id=12345,
             repository="Artificial-Sweetener/CuteCanvas",
+            recovery_id="0" * 32,
         )
 
 
-def test_publish_builds_survive_the_intentionally_skipped_verification_job() -> None:
-    """Let verified waterfall calls build after their local verify job is skipped."""
-    workflow = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
-    python_build = workflow[
-        workflow.index("  build-python:") : workflow.index("  build-ferrastra:")
-    ]
-    ferrastra_build = workflow[
-        workflow.index("  build-ferrastra:") : workflow.index("  publish:")
-    ]
-    for build in (python_build, ferrastra_build):
-        assert "always()" in build
-        assert "needs.select.result == 'success'" in build
-
-
-def test_publish_workflow_creates_package_scoped_release_notes_after_pypi() -> None:
-    """Create one product release only after its immutable upload succeeds."""
-    workflow = (repository_root() / ".github/workflows/publish.yml").read_text("utf-8")
-    release_job = workflow.index("  release-product:")
-    assert workflow.index("      - publish", release_job) > release_job
-    assert "always()" in workflow[release_job:]
-    assert "needs.publish.result == 'success'" in workflow[release_job:]
-    assert "python tools/generate_release_notes.py" in workflow[release_job:]
-    assert 'gh release create "$RELEASE_TAG" --verify-tag' in workflow
-    assert "needs.select.outputs.package != 'ferrastra'" not in workflow[release_job:]
+def _workflow(name: str) -> str:
+    """Read one authoritative GitHub workflow."""
+    return (repository_root() / ".github/workflows" / name).read_text("utf-8")

@@ -103,6 +103,41 @@ def test_refined_tiles_match_direct_vector_drawing(qapp: QApplication) -> None:
         coordinator.shutdown()
 
 
+def test_vector_detail_waits_for_idle_after_continuity(
+    qapp: QApplication,
+) -> None:
+    """Exact detail must not contend with input as soon as continuity arrives."""
+    executor = ControlledExecution()
+    coordinator = RenderTileWorkCoordinator(
+        execution_scope=executor.scope,
+        cache=RenderTileCache(8 * 1024 * 1024),
+        ready=lambda: None,
+    )
+    document = _document(12)
+    try:
+        assert coordinator.request(
+            source=VectorRenderTileSource(document, document.revision),
+            source_to_panel=QTransform.fromScale(4.0, 4.0),
+            panel_rect=QRectF(0.0, 0.0, 1024.0, 768.0),
+            device_pixel_ratio=1.0,
+        ).pending
+        assert tuple(job.operation for job in executor.pending_jobs()) == (
+            "render.refinement.continuity",
+        )
+
+        executor.run_operation("render.refinement.continuity")
+        qapp.processEvents()
+        assert not executor.pending_jobs()
+
+        QTest.qWait(100)
+        qapp.processEvents()
+        assert tuple(job.operation for job in executor.pending_jobs()) == (
+            "render.refinement.detail",
+        )
+    finally:
+        coordinator.shutdown()
+
+
 def test_latest_refinement_wins_and_cache_stays_bounded(qapp: QApplication) -> None:
     """Superseded work cannot publish and cache pressure must evict exactly."""
     executor = ControlledExecution()

@@ -21,9 +21,6 @@ import logging
 import uuid
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
-from enum import Enum
-from typing import Protocol, runtime_checkable
 
 from PySide6.QtCore import QRectF, QTimer
 
@@ -42,7 +39,7 @@ from ..execution import (
 from ..ferrastra.reconstruction import RasterReconstructionSpace
 from ..scene.raster_sampling import RasterExactSampling
 from . import render_tile_types as tile_types
-from .panel_mapping import PanelLayerMapping, detached_panel_mapping
+from .panel_mapping import PanelLayerMapping
 from .render_cancellation import RenderCancellation
 from .render_refinement_demand import RenderRefinementDemandPlanner
 from .render_tile_cache import RenderTileCache
@@ -53,33 +50,31 @@ from .render_tile_geometry import (
     guarded_tile_requests,
     unique_requests,
 )
+from .render_tile_protocols import (
+    IdleSettledDetailSource as _IdleSettledDetailSource,
+)
+from .render_tile_protocols import (
+    ImmediateTileSource as _ImmediateTileSource,
+)
+from .render_tile_work_state import (
+    DeferredPrefetch as _DeferredPrefetch,
+)
+from .render_tile_work_state import (
+    DeferredTiles as _DeferredTiles,
+)
+from .render_tile_work_state import (
+    PendingTiles as _PendingTiles,
+)
+from .render_tile_work_state import (
+    RefinementLane as _RefinementLane,
+)
 
 logger = logging.getLogger(__name__)
 
 _REFINEMENT_CHUNK_TILES = 4
 _PREFETCH_CHUNK_TILES = 1
+_DETAIL_SETTLE_MS = 50
 _PREFETCH_SETTLE_MS = 150
-_TileProduct = tile_types.RenderTileProduct
-
-
-@runtime_checkable
-class _ImmediateTileSource(Protocol):
-    """Provide products whose bounded result is safe to derive on the GUI thread."""
-
-    def immediate_products(
-        self,
-        requests: tuple[RenderTileRequest, ...],
-    ) -> tuple[tile_types.RenderTileProduct, ...] | None:
-        """Return immediate products or decline synchronous derivation."""
-        ...
-
-
-class _RefinementLane(str, Enum):
-    """Separate stable continuity work from replaceable viewport detail."""
-
-    CONTINUITY = "continuity"
-    DETAIL = "detail"
-    PREFETCH = "prefetch"
 
 
 def _render_tiles(
@@ -110,47 +105,6 @@ def _render_tiles(
     return tuple(products)
 
 
-@dataclass(slots=True)
-class _PendingTiles:
-    """Retain one latest request in a source refinement lane."""
-
-    signature: tuple[RenderTileKey, ...]
-    retained_signature: tuple[RenderTileKey, ...]
-    source: tile_types.RenderTileBatchSource
-    lane: _RefinementLane
-    handle: ExecutionHandle[tuple[_TileProduct, ...], object] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class _DeferredTiles:
-    """Retain latest detail work until stable continuity pixels are available."""
-
-    source: tile_types.RenderTileBatchSource
-    requests: tuple[RenderTileRequest, ...]
-    required_signature: tuple[RenderTileKey, ...]
-    retained_signature: tuple[RenderTileKey, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class _DeferredPrefetch:
-    """Retain the latest settled-view guard request for one source."""
-
-    source: tile_types.RenderTileBatchSource
-    source_to_panel: PanelLayerMapping
-    panel_rect: QRectF
-    visible_requests: tuple[RenderTileRequest, ...]
-    overview_signature: tuple[RenderTileKey, ...]
-
-    def __post_init__(self) -> None:
-        """Detach mutable Qt geometry from the caller's frame."""
-        object.__setattr__(
-            self,
-            "source_to_panel",
-            detached_panel_mapping(self.source_to_panel),
-        )
-        object.__setattr__(self, "panel_rect", QRectF(self.panel_rect))
-
-
 class RenderTileWorkCoordinator:
     """Coordinate stable coverage plus latest-only viewport refinement."""
 
@@ -174,6 +128,10 @@ class RenderTileWorkCoordinator:
         )
         self._deferred_prefetch: dict[tuple[str, uuid.UUID], _DeferredPrefetch] = {}
         self._rejected: set[tuple[RenderTileKey, ...]] = set()
+        self._detail_timer = QTimer()
+        self._detail_timer.setSingleShot(True)
+        self._detail_timer.setInterval(_DETAIL_SETTLE_MS)
+        self._detail_timer.timeout.connect(self._start_settled_details)
         self._prefetch_timer = QTimer()
         self._prefetch_timer.setSingleShot(True)
         self._prefetch_timer.setInterval(_PREFETCH_SETTLE_MS)
@@ -221,6 +179,7 @@ class RenderTileWorkCoordinator:
         if self._closed:
             return
         self._navigation_suspended = True
+        self._detail_timer.stop()
         self._prefetch_timer.stop()
         self._deferred_prefetch.clear()
         if abandon_current:
@@ -253,7 +212,7 @@ class RenderTileWorkCoordinator:
             if lane is _RefinementLane.DETAIL
         }
         for source_kind, source_id in deferred_sources:
-            self._start_deferred_detail(source_kind, source_id)
+            self._schedule_deferred_detail(source_kind, source_id)
 
     def request(
         self,
@@ -569,7 +528,7 @@ class RenderTileWorkCoordinator:
                 self._pending.pop(identity, None)
             self._rejected.add(retained_signature)
             if lane is _RefinementLane.CONTINUITY:
-                self._start_deferred_detail(
+                self._schedule_deferred_detail(
                     source.source_kind,
                     source.source_id,
                 )
@@ -613,6 +572,7 @@ class RenderTileWorkCoordinator:
             return
         self._closed = True
         try:
+            self._detail_timer.stop()
             self._prefetch_timer.stop()
         except RuntimeError:
             pass
@@ -646,7 +606,7 @@ class RenderTileWorkCoordinator:
             if pending.lane is not _RefinementLane.PREFETCH:
                 self._ready()
         if pending.lane is _RefinementLane.CONTINUITY:
-            self._start_deferred_detail(
+            self._schedule_deferred_detail(
                 pending.source.source_kind,
                 pending.source.source_id,
             )
@@ -672,22 +632,46 @@ class RenderTileWorkCoordinator:
                 exc_info=outcome.error,
             )
         if pending.lane is _RefinementLane.CONTINUITY:
-            self._start_deferred_detail(
+            self._schedule_deferred_detail(
                 pending.source.source_kind,
                 pending.source.source_id,
             )
         if pending.lane is not _RefinementLane.PREFETCH:
             self._ready()
 
-    def _start_deferred_detail(
+    def _schedule_deferred_detail(
         self,
         source_kind: str,
         source_id: uuid.UUID,
     ) -> None:
-        """Submit the latest detail work after its continuity lane settles."""
+        """Debounce latest detail work after its continuity lane settles."""
         identity = (source_kind, source_id, _RefinementLane.DETAIL)
         deferred = self._deferred.get(identity)
         if deferred is None or self._closed or self._navigation_suspended:
+            return
+        source = deferred.source
+        if (
+            isinstance(source, _IdleSettledDetailSource)
+            and source.detail_requires_idle_settle
+        ):
+            self._detail_timer.start()
+        else:
+            self._start_deferred_detail(identity)
+
+    def _start_settled_details(self) -> None:
+        """Submit deferred detail only after the GUI has remained responsive."""
+        if self._closed or self._navigation_suspended:
+            return
+        for identity in tuple(self._deferred):
+            self._start_deferred_detail(identity)
+
+    def _start_deferred_detail(
+        self,
+        identity: tuple[str, uuid.UUID, _RefinementLane],
+    ) -> None:
+        """Submit one detail batch after the shared idle boundary."""
+        deferred = self._deferred.get(identity)
+        if deferred is None:
             return
         self._deferred.pop(identity, None)
         self._ensure_work(

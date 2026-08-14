@@ -25,6 +25,11 @@ from email.message import Message
 from email.parser import Parser
 from pathlib import Path, PurePosixPath
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
+
+from .candidate import read_product_requirements
 from .products import ReleaseProduct
 
 _REPOSITORY = "https://github.com/Artificial-Sweetener/CuteCanvas"
@@ -53,8 +58,14 @@ def validate_artifacts(
     product: ReleaseProduct,
     version: str,
     distribution: Path,
+    expected_requirements: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
     """Return every violation in a product's complete distribution set."""
+    requirements = (
+        _manifest_requirements(product)
+        if expected_requirements is None
+        else expected_requirements
+    )
     errors: list[str] = []
     wheels = tuple(sorted(distribution.glob(f"{product.name}-*.whl")))
     source_distributions = tuple(sorted(distribution.glob(f"{product.name}-*.tar.gz")))
@@ -70,12 +81,19 @@ def validate_artifacts(
         )
     errors.extend(_validate_wheel_platforms(wheels, product))
     for wheel in wheels:
-        errors.extend(_validate_metadata(read_wheel_metadata(wheel), product, version))
+        errors.extend(
+            _validate_metadata(
+                read_wheel_metadata(wheel), product, version, requirements
+            )
+        )
         errors.extend(_validate_wheel_contents(wheel, product))
     if len(source_distributions) == 1:
         errors.extend(
             _validate_metadata(
-                read_sdist_metadata(source_distributions[0]), product, version
+                read_sdist_metadata(source_distributions[0]),
+                product,
+                version,
+                requirements,
             )
         )
     return tuple(errors)
@@ -150,6 +168,7 @@ def _validate_metadata(
     metadata: ArtifactMetadata,
     product: ReleaseProduct,
     version: str,
+    expected_requirements: tuple[str, ...],
 ) -> tuple[str, ...]:
     """Return public contract violations in one artifact metadata document."""
     errors: list[str] = []
@@ -171,29 +190,74 @@ def _validate_metadata(
         errors.append("package README contains a relative Markdown link")
     if _RELATIVE_HTML_SOURCE.search(metadata.description):
         errors.append("package README contains a relative HTML link or image source")
-    errors.extend(_validate_dependencies(metadata, product))
+    errors.extend(_validate_dependencies(metadata, product, expected_requirements))
     return tuple(errors)
 
 
 def _validate_dependencies(
     metadata: ArtifactMetadata,
     product: ReleaseProduct,
+    expected_requirements: tuple[str, ...],
 ) -> tuple[str, ...]:
     """Return cross-product dependency contract violations."""
-    qpane = tuple(
-        requirement.replace(" ", "")
-        for requirement in metadata.requirements
-        if requirement.lower().startswith("qpane")
+    parsed: list[Requirement] = []
+    errors: list[str] = []
+    for value in metadata.requirements:
+        requirement = _parse_requirement(value)
+        if requirement is None:
+            errors.append(f"artifact contains invalid requirement {value!r}")
+        else:
+            parsed.append(requirement)
+
+    product_names = {
+        canonicalize_name(name) for name in ("ferrastra", "qpane", "cutecanvas")
+    }
+    actual_product_dependencies = tuple(
+        requirement
+        for requirement in parsed
+        if canonicalize_name(requirement.name) in product_names
     )
-    if product.name == "cutecanvas":
-        if len(qpane) != 1 or ">=3.0.0" not in qpane[0] or "<4.0.0" not in qpane[0]:
-            return ("CuteCanvas must require exactly qpane>=3.0.0,<4.0.0",)
-    elif any(
-        requirement.lower().startswith("cutecanvas")
-        for requirement in metadata.requirements
-    ):
-        return ("QPane must not depend on CuteCanvas",)
-    return ()
+    expected = tuple(Requirement(value) for value in expected_requirements)
+    expected_names = {canonicalize_name(requirement.name) for requirement in expected}
+    errors.extend(
+        f"{product.display_name} must not depend on {requirement.name}"
+        for requirement in actual_product_dependencies
+        if canonicalize_name(requirement.name) not in expected_names
+    )
+    for expected_text, dependency in zip(expected_requirements, expected, strict=True):
+        matching = tuple(
+            requirement
+            for requirement in actual_product_dependencies
+            if canonicalize_name(requirement.name) == canonicalize_name(dependency.name)
+        )
+        if (
+            len(matching) != 1
+            or matching[0].extras
+            or matching[0].marker is not None
+            or matching[0].url is not None
+            or matching[0].specifier != SpecifierSet(dependency.specifier)
+        ):
+            errors.append(
+                f"{product.display_name} must require exactly {expected_text}"
+            )
+    return tuple(errors)
+
+
+def _manifest_requirements(product: ReleaseProduct) -> tuple[str, ...]:
+    """Return current source requirements for the product dependency edges."""
+    values = read_product_requirements(product.package_path / "pyproject.toml")
+    return tuple(
+        f"{dependency.name}{values[dependency.name]}"
+        for dependency in product.dependencies
+    )
+
+
+def _parse_requirement(value: str) -> Requirement | None:
+    """Parse one requirement or return ``None`` when it is invalid."""
+    try:
+        return Requirement(value)
+    except InvalidRequirement:
+        return None
 
 
 def _validate_wheel_contents(

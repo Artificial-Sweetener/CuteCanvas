@@ -24,7 +24,11 @@ from collections import Counter
 from collections.abc import Sequence
 
 from tools.testing.changes import staged_paths, worktree_paths
-from tools.testing.execution import run_isolated_groups, run_selection
+from tools.testing.execution import (
+    run_isolated_groups,
+    run_parallel_isolated_groups,
+    run_selection,
+)
 from tools.testing.inventory import validate_inventory
 from tools.testing.model import TestPolicy, TestSelection
 from tools.testing.policy import load_policies, repository_root
@@ -57,6 +61,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
         if options.command == "isolated":
             validate_inventory(root, policies)
             return run_isolated_groups(root, policies)
+        if options.command == "ci":
+            validate_inventory(root, policies)
+            return run_parallel_isolated_groups(root, policies)
         if options.command == "changed":
             validate_inventory(root, policies)
             selection = select_changed_paths(worktree_paths(root), policies)
@@ -99,6 +106,10 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "isolated",
         help="run every policy group in a fresh pytest process",
+    )
+    commands.add_parser(
+        "ci",
+        help="run isolated groups concurrently while serializing strong isolation",
     )
     commands.add_parser("changed", help="test staged, unstaged, and untracked work")
     staged = commands.add_parser("staged", help="test the staged diff")

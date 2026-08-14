@@ -21,6 +21,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .compatibility import STABLE_MAJOR_PRERELEASE_MINOR, CompatibilityPolicy
+
 StableVersion = tuple[int, int, int]
 
 _STABLE_VERSION = re.compile(
@@ -28,6 +30,14 @@ _STABLE_VERSION = re.compile(
     r"(?P<minor>0|[1-9][0-9]*)\."
     r"(?P<patch>0|[1-9][0-9]*)$"
 )
+
+
+@dataclass(frozen=True)
+class ReleaseDependency:
+    """Describe one version-derived dependency edge between products."""
+
+    name: str
+    policy: CompatibilityPolicy
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,7 @@ class ReleaseProduct:
     additional_release_paths: tuple[Path, ...] = ()
     legacy_tag_fallback: bool = False
     wheel_platforms: tuple[str, ...] = ()
+    dependencies: tuple[ReleaseDependency, ...] = ()
 
     @property
     def tag_prefix(self) -> str:
@@ -73,12 +84,17 @@ PRODUCTS = {
         package_path=Path("packages/qpane"),
         first_release=(3, 0, 0),
         legacy_tag_fallback=True,
+        dependencies=(ReleaseDependency("ferrastra", STABLE_MAJOR_PRERELEASE_MINOR),),
     ),
     "cutecanvas": ReleaseProduct(
         name="cutecanvas",
         display_name="CuteCanvas",
         package_path=Path("packages/cutecanvas"),
         first_release=(1, 0, 0),
+        dependencies=(
+            ReleaseDependency("ferrastra", STABLE_MAJOR_PRERELEASE_MINOR),
+            ReleaseDependency("qpane", STABLE_MAJOR_PRERELEASE_MINOR),
+        ),
     ),
 }
 PYTHON_PRODUCTS = {name: PRODUCTS[name] for name in ("qpane", "cutecanvas")}
@@ -95,7 +111,11 @@ def parse_stable_version(value: str) -> StableVersion:
         raise ValueError(
             f"release version must be stable MAJOR.MINOR.PATCH, received {value!r}"
         )
-    return tuple(int(match.group(part)) for part in ("major", "minor", "patch"))
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+    )
 
 
 def format_version(version: StableVersion) -> str:

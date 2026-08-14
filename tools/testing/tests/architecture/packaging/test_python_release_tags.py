@@ -19,8 +19,14 @@ from __future__ import annotations
 
 import pytest
 
+import tools.check_python_release as release_check
 from tools.release.products import python_release_from_tag, release_from_tag
-from tools.release.pypi import has_compatible_qpane_release
+from tools.release.pypi import has_compatible_release
+
+
+def _release_absent(_name: str, _version: str) -> bool:
+    """Represent an immutable package version that is absent from PyPI."""
+    return False
 
 
 @pytest.mark.parametrize(
@@ -69,8 +75,46 @@ def test_python_release_admission_rejects_ferrastra_tags() -> None:
         python_release_from_tag("ferrastra-v1.0.0")
 
 
-def test_cutecanvas_requires_a_published_compatible_qpane_major() -> None:
-    """Admit CuteCanvas only after an accepted QPane 3 release exists."""
-    assert not has_compatible_qpane_release(((2, 1, 1), (4, 0, 0)))
-    assert has_compatible_qpane_release(((2, 1, 1), (3, 0, 0)))
-    assert has_compatible_qpane_release(((3, 9, 2),))
+def test_release_dependency_requires_a_published_compatible_major() -> None:
+    """Admit downstream publication only after its supported line exists."""
+    assert not has_compatible_release(((0, 1, 0), (2, 0, 0)), ">=1.0.0,<2.0.0")
+    assert has_compatible_release(((0, 1, 0), (1, 0, 0)), ">=1.0.0,<2.0.0")
+    assert has_compatible_release(((1, 9, 2),), ">=1.0.0,<2.0.0")
+
+
+def test_qpane_publication_rejects_an_unresolvable_ferrastra_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop downstream publication when PyPI cannot satisfy its upstream range."""
+    monkeypatch.setattr(release_check, "release_exists", _release_absent)
+
+    def incompatible_versions(name: str) -> tuple[tuple[int, int, int], ...]:
+        """Expose only the pre-1.0 Ferrastra line to release admission."""
+        assert name == "ferrastra"
+        return ((0, 1, 0),)
+
+    monkeypatch.setattr(
+        release_check,
+        "published_stable_versions",
+        incompatible_versions,
+    )
+    with pytest.raises(RuntimeError, match=r"ferrastra>=1\.0\.0,<2\.0\.0"):
+        release_check.run("qpane-v3.0.2", check_pypi=True)
+
+
+def test_cutecanvas_publication_requires_the_complete_resolvable_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admit CuteCanvas only when both exact upstream lines exist on PyPI."""
+    monkeypatch.setattr(release_check, "release_exists", _release_absent)
+
+    def compatible_versions(name: str) -> tuple[tuple[int, int, int], ...]:
+        """Expose one compatible release for each upstream product."""
+        return {"ferrastra": ((1, 0, 0),), "qpane": ((3, 0, 2),)}[name]
+
+    monkeypatch.setattr(
+        release_check,
+        "published_stable_versions",
+        compatible_versions,
+    )
+    release_check.run("cutecanvas-v1.0.3", check_pypi=True)

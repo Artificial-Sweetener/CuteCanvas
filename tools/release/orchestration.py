@@ -29,9 +29,8 @@ from tools.release.products import PRODUCTS, release_from_tag
 
 _PUBLISH_WORKFLOW = "publish.yml"
 _RELEASE_WORKFLOW_PATH = ".github/workflows/release.yml"
-_VERIFICATION_GATE = "verify / Gate"
 _POLL_SECONDS = 15.0
-_PUBLICATION_TIMEOUT_SECONDS = 21_000.0
+_PUBLICATION_TIMEOUT_SECONDS = 1_800.0
 
 
 class PublicationError(RuntimeError):
@@ -52,7 +51,12 @@ class PublicationRun:
 class ActionsGateway(Protocol):
     """Provide the GitHub Actions operations required by release orchestration."""
 
-    def dispatch_publication(self, tag: str, orchestrator_run_id: str) -> None:
+    def dispatch_publication(
+        self,
+        tag: str,
+        orchestrator_run_id: str,
+        recovery_id: str,
+    ) -> None:
         """Dispatch the trusted publication workflow for ``tag``."""
         ...
 
@@ -68,6 +72,10 @@ class ActionsGateway(Protocol):
         """Return jobs belonging to one workflow run."""
         ...
 
+    def workflow_artifacts(self, run_id: int) -> Sequence[Mapping[str, Any]]:
+        """Return artifacts belonging to one workflow run."""
+        ...
+
 
 class GitHubActionsGateway:
     """Access GitHub Actions through its authenticated REST API."""
@@ -78,7 +86,12 @@ class GitHubActionsGateway:
         self._token = token
         self._api_url = api_url.rstrip("/")
 
-    def dispatch_publication(self, tag: str, orchestrator_run_id: str) -> None:
+    def dispatch_publication(
+        self,
+        tag: str,
+        orchestrator_run_id: str,
+        recovery_id: str,
+    ) -> None:
         """Dispatch ``publish.yml`` as a top-level workflow at ``tag``."""
         self._request(
             "POST",
@@ -89,6 +102,7 @@ class GitHubActionsGateway:
                 "inputs": {
                     "release_tag": tag,
                     "orchestrator_run_id": orchestrator_run_id,
+                    "recovery_id": recovery_id,
                 },
             },
         )
@@ -124,6 +138,19 @@ class GitHubActionsGateway:
             raise PublicationError("GitHub workflow-job response omitted jobs")
         return tuple(_mapping(job, "workflow job") for job in jobs)
 
+    def workflow_artifacts(self, run_id: int) -> tuple[Mapping[str, Any], ...]:
+        """Return artifacts belonging to one release workflow run."""
+        payload = self._request(
+            "GET",
+            f"/repos/{self._repository}/actions/runs/{run_id}/artifacts?per_page=100",
+        )
+        artifacts = payload.get("artifacts")
+        if not isinstance(artifacts, list):
+            raise PublicationError(
+                "GitHub workflow-artifact response omitted artifacts"
+            )
+        return tuple(_mapping(item, "workflow artifact") for item in artifacts)
+
     def _request(
         self,
         method: str,
@@ -156,46 +183,16 @@ class GitHubActionsGateway:
         return _mapping(decoded, "GitHub API response")
 
 
-def release_tags_from_environment(environment: Mapping[str, str]) -> tuple[str, ...]:
-    """Return versioned product tags in dependency publication order."""
-    tags: list[str] = []
-    for product_name in PRODUCTS:
-        prefix = product_name.upper()
-        released = environment.get(f"{prefix}_RELEASED", "").strip().lower()
-        tag = environment.get(f"{prefix}_RELEASE_TAG", "").strip()
-        if released not in {"true", "false"}:
-            raise PublicationError(
-                f"{prefix}_RELEASED must be true or false, received {released!r}"
-            )
-        if released == "false":
-            if tag:
-                raise PublicationError(
-                    f"{prefix}_RELEASE_TAG must be empty when no release was created"
-                )
-            continue
-        if not tag:
-            raise PublicationError(
-                f"{prefix}_RELEASE_TAG is required when the product was released"
-            )
-        product, _version = release_from_tag(tag)
-        if product.name != product_name:
-            raise PublicationError(
-                f"{prefix}_RELEASE_TAG selected {product.name}, expected {product_name}"
-            )
-        tags.append(tag)
-    return tuple(tags)
-
-
 def confirm_verified_orchestrator(
     gateway: ActionsGateway,
     *,
     run_id: int,
     repository: str,
+    recovery_id: str,
 ) -> None:
-    """Admit only an active ``release.yml`` run whose verification gate passed."""
+    """Admit only a release run owning the sealed plan and finalized lineage."""
     run = gateway.workflow_run(run_id)
     path = run.get("path")
-    status = run.get("status")
     run_repository = _nested_value(run, "repository", "full_name")
     if path != _RELEASE_WORKFLOW_PATH:
         raise PublicationError(
@@ -206,26 +203,25 @@ def confirm_verified_orchestrator(
             f"orchestrator run {run_id} belongs to {run_repository!r}, "
             f"expected {repository!r}"
         )
-    if status != "in_progress":
-        raise PublicationError(
-            f"orchestrator run {run_id} must be in_progress, received {status!r}"
-        )
-    gate = next(
+    jobs = gateway.workflow_jobs(run_id)
+    for required in ("Candidate gate", "Finalize release lineage"):
+        job = next((item for item in jobs if item.get("name") == required), None)
+        if job is None or job.get("conclusion") != "success":
+            raise PublicationError(
+                f"orchestrator run {run_id} has no successful {required!r} job"
+            )
+    artifact_name = f"sealed-plan-{recovery_id}"
+    artifact = next(
         (
-            job
-            for job in gateway.workflow_jobs(run_id)
-            if job.get("name") == _VERIFICATION_GATE
+            item
+            for item in gateway.workflow_artifacts(run_id)
+            if item.get("name") == artifact_name
         ),
         None,
     )
-    if gate is None:
+    if artifact is None or artifact.get("expired") is True:
         raise PublicationError(
-            f"orchestrator run {run_id} has no {_VERIFICATION_GATE!r} job"
-        )
-    if gate.get("status") != "completed" or gate.get("conclusion") != "success":
-        raise PublicationError(
-            f"orchestrator run {run_id} verification gate is "
-            f"{gate.get('status')}/{gate.get('conclusion')}, expected completed/success"
+            f"orchestrator run {run_id} does not own active artifact {artifact_name!r}"
         )
 
 
@@ -234,6 +230,7 @@ def dispatch_publication_waterfall(
     tags: Sequence[str],
     *,
     orchestrator_run_id: str,
+    recovery_id: str,
     monotonic: Callable[[], float] = time.monotonic,
     pause: Callable[[float], None] = time.sleep,
     timeout_seconds: float = _PUBLICATION_TIMEOUT_SECONDS,
@@ -243,13 +240,13 @@ def dispatch_publication_waterfall(
         raise PublicationError("the versioning workflow produced no release tags")
     _validate_tag_order(tags)
     for tag in tags:
-        expected_title = _publication_title(tag, orchestrator_run_id)
+        expected_title = _publication_title(tag, recovery_id)
         existing_ids = {
             run.run_id
             for run in gateway.publication_runs(tag)
             if run.display_title == expected_title
         }
-        gateway.dispatch_publication(tag, orchestrator_run_id)
+        gateway.dispatch_publication(tag, orchestrator_run_id, recovery_id)
         print(f"Dispatched trusted publication for {tag}.")
         deadline = monotonic() + timeout_seconds
         last_state: tuple[str, str | None] | None = None
@@ -297,9 +294,9 @@ def _validate_tag_order(tags: Sequence[str]) -> None:
         )
 
 
-def _publication_title(tag: str, orchestrator_run_id: str) -> str:
+def _publication_title(tag: str, recovery_id: str) -> str:
     """Return the exact run title used to correlate one workflow dispatch."""
-    return f"Publish {tag} from release {orchestrator_run_id}"
+    return f"Publish {tag} from {recovery_id}"
 
 
 def _publication_run(value: object) -> PublicationRun:

@@ -22,7 +22,11 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from tools.release.artifact_validation import validate_artifacts
+from tools.release.artifacts import seal_release_plan, verify_release_artifacts
+from tools.release.plan import ReleasePlanError, create_release_plan
 from tools.release.products import PRODUCTS
 from tools.testing.policy import repository_root
 
@@ -46,11 +50,44 @@ def test_release_artifacts_reject_relative_readme_links_and_wrong_dependencies(
     _write_artifacts(
         tmp_path,
         description=f"[Repository]({_REPOSITORY}) [Docs](docs/index.md)",
-        requirement="qpane>=2.0.0,<3.0.0",
+        requirements=(
+            "ferrastra>=1.0.0,<2.0.0",
+            "qpane>=2.0.0,<3.0.0",
+        ),
     )
     errors = validate_artifacts(PRODUCTS["cutecanvas"], "1.0.0", tmp_path)
     assert "package README contains a relative Markdown link" in errors
     assert "CuteCanvas must require exactly qpane>=3.0.0,<4.0.0" in errors
+
+
+def test_release_artifacts_reject_incompatible_ferrastra_dependency(
+    tmp_path: Path,
+) -> None:
+    """Reject the dependency ranges that broke the published 1.0 stack."""
+    _write_artifacts(
+        tmp_path,
+        description=f"[Repository]({_REPOSITORY})",
+        requirements=(
+            "ferrastra>=0.1.0,<1.0.0",
+            "qpane>=3.0.0,<4.0.0",
+        ),
+    )
+    errors = validate_artifacts(PRODUCTS["cutecanvas"], "1.0.0", tmp_path)
+    assert "CuteCanvas must require exactly ferrastra>=1.0.0,<2.0.0" in errors
+
+
+def test_qpane_artifacts_reject_incompatible_ferrastra_dependency(
+    tmp_path: Path,
+) -> None:
+    """Reject a QPane wheel that cannot resolve against stable Ferrastra."""
+    _write_artifacts(
+        tmp_path,
+        product="qpane",
+        description=f"[Repository]({_REPOSITORY})",
+        requirements=("ferrastra>=0.1.0,<0.2",),
+    )
+    errors = validate_artifacts(PRODUCTS["qpane"], "1.0.0", tmp_path)
+    assert "QPane must require exactly ferrastra>=1.0.0,<2.0.0" in errors
 
 
 def test_release_artifacts_reject_sibling_package_contents(tmp_path: Path) -> None:
@@ -83,33 +120,96 @@ def test_ferrastra_release_rejects_incomplete_platform_coverage(
     assert "expected one ferrastra windows-x64 wheel, found 0" in errors
 
 
+def test_sealed_plan_rejects_any_post_validation_artifact_change(
+    tmp_path: Path,
+) -> None:
+    """Bind publication and recovery to the exact prevalidated bytes."""
+    plan = create_release_plan(
+        "a" * 40,
+        {
+            "ferrastra": (1, 0, 0),
+            "qpane": (3, 0, 1),
+            "cutecanvas": (1, 0, 2),
+        },
+        {"ferrastra": None, "qpane": (3, 0, 2), "cutecanvas": None},
+        {
+            "qpane": {"ferrastra": ">=1.0.0,<2.0.0"},
+            "cutecanvas": {
+                "ferrastra": ">=1.0.0,<2.0.0",
+                "qpane": ">=3.0.0,<4.0.0",
+            },
+        },
+    ).with_candidate(
+        "d" * 40,
+        {"qpane": "b" * 40, "cutecanvas": "c" * 40},
+    )
+    qpane = tmp_path / "qpane"
+    canvas = tmp_path / "cutecanvas"
+    qpane.mkdir()
+    canvas.mkdir()
+    _write_artifacts(
+        qpane,
+        product="qpane",
+        version="3.0.2",
+        description=f"[Repository]({_REPOSITORY})",
+        requirements=("ferrastra>=1.0.0,<2.0.0",),
+    )
+    _write_artifacts(
+        canvas,
+        version="1.0.3",
+        description=f"[Repository]({_REPOSITORY})",
+        requirements=(
+            "ferrastra>=1.0.0,<2.0.0",
+            "qpane>=3.0.2,<4.0.0",
+        ),
+    )
+    sealed = seal_release_plan(plan, tmp_path)
+    verify_release_artifacts(sealed, tmp_path)
+
+    wheel = next(canvas.glob("cutecanvas-*.whl"))
+    with wheel.open("ab") as output:
+        output.write(b"tampered")
+    with pytest.raises(ReleasePlanError, match="hash"):
+        verify_release_artifacts(sealed, tmp_path)
+
+
 def _write_artifacts(
     directory: Path,
     *,
     description: str,
-    requirement: str = "qpane>=3.0.0,<4.0.0",
+    product: str = "cutecanvas",
+    version: str = "1.0.0",
+    requirements: tuple[str, ...] = (
+        "ferrastra>=1.0.0,<2.0.0",
+        "qpane>=3.0.0,<4.0.0",
+    ),
 ) -> None:
-    """Write a minimal synthetic CuteCanvas wheel and source distribution."""
+    """Write one minimal synthetic Python product distribution."""
+    serialized_requirements = "".join(
+        f"Requires-Dist: {requirement}\n" for requirement in requirements
+    )
     metadata = (
         "Metadata-Version: 2.4\n"
-        "Name: cutecanvas\n"
-        "Version: 1.0.0\n"
+        f"Name: {product}\n"
+        f"Version: {version}\n"
         "Description-Content-Type: text/markdown\n"
         f"Project-URL: Repository, {_REPOSITORY}\n"
-        f"Requires-Dist: {requirement}\n"
+        f"{serialized_requirements}"
         "\n"
         f"{description}\n"
     ).encode()
-    wheel = directory / "cutecanvas-1.0.0-py3-none-any.whl"
+    wheel = directory / f"{product}-{version}-py3-none-any.whl"
     with zipfile.ZipFile(wheel, mode="w") as archive:
-        archive.writestr("cutecanvas/__init__.py", "")
-        archive.writestr("cutecanvas-1.0.0.dist-info/METADATA", metadata)
-    source = directory / "cutecanvas-1.0.0.tar.gz"
+        archive.writestr(f"{product}/__init__.py", "")
+        archive.writestr(f"{product}-{version}.dist-info/METADATA", metadata)
+    source = directory / f"{product}-{version}.tar.gz"
     with tarfile.open(source, mode="w:gz") as archive:
-        info = tarfile.TarInfo("cutecanvas-1.0.0/PKG-INFO")
+        info = tarfile.TarInfo(f"{product}-{version}/PKG-INFO")
         info.size = len(metadata)
         archive.addfile(info, io.BytesIO(metadata))
-        duplicate = tarfile.TarInfo("cutecanvas-1.0.0/src/cutecanvas.egg-info/PKG-INFO")
+        duplicate = tarfile.TarInfo(
+            f"{product}-{version}/src/{product}.egg-info/PKG-INFO"
+        )
         duplicate.size = len(metadata)
         archive.addfile(duplicate, io.BytesIO(metadata))
 
