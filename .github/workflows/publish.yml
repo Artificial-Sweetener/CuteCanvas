@@ -238,6 +238,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install release tooling runtime
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
+
       - name: Generate package-scoped release notes
         run: python tools/generate_release_notes.py "$RELEASE_TAG" release-notes.md
 

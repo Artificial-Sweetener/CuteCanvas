@@ -167,36 +167,39 @@ def test_candidate_gate_provisions_linux_qt_runtime_before_import_proof() -> Non
     assert install_runtime < verify_closure
 
 
-def test_clean_release_jobs_install_tool_runtime_before_first_import() -> None:
-    """Provision pinned plan dependencies in every clean release-tool job."""
-    release = _workflow("release.yml")
-    publish = _workflow("publish.yml")
-    jobs = (
-        (
-            release[
-                release.index("  finalize:") : release.index("  publish-waterfall:")
-            ],
-            "python -m tools.manage_release_plan finalize",
-        ),
-        (
-            release[
-                release.index("  publish-waterfall:") : release.index(
-                    "  cleanup-candidate:"
-                )
-            ],
-            "python -m tools.release_publications dispatch",
-        ),
-        (
-            publish[publish.index("  admit:") : publish.index("  publish:")],
-            "python -m tools.release_publications verify",
-        ),
+def test_every_release_tool_invocation_has_its_pinned_runtime() -> None:
+    """Provision plan dependencies before every local release-tool invocation."""
+    invocation_pattern = re.compile(
+        r"python[^\n]*(?:from tools\.release|"
+        r"-m tools\.(?:admit_release_publication|manage_release_plan|prepare_release|"
+        r"release_publications|verify_release_closure)|"
+        r"tools/generate_release_notes\.py)"
     )
-    install_runtime = (
-        'python -m pip install "pip==${{ env.PIP_VERSION }}" '
-        '"packaging==${{ env.PACKAGING_VERSION }}"'
+    job_pattern = re.compile(r"^  [a-z][a-z0-9-]+:\s*$", re.MULTILINE)
+    install_runtime_pattern = re.compile(
+        r'python -m pip install[^\n]*"packaging==\$\{\{ env\.PACKAGING_VERSION \}\}"'
     )
-    for job, invocation in jobs:
-        assert job.index(install_runtime) < job.index(invocation)
+    for workflow_name in ("release.yml", "publish.yml"):
+        workflow = _workflow(workflow_name)
+        job_starts = tuple(match.start() for match in job_pattern.finditer(workflow))
+        invocations = tuple(invocation_pattern.finditer(workflow))
+        assert invocations
+        for invocation in invocations:
+            job_start = max(start for start in job_starts if start < invocation.start())
+            job_prefix = workflow[job_start : invocation.start()]
+            assert install_runtime_pattern.search(job_prefix), (
+                f"{workflow_name}:{workflow.count(chr(10), 0, invocation.start()) + 1} "
+                "invokes release tooling before installing its pinned runtime"
+            )
+
+
+def test_every_verify_checkout_fetches_product_version_tags() -> None:
+    """Keep editable SCM versions compatible after synchronized releases."""
+    workflow = _workflow("verify.yml")
+    checkout_count = workflow.count("uses: actions/checkout@v6")
+    assert checkout_count > 0
+    assert workflow.count("fetch-depth: 0") == checkout_count
+    assert workflow.count("fetch-tags: true") == checkout_count
 
 
 def test_publisher_has_no_tag_or_unplanned_direct_entry_point() -> None:
