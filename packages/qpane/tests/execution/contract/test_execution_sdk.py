@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from threading import Event, Lock, get_ident
+from threading import Condition, Event, Lock, get_ident
 
 import pytest
 
@@ -605,18 +605,26 @@ def test_runtime_diagnostics_subscription_aggregates_backend_changes() -> None:
 
     runtime = create_default_execution_runtime(DefaultExecutionPolicy(max_workers=1))
     scope = runtime.open_scope(owner_id="diagnostics")
-    changed = Event()
+    changed = Condition()
     observed: list[tuple[ExecutionSnapshot, ...]] = []
-    subscription = runtime.subscribe_diagnostics(
-        lambda snapshots: (observed.append(snapshots), changed.set())
-    )
+
+    def observe(snapshots: tuple[ExecutionSnapshot, ...]) -> None:
+        """Record one aggregate and wake the predicate-based assertion."""
+        with changed:
+            observed.append(snapshots)
+            changed.notify_all()
+
+    subscription = runtime.subscribe_diagnostics(observe)
 
     handle = scope.submit(ExecutionRequest(operation="observed", work=lambda _ctx: 7))
 
     _wait_terminal(handle)
-    assert changed.wait(timeout=2)
-    assert observed
-    assert any(snapshot.completed >= 1 for snapshot in observed[-1])
+    with changed:
+        assert changed.wait_for(
+            lambda: bool(observed)
+            and any(snapshot.completed >= 1 for snapshot in observed[-1]),
+            timeout=2,
+        )
     subscription.close()
     runtime.shutdown(wait=True)
 
