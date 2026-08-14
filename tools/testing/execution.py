@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from tools.testing.model import TestGroup, TestPolicy, TestSelection
@@ -28,6 +31,8 @@ from tools.testing.model import TestGroup, TestPolicy, TestSelection
 CommandRunner = Callable[[Sequence[str], Path], int]
 TestNodeCollector = Callable[[str, Path], tuple[int, tuple[str, ...]]]
 _MAX_PARALLEL_TEST_PROCESSES = 8
+_PARALLEL_GROUP_ENVIRONMENT = "CUTE_CANVAS_PARALLEL_TEST_GROUP"
+_HOSTED_CI_ENVIRONMENT = "CI"
 
 
 def group_paths(
@@ -169,7 +174,7 @@ def run_parallel_isolated_groups(
     node_collector: TestNodeCollector | None = None,
     workers: int = _MAX_PARALLEL_TEST_PROCESSES,
 ) -> int:
-    """Run ordinary proofs through xdist and strong isolation serially."""
+    """Run group-isolated proofs concurrently and strong cases serially."""
     if workers < 1:
         raise ValueError("parallel isolated test workers must be positive")
     active_runner = runner or _run_command
@@ -180,30 +185,24 @@ def run_parallel_isolated_groups(
     )
     if result:
         return result
-    collection_status, ordinary, strongly_isolated = _ci_targets(
+    collection_status, ordinary, serial_groups, strongly_isolated = _ci_targets(
         root,
         policies,
         active_collector,
     )
     if collection_status:
         return collection_status
-    result = active_runner(
-        (
-            sys.executable,
-            "-m",
-            "pytest",
-            "-n",
-            "auto",
-            f"--maxprocesses={workers}",
-            "--basetemp=.pytest-tmp-ci-ordinary",
-            *ordinary,
-        ),
-        root,
-    )
+    parallel_runner = active_runner if runner is not None else _run_parallel_group
+    result = _run_commands_in_parallel(ordinary, root, workers, parallel_runner)
     if result:
         return result
+    serial_runner = active_runner if runner is not None else _run_ci_command
+    for command in serial_groups:
+        result = serial_runner(command, root)
+        if result:
+            return result
     for command in strongly_isolated:
-        result = active_runner(command, root)
+        result = serial_runner(command, root)
         if result:
             return result
     return 0
@@ -213,9 +212,15 @@ def _ci_targets(
     root: Path,
     policies: dict[str, TestPolicy],
     collector: TestNodeCollector,
-) -> tuple[int, tuple[str, ...], tuple[tuple[str, ...], ...]]:
-    """Build aggregate ordinary paths and collision-free isolated case commands."""
-    ordinary: list[str] = []
+) -> tuple[
+    int,
+    tuple[tuple[str, ...], ...],
+    tuple[tuple[str, ...], ...],
+    tuple[tuple[str, ...], ...],
+]:
+    """Build collision-free parallel, serial-group, and case commands."""
+    ordinary: list[tuple[str, ...]] = []
+    serial_groups: list[tuple[str, ...]] = []
     strong: list[tuple[str, ...]] = []
     index = 0
     for product in sorted(policies):
@@ -227,13 +232,87 @@ def _ci_targets(
                 if proof in area.case_isolated_proofs:
                     status, node_ids = collector(path, root)
                     if status:
-                        return status, (), ()
+                        return status, (), (), ()
                     for node_id in node_ids:
                         strong.append(_isolated_command(node_id, index))
                         index += 1
                     continue
-                ordinary.append(path)
-    return 0, tuple(ordinary), tuple(strong)
+                target = _isolated_command(path, index)
+                if proof in {"abuse", "performance"}:
+                    serial_groups.append(target)
+                else:
+                    ordinary.append(target)
+                index += 1
+    return 0, tuple(ordinary), tuple(serial_groups), tuple(strong)
+
+
+def _run_commands_in_parallel(
+    commands: Sequence[tuple[str, ...]],
+    root: Path,
+    workers: int,
+    runner: CommandRunner,
+) -> int:
+    """Run process-isolated groups concurrently and return the first failure."""
+    if not commands:
+        return 0
+    failures: list[tuple[int, int]] = []
+    with ThreadPoolExecutor(max_workers=min(workers, len(commands))) as executor:
+        futures = {
+            executor.submit(runner, command, root): index
+            for index, command in enumerate(commands)
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                index = futures[future]
+                failures.append((index, result))
+                print(
+                    f"FAILED parallel test group: {' '.join(commands[index])}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+    return min(failures)[1] if failures else 0
+
+
+def _run_parallel_group(command: Sequence[str], root: Path) -> int:
+    """Run one group with a private log and emit details only on failure."""
+    command_environment = os.environ.copy()
+    command_environment.setdefault(_HOSTED_CI_ENVIRONMENT, "1")
+    command_environment[_PARALLEL_GROUP_ENVIRONMENT] = "1"
+    with tempfile.NamedTemporaryFile(
+        mode="w+",
+        encoding="utf-8",
+        prefix="cutecanvas-test-group-",
+        suffix=".log",
+        delete=False,
+    ) as output:
+        log_path = Path(output.name)
+        result = subprocess.run(
+            tuple(command),
+            cwd=root,
+            env=command_environment,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            check=False,
+            text=True,
+        ).returncode
+        output.flush()
+        if result:
+            output.seek(0)
+            print(output.read(), end="", file=sys.stderr, flush=True)
+    log_path.unlink(missing_ok=True)
+    if not result:
+        print(f"PASSED parallel test group: {command[-1]}", flush=True)
+    return result
+
+
+def _run_ci_command(command: Sequence[str], root: Path) -> int:
+    """Run one serial group with the same timing policy as hosted CI."""
+    return _run_command(
+        command,
+        root,
+        environment={_HOSTED_CI_ENVIRONMENT: os.environ.get("CI") or "1"},
+    )
 
 
 def _isolated_command(target: str, index: int) -> tuple[str, ...]:
@@ -338,6 +417,18 @@ def _changed_paths(selection: TestSelection) -> frozenset[str]:
     )
 
 
-def _run_command(command: Sequence[str], root: Path) -> int:
+def _run_command(
+    command: Sequence[str],
+    root: Path,
+    *,
+    environment: dict[str, str] | None = None,
+) -> int:
     """Run one gate with inherited output and return its process status."""
-    return subprocess.run(tuple(command), cwd=root, check=False).returncode
+    command_environment = os.environ.copy()
+    command_environment.update(environment or {})
+    return subprocess.run(
+        tuple(command),
+        cwd=root,
+        env=command_environment,
+        check=False,
+    ).returncode

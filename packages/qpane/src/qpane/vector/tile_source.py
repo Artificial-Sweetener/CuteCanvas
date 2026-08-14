@@ -61,6 +61,11 @@ class VectorRenderTileSource:
         """Return exact semantic-vector content fallback identity."""
         return self.document.bounds, self.document.revision
 
+    @property
+    def detail_requires_idle_settle(self) -> bool:
+        """Keep expensive exact rasterization behind GUI input continuity."""
+        return True
+
     def render_tiles(
         self,
         requests: tuple[RenderTileRequest, ...],

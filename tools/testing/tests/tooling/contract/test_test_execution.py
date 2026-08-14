@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -25,6 +26,7 @@ import pytest
 
 from tools.testing.cli import _print_selection
 from tools.testing.execution import (
+    _run_ci_command,
     group_paths,
     run_isolated_groups,
     run_parallel_isolated_groups,
@@ -168,13 +170,78 @@ def test_ci_gate_parallelizes_groups_but_serializes_strong_cases() -> None:
         == 0
     )
     pytest_commands = [command for command in commands if "pytest" in command]
-    ordinary = next(command for command in pytest_commands if "-n" in command)
-    assert ordinary[3:6] == ("-n", "auto", "--maxprocesses=4")
-    assert "--basetemp=.pytest-tmp-ci-ordinary" in ordinary
+    groups = [command for command in pytest_commands if "::" not in command[-1]]
+    assert len(groups) > 1
+    assert all("-n" not in command for command in groups)
+    assert len({command[3] for command in groups}) == len(groups)
+    serial = [
+        command
+        for command in groups
+        if command[-1].endswith(("/abuse", "/performance"))
+    ]
+    parallel = [command for command in groups if command not in serial]
+    assert serial
+    assert any(
+        command[-1] == "packages/cutecanvas/tests/rendering/abuse" for command in serial
+    )
+    assert max(commands.index(command) for command in parallel) < min(
+        commands.index(command) for command in serial
+    )
     strong = [command for command in pytest_commands if "::" in command[-1]]
     assert strong
+    assert max(commands.index(command) for command in serial) < min(
+        commands.index(command) for command in strong
+    )
     assert all("-n" not in command for command in strong)
     assert len({command[3] for command in strong}) == len(strong)
+
+
+def test_ci_gate_reports_a_parallel_group_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Return and identify a failed group after concurrent work settles."""
+    policies = load_policies(repository_root())
+    failed_path = "packages/qpane/tests/cache/integration"
+
+    def group_failure(command: Sequence[str], root: Path) -> int:
+        """Fail one known ordinary group without executing repository tests."""
+        assert root == repository_root()
+        return 9 if command[-1] == failed_path else 0
+
+    def one_node(path: str, root: Path) -> tuple[int, tuple[str, ...]]:
+        """Represent each strongly isolated group with one case."""
+        assert root == repository_root()
+        return 0, (f"{path}/test_case.py::test_case",)
+
+    assert (
+        run_parallel_isolated_groups(
+            repository_root(),
+            policies,
+            runner=group_failure,
+            node_collector=one_node,
+            workers=4,
+        )
+        == 9
+    )
+    assert failed_path in capsys.readouterr().err
+
+
+def test_serial_ci_groups_receive_hosted_timing_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make local CI execution use the same contention policy as hosted jobs."""
+    monkeypatch.delenv("CI", raising=False)
+    assert (
+        _run_ci_command(
+            (
+                sys.executable,
+                "-c",
+                "import os, sys; sys.exit(0 if os.environ.get('CI') else 9)",
+            ),
+            repository_root(),
+        )
+        == 0
+    )
 
 
 def test_native_commit_gate_denies_warnings_and_dependency_risk() -> None:

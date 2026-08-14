@@ -84,7 +84,11 @@ def run_qt_event_loop_for(*, duration_seconds: float) -> None:
 
 def absolute_latency_assertions_are_isolated() -> bool:
     """Return whether wall-clock latency runs without shared or hosted contention."""
-    return not bool(os.environ.get("PYTEST_XDIST_WORKER") or os.environ.get("CI"))
+    return not bool(
+        os.environ.get("PYTEST_XDIST_WORKER")
+        or os.environ.get("CI")
+        or os.environ.get("CUTE_CANVAS_PARALLEL_TEST_GROUP")
+    )
 
 
 def average_interaction_latency_ms(

@@ -45,11 +45,12 @@ def test_repository_inventory_matches_every_product_policy() -> None:
     validate_inventory(root, load_policies(root))
 
 
-def test_cutecanvas_rendering_abuse_is_case_isolated() -> None:
-    """Keep native Qt lifetime storms out of shared xdist workers."""
+def test_cutecanvas_rendering_abuse_is_group_isolated() -> None:
+    """Keep rendering abuse process-isolated without a process per case."""
     policy = load_policies(repository_root())["cutecanvas"]
     rendering = next(area for area in policy.areas if area.name == "rendering")
-    assert "abuse" in rendering.case_isolated_proofs
+    assert "abuse" in rendering.proofs
+    assert "abuse" not in rendering.case_isolated_proofs
 
 
 def test_recursive_patterns_are_anchored_to_the_repository() -> None:
