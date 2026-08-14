@@ -52,6 +52,8 @@ class ReleaseProduct:
     legacy_tag_fallback: bool = False
     wheel_platforms: tuple[str, ...] = ()
     dependencies: tuple[ReleaseDependency, ...] = ()
+    release_derivative_paths: tuple[Path, ...] = ()
+    release_derivative_commands: tuple[tuple[str, ...], ...] = ()
 
     @property
     def tag_prefix(self) -> str:
@@ -77,6 +79,8 @@ PRODUCTS = {
             Path("rust-toolchain.toml"),
         ),
         wheel_platforms=("linux-x64", "windows-x64", "macos-arm64"),
+        release_derivative_paths=(Path("Cargo.lock"),),
+        release_derivative_commands=(("cargo", "metadata", "--format-version", "1"),),
     ),
     "qpane": ReleaseProduct(
         name="qpane",

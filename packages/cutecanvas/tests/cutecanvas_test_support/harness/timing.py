@@ -122,6 +122,20 @@ def stable_latency_samples(
     )
 
 
+def tail_latency_sample_count(
+    *,
+    quantile: float,
+    parallel_batch_size: int = 8,
+) -> int:
+    """Return enough raw samples to preserve a tail after hosted batching."""
+    if not 0.0 < quantile < 1.0:
+        raise ValueError("quantile must be in the interval (0, 1)")
+    batch_size = int(parallel_batch_size)
+    if batch_size <= 0:
+        raise ValueError("parallel_batch_size must be positive")
+    return ceil(1.0 / (1.0 - quantile)) * batch_size
+
+
 def tail_interaction_latency_ms(
     latencies_ms: list[float],
     *,

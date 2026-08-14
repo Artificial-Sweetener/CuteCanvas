@@ -35,7 +35,13 @@ from .plan import (
     create_release_plan,
     save_release_plan,
 )
-from .products import PRODUCTS, StableVersion, format_version, parse_stable_version
+from .products import (
+    PRODUCTS,
+    ReleaseProduct,
+    StableVersion,
+    format_version,
+    parse_stable_version,
+)
 
 _REQUIREMENT_LINE = re.compile(r'^(?P<indent>\s*)"(?P<value>[^"]+)",(?P<suffix>\s*)$')
 
@@ -81,6 +87,7 @@ def prepare_candidate(root: Path, source_sha: str, output: Path) -> ReleasePlan:
         if not planned.direct:
             arguments.append("--patch")
         run_release_command(arguments, cwd=root)
+        materialize_release_derivatives(root, definition)
         commit_sha = _git(root, "rev-parse", "HEAD")
         run_release_command(["git", "tag", planned.tag, commit_sha], cwd=root)
         actual_version = _semantic_version(
@@ -101,6 +108,43 @@ def prepare_candidate(root: Path, source_sha: str, output: Path) -> ReleasePlan:
     materialized = plan.with_candidate(candidate_sha, commits)
     save_release_plan(materialized, output)
     return materialized
+
+
+def materialize_release_derivatives(root: Path, product: ReleaseProduct) -> None:
+    """Regenerate and commit exactly one product's declared derived manifests."""
+    commands = product.release_derivative_commands
+    paths = product.release_derivative_paths
+    if bool(commands) != bool(paths):
+        raise ReleasePlanError(
+            "release derivative commands and paths must be declared together"
+        )
+    if not commands:
+        return
+    expected = {Path(path) for path in paths}
+    if any(path.is_absolute() or ".." in path.parts for path in expected):
+        raise ReleasePlanError(
+            "release derivative paths must stay inside the repository"
+        )
+    for command in commands:
+        if not command:
+            raise ReleasePlanError("release derivative commands must not be empty")
+        run_release_command(command, cwd=root)
+    changed = _changed_paths(root)
+    if changed != expected:
+        raise ReleasePlanError(
+            "release derivative commands changed "
+            f"{sorted(map(str, changed))}, expected {sorted(map(str, expected))}"
+        )
+    run_release_command(
+        ["git", "add", "--", *(str(path) for path in sorted(expected))],
+        cwd=root,
+    )
+    run_release_command(
+        ["git", "commit", "--amend", "--no-edit", "--no-verify"],
+        cwd=root,
+    )
+    if _changed_paths(root):
+        raise ReleasePlanError("release derivative commit left uncommitted files")
 
 
 def read_product_requirements(manifest: Path) -> dict[str, str]:
@@ -285,6 +329,20 @@ def _requirement_or_none(value: str) -> Requirement | None:
 def _git(root: Path, *arguments: str) -> str:
     """Run Git and return stripped standard output."""
     return run_release_command(["git", *arguments], cwd=root).strip()
+
+
+def _changed_paths(root: Path) -> set[Path]:
+    """Return every tracked, staged, or untracked repository mutation."""
+    changed: set[Path] = set()
+    for arguments in (
+        ("diff", "--name-only", "--"),
+        ("diff", "--cached", "--name-only", "--"),
+        ("ls-files", "--others", "--exclude-standard"),
+    ):
+        changed.update(
+            Path(line) for line in _git(root, *arguments).splitlines() if line.strip()
+        )
+    return changed
 
 
 def run_release_command(arguments: Sequence[str], *, cwd: Path) -> str:

@@ -60,3 +60,24 @@ def test_tail_latency_uses_nearest_rank_after_contention_safe_batching(
         )
         == 11.0
     )
+
+
+def test_tail_sample_count_preserves_p99_after_hosted_batching(monkeypatch) -> None:
+    """A hosted p99 proof must retain 100 samples instead of becoming a maximum."""
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "timing-proof")
+    sample_count = timing.tail_latency_sample_count(quantile=0.99)
+    latencies = [1.0] * (sample_count - 8) + [100.0] * 8
+
+    assert sample_count == 800
+    assert len(timing.stable_latency_samples(latencies)) == 100
+    assert timing.tail_interaction_latency_ms(latencies, quantile=0.99) == 1.0
+
+    insufficient_latencies = latencies[8:]
+    assert len(timing.stable_latency_samples(insufficient_latencies)) == 99
+    assert (
+        timing.tail_interaction_latency_ms(
+            insufficient_latencies,
+            quantile=0.99,
+        )
+        == 100.0
+    )

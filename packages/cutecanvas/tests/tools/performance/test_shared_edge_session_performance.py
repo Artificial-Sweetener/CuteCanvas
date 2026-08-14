@@ -31,6 +31,7 @@ from cutecanvas_test_support.harness.timing import (
     INTERACTIVE_PERFORMANCE,
     interaction_clock,
     tail_interaction_latency_ms,
+    tail_latency_sample_count,
 )
 from qpane.sdk.scene import LayerTransform
 
@@ -83,7 +84,7 @@ def test_pivot_updates_remain_interactive_with_large_frozen_target_set() -> None
     )
     latencies: list[float] = []
     batch_size = 16
-    for batch in range(250):
+    for batch in range(tail_latency_sample_count(quantile=0.99)):
         started = interaction_clock()
         for offset in range(batch_size):
             sample = batch * batch_size + offset
