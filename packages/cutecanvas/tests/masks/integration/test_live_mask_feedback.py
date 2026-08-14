@@ -434,6 +434,8 @@ def test_fractional_zoom_mask_pixels_do_not_change_when_stroke_settles(
             QTest.mouseMove(probe.viewer, QPoint(x_position, end.y()), delay=0)
             qapp.processEvents()
         probe.drain_events()
+        assert probe.wait_for_raster_render_idle()
+        assert probe.wait_for_render_refinement_idle()
         held = probe.capture()
         current_buffer = probe.viewer.view().presenter.renderer.get_base_buffer()
         assert current_buffer is not None
