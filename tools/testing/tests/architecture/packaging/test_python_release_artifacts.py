@@ -26,6 +26,7 @@ import pytest
 
 from tools.release.artifact_validation import validate_artifacts
 from tools.release.artifacts import seal_release_plan, verify_release_artifacts
+from tools.release.candidate import read_product_requirements
 from tools.release.plan import ReleasePlanError, create_release_plan
 from tools.release.products import PRODUCTS
 from tools.testing.policy import repository_root
@@ -46,34 +47,42 @@ def test_release_artifacts_accept_exact_metadata_and_package_contents(
 def test_release_artifacts_reject_relative_readme_links_and_wrong_dependencies(
     tmp_path: Path,
 ) -> None:
-    """Reject metadata that would render incorrectly or install against QPane 2."""
+    """Reject relative README links and an incompatible QPane requirement."""
     _write_artifacts(
         tmp_path,
         description=f"[Repository]({_REPOSITORY}) [Docs](docs/index.md)",
-        requirements=(
-            "ferrastra>=1.0.0,<2.0.0",
-            "qpane>=2.0.0,<3.0.0",
+        requirements=_requirements_with_replacement(
+            "cutecanvas",
+            dependency="qpane",
+            replacement="qpane<0",
         ),
     )
     errors = validate_artifacts(PRODUCTS["cutecanvas"], "1.0.0", tmp_path)
     assert "package README contains a relative Markdown link" in errors
-    assert "CuteCanvas must require exactly qpane>=3.0.0,<4.0.0" in errors
+    assert (
+        f"CuteCanvas must require exactly {_requirement('cutecanvas', 'qpane')}"
+        in errors
+    )
 
 
 def test_release_artifacts_reject_incompatible_ferrastra_dependency(
     tmp_path: Path,
 ) -> None:
-    """Reject the dependency ranges that broke the published 1.0 stack."""
+    """Reject a Ferrastra dependency outside the planned compatibility line."""
     _write_artifacts(
         tmp_path,
         description=f"[Repository]({_REPOSITORY})",
-        requirements=(
-            "ferrastra>=0.1.0,<1.0.0",
-            "qpane>=3.0.0,<4.0.0",
+        requirements=_requirements_with_replacement(
+            "cutecanvas",
+            dependency="ferrastra",
+            replacement="ferrastra<0",
         ),
     )
     errors = validate_artifacts(PRODUCTS["cutecanvas"], "1.0.0", tmp_path)
-    assert "CuteCanvas must require exactly ferrastra>=1.0.0,<2.0.0" in errors
+    assert (
+        f"CuteCanvas must require exactly {_requirement('cutecanvas', 'ferrastra')}"
+        in errors
+    )
 
 
 def test_qpane_artifacts_reject_incompatible_ferrastra_dependency(
@@ -84,10 +93,10 @@ def test_qpane_artifacts_reject_incompatible_ferrastra_dependency(
         tmp_path,
         product="qpane",
         description=f"[Repository]({_REPOSITORY})",
-        requirements=("ferrastra>=0.1.0,<0.2",),
+        requirements=("ferrastra<0",),
     )
     errors = validate_artifacts(PRODUCTS["qpane"], "1.0.0", tmp_path)
-    assert "QPane must require exactly ferrastra>=1.0.0,<2.0.0" in errors
+    assert f"QPane must require exactly {_requirement('qpane', 'ferrastra')}" in errors
 
 
 def test_release_artifacts_reject_sibling_package_contents(tmp_path: Path) -> None:
@@ -179,12 +188,11 @@ def _write_artifacts(
     description: str,
     product: str = "cutecanvas",
     version: str = "1.0.0",
-    requirements: tuple[str, ...] = (
-        "ferrastra>=1.0.0,<2.0.0",
-        "qpane>=3.0.0,<4.0.0",
-    ),
+    requirements: tuple[str, ...] | None = None,
 ) -> None:
     """Write one minimal synthetic Python product distribution."""
+    if requirements is None:
+        requirements = _requirements(product)
     serialized_requirements = "".join(
         f"Requires-Dist: {requirement}\n" for requirement in requirements
     )
@@ -212,6 +220,44 @@ def _write_artifacts(
         )
         duplicate.size = len(metadata)
         archive.addfile(duplicate, io.BytesIO(metadata))
+
+
+def _requirements(product: str) -> tuple[str, ...]:
+    """Return ordered cross-product requirements from the current manifest."""
+    definition = PRODUCTS[product]
+    specifiers = read_product_requirements(
+        _ROOT / definition.package_path / "pyproject.toml"
+    )
+    return tuple(
+        f"{dependency.name}{specifiers[dependency.name]}"
+        for dependency in definition.dependencies
+    )
+
+
+def _requirement(product: str, dependency: str) -> str:
+    """Return one current cross-product requirement by dependency name."""
+    matching = tuple(
+        requirement
+        for requirement in _requirements(product)
+        if requirement.startswith(dependency)
+    )
+    if len(matching) != 1:
+        raise AssertionError(f"{product} must declare {dependency} exactly once")
+    return matching[0]
+
+
+def _requirements_with_replacement(
+    product: str,
+    *,
+    dependency: str,
+    replacement: str,
+) -> tuple[str, ...]:
+    """Replace one current dependency with a deliberately invalid requirement."""
+    expected = _requirement(product, dependency)
+    return tuple(
+        replacement if requirement == expected else requirement
+        for requirement in _requirements(product)
+    )
 
 
 def _write_ferrastra_artifacts(directory: Path, *, description: str) -> None:

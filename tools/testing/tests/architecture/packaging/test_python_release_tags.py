@@ -17,11 +17,19 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
+from packaging.requirements import Requirement
+from packaging.version import Version
 
 import tools.check_python_release as release_check
-from tools.release.products import python_release_from_tag, release_from_tag
+from tools.release.candidate import read_product_requirements
+from tools.release.products import PRODUCTS, python_release_from_tag, release_from_tag
 from tools.release.pypi import has_compatible_release
+from tools.testing.policy import repository_root
+
+_ROOT = repository_root()
 
 
 def _release_absent(_name: str, _version: str) -> bool:
@@ -89,16 +97,17 @@ def test_qpane_publication_rejects_an_unresolvable_ferrastra_line(
     monkeypatch.setattr(release_check, "release_exists", _release_absent)
 
     def incompatible_versions(name: str) -> tuple[tuple[int, int, int], ...]:
-        """Expose only the pre-1.0 Ferrastra line to release admission."""
+        """Expose no Ferrastra release admitted by the current manifest."""
         assert name == "ferrastra"
-        return ((0, 1, 0),)
+        return ()
 
     monkeypatch.setattr(
         release_check,
         "published_stable_versions",
         incompatible_versions,
     )
-    with pytest.raises(RuntimeError, match=r"ferrastra>=1\.0\.0,<2\.0\.0"):
+    expected = _dependency_requirement("qpane", "ferrastra")
+    with pytest.raises(RuntimeError, match=re.escape(expected)):
         release_check.run("qpane-v3.0.2", check_pypi=True)
 
 
@@ -110,7 +119,7 @@ def test_cutecanvas_publication_requires_the_complete_resolvable_stack(
 
     def compatible_versions(name: str) -> tuple[tuple[int, int, int], ...]:
         """Expose one compatible release for each upstream product."""
-        return {"ferrastra": ((1, 0, 0),), "qpane": ((3, 0, 2),)}[name]
+        return (_compatible_manifest_version("cutecanvas", name),)
 
     monkeypatch.setattr(
         release_check,
@@ -118,3 +127,38 @@ def test_cutecanvas_publication_requires_the_complete_resolvable_stack(
         compatible_versions,
     )
     release_check.run("cutecanvas-v1.0.3", check_pypi=True)
+
+
+def _dependency_requirement(consumer: str, dependency: str) -> str:
+    """Return one current cross-product requirement from its manifest owner."""
+    product = PRODUCTS[consumer]
+    specifiers = read_product_requirements(
+        _ROOT / product.package_path / "pyproject.toml"
+    )
+    return f"{dependency}{specifiers[dependency]}"
+
+
+def _compatible_manifest_version(
+    consumer: str,
+    dependency: str,
+) -> tuple[int, int, int]:
+    """Return the manifest's stable inclusive lower bound as test index data."""
+    requirement = Requirement(_dependency_requirement(consumer, dependency))
+    candidates = tuple(
+        Version(specifier.version)
+        for specifier in requirement.specifier
+        if specifier.operator in {"==", ">="}
+    )
+    matching = tuple(
+        candidate
+        for candidate in candidates
+        if not candidate.is_prerelease
+        and len(candidate.release) == 3
+        and candidate in requirement.specifier
+    )
+    if len(matching) != 1:
+        raise AssertionError(
+            f"{consumer} must declare one stable inclusive lower bound for {dependency}"
+        )
+    release = matching[0].release
+    return release[0], release[1], release[2]
