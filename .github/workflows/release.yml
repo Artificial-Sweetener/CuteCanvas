@@ -213,6 +213,11 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
+      - name: Install Linux Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libegl1
+
       - name: Download candidate plan
         uses: actions/download-artifact@v7
         with:

@@ -156,6 +156,17 @@ def test_release_closure_is_one_clean_offline_transaction() -> None:
     assert verifier.count('"pip",\n        "install"') == 1
 
 
+def test_candidate_gate_provisions_linux_qt_runtime_before_import_proof() -> None:
+    """Keep the clean candidate import proof runnable on a minimal Linux host."""
+    workflow = _workflow("release.yml")
+    gate = workflow[workflow.index("  candidate-gate:") : workflow.index("  finalize:")]
+    install_runtime = gate.index(
+        "sudo apt-get install --yes --no-install-recommends libegl1"
+    )
+    verify_closure = gate.index("python -m tools.verify_release_closure")
+    assert install_runtime < verify_closure
+
+
 def test_publisher_has_no_tag_or_unplanned_direct_entry_point() -> None:
     """Require all automatic and manual recovery runs to name one sealed plan."""
     workflow = _workflow("publish.yml")
