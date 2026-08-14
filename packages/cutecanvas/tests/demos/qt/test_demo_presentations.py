@@ -17,7 +17,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QSize
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QFileDialog
 
@@ -58,12 +59,22 @@ def test_demo_exports_the_visible_presentation_through_projection(
     window = ExampleWindow(ExampleOptions())
     destination = tmp_path / "preview.png"
     try:
+        export_image = QImage(
+            QSize(64, 48),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        export_image.fill(QColor("#2878c8"))
+        export_composition_id = window.qpane.createCompositionFromImage(
+            export_image,
+            title="Export target",
+        )
         window.presentations.show()
         qapp.processEvents()
         workspace = window.presentations._workspace
         assert workspace is not None
         target = workspace.currentCanvas()
         assert target is not None
+        assert target.currentCompositionID() == export_composition_id
         completed = QSignalSpy(target.projectionCompleted)
         monkeypatch.setattr(
             QFileDialog,
