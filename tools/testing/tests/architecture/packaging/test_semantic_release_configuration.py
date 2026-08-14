@@ -81,3 +81,26 @@ def test_ferrastra_release_updates_cargo_version_and_lock_together() -> None:
     assert configuration["version_toml"] == ["Cargo.toml:workspace.package.version"]
     assert "Cargo.lock" in configuration["assets"]
     assert "cargo check --workspace --all-features" in configuration["build_command"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/dependabot.yml",
+        ".github/workflows/verify.yml",
+        "SECURITY.md",
+        "constraints-tooling.txt",
+        "requirements-dev.txt",
+        "tools/testing/tests/architecture/packaging/test_repository_security_automation.py",
+    ],
+)
+def test_repository_hardening_paths_do_not_release_products(path: str) -> None:
+    """Keep repository-security maintenance outside every product release."""
+    for product in ("ferrastra", "qpane", "cutecanvas"):
+        configuration = _semantic_release_configuration(product)
+        parser = configuration["commit_parser_options"]
+        assert parser["scope_prefix"] != "repo"
+        assert not any(
+            path == release_path or path.startswith(f"{release_path}/")
+            for release_path in parser["path_filters"]
+        )

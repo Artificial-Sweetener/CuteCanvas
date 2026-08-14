@@ -47,7 +47,9 @@ def test_repository_bootstrap_installs_all_editable_packages() -> None:
     assert "-e ./packages/qpane" in development_requirements
     assert "-e ./packages/cutecanvas" in development_requirements
     assert "-e ./packages/ferrastra" in development_requirements
+    assert "-c constraints-tooling.txt" in development_requirements
     assert "-r requirements-dev.txt" in root_requirements
+    assert 'repo_root / "constraints-tooling.txt"' in setup_source
     assert 'repo_root / "requirements-dev.txt"' in setup_source
 
 

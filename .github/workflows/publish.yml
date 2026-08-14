@@ -19,13 +19,9 @@ on:
         type: string
 
 permissions:
-  actions: read
-  contents: write
-  id-token: write
+  contents: read
 
 env:
-  PIP_VERSION: "26.1.2"
-  PACKAGING_VERSION: "26.3"
   RELEASE_TAG: ${{ inputs.release_tag }}
   ORCHESTRATOR_RUN_ID: ${{ inputs.orchestrator_run_id }}
   RECOVERY_ID: ${{ inputs.recovery_id }}
@@ -33,6 +29,9 @@ env:
 jobs:
   admit:
     name: Admit sealed publication
+    permissions:
+      actions: read
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -43,7 +42,7 @@ jobs:
       upload_required: ${{ steps.admission.outputs.upload_required }}
     steps:
       - name: Check out exact product tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
@@ -64,13 +63,13 @@ jobs:
           echo "version=${RELEASE_TAG#*-v}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Install release tooling runtime
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip packaging
 
       - name: Confirm release-run ownership
         env:
@@ -78,7 +77,7 @@ jobs:
         run: python -m tools.release_publications verify "$ORCHESTRATOR_RUN_ID" "$RECOVERY_ID"
 
       - name: Download sealed plan
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sealed-plan-${{ env.RECOVERY_ID }}
           path: plan
@@ -94,7 +93,7 @@ jobs:
 
       - name: Download native distribution
         if: steps.product.outputs.package == 'ferrastra'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-${{ steps.plan.outputs.plan_id }}-ferrastra-*
           path: distributions/ferrastra
@@ -104,7 +103,7 @@ jobs:
 
       - name: Download Python distribution
         if: steps.product.outputs.package != 'ferrastra'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ steps.plan.outputs.plan_id }}-${{ steps.product.outputs.package }}
           path: distributions/${{ steps.product.outputs.package }}
@@ -120,6 +119,9 @@ jobs:
     name: Publish immutable files
     needs: admit
     if: needs.admit.outputs.upload_required == 'true'
+    permissions:
+      actions: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -128,7 +130,7 @@ jobs:
     steps:
       - name: Download native distribution
         if: needs.admit.outputs.package == 'ferrastra'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-${{ needs.admit.outputs.plan_id }}-ferrastra-*
           path: distributions/ferrastra
@@ -138,7 +140,7 @@ jobs:
 
       - name: Download Python distribution
         if: needs.admit.outputs.package != 'ferrastra'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ needs.admit.outputs.plan_id }}-${{ needs.admit.outputs.package }}
           path: distributions/${{ needs.admit.outputs.package }}
@@ -146,7 +148,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Publish absent files from the exact sealed distribution
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: distributions/${{ needs.admit.outputs.package }}
           skip-existing: true
@@ -160,23 +162,26 @@ jobs:
       always() &&
       needs.admit.result == 'success' &&
       (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    permissions:
+      actions: read
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out exact product tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Download sealed plan
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sealed-plan-${{ env.RECOVERY_ID }}
           path: plan
@@ -185,7 +190,7 @@ jobs:
 
       - name: Download native distribution
         if: needs.admit.outputs.package == 'ferrastra'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-${{ needs.admit.outputs.plan_id }}-ferrastra-*
           path: distributions/ferrastra
@@ -195,7 +200,7 @@ jobs:
 
       - name: Download Python distribution
         if: needs.admit.outputs.package != 'ferrastra'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ needs.admit.outputs.plan_id }}-${{ needs.admit.outputs.package }}
           path: distributions/${{ needs.admit.outputs.package }}
@@ -205,12 +210,12 @@ jobs:
       - name: Require complete live PyPI state
         shell: bash
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip packaging
           python -m tools.admit_release_publication plan/sealed-release-plan.json "${{ needs.admit.outputs.package }}" distributions --commit-sha "$(git rev-parse HEAD)" --release-tag "$RELEASE_TAG" --recovery-id "$RECOVERY_ID" | tee publication-receipt.txt
           grep "PyPI state complete" publication-receipt.txt
 
       - name: Persist publication receipt
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: publication-receipt-${{ env.RECOVERY_ID }}-${{ needs.admit.outputs.package }}
           path: publication-receipt.txt
@@ -226,24 +231,26 @@ jobs:
       always() &&
       needs.admit.result == 'success' &&
       needs.verify-published.result == 'success'
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out exact product tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Install release tooling runtime
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip packaging
 
       - name: Generate package-scoped release notes
         run: python tools/generate_release_notes.py "$RELEASE_TAG" release-notes.md

@@ -22,10 +22,9 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 env:
-  PIP_VERSION: "26.1.2"
-  RUSTUP_TOOLCHAIN: "1.93.1"
   SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE: ${{ inputs.qpane_version }}
   SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS: ${{ inputs.cutecanvas_version }}
 
@@ -36,18 +35,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
+            constraints-tooling.txt
             requirements-dev.txt
             packages/qpane/pyproject.toml
             packages/cutecanvas/pyproject.toml
@@ -59,12 +59,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libegl1
 
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.93.1 --profile minimal
+      - name: Activate repository Rust toolchain
+        run: rustup show active-toolchain
 
       - name: Install development dependencies
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip
           python -m pip install -r requirements-dev.txt
 
       - name: Run hook-equivalent quality checks
@@ -113,18 +113,19 @@ jobs:
       QT_QPA_PLATFORM: offscreen
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: |
+            constraints-tooling.txt
             requirements-dev.txt
             packages/qpane/pyproject.toml
             packages/cutecanvas/pyproject.toml
@@ -137,12 +138,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libegl1
 
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.93.1 --profile minimal
+      - name: Activate repository Rust toolchain
+        run: rustup show active-toolchain
 
       - name: Install development dependencies
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip
           python -m pip install -r requirements-dev.txt
 
       - name: Run test suite
@@ -155,7 +156,7 @@ jobs:
 
       - name: Upload mounted QPane failure evidence
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cutecanvas-abuse-${{ matrix.os }}-py${{ matrix.python }}
           path: qpane-abuse-artifacts
@@ -177,24 +178,24 @@ jobs:
             platform: macos-arm64
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.93.1 --profile minimal --component rustfmt,clippy
+      - name: Activate repository Rust toolchain
+        run: rustup show active-toolchain
 
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --version 0.20.2 --locked
-
-      - name: Run native quality and dependency gates
+      - name: Run native quality and test gates
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo test --workspace --all-features
-          cargo deny check
+
+      - name: Run native dependency policy
+        if: runner.os == 'Linux'
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
 
   ferrastra-wheel:
     name: Ferrastra wheel (${{ matrix.platform }}, Python ${{ matrix.python }})
@@ -227,29 +228,29 @@ jobs:
             python: "3.14"
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.93.1 --profile minimal
+      - name: Activate repository Rust toolchain
+        run: rustup show active-toolchain
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: |
+            constraints-tooling.txt
             requirements-dev.txt
             packages/ferrastra/pyproject.toml
             Cargo.lock
 
       - name: Install wheel verification tools
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}"
-          python -m pip install build==1.5.0
+          python -m pip install --constraint constraints-tooling.txt pip build
 
       - name: Build and verify the independent wheel
         run: python tools/verify_ferrastra_wheel.py
@@ -260,18 +261,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_ref || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
+            constraints-tooling.txt
             packages/qpane/pyproject.toml
             packages/cutecanvas/pyproject.toml
 
@@ -282,11 +284,58 @@ jobs:
 
       - name: Install wheel verification tools
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}"
-          python -m pip install build==1.5.0
+          python -m pip install --constraint constraints-tooling.txt pip build
 
       - name: Verify the exact QPane and CuteCanvas wheel stack
         run: python -m tools.verify_python_wheels
+
+  python-audit:
+    name: Python dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            constraints-tooling.txt
+            requirements-dev.txt
+            packages/qpane/pyproject.toml
+            packages/cutecanvas/pyproject.toml
+            packages/ferrastra/pyproject.toml
+            Cargo.lock
+
+      - name: Activate repository Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Install the resolved repository environment
+        run: |
+          python -m pip install --constraint constraints-tooling.txt pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Audit installed Python dependencies
+        run: python -m pip_audit --local
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
   gate:
     name: Gate
@@ -297,6 +346,8 @@ jobs:
       - rust
       - ferrastra-wheel
       - python-wheels
+      - python-audit
+      - dependency-review
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -307,9 +358,13 @@ jobs:
           RUST_RESULT: ${{ needs.rust.result }}
           FERRASTRA_WHEEL_RESULT: ${{ needs.ferrastra-wheel.result }}
           PYTHON_WHEELS_RESULT: ${{ needs.python-wheels.result }}
+          PYTHON_AUDIT_RESULT: ${{ needs.python-audit.result }}
+          DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
         run: |
           test "$QUALITY_RESULT" = "success"
           test "$TEST_RESULT" = "success"
           test "$RUST_RESULT" = "success"
           test "$FERRASTRA_WHEEL_RESULT" = "success"
           test "$PYTHON_WHEELS_RESULT" = "success"
+          test "$PYTHON_AUDIT_RESULT" = "success"
+          test "$DEPENDENCY_REVIEW_RESULT" = "success" || test "$DEPENDENCY_REVIEW_RESULT" = "skipped"

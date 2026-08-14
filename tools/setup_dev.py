@@ -23,7 +23,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-PIP_VERSION = "26.1.2"
 CARGO_DENY_VERSION = "0.20.2"
 
 
@@ -49,7 +48,7 @@ def _install_requirements(python_path: Path, requirements_path: Path) -> None:
     )
 
 
-def _install_pinned_pip(python_path: Path) -> None:
+def _install_pinned_pip(python_path: Path, constraints_path: Path) -> None:
     """Install the repository's pinned package installer version."""
     subprocess.run(
         [
@@ -57,7 +56,9 @@ def _install_pinned_pip(python_path: Path) -> None:
             "-m",
             "pip",
             "install",
-            f"pip=={PIP_VERSION}",
+            "--constraint",
+            str(constraints_path),
+            "pip",
         ],
         check=True,
     )
@@ -108,13 +109,14 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     venv_dir = repo_root / ".venv"
     requirements_path = repo_root / "requirements-dev.txt"
+    constraints_path = repo_root / "constraints-tooling.txt"
     hooks_script = repo_root / "tools" / "setup_hooks.py"
     _setup_rust_tools(repo_root)
     _create_venv(venv_dir)
     venv_python = _venv_python(venv_dir)
     if not venv_python.exists():
         raise FileNotFoundError(f"Venv Python not found at {venv_python}")
-    _install_pinned_pip(venv_python)
+    _install_pinned_pip(venv_python, constraints_path)
     _install_requirements(venv_python, requirements_path)
     _run_hook_setup(venv_python, hooks_script)
     return 0

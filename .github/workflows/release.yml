@@ -6,24 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
-  contents: write
+  contents: read
 
 concurrency:
   group: release-main
   cancel-in-progress: false
 
-env:
-  PIP_VERSION: "26.1.2"
-  BUILD_VERSION: "1.5.0"
-  PACKAGING_VERSION: "26.3"
-  PYTHON_SEMANTIC_RELEASE_VERSION: "10.6.1"
-  TWINE_VERSION: "7.0.0"
-  README_RENDERER_VERSION: "45.0"
-
 jobs:
   prepare:
     name: Prepare immutable candidate
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -38,23 +31,24 @@ jobs:
       cutecanvas_version: ${{ steps.plan.outputs.cutecanvas_version }}
     steps:
       - name: Check out the exact main source and release history
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
           fetch-tags: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            constraints-tooling.txt
+            requirements-dev.txt
 
       - name: Install the release planner
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}"
-          python -m pip install "packaging==${{ env.PACKAGING_VERSION }}" "python-semantic-release==${{ env.PYTHON_SEMANTIC_RELEASE_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip packaging python-semantic-release
 
       - name: Plan versions, synchronize manifests, and create local release commits
         id: plan
@@ -76,7 +70,7 @@ jobs:
 
       - name: Upload unsealed candidate plan
         if: steps.plan.outputs.released == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: candidate-plan-${{ steps.plan.outputs.plan_id }}
           path: ${{ runner.temp }}/release-plan.json
@@ -87,6 +81,8 @@ jobs:
     name: Verify candidate
     needs: prepare
     if: needs.prepare.outputs.released == 'true'
+    permissions:
+      contents: read
     uses: ./.github/workflows/verify.yml
     with:
       source_ref: ${{ needs.prepare.outputs.candidate_sha }}
@@ -109,25 +105,27 @@ jobs:
       SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS: ${{ needs.prepare.outputs.cutecanvas_version }}
     steps:
       - name: Check out exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.candidate_sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: packages/${{ matrix.product }}/pyproject.toml
+          cache-dependency-path: |
+            constraints-tooling.txt
+            packages/${{ matrix.product }}/pyproject.toml
 
       - name: Build and check distribution
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "build==${{ env.BUILD_VERSION }}" "twine==${{ env.TWINE_VERSION }}" "readme-renderer[md]==${{ env.README_RENDERER_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip build twine "readme-renderer[md]"
           python -m build "packages/${{ matrix.product }}"
           python -m twine check --strict "packages/${{ matrix.product }}/dist/"*
 
       - name: Upload immutable candidate distribution
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-${{ matrix.product }}
           path: packages/${{ matrix.product }}/dist/*
@@ -152,21 +150,23 @@ jobs:
             platform: macos-arm64
     steps:
       - name: Check out exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.candidate_sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: Cargo.lock
+          cache-dependency-path: |
+            constraints-tooling.txt
+            Cargo.lock
 
       - name: Build native candidate
         working-directory: packages/ferrastra
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" maturin==1.14.1
+          python -m pip install --constraint ../../constraints-tooling.txt pip maturin
           python -m maturin build --release --out dist
 
       - name: Build source distribution
@@ -175,7 +175,7 @@ jobs:
         run: python -m maturin sdist --out dist
 
       - name: Upload immutable native distribution
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-ferrastra-${{ matrix.platform }}
           path: packages/ferrastra/dist/*
@@ -202,16 +202,18 @@ jobs:
       recovery_id: ${{ steps.identity.outputs.recovery_id }}
     steps:
       - name: Check out exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.candidate_sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            constraints-tooling.txt
+            requirements-dev.txt
 
       - name: Install Linux Qt runtime dependencies
         run: |
@@ -219,28 +221,28 @@ jobs:
           sudo apt-get install --yes --no-install-recommends libegl1
 
       - name: Download candidate plan
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: candidate-plan-${{ needs.prepare.outputs.plan_id }}
           path: plan
 
       - name: Download QPane candidate
         if: needs.prepare.outputs.qpane_version != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-qpane
           path: distributions/qpane
 
       - name: Download CuteCanvas candidate
         if: needs.prepare.outputs.cutecanvas_version != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-cutecanvas
           path: distributions/cutecanvas
 
       - name: Download Ferrastra candidates
         if: needs.prepare.outputs.ferrastra_released == 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-${{ needs.prepare.outputs.plan_id }}-ferrastra-*
           path: distributions/ferrastra
@@ -248,7 +250,7 @@ jobs:
 
       - name: Seal artifacts and prove clean resolver closure
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}" "twine==${{ env.TWINE_VERSION }}" "readme-renderer[md]==${{ env.README_RENDERER_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip packaging twine "readme-renderer[md]"
           python -m twine check --strict distributions/*/*
           python -m tools.manage_release_plan seal plan/release-plan.json distributions sealed-release-plan.json
           python -m tools.verify_release_closure sealed-release-plan.json distributions "${{ runner.temp }}/release-closure"
@@ -261,7 +263,7 @@ jobs:
           echo "recovery_id=$recovery_id" >> "$GITHUB_OUTPUT"
 
       - name: Upload sealed release plan
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sealed-plan-${{ steps.identity.outputs.recovery_id }}
           path: sealed-release-plan.json
@@ -273,27 +275,29 @@ jobs:
     needs:
       - prepare
       - candidate-gate
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check out exact candidate and tags
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.candidate_sha }}
           fetch-depth: 0
           fetch-tags: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Install release tooling runtime
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip packaging
 
       - name: Download sealed plan
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sealed-plan-${{ needs.candidate-gate.outputs.recovery_id }}
 
@@ -306,25 +310,28 @@ jobs:
       - prepare
       - candidate-gate
       - finalize
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Check out finalized release tools
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.candidate_sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Install release tooling runtime
         run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
+          python -m pip install --constraint constraints-tooling.txt pip packaging
 
       - name: Download sealed plan
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sealed-plan-${{ needs.candidate-gate.outputs.recovery_id }}
 
@@ -339,6 +346,8 @@ jobs:
       - prepare
       - finalize
       - publish-waterfall
+    permissions:
+      contents: write
     if: always() && needs.finalize.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
