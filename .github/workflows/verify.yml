@@ -26,6 +26,8 @@ permissions:
 env:
   PIP_VERSION: "26.1.2"
   RUSTUP_TOOLCHAIN: "1.93.1"
+  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE: ${{ inputs.qpane_version }}
+  SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS: ${{ inputs.cutecanvas_version }}
 
 jobs:
   quality:
@@ -248,9 +250,6 @@ jobs:
     name: QPane and CuteCanvas wheel integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE: ${{ inputs.qpane_version }}
-      SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS: ${{ inputs.cutecanvas_version }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6

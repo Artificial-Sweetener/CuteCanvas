@@ -201,10 +201,19 @@ def test_release_workflows_enforce_sub_hour_job_budgets() -> None:
 def test_verification_uses_exact_candidate_ref_and_versions() -> None:
     """Keep candidate wheel metadata exact without prematurely pushing tags."""
     workflow = _workflow("verify.yml")
+    workflow_environment = workflow[workflow.index("env:") : workflow.index("jobs:")]
     assert "source_ref:" in workflow
     assert "ref: ${{ inputs.source_ref || github.sha }}" in workflow
-    assert "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE" in workflow
-    assert "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS" in workflow
+    assert (
+        "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE: "
+        "${{ inputs.qpane_version }}" in workflow_environment
+    )
+    assert (
+        "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS: "
+        "${{ inputs.cutecanvas_version }}" in workflow_environment
+    )
+    assert workflow.count("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE") == 1
+    assert workflow.count("SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS") == 1
     assert "python -m tools.verify_python_wheels" in workflow
     assert "python tools/verify_python_wheels.py" not in workflow
 
