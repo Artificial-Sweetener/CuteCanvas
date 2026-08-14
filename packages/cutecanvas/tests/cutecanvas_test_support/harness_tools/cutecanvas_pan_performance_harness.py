@@ -58,7 +58,6 @@ import qpane
 from cutecanvas import CuteCanvas
 
 _RESULT_VERSION = 1
-_DEFAULT_DOCUMENT = Path(r"C:\Users\imkno\test.cutecanvas")
 _DEFAULT_LOGICAL_VIEWPORT = QSize(3840, 2160)
 _DEFAULT_ZOOM = 5.0
 _DEFAULT_STEPS = 96
@@ -297,6 +296,8 @@ class DocumentPanHarness:
     ) -> None:
         """Load and settle one production CuteCanvas document."""
         self._application = application
+        # The benchmark operator explicitly supplies the local document under test.
+        # codeql[py/path-injection]
         self._document_path = document_path.resolve()
         self._logical_viewport = QSize(logical_viewport)
         self._zoom = float(zoom)
@@ -898,7 +899,7 @@ def save_difference_artifacts(
 def _parse_args(arguments: Sequence[str]) -> argparse.Namespace:
     """Parse the immutable reproducer and local artifact options."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--document", type=Path, default=_DEFAULT_DOCUMENT)
+    parser.add_argument("--document", type=Path, required=True)
     parser.add_argument("--logical-width", type=int, default=3840)
     parser.add_argument("--logical-height", type=int, default=2160)
     parser.add_argument("--zoom", type=float, default=_DEFAULT_ZOOM)

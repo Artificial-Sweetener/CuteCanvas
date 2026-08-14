@@ -1160,7 +1160,11 @@ def _resolve_document(
         path = Path(trace.document_path)
     if path is None:
         raise ValueError("--document is required when the trace has no document path")
+    # The replay harness intentionally consumes its operator-selected local document.
+    # codeql[py/path-injection]
     document = path.resolve()
+    # The resolved path is only admitted as an existing regular local file.
+    # codeql[py/path-injection]
     if not document.is_file():
         raise FileNotFoundError(document)
     digest = sha256_file(document)

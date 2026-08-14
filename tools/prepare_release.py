@@ -18,10 +18,10 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 from tools.release.candidate import prepare_candidate, write_github_outputs
+from tools.release.github_outputs import append_github_outputs
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,9 +33,7 @@ def run(arguments: list[str] | None = None) -> None:
     parser.add_argument("--output", type=Path, required=True)
     options = parser.parse_args(arguments)
     plan = prepare_candidate(_ROOT, options.source_sha, options.output)
-    github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output:
-        write_github_outputs(plan, Path(github_output))
+    append_github_outputs(write_github_outputs(plan))
     if plan.products:
         print(
             f"SUCCESS: prepared release plan {plan.plan_id} at "

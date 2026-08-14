@@ -44,6 +44,11 @@ from cutecanvas_demo_environment import (
     DemoLaunchSettings,
 )
 from demo_settings import load_demo_settings, save_demo_launch_settings
+from demonstration.sam_checkpoint import (
+    clear_managed_checkpoint,
+    is_managed_checkpoint,
+    managed_checkpoint_path,
+)
 
 if TYPE_CHECKING:
     from demonstration.demo_window import ExampleOptions, ExampleWindow
@@ -92,6 +97,8 @@ def _resolve_fallback_app_data_dir() -> Path | None:
     if not base:
         return None
     try:
+        # The base is the current user's standard local application-data root.
+        # codeql[py/path-injection]
         return (Path(base) / Path(sys.executable).stem).resolve()
     except (OSError, RuntimeError, ValueError):
         return None
@@ -213,14 +220,14 @@ def _interactive_menu() -> int:
         normalized = value.strip() if isinstance(value, str) else ""
         if normalized:
             try:
+                # The local user explicitly selects the model consumed by the demo.
+                # codeql[py/path-injection]
                 return Path(normalized).expanduser().resolve()
             except (OSError, RuntimeError, ValueError):
                 return None
         app_data = _resolve_app_data_dir()
-        if app_data is None:
-            return None
         try:
-            return (app_data / "mobile_sam.pt").resolve()
+            return managed_checkpoint_path(app_data)
         except (OSError, RuntimeError, ValueError):
             return None
 
@@ -302,7 +309,16 @@ def _interactive_menu() -> int:
                 }
             )
             checkpoint_path = _resolve_sam_checkpoint_path(state["sam_model_path"])
-            if checkpoint_path is not None and checkpoint_path.exists():
+            if (
+                checkpoint_path is not None
+                and is_managed_checkpoint(
+                    checkpoint_path,
+                    app_data_directory=_resolve_app_data_dir(),
+                )
+                # The path is read-only here and deletion has a separate ownership gate.
+                # lgtm[py/path-injection]
+                and checkpoint_path.exists()
+            ):
                 rows.append(
                     {
                         "kind": "option",
@@ -346,11 +362,12 @@ def _interactive_menu() -> int:
 
     def _clear_sam_checkpoint(path: Path) -> None:
         """Delete the resolved SAM checkpoint before launch."""
-        if not path.exists():
+        app_data_directory = _resolve_app_data_dir()
+        if app_data_directory is None:
             return
         try:
-            path.unlink()
-        except OSError as exc:
+            clear_managed_checkpoint(path, app_data_directory=app_data_directory)
+        except (OSError, ValueError) as exc:
             print(f"\nError clearing SAM checkpoint: {exc}")
             input("Press Enter...")
 

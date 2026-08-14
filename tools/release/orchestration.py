@@ -29,6 +29,8 @@ from tools.release.products import PRODUCTS, release_from_tag
 
 _PUBLISH_WORKFLOW = "publish.yml"
 _RELEASE_WORKFLOW_PATH = ".github/workflows/release.yml"
+_GITHUB_API_URL = "https://api.github.com"
+_GITHUB_REPOSITORY = "Artificial-Sweetener/CuteCanvas"
 _POLL_SECONDS = 15.0
 _PUBLICATION_TIMEOUT_SECONDS = 1_800.0
 
@@ -80,11 +82,13 @@ class ActionsGateway(Protocol):
 class GitHubActionsGateway:
     """Access GitHub Actions through its authenticated REST API."""
 
-    def __init__(self, repository: str, token: str, api_url: str) -> None:
+    def __init__(self, repository: str, token: str) -> None:
         """Create a gateway for one GitHub repository."""
-        self._repository = repository
+        if repository != _GITHUB_REPOSITORY:
+            raise PublicationError(
+                f"release repository must be {_GITHUB_REPOSITORY!r}, got {repository!r}"
+            )
         self._token = token
-        self._api_url = api_url.rstrip("/")
 
     def dispatch_publication(
         self,
@@ -95,7 +99,7 @@ class GitHubActionsGateway:
         """Dispatch ``publish.yml`` as a top-level workflow at ``tag``."""
         self._request(
             "POST",
-            f"/repos/{self._repository}/actions/workflows/"
+            f"/repos/{_GITHUB_REPOSITORY}/actions/workflows/"
             f"{_PUBLISH_WORKFLOW}/dispatches",
             {
                 "ref": tag,
@@ -114,7 +118,7 @@ class GitHubActionsGateway:
         )
         payload = self._request(
             "GET",
-            f"/repos/{self._repository}/actions/workflows/"
+            f"/repos/{_GITHUB_REPOSITORY}/actions/workflows/"
             f"{_PUBLISH_WORKFLOW}/runs?{query}",
         )
         runs = payload.get("workflow_runs")
@@ -126,12 +130,15 @@ class GitHubActionsGateway:
 
     def workflow_run(self, run_id: int) -> Mapping[str, Any]:
         """Return metadata for one workflow run."""
-        return self._request("GET", f"/repos/{self._repository}/actions/runs/{run_id}")
+        return self._request(
+            "GET", f"/repos/{_GITHUB_REPOSITORY}/actions/runs/{run_id}"
+        )
 
     def workflow_jobs(self, run_id: int) -> tuple[Mapping[str, Any], ...]:
         """Return every job reported for one workflow run."""
         payload = self._request(
-            "GET", f"/repos/{self._repository}/actions/runs/{run_id}/jobs?per_page=100"
+            "GET",
+            f"/repos/{_GITHUB_REPOSITORY}/actions/runs/{run_id}/jobs?per_page=100",
         )
         jobs = payload.get("jobs")
         if not isinstance(jobs, list):
@@ -142,7 +149,7 @@ class GitHubActionsGateway:
         """Return artifacts belonging to one release workflow run."""
         payload = self._request(
             "GET",
-            f"/repos/{self._repository}/actions/runs/{run_id}/artifacts?per_page=100",
+            f"/repos/{_GITHUB_REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100",
         )
         artifacts = payload.get("artifacts")
         if not isinstance(artifacts, list):
@@ -160,7 +167,7 @@ class GitHubActionsGateway:
         """Send one authenticated JSON request and return its object response."""
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = Request(
-            f"{self._api_url}{path}",
+            f"{_GITHUB_API_URL}{path}",
             data=data,
             method=method,
             headers={

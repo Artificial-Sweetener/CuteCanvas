@@ -104,11 +104,31 @@ def test_release_credentials_are_scoped_to_the_jobs_that_use_them() -> None:
     assert "contents: write" not in publication_job
 
 
+def test_privileged_release_workflow_runs_only_from_main_pushes() -> None:
+    """Keep generated candidates and release caches out of manual branch runs."""
+    release = _workflow("release.yml")
+    trigger = release[release.index("on:") : release.index("permissions:")]
+    assert "push:" in trigger
+    assert "branches: [main]" in trigger
+    assert "workflow_dispatch" not in trigger
+
+
 def test_security_policy_uses_private_vulnerability_reporting() -> None:
     """Route vulnerability disclosure away from public issue traffic."""
     policy = (_ROOT / "SECURITY.md").read_text("utf-8")
     assert "security/advisories/new" in policy
     assert "Do not open a public issue" in policy
+
+
+def test_performance_harness_requires_an_explicit_document() -> None:
+    """Keep developer-specific filesystem paths out of shared harness defaults."""
+    harness = (
+        _ROOT
+        / "packages/cutecanvas/tests/cutecanvas_test_support/harness_tools"
+        / "cutecanvas_pan_performance_harness.py"
+    ).read_text("utf-8")
+    assert "_DEFAULT_DOCUMENT" not in harness
+    assert 'parser.add_argument("--document", type=Path, required=True)' in harness
 
 
 def _workflow(name: str) -> str:

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools==83.0.0", "wheel==0.47.0", "setuptools_scm==10.2.0"]
+requires = ["setuptools==84.0.0", "wheel==0.47.0", "setuptools_scm==10.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -69,6 +69,7 @@ version_variables = []
 [tool.semantic_release.commit_parser_options]
 path_filters = ["packages/qpane"]
 scope_prefix = "qpane"
+patch_tags = ["fix", "perf", "build"]
 
 [tool.semantic_release.changelog]
 mode = "update"
