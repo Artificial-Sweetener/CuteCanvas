@@ -150,11 +150,17 @@ def _parse_area(data: dict[str, Any], path: Path) -> TestArea:
         if "case_isolated_proofs" in data
         else ()
     )
+    serial_ci_proofs = (
+        _required_text_list(data, "serial_ci_proofs", path)
+        if "serial_ci_proofs" in data
+        else ()
+    )
     area = TestArea(
         name=_required_text(data, "name", path),
         sources=_required_text_list(data, "sources", path),
         proofs=_required_text_list(data, "proofs", path),
         case_isolated_proofs=case_isolated_proofs,
+        serial_ci_proofs=serial_ci_proofs,
     )
     if not area.proofs:
         raise PolicyError(f"{path}: area {area.name!r} must require proof")
@@ -167,6 +173,22 @@ def _parse_area(data: dict[str, Any], path: Path) -> TestArea:
         raise PolicyError(
             f"{path}: area {area.name!r} isolates unknown proof kinds "
             f"{sorted(unknown_isolation)}"
+        )
+    if len(set(area.serial_ci_proofs)) != len(area.serial_ci_proofs):
+        raise PolicyError(f"{path}: area {area.name!r} repeats CI serialization")
+    unknown_serialization = set(area.serial_ci_proofs) - set(area.proofs)
+    if unknown_serialization:
+        raise PolicyError(
+            f"{path}: area {area.name!r} serializes unknown proof kinds "
+            f"{sorted(unknown_serialization)}"
+        )
+    redundant_serialization = set(area.serial_ci_proofs) & set(
+        area.case_isolated_proofs
+    )
+    if redundant_serialization:
+        raise PolicyError(
+            f"{path}: area {area.name!r} gives case-isolated proofs redundant "
+            f"CI serialization {sorted(redundant_serialization)}"
         )
     return area
 

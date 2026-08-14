@@ -39,6 +39,7 @@ class TestArea:
     sources: tuple[str, ...]
     proofs: tuple[str, ...]
     case_isolated_proofs: tuple[str, ...] = ()
+    serial_ci_proofs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

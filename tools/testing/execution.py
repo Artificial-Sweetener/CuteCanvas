@@ -172,9 +172,10 @@ def run_parallel_isolated_groups(
     *,
     runner: CommandRunner | None = None,
     node_collector: TestNodeCollector | None = None,
-    workers: int = _MAX_PARALLEL_TEST_PROCESSES,
+    workers: int | None = None,
 ) -> int:
-    """Run group-isolated proofs concurrently and strong cases serially."""
+    """Run safe groups concurrently and resource-sensitive groups serially."""
+    workers = _parallel_worker_budget() if workers is None else workers
     if workers < 1:
         raise ValueError("parallel isolated test workers must be positive")
     active_runner = runner or _run_command
@@ -238,12 +239,21 @@ def _ci_targets(
                         index += 1
                     continue
                 target = _isolated_command(path, index)
-                if proof in {"abuse", "performance"}:
+                if proof in {"abuse", "performance"} or (
+                    proof in area.serial_ci_proofs
+                ):
                     serial_groups.append(target)
                 else:
                     ordinary.append(target)
                 index += 1
     return 0, tuple(ordinary), tuple(serial_groups), tuple(strong)
+
+
+def _parallel_worker_budget() -> int:
+    """Avoid oversubscribing constrained macOS Qt runners."""
+    if sys.platform == "darwin":
+        return min(_MAX_PARALLEL_TEST_PROCESSES, os.cpu_count() or 1)
+    return _MAX_PARALLEL_TEST_PROCESSES
 
 
 def _run_commands_in_parallel(

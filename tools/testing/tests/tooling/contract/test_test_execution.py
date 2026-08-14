@@ -26,6 +26,7 @@ import pytest
 
 from tools.testing.cli import _print_selection
 from tools.testing.execution import (
+    _parallel_worker_budget,
     _run_ci_command,
     group_paths,
     run_isolated_groups,
@@ -178,6 +179,11 @@ def test_ci_gate_parallelizes_groups_but_serializes_strong_cases() -> None:
         command
         for command in groups
         if command[-1].endswith(("/abuse", "/performance"))
+        or command[-1]
+        in {
+            "packages/cutecanvas/tests/painting/integration",
+            "packages/cutecanvas/tests/rendering/integration",
+        }
     ]
     parallel = [command for command in groups if command not in serial]
     assert serial
@@ -194,6 +200,24 @@ def test_ci_gate_parallelizes_groups_but_serializes_strong_cases() -> None:
     )
     assert all("-n" not in command for command in strong)
     assert len({command[3] for command in strong}) == len(strong)
+
+
+def test_ci_parallelism_never_oversubscribes_available_cpus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep macOS Qt group concurrency within the runner's CPU envelope."""
+    monkeypatch.setattr("tools.testing.execution.sys.platform", "darwin")
+    monkeypatch.setattr("tools.testing.execution.os.cpu_count", lambda: 3)
+    assert _parallel_worker_budget() == 3
+
+
+def test_ci_parallelism_retains_the_repository_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the proven fast process budget on non-macOS hosts."""
+    monkeypatch.setattr("tools.testing.execution.sys.platform", "win32")
+    monkeypatch.setattr("tools.testing.execution.os.cpu_count", lambda: 2)
+    assert _parallel_worker_budget() == 8
 
 
 def test_ci_gate_reports_a_parallel_group_failure(

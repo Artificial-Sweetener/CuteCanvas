@@ -53,6 +53,14 @@ def test_cutecanvas_rendering_abuse_is_group_isolated() -> None:
     assert "abuse" not in rendering.case_isolated_proofs
 
 
+def test_mounted_qt_integrations_are_serial_in_hosted_ci() -> None:
+    """Keep the two resource-heavy Qt integrations free from group contention."""
+    policy = load_policies(repository_root())["cutecanvas"]
+    areas = {area.name: area for area in policy.areas}
+    assert areas["painting"].serial_ci_proofs == ("integration",)
+    assert areas["rendering"].serial_ci_proofs == ("integration",)
+
+
 def test_recursive_patterns_are_anchored_to_the_repository() -> None:
     """Keep similarly named nested directories from stealing ownership."""
     assert path_matches_pattern("tools/testing/cli.py", "tools/**")
@@ -131,6 +139,30 @@ case_isolated_proofs = ["abuse"]
     )
 
     with pytest.raises(PolicyError, match="isolates unknown proof kinds"):
+        load_policy_file(policy_path)
+
+
+def test_policy_rejects_ci_serialization_for_an_unknown_proof(
+    tmp_path: Path,
+) -> None:
+    """CI serialization must name a proof owned by the same behavior area."""
+    policy_path = tmp_path / "TEST_POLICY.toml"
+    policy_path.write_text(
+        """
+schema = 1
+product = "invalid"
+test_root = "tests"
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+[[areas]]
+name = "api"
+sources = ["src/**"]
+proofs = ["contract"]
+serial_ci_proofs = ["integration"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError, match="serializes unknown proof kinds"):
         load_policy_file(policy_path)
 
 
