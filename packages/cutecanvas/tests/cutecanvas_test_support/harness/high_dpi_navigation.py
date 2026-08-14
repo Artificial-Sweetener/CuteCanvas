@@ -276,14 +276,17 @@ def main() -> None:
         )
         mismatched_y, mismatched_x = np.nonzero(settled_difference)
         current = viewer.editor.compositions.current
+        loaded_document = None
+        if document_path is not None:
+            # The abuse harness reports its operator-selected local fixture path.
+            # codeql[py/path-injection]
+            loaded_document = str(document_path.resolve())
         result = {
             "physical_width": physical.width(),
             "physical_height": physical.height(),
             "device_pixel_ratio": viewer.devicePixelRatioF(),
             "absolute_latency_isolated": absolute_latency_assertions_are_isolated(),
-            "loaded_document": (
-                None if document_path is None else str(document_path.resolve())
-            ),
+            "loaded_document": loaded_document,
             "mask_count": len(viewer.listMasksForComposition()),
             "active_composition_id": (None if current is None else str(current.id)),
             "active_composition_title": (

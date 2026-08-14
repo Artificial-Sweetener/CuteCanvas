@@ -61,7 +61,6 @@ def run(arguments: list[str] | None = None) -> None:
     gateway = GitHubActionsGateway(
         repository=_required_environment("GITHUB_REPOSITORY"),
         token=_required_environment("GH_TOKEN"),
-        api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
     )
     if options.command == "verify":
         confirm_verified_orchestrator(

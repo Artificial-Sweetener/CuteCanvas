@@ -18,9 +18,9 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
+from tools.release.github_outputs import append_github_outputs
 from tools.release.plan import load_release_plan
 from tools.release.publication import admit_publication
 
@@ -50,11 +50,12 @@ def run(arguments: list[str] | None = None) -> None:
         options.distributions,
         options.commit_sha,
     )
-    github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output:
-        with Path(github_output).open("a", encoding="utf-8", newline="\n") as output:
-            output.write(f"publication_state={state.value}\n")
-            output.write(f"upload_required={str(state.value != 'complete').lower()}\n")
+    append_github_outputs(
+        {
+            "publication_state": state.value,
+            "upload_required": str(state.value != "complete").lower(),
+        }
+    )
     print(
         f"SUCCESS: {options.product} publication is admitted from plan "
         f"{plan.plan_id} with PyPI state {state.value}."

@@ -52,6 +52,7 @@ def test_product_semantic_release_configuration_is_independent(product: str) -> 
     parser = configuration["commit_parser_options"]
     assert f"packages/{product}" in parser["path_filters"]
     assert parser["scope_prefix"] == product
+    assert set(parser["patch_tags"]) == {"build", "fix", "perf"}
     assert configuration["changelog"]["mode"] == "update"
     assert (
         configuration["changelog"]["default_templates"]["changelog_file"]
@@ -65,6 +66,23 @@ def test_dynamic_python_versions_remain_tag_owned() -> None:
         configuration = _semantic_release_configuration(product)
         assert configuration["version_toml"] == []
         assert configuration["assets"] == [f"packages/{product}/pyproject.toml"]
+
+
+def test_python_build_tools_share_repository_owned_versions() -> None:
+    """Release both Python products from the exact verified build-tool stack."""
+    constraints = {
+        name: version
+        for line in (_ROOT / "constraints-tooling.txt").read_text("utf-8").splitlines()
+        if line and not line.startswith("#") and "==" in line
+        for name, version in [line.split("==", maxsplit=1)]
+    }
+    for product in ("qpane", "cutecanvas"):
+        package_file = _ROOT / "packages" / product / "pyproject.toml"
+        build_requirements = tomllib.loads(package_file.read_text("utf-8"))[
+            "build-system"
+        ]["requires"]
+        assert f"setuptools=={constraints['setuptools']}" in build_requirements
+        assert f"setuptools_scm=={constraints['setuptools-scm']}" in build_requirements
 
 
 def test_ferrastra_release_updates_cargo_version_and_lock_together() -> None:

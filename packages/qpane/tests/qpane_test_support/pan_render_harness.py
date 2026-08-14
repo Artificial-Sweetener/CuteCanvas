@@ -528,6 +528,8 @@ class HeadlessPanHarness:
     ) -> Path:
         """Persist a reproducible frame triplet and mismatch metadata."""
         artifact_directory = self._artifact_root / f"step-{step_index:05d}"
+        # The harness operator explicitly owns the local artifact destination.
+        # codeql[py/path-injection]
         artifact_directory.mkdir(parents=True, exist_ok=True)
         actual_frame.save(str(artifact_directory / "actual.png"))
         expected_frame.save(str(artifact_directory / "expected.png"))
@@ -554,6 +556,8 @@ class HeadlessPanHarness:
             "requested_pan_sequence": [[pan.x(), pan.y()] for pan in requested_history],
             "actual_pan_sequence": [[pan.x(), pan.y()] for pan in actual_history],
         }
+        # The destination remains beneath the operator-selected artifact root.
+        # codeql[py/path-injection]
         (artifact_directory / "metadata.json").write_text(
             json.dumps(metadata, indent=2),
             encoding="utf-8",

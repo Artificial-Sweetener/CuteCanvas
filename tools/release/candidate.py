@@ -236,12 +236,12 @@ def finalize_candidate(root: Path, plan: ReleasePlan, remote: str = "origin") ->
     run_release_command(["git", "push", "--atomic", remote, *refspecs], cwd=root)
 
 
-def write_github_outputs(plan: ReleasePlan, path: Path) -> None:
-    """Expose compact candidate facts to GitHub Actions jobs."""
+def write_github_outputs(plan: ReleasePlan) -> dict[str, str]:
+    """Return compact candidate facts for GitHub Actions jobs."""
     versions = {
         product.name: format_version(product.version) for product in plan.products
     }
-    values = {
+    return {
         "released": str(bool(plan.products)).lower(),
         "plan_id": plan.plan_id,
         "candidate_sha": plan.candidate_sha,
@@ -253,9 +253,6 @@ def write_github_outputs(plan: ReleasePlan, path: Path) -> None:
         "qpane_version": versions.get("qpane", ""),
         "cutecanvas_version": versions.get("cutecanvas", ""),
     }
-    with path.open("a", encoding="utf-8", newline="\n") as output:
-        for name, value in values.items():
-            output.write(f"{name}={value}\n")
 
 
 def _current_version(root: Path, name: str) -> StableVersion:

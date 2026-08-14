@@ -430,6 +430,8 @@ def load_navigation_trace(path: Path) -> NavigationTrace:
 def sha256_file(path: Path) -> str:
     """Return the lowercase SHA-256 digest of one file."""
     digest = hashlib.sha256()
+    # Trace tooling hashes the exact local document selected by its operator.
+    # codeql[py/path-injection]
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
