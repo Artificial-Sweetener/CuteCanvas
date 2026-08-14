@@ -111,6 +111,11 @@ def test_main_release_builds_and_seals_before_atomic_finalization() -> None:
     assert prepare < verify < python_build < native_build < gate < finalize < publish
     assert "python -m tools.manage_release_plan seal" in workflow[gate:finalize]
     assert "python -m tools.verify_release_closure" in workflow[gate:finalize]
+    admit_status = workflow.index('-f context="verify / Gate"', finalize)
+    atomic_finalize = workflow.index(
+        "python -m tools.manage_release_plan finalize", finalize
+    )
+    assert admit_status < atomic_finalize
     assert "python -m tools.manage_release_plan finalize" in workflow[finalize:publish]
     assert "git push --atomic" not in workflow
     assert "uses: ./.github/workflows/version-product.yml" not in workflow

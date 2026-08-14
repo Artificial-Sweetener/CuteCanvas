@@ -278,6 +278,7 @@ jobs:
       - candidate-gate
     permissions:
       contents: write
+      statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -301,6 +302,16 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sealed-plan-${{ needs.candidate-gate.outputs.recovery_id }}
+
+      - name: Admit verified candidate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${{ needs.prepare.outputs.candidate_sha }}" \
+            -f state=success \
+            -f context="verify / Gate" \
+            -f description="Candidate passed the complete release gate"
 
       - name: Atomically push verified main and product tags
         run: python -m tools.manage_release_plan finalize sealed-release-plan.json
