@@ -229,6 +229,16 @@ def test_exact_state_admission_precedes_trusted_publication() -> None:
     assert "publication-receipt-${{ env.RECOVERY_ID }}" in workflow
 
 
+def test_verified_existing_files_still_create_the_github_release() -> None:
+    """Complete idempotent recovery after an intentionally skipped upload."""
+    workflow = _workflow("publish.yml")
+    release = workflow[workflow.index("  release-product:") :]
+    assert "always() &&" in release
+    assert "needs.admit.result == 'success'" in release
+    assert "needs.verify-published.result == 'success'" in release
+    assert "needs.publish.result" not in release
+
+
 def test_release_workflows_enforce_sub_hour_job_budgets() -> None:
     """Prevent accidental hour-long serial jobs in the release critical path."""
     for name in ("release.yml", "publish.yml", "verify.yml"):

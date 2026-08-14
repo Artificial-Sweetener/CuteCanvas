@@ -222,7 +222,10 @@ jobs:
     needs:
       - admit
       - verify-published
-    if: needs.verify-published.result == 'success'
+    if: >-
+      always() &&
+      needs.admit.result == 'success' &&
+      needs.verify-published.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
