@@ -68,6 +68,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install release tooling runtime
+        run: |
+          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
+
       - name: Confirm release-run ownership
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,9 +114,7 @@ jobs:
       - name: Admit exact bytes, lineage, dependencies, and PyPI state
         id: admission
         shell: bash
-        run: |
-          python -m pip install "pip==${{ env.PIP_VERSION }}" "packaging==${{ env.PACKAGING_VERSION }}"
-          python -m tools.admit_release_publication plan/sealed-release-plan.json "${{ steps.product.outputs.package }}" distributions --commit-sha "$(git rev-parse HEAD)" --release-tag "$RELEASE_TAG" --recovery-id "$RECOVERY_ID"
+        run: python -m tools.admit_release_publication plan/sealed-release-plan.json "${{ steps.product.outputs.package }}" distributions --commit-sha "$(git rev-parse HEAD)" --release-tag "$RELEASE_TAG" --recovery-id "$RECOVERY_ID"
 
   publish:
     name: Publish immutable files

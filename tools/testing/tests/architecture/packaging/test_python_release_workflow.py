@@ -167,6 +167,38 @@ def test_candidate_gate_provisions_linux_qt_runtime_before_import_proof() -> Non
     assert install_runtime < verify_closure
 
 
+def test_clean_release_jobs_install_tool_runtime_before_first_import() -> None:
+    """Provision pinned plan dependencies in every clean release-tool job."""
+    release = _workflow("release.yml")
+    publish = _workflow("publish.yml")
+    jobs = (
+        (
+            release[
+                release.index("  finalize:") : release.index("  publish-waterfall:")
+            ],
+            "python -m tools.manage_release_plan finalize",
+        ),
+        (
+            release[
+                release.index("  publish-waterfall:") : release.index(
+                    "  cleanup-candidate:"
+                )
+            ],
+            "python -m tools.release_publications dispatch",
+        ),
+        (
+            publish[publish.index("  admit:") : publish.index("  publish:")],
+            "python -m tools.release_publications verify",
+        ),
+    )
+    install_runtime = (
+        'python -m pip install "pip==${{ env.PIP_VERSION }}" '
+        '"packaging==${{ env.PACKAGING_VERSION }}"'
+    )
+    for job, invocation in jobs:
+        assert job.index(install_runtime) < job.index(invocation)
+
+
 def test_publisher_has_no_tag_or_unplanned_direct_entry_point() -> None:
     """Require all automatic and manual recovery runs to name one sealed plan."""
     workflow = _workflow("publish.yml")
