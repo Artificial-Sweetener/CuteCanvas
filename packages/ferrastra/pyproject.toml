@@ -45,7 +45,7 @@ python-source = "src"
 strip = false
 
 [tool.semantic_release]
-allow_zero_version = true
+allow_zero_version = false
 assets = ["Cargo.lock"]
 build_command = "cargo check --workspace --all-features"
 commit_parser = "conventional-monorepo"

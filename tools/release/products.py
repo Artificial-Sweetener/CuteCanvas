@@ -40,6 +40,7 @@ class ReleaseProduct:
     first_release: StableVersion
     additional_release_paths: tuple[Path, ...] = ()
     legacy_tag_fallback: bool = False
+    wheel_platforms: tuple[str, ...] = ()
 
     @property
     def tag_prefix(self) -> str:
@@ -57,13 +58,14 @@ PRODUCTS = {
         name="ferrastra",
         display_name="Ferrastra",
         package_path=Path("packages/ferrastra"),
-        first_release=(0, 1, 0),
+        first_release=(1, 0, 0),
         additional_release_paths=(
             Path("crates"),
             Path("Cargo.toml"),
             Path("Cargo.lock"),
             Path("rust-toolchain.toml"),
         ),
+        wheel_platforms=("linux-x64", "windows-x64", "macos-arm64"),
     ),
     "qpane": ReleaseProduct(
         name="qpane",

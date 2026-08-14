@@ -22,8 +22,8 @@ jobs:
     uses: ./.github/workflows/version-product.yml
     with:
       product: ferrastra
-      first_bump: "minor"
-      release_initial: false
+      first_bump: "major"
+      release_initial: true
       expected_head: ${{ github.sha }}
     secrets: inherit
 

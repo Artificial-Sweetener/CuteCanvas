@@ -13,25 +13,20 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""Verify exact QPane or CuteCanvas artifacts before trusted publication."""
+"""Verify exact Python distribution artifacts before trusted publication."""
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
 from tools.release.artifact_validation import validate_artifacts
-from tools.release.products import format_version, python_release_from_tag
+from tools.release.products import format_version, release_from_tag
 
 
 def run(tag: str, distribution: Path) -> None:
     """Validate one tag-selected distribution directory."""
-    product, version = python_release_from_tag(tag)
+    product, version = release_from_tag(tag)
     version_text = format_version(version)
     errors = validate_artifacts(product, version_text, distribution)
     if errors:

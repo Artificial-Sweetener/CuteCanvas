@@ -49,15 +49,13 @@ object with focused typed handles is valid when it preserves ownership. Do not
 make unrelated one-off filter functions, untyped dictionaries, or private native
 objects the primary integration API.
 
-## Stage 0
+## Stable product surface
 
-Stage 0 exposes package identity so native wheel building, installation, typing,
-and architecture enforcement are executable. It contains no graphics kernel,
-parser, language crate, placeholder engine API, mock public operation, or
-speculative product contract. Non-production schemas and fixtures may verify the
-planned R-Candy constraints without creating public behavior. Add product,
-graph, runtime, store, raster, vector, painting, or language contracts only in
-the phase and owner authorized by the design charters.
+Ferrastra's stable package exposes its implemented graph, raster, coverage,
+runtime, source-editing, reconstruction, and diagnostic contracts. Extend that
+surface only through the phases and owners authorized by the design charters.
+Do not add placeholder APIs, mock production operations, speculative contracts,
+or public behavior that bypasses the canonical native implementation.
 
 ## Public surface
 

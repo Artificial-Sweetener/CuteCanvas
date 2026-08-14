@@ -101,12 +101,12 @@ def test_main_push_versions_the_complete_waterfall_before_publication() -> None:
     assert "uses: ./.github/workflows/publish.yml" not in workflow
     assert "python tools/release_publications.py dispatch" in workflow[publisher:]
     assert 'legacy_anchor: "v2.1.1"' in workflow
-    assert 'first_bump: "minor"' in workflow
-    assert workflow.count('first_bump: "major"') == 2
+    assert 'first_bump: "minor"' not in workflow
+    assert workflow.count('first_bump: "major"') == 3
 
 
-def test_release_waits_for_ferrastras_explicit_initial_publication() -> None:
-    """Keep the native package private until its first release is admitted."""
+def test_release_admits_ferrastras_stable_initial_publication() -> None:
+    """Publish Ferrastra 1.0.0 through the verified product waterfall."""
     release = (repository_root() / ".github/workflows/release.yml").read_text("utf-8")
     ferrastra = release[
         release.index("  version-ferrastra:") : release.index("  version-qpane:")
@@ -121,7 +121,7 @@ def test_release_waits_for_ferrastras_explicit_initial_publication() -> None:
         "utf-8"
     )
 
-    assert "release_initial: false" in ferrastra
+    assert "release_initial: true" in ferrastra
     assert "release_initial: true" in qpane
     assert "release_initial: true" in cutecanvas
     assert "release_initial:" in version
@@ -194,11 +194,17 @@ def test_publish_workflow_validates_before_trusted_publication() -> None:
     build = workflow.index(
         'python -m build "packages/${{ needs.select.outputs.package }}"'
     )
-    artifact = workflow.index("python tools/verify_python_release_artifacts.py")
+    artifact = workflow.index("python -m tools.verify_python_release_artifacts")
     publish = workflow.index("pypa/gh-action-pypi-publish@release/v1")
     assert admission < build < artifact < publish
     assert '"readme-renderer[md]==${{ env.README_RENDERER_VERSION }}"' in workflow
     assert "python -m twine check --strict" in workflow
+    assert "  validate-distribution:" in workflow
+    assert "needs.validate-distribution.result == 'success'" in workflow
+    assert (
+        'python -m tools.check_ferrastra_release_tag "${{ env.RELEASE_TAG }}" '
+        "--check-pypi"
+    ) in workflow
     assert "skip-existing: false" in workflow
 
 
@@ -232,14 +238,14 @@ def test_release_plan_preserves_dependency_order_and_product_identity() -> None:
     """Translate version outputs into the exact Ferrastra-to-CuteCanvas waterfall."""
     environment = {
         "FERRASTRA_RELEASED": "true",
-        "FERRASTRA_RELEASE_TAG": "ferrastra-v0.1.0",
+        "FERRASTRA_RELEASE_TAG": "ferrastra-v1.0.0",
         "QPANE_RELEASED": "true",
         "QPANE_RELEASE_TAG": "qpane-v3.0.1",
         "CUTECANVAS_RELEASED": "true",
         "CUTECANVAS_RELEASE_TAG": "cutecanvas-v1.0.2",
     }
     assert release_tags_from_environment(environment) == (
-        "ferrastra-v0.1.0",
+        "ferrastra-v1.0.0",
         "qpane-v3.0.1",
         "cutecanvas-v1.0.2",
     )
@@ -252,9 +258,12 @@ def test_release_plan_preserves_dependency_order_and_product_identity() -> None:
 def test_publication_waterfall_waits_and_stops_on_the_first_failure() -> None:
     """Never publish a downstream product after an upstream publication fails."""
     gateway = _ActionsGateway(outcomes={"qpane-v3.0.1": "failure"})
-    tags = ("ferrastra-v0.1.0", "qpane-v3.0.1", "cutecanvas-v1.0.2")
+    tags = ("ferrastra-v1.0.0", "qpane-v3.0.1", "cutecanvas-v1.0.2")
 
-    with pytest.raises(PublicationError, match="qpane-v3.0.1 completed with 'failure'"):
+    with pytest.raises(
+        PublicationError,
+        match=r"qpane-v3\.0\.1 completed with 'failure'",
+    ):
         dispatch_publication_waterfall(
             gateway,
             tags,
@@ -263,7 +272,7 @@ def test_publication_waterfall_waits_and_stops_on_the_first_failure() -> None:
         )
 
     assert gateway.dispatched == [
-        ("ferrastra-v0.1.0", "12345"),
+        ("ferrastra-v1.0.0", "12345"),
         ("qpane-v3.0.1", "12345"),
     ]
 

@@ -63,6 +63,26 @@ def test_release_artifacts_reject_sibling_package_contents(tmp_path: Path) -> No
     assert "wheel contains unexpected top-level paths: ['qpane']" in errors
 
 
+def test_ferrastra_release_requires_exact_native_platform_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Accept one metadata-consistent wheel per supported native platform."""
+    description = f"[Repository]({_REPOSITORY})"
+    _write_ferrastra_artifacts(tmp_path, description=description)
+    assert validate_artifacts(PRODUCTS["ferrastra"], "1.0.0", tmp_path) == ()
+
+
+def test_ferrastra_release_rejects_incomplete_platform_coverage(
+    tmp_path: Path,
+) -> None:
+    """Reject a native release when any supported platform wheel is absent."""
+    _write_ferrastra_artifacts(tmp_path, description=f"[Repository]({_REPOSITORY})")
+    next(tmp_path.glob("ferrastra-*-win_amd64.whl")).unlink()
+    errors = validate_artifacts(PRODUCTS["ferrastra"], "1.0.0", tmp_path)
+    assert "expected 3 ferrastra wheel(s), found 2" in errors
+    assert "expected one ferrastra windows-x64 wheel, found 0" in errors
+
+
 def _write_artifacts(
     directory: Path,
     *,
@@ -92,3 +112,30 @@ def _write_artifacts(
         duplicate = tarfile.TarInfo("cutecanvas-1.0.0/src/cutecanvas.egg-info/PKG-INFO")
         duplicate.size = len(metadata)
         archive.addfile(duplicate, io.BytesIO(metadata))
+
+
+def _write_ferrastra_artifacts(directory: Path, *, description: str) -> None:
+    """Write a complete synthetic Ferrastra native distribution set."""
+    metadata = (
+        "Metadata-Version: 2.4\n"
+        "Name: ferrastra\n"
+        "Version: 1.0.0\n"
+        "Description-Content-Type: text/markdown\n"
+        f"Project-URL: Repository, {_REPOSITORY}\n"
+        "\n"
+        f"{description}\n"
+    ).encode()
+    wheels = (
+        "ferrastra-1.0.0-cp310-abi3-manylinux_2_35_x86_64.whl",
+        "ferrastra-1.0.0-cp310-abi3-win_amd64.whl",
+        "ferrastra-1.0.0-cp310-abi3-macosx_11_0_arm64.whl",
+    )
+    for name in wheels:
+        with zipfile.ZipFile(directory / name, mode="w") as archive:
+            archive.writestr("ferrastra/__init__.py", "")
+            archive.writestr("ferrastra-1.0.0.dist-info/METADATA", metadata)
+    source = directory / "ferrastra-1.0.0.tar.gz"
+    with tarfile.open(source, mode="w:gz") as archive:
+        info = tarfile.TarInfo("ferrastra-1.0.0/PKG-INFO")
+        info.size = len(metadata)
+        archive.addfile(info, io.BytesIO(metadata))
