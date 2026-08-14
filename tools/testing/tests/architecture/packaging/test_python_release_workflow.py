@@ -205,6 +205,8 @@ def test_verification_uses_exact_candidate_ref_and_versions() -> None:
     assert "ref: ${{ inputs.source_ref || github.sha }}" in workflow
     assert "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_QPANE" in workflow
     assert "SETUPTOOLS_SCM_PRETEND_VERSION_FOR_CUTECANVAS" in workflow
+    assert "python -m tools.verify_python_wheels" in workflow
+    assert "python tools/verify_python_wheels.py" not in workflow
 
 
 def test_publication_waterfall_stops_on_first_failure() -> None:
