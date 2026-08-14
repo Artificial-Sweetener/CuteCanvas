@@ -203,6 +203,27 @@ def test_candidate_command_failure_preserves_actionable_stderr(tmp_path: Path) -
         )
 
 
+def test_candidate_command_cannot_claim_parent_action_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reserve GitHub step outputs for the outer transactional planner."""
+    output = tmp_path / "github-output.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    observed = run_release_command(
+        (
+            sys.executable,
+            "-c",
+            "import os; print(os.environ.get('GITHUB_OUTPUT', ''))",
+        ),
+        cwd=tmp_path,
+    )
+
+    assert observed.strip() == ""
+    assert not output.exists()
+
+
 def _plan(
     *,
     ferrastra: tuple[int, int, int] | None = None,
