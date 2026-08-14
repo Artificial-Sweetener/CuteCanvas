@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v3.0.1 (2026-08-14)
+
+### Bug Fixes
+
+- Join standalone workers at viewer teardown
+  ([`859d5ac`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/859d5acbe9263b82c73749e7048e8e9a788c8e93))
+
+- Serialize Qt callback teardown
+  ([`930c869`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/930c869f4a232070959d9be58600e9af876a8812))
+
+### Testing
+
+- Join pan harness workers on teardown
+  ([`6e7b999`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/6e7b999b4e6bc346c3574f4e996f3b6e88246fd9))
+
+
 ## v3.0.0 (2026-08-11)
 
 ### Bug Fixes
