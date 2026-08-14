@@ -289,11 +289,13 @@ def _git(root: Path, *arguments: str) -> str:
 
 def run_release_command(arguments: Sequence[str], *, cwd: Path) -> str:
     """Run one required candidate command without invoking a shell."""
+    command_environment = os.environ.copy()
+    command_environment.pop("GITHUB_OUTPUT", None)
     try:
         completed = subprocess.run(
             list(arguments),
             cwd=cwd,
-            env=os.environ.copy(),
+            env=command_environment,
             check=True,
             capture_output=True,
             text=True,
