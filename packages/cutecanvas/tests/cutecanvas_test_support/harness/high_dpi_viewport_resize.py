@@ -25,6 +25,7 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
 from cutecanvas import CuteCanvas
+from cutecanvas_test_support.harness.qt_lifetime import flush_deferred_qt_lifetime
 from cutecanvas_test_support.harness.viewport_resize_probe import (
     MountedViewportResizeProbe,
 )
@@ -103,9 +104,11 @@ def main() -> None:
             )
         )
     finally:
+        canvas.documentRuntime().execution_runtime.shutdown(wait=True)
+        app.processEvents()
         canvas.close()
         canvas.deleteLater()
-        app.processEvents()
+        flush_deferred_qt_lifetime(app)
 
 
 if __name__ == "__main__":
