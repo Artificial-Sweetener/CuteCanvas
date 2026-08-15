@@ -2,6 +2,24 @@
 
 <!-- version list -->
 
+## v1.0.4 (2026-08-15)
+
+### Build System
+
+- **repo**: Secure dependency and release automation
+  ([`5232f08`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/5232f08b7529ba24c52ec3f840c1163b6cbbc155))
+
+### Continuous Integration
+
+- **repo**: Admit verified release candidates
+  ([`2021d95`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/2021d95ddd58eb9fc14acdefd3d0ce2be3280013))
+
+### Performance Improvements
+
+- Keep sparse vector bounds responsive
+  ([`6694f82`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/6694f8261b8af4537fa7e7675eecc7ad5dd3ba68))
+
+
 ## v1.0.3 (2026-08-14)
 
 ### Bug Fixes
