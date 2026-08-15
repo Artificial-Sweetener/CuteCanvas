@@ -137,18 +137,36 @@ class CoverageDocumentEvaluator:
         if key in self._vector_bounds_cache:
             cached = self._vector_bounds_cache[key]
             return None if cached is None else QRectF(cached)
-        current = QPainterPath()
-        for item in document.items:
-            path = item.transform.to_qtransform().map(object_path(item.geometry))
-            if item.combine_mode is CoverageCombineMode.REPLACE:
-                current = path
-            elif item.combine_mode is CoverageCombineMode.ADD:
-                current = current.united(path)
-            elif item.combine_mode is CoverageCombineMode.SUBTRACT:
-                current = current.subtracted(path)
-            else:
-                current = current.intersected(path)
-        bounds = None if current.isEmpty() else current.boundingRect()
+        simple_envelope = all(
+            item.combine_mode in {CoverageCombineMode.ADD, CoverageCombineMode.REPLACE}
+            for item in document.items
+        )
+        if simple_envelope:
+            bounds: QRectF | None = None
+            for item in document.items:
+                path = item.transform.to_qtransform().map(object_path(item.geometry))
+                item_bounds = None if path.isEmpty() else path.boundingRect()
+                if item.combine_mode is CoverageCombineMode.REPLACE:
+                    bounds = item_bounds
+                elif item_bounds is not None:
+                    bounds = (
+                        QRectF(item_bounds)
+                        if bounds is None
+                        else bounds.united(item_bounds)
+                    )
+        else:
+            current = QPainterPath()
+            for item in document.items:
+                path = item.transform.to_qtransform().map(object_path(item.geometry))
+                if item.combine_mode is CoverageCombineMode.REPLACE:
+                    current = path
+                elif item.combine_mode is CoverageCombineMode.ADD:
+                    current = current.united(path)
+                elif item.combine_mode is CoverageCombineMode.SUBTRACT:
+                    current = current.subtracted(path)
+                else:
+                    current = current.intersected(path)
+            bounds = None if current.isEmpty() else current.boundingRect()
         if len(self._vector_bounds_cache) >= 256:
             self._vector_bounds_cache.pop(next(iter(self._vector_bounds_cache)))
         self._vector_bounds_cache[key] = None if bounds is None else QRectF(bounds)

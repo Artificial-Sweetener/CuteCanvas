@@ -125,6 +125,32 @@ def test_vector_manipulation_bounds_apply_boolean_geometry_continuously() -> Non
     )
 
 
+def test_vector_manipulation_bounds_reset_additive_envelope_on_replace() -> None:
+    """Replacement should discard the envelope of preceding additive geometry."""
+    document = CoverageDocument(
+        items=(
+            VectorCoverageItem(uuid.uuid4(), _rectangle(0.0, 0.0, 8.0, 8.0)),
+            VectorCoverageItem(uuid.uuid4(), _rectangle(100.0, 0.0, 8.0, 8.0)),
+            VectorCoverageItem(
+                uuid.uuid4(),
+                _rectangle(20.25, 10.5, 8.0, 8.0),
+                CoverageCombineMode.REPLACE,
+            ),
+            VectorCoverageItem(
+                uuid.uuid4(),
+                _rectangle(40.25, 12.5, 8.0, 8.0),
+            ),
+        )
+    )
+
+    assert CoverageDocumentEvaluator().vector_content_bounds(document) == QRectF(
+        20.25,
+        10.5,
+        28.0,
+        10.0,
+    )
+
+
 def test_ordered_coverage_algebra_preserves_transparent_holes() -> None:
     document = (
         CoverageDocument()
