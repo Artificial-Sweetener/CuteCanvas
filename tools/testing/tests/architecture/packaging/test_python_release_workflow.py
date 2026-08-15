@@ -234,6 +234,21 @@ def test_exact_state_admission_precedes_trusted_publication() -> None:
     assert "publication-receipt-${{ env.RECOVERY_ID }}" in workflow
 
 
+def test_live_pypi_verification_tolerates_bounded_index_propagation() -> None:
+    """Poll exact live state without allowing an unbounded publication wait."""
+    workflow = _workflow("publish.yml")
+    verification = workflow[
+        workflow.index(
+            "      - name: Require complete live PyPI state"
+        ) : workflow.index("      - name: Persist publication receipt")
+    ]
+    assert "for attempt in {1..18}; do" in verification
+    assert 'grep -q "PyPI state complete"' in verification
+    assert '[[ "$attempt" == "18" ]]' in verification
+    assert "sleep 10" in verification
+    assert "exit 1" in verification
+
+
 def test_verified_existing_files_still_create_the_github_release() -> None:
     """Complete idempotent recovery after an intentionally skipped upload."""
     workflow = _workflow("publish.yml")
