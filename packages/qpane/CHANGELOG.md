@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v3.0.3 (2026-08-15)
+
+### Bug Fixes
+
+- Join demo runtime on exit
+  ([`c4fee0c`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/c4fee0c27b79c40d66cae0191c870511f8d3790e))
+
+### Build System
+
+- **repo**: Secure dependency and release automation
+  ([`5232f08`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/5232f08b7529ba24c52ec3f840c1163b6cbbc155))
+
+
 ## v3.0.2 (2026-08-14)
 
 ### Bug Fixes
