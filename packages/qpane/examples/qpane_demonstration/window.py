@@ -118,7 +118,7 @@ class ViewerWindow(QMainWindow):
             return
         self._execution_closed = True
         self.workspace.close()
-        self._execution_runtime.shutdown(wait=False)
+        self._execution_runtime.shutdown(wait=True)
 
     def _build_layout(self) -> None:
         """Compose the recognizable hideable catalog-and-canvas splitter."""
