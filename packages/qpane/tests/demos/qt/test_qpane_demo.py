@@ -19,7 +19,9 @@
 from __future__ import annotations
 
 import math
+from unittest.mock import Mock
 
+import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QAction, QColor, QImage
 
@@ -27,9 +29,14 @@ from qpane import ClipCoordinateSpace, QPane
 from qpane_demo import ViewerWindow
 
 
-def test_qpane_demo_restores_catalog_viewer_and_sdk_scene(qapp) -> None:
+def test_qpane_demo_restores_catalog_viewer_and_sdk_scene(
+    qapp,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Preserve viewer workflows while teaching mixed public SDK scenes."""
     window = ViewerWindow()
+    runtime_shutdown = Mock(wraps=window._execution_runtime.shutdown)
+    monkeypatch.setattr(window._execution_runtime, "shutdown", runtime_shutdown)
     window.show()
     qapp.processEvents()
     try:
@@ -104,3 +111,4 @@ def test_qpane_demo_restores_catalog_viewer_and_sdk_scene(qapp) -> None:
         window.close()
         window.deleteLater()
         qapp.processEvents()
+    runtime_shutdown.assert_called_once_with(wait=True)
