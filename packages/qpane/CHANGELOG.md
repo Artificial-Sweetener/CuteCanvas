@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v3.0.4 (2026-08-28)
+
+### Bug Fixes
+
+- Preserve completed frames through memory contention
+  ([`3d9a09c`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/3d9a09c71fa37aa91f7a60b9926cb024103de10a))
+
+### Performance Improvements
+
+- Keep transient effects responsive under churn
+  ([`7da908d`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/7da908d5102e81eeb1e4c27261b3bdacb457d486))
+
+
 ## v3.0.3 (2026-08-15)
 
 ### Bug Fixes
