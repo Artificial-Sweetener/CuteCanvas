@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPointF
 
@@ -42,6 +42,8 @@ class SharedEdgeParticipant:
     seam_indexes: tuple[int, int]
     translation_indexes: tuple[int, ...]
     interior_side: int
+    initial_clearance: float = field(init=False, repr=False)
+    initial_signed_area_twice: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Detach participant geometry and validate its boundary indexes."""
@@ -65,6 +67,16 @@ class SharedEdgeParticipant:
         ):
             raise ValueError("shared-edge translation vertices must include the seam")
         object.__setattr__(self, "translation_indexes", translation_indexes)
+        object.__setattr__(
+            self,
+            "initial_clearance",
+            shared_boundary_clearance(self.scene_boundary, translation_indexes),
+        )
+        object.__setattr__(
+            self,
+            "initial_signed_area_twice",
+            shared_boundary_signed_area_twice(self.scene_boundary),
+        )
         if self.interior_side not in {-1, 1}:
             raise ValueError("shared-edge participant side must be -1 or 1")
 
@@ -322,9 +334,91 @@ def _point_distance(first: QPointF, second: QPointF) -> float:
     return math.hypot(delta.x(), delta.y())
 
 
+def shared_boundary_clearance(
+    boundary: tuple[QPointF, ...],
+    moving_indexes: tuple[int, ...],
+) -> float:
+    """Return the moving boundary chain's nearest finite collision."""
+    moving = frozenset(moving_indexes)
+    seam_start, seam_end = max(
+        (
+            (boundary[first], boundary[second])
+            for first in moving_indexes
+            for second in moving_indexes
+            if first < second
+        ),
+        key=lambda points: _point_distance(*points),
+    )
+    clearance = math.inf
+    for index, edge_start in enumerate(boundary):
+        next_index = (index + 1) % len(boundary)
+        edge_end = boundary[next_index]
+        first_moves = index in moving
+        second_moves = next_index in moving
+        if first_moves and second_moves:
+            continue
+        if first_moves or second_moves:
+            clearance = min(clearance, _point_distance(edge_start, edge_end))
+            continue
+        clearance = min(
+            clearance,
+            _segment_distance(seam_start, seam_end, edge_start, edge_end),
+        )
+    if not math.isfinite(clearance):
+        raise ValueError("shared-edge participant has no exterior boundary")
+    return clearance
+
+
+def shared_boundary_signed_area_twice(boundary: tuple[QPointF, ...]) -> float:
+    """Return twice one finite boundary's signed area."""
+    return sum(
+        point.x() * boundary[(index + 1) % len(boundary)].y()
+        - boundary[(index + 1) % len(boundary)].x() * point.y()
+        for index, point in enumerate(boundary)
+    )
+
+
+def _segment_distance(
+    first_start: QPointF,
+    first_end: QPointF,
+    second_start: QPointF,
+    second_end: QPointF,
+) -> float:
+    """Return the Euclidean distance between two finite segments."""
+    return min(
+        _point_segment_distance(first_start, second_start, second_end),
+        _point_segment_distance(first_end, second_start, second_end),
+        _point_segment_distance(second_start, first_start, first_end),
+        _point_segment_distance(second_end, first_start, first_end),
+    )
+
+
+def _point_segment_distance(point: QPointF, start: QPointF, end: QPointF) -> float:
+    """Return the Euclidean distance from one point to a finite segment."""
+    segment_x = end.x() - start.x()
+    segment_y = end.y() - start.y()
+    length_squared = segment_x * segment_x + segment_y * segment_y
+    if length_squared <= 1e-9:
+        return _point_distance(point, start)
+    relative_x = point.x() - start.x()
+    relative_y = point.y() - start.y()
+    fraction = max(
+        0.0,
+        min(
+            1.0,
+            (relative_x * segment_x + relative_y * segment_y) / length_squared,
+        ),
+    )
+    closest_x = start.x() + segment_x * fraction
+    closest_y = start.y() + segment_y * fraction
+    return math.hypot(point.x() - closest_x, point.y() - closest_y)
+
+
 __all__ = [
     "SharedEdgeParticipant",
     "inverse_shared_boundary",
+    "shared_boundary_clearance",
+    "shared_boundary_signed_area_twice",
     "shared_boundary_with_points",
     "shared_endpoint_indexes",
     "shared_exterior_neighbor_index",
