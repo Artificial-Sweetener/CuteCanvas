@@ -275,6 +275,10 @@ jobs:
     needs:
       - prepare
       - candidate-gate
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.candidate-gate.result == 'success'
     permissions:
       contents: write
       statuses: write
@@ -321,6 +325,11 @@ jobs:
       - prepare
       - candidate-gate
       - finalize
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.candidate-gate.result == 'success' &&
+      needs.finalize.result == 'success'
     permissions:
       actions: write
       contents: read

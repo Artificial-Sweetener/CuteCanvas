@@ -1225,12 +1225,11 @@ class RenderingPresenter:
             )
         dirty = QRect()
         if plan is not None:
-            items_by_layer: dict[uuid.UUID, list[SceneRenderItem]] = {}
-            for item in plan.render_items:
-                items_by_layer.setdefault(item.descriptor.layer_id, []).append(item)
             for effect in effects:
                 padding = max(1, round(effect.style.panel_padding + 0.5))
-                for item in items_by_layer.get(effect.layer_id, ()):
+                for item in plan.render_items:
+                    if item.descriptor.layer_id != effect.layer_id:
+                        continue
                     bounds = self.renderer.item_panel_bounds(item).adjusted(
                         -padding,
                         -padding,
