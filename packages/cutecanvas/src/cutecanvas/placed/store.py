@@ -62,14 +62,11 @@ class PlacedAssetStore:
         resolved_id = asset_id or uuid.uuid4()
         if resolved_id in self._assets:
             raise ValueError("placed asset ID already exists")
-        self._resources.create(
-            ProjectResourceKind.IMPORTED_RASTER,
-            editable=False,
-            resource_id=resolved_id,
-        )
-        self._assets[resolved_id] = PlacedAssetSnapshot(
-            image=QImage(image),
-            source_size=image.size(),
+        retained_image = _retained_image(image)
+        content_bounds = _image_content_bounds(retained_image)
+        snapshot = PlacedAssetSnapshot(
+            image=retained_image,
+            source_size=retained_image.size(),
             mode=PlacedAssetMode.EMBEDDED,
             source_path=None,
             status=PlacedAssetStatus.READY,
@@ -79,7 +76,13 @@ class PlacedAssetStore:
             content_revision=0,
             generation=0,
         )
-        self._content_bounds[resolved_id] = _image_content_bounds(image)
+        self._resources.create(
+            ProjectResourceKind.IMPORTED_RASTER,
+            editable=False,
+            resource_id=resolved_id,
+        )
+        self._assets[resolved_id] = snapshot
+        self._content_bounds[resolved_id] = content_bounds
         self._revision += 1
         return resolved_id
 
@@ -94,9 +97,11 @@ class PlacedAssetStore:
             raise KeyError(f"unknown placed asset: {asset_id}")
         if current.mode is not PlacedAssetMode.EMBEDDED:
             raise ValueError("placed asset must be embedded")
-        self._assets[asset_id] = PlacedAssetSnapshot(
-            image=QImage(image),
-            source_size=image.size(),
+        retained_image = _retained_image(image)
+        content_bounds = _image_content_bounds(retained_image)
+        updated = PlacedAssetSnapshot(
+            image=retained_image,
+            source_size=retained_image.size(),
             mode=PlacedAssetMode.EMBEDDED,
             source_path=None,
             status=PlacedAssetStatus.READY,
@@ -106,7 +111,8 @@ class PlacedAssetStore:
             content_revision=current.content_revision + 1,
             generation=current.generation,
         )
-        self._content_bounds[asset_id] = _image_content_bounds(image)
+        self._assets[asset_id] = updated
+        self._content_bounds[asset_id] = content_bounds
         self._resources.touch(asset_id)
         self._revision += 1
         return True
@@ -126,14 +132,11 @@ class PlacedAssetStore:
         resolved_id = asset_id or uuid.uuid4()
         if resolved_id in self._assets:
             raise ValueError("placed asset ID already exists")
-        self._resources.create(
-            ProjectResourceKind.LINKED_RASTER,
-            editable=False,
-            resource_id=resolved_id,
-        )
-        self._assets[resolved_id] = PlacedAssetSnapshot(
-            image=QImage(image),
-            source_size=image.size(),
+        retained_image = _retained_image(image)
+        content_bounds = _image_content_bounds(retained_image)
+        snapshot = PlacedAssetSnapshot(
+            image=retained_image,
+            source_size=retained_image.size(),
             mode=PlacedAssetMode.LINKED,
             source_path=Path(path),
             status=PlacedAssetStatus.READY,
@@ -143,7 +146,13 @@ class PlacedAssetStore:
             content_revision=0,
             generation=0,
         )
-        self._content_bounds[resolved_id] = _image_content_bounds(image)
+        self._resources.create(
+            ProjectResourceKind.LINKED_RASTER,
+            editable=False,
+            resource_id=resolved_id,
+        )
+        self._assets[resolved_id] = snapshot
+        self._content_bounds[resolved_id] = content_bounds
         self._revision += 1
         return resolved_id
 
@@ -177,6 +186,7 @@ class PlacedAssetStore:
     def restore(self, asset_id: uuid.UUID, snapshot: PlacedAssetSnapshot) -> None:
         """Create or replace one asset with an exact retained snapshot."""
         resource_kind = self._resource_kind(snapshot.mode)
+        content_bounds = _optional_image_content_bounds(snapshot.image)
         existing = self._resources.get(asset_id)
         if existing is None:
             self._resources.create(
@@ -185,7 +195,7 @@ class PlacedAssetStore:
                 resource_id=asset_id,
             )
         self._assets[asset_id] = snapshot
-        self._content_bounds[asset_id] = _optional_image_content_bounds(snapshot.image)
+        self._content_bounds[asset_id] = content_bounds
         if existing is None:
             pass
         elif existing.kind is not resource_kind:
@@ -203,8 +213,9 @@ class PlacedAssetStore:
         resource = self._resources.get(asset_id)
         if resource is None or resource.kind is not self._resource_kind(snapshot.mode):
             raise ValueError("placed payload does not match its resource record")
+        content_bounds = _optional_image_content_bounds(snapshot.image)
         self._assets[asset_id] = snapshot
-        self._content_bounds[asset_id] = _optional_image_content_bounds(snapshot.image)
+        self._content_bounds[asset_id] = content_bounds
         self._revision += 1
 
     def remove(self, asset_id: uuid.UUID) -> bool:
@@ -268,9 +279,11 @@ class PlacedAssetStore:
             or image.isNull()
         ):
             return None
+        retained_image = _retained_image(image)
+        content_bounds = _image_content_bounds(retained_image)
         updated = PlacedAssetSnapshot(
-            image=QImage(image),
-            source_size=image.size(),
+            image=retained_image,
+            source_size=retained_image.size(),
             mode=PlacedAssetMode.LINKED,
             source_path=Path(path),
             status=PlacedAssetStatus.READY,
@@ -281,7 +294,7 @@ class PlacedAssetStore:
             generation=generation,
         )
         self._assets[asset_id] = updated
-        self._content_bounds[asset_id] = _image_content_bounds(image)
+        self._content_bounds[asset_id] = content_bounds
         self._resources.touch(asset_id)
         self._revision += 1
         return updated
@@ -355,6 +368,14 @@ class PlacedAssetStore:
 def _optional_image_content_bounds(image: QImage | None) -> QRectF | None:
     """Return alpha-tight bounds when retained pixels are available."""
     return None if image is None else _image_content_bounds(image)
+
+
+def _retained_image(image: QImage) -> QImage:
+    """Return a valid implicitly shared authoritative image snapshot."""
+    retained = QImage(image)
+    if retained.isNull():
+        raise MemoryError("authoritative image retention was rejected")
+    return retained
 
 
 def _image_content_bounds(image: QImage) -> QRectF | None:
