@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.0.6 (2026-08-28)
+
+### Bug Fixes
+
+- Retain workflow images through memory contention
+  ([`1a61b76`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/1a61b76fe7a9c3d6e7d37d0bcf61e2dd68ccb258))
+
+
 ## v1.0.5 (2026-08-28)
 
 ### Performance Improvements
