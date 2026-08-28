@@ -40,8 +40,18 @@ def _git_root() -> Path:
 
 
 def _ensure_hook_directory(git_root: Path) -> Path:
-    """Ensure the git hook directory exists and return its path."""
-    hook_dir = git_root / ".git" / "hooks"
+    """Ensure the repository-owned hook directory exists and return its path."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+            cwd=git_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError("Error resolving the repository hook directory.") from exc
+    hook_dir = Path(result.stdout.strip())
     hook_dir.mkdir(parents=True, exist_ok=True)
     return hook_dir
 
@@ -163,7 +173,8 @@ fi
 
 # --- Test Caching ---
 # If the staged content (tree) hasn't changed since the last successful test run, skip tests.
-CACHE_FILE=".git/hooks/last_passed_tree"
+HOOKS_DIR=$(git rev-parse --path-format=absolute --git-path hooks) || exit 1
+CACHE_FILE="$HOOKS_DIR/last_passed_tree"
 CURRENT_TREE=$(git write-tree)
 
 if [ -f "$CACHE_FILE" ]; then
@@ -174,15 +185,17 @@ if [ -f "$CACHE_FILE" ]; then
     fi
 fi
 
-# 4. Run Pytest (prefer parallel execution when pytest-xdist is installed)
+# 4. Run the authoritative CI profile outside the commit's temporary Git context.
+# Git exports its locked temporary index to hooks. Tests create disposable repositories,
+# so inheriting any repository-local Git variable can redirect their config, refs, or
+# index operations back into this worktree.
 echo "Running tests in .venv..."
-if "$PYTHON" -m pip show pytest-xdist >/dev/null 2>&1; then
-    echo "pytest-xdist detected; running pytest -n auto..."
-    "$PYTHON" -m pytest -n auto
-else
-    echo "pytest-xdist not found; running pytest serially."
-    "$PYTHON" -m pytest
-fi
+(
+    for GIT_VARIABLE in $(git rev-parse --local-env-vars); do
+        unset "$GIT_VARIABLE"
+    done
+    "$PYTHON" tools/test.py ci
+)
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
