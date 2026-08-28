@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.0.5 (2026-08-28)
+
+### Performance Improvements
+
+- Keep shared-edge translation interactive
+  ([`31f85e9`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/31f85e9484d877f42cbf6396e92f503300bbe56f))
+
+
 ## v1.0.4 (2026-08-15)
 
 ### Build System
