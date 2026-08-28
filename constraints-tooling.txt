@@ -10,6 +10,7 @@ black==26.5.1
 build==1.5.0
 packaging==26.3
 python-semantic-release==10.6.1
+GitPython==3.1.59
 twine==7.0.0
 readme-renderer==45.0
 maturin==1.14.1
