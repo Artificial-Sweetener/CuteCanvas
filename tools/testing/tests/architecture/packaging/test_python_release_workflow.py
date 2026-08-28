@@ -172,6 +172,24 @@ def test_candidate_gate_provisions_linux_qt_runtime_before_import_proof() -> Non
     assert install_runtime < verify_closure
 
 
+def test_optional_candidate_build_cannot_skip_release_completion() -> None:
+    """Finalize verified Python-only releases after optional native work skips."""
+    workflow = _workflow("release.yml")
+    finalize = workflow[
+        workflow.index("  finalize:") : workflow.index("  publish-waterfall:")
+    ]
+    publish = workflow[
+        workflow.index("  publish-waterfall:") : workflow.index("  cleanup-candidate:")
+    ]
+    assert "always() &&" in finalize
+    assert "needs.prepare.result == 'success'" in finalize
+    assert "needs.candidate-gate.result == 'success'" in finalize
+    assert "always() &&" in publish
+    assert "needs.prepare.result == 'success'" in publish
+    assert "needs.candidate-gate.result == 'success'" in publish
+    assert "needs.finalize.result == 'success'" in publish
+
+
 def test_every_release_tool_invocation_has_its_pinned_runtime() -> None:
     """Provision plan dependencies before every local release-tool invocation."""
     invocation_pattern = re.compile(
