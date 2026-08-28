@@ -27,6 +27,7 @@ else:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
 
 import pytest
+from git import Actor
 
 from tools.testing.policy import repository_root
 
@@ -83,6 +84,12 @@ def test_python_build_tools_share_repository_owned_versions() -> None:
         ]["requires"]
         assert f"setuptools=={constraints['setuptools']}" in build_requirements
         assert f"setuptools_scm=={constraints['setuptools-scm']}" in build_requirements
+
+
+def test_semantic_release_runtime_dependencies_are_compatible() -> None:
+    """Keep GitPython's author parser compatible with semantic-release."""
+    author = "semantic-release <semantic-release@users.noreply.github.com>"
+    assert Actor.name_email_regex.fullmatch(author) is not None
 
 
 def test_ferrastra_release_updates_cargo_version_and_lock_together() -> None:
