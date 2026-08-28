@@ -31,6 +31,11 @@ from qpane.sdk.scene import (
     TriangularLayerMappingPatch,
 )
 
+from .shared_edge_participant import (
+    shared_boundary_clearance,
+    shared_boundary_signed_area_twice,
+)
+
 _SEARCH_STEPS = 24
 _OFFSET_EPSILON = 1e-9
 
@@ -45,6 +50,8 @@ class _TranslationParticipant(Protocol):
     seam_indexes: tuple[int, int]
     translation_indexes: tuple[int, ...]
     interior_side: int
+    initial_clearance: float
+    initial_signed_area_twice: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,22 +118,19 @@ def _mappings_for_distance(
             (
                 point + displacement
                 if index in participant.translation_indexes
-                else QPointF(point)
+                else point
             )
             for index, point in enumerate(participant.scene_boundary)
         )
         if (
-            _signed_area_twice(participant.scene_boundary) * _signed_area_twice(target)
+            participant.initial_signed_area_twice
+            * shared_boundary_signed_area_twice(target)
             <= 0.0
         ):
             raise ValueError("shared-edge translation reverses boundary winding")
-        initial_clearance = _boundary_clearance(
-            participant.scene_boundary,
-            participant.translation_indexes,
-        )
-        required_clearance = min(minimum_thickness, initial_clearance)
+        required_clearance = min(minimum_thickness, participant.initial_clearance)
         if (
-            _boundary_clearance(target, participant.translation_indexes)
+            shared_boundary_clearance(target, participant.translation_indexes)
             < required_clearance - _OFFSET_EPSILON
         ):
             raise ValueError("shared-edge translation violates minimum thickness")
@@ -205,81 +209,9 @@ def _nearest_valid_translation(
     return requested * valid_fraction, valid_mappings
 
 
-def _boundary_clearance(
-    boundary: tuple[QPointF, ...],
-    moving_indexes: tuple[int, ...],
-) -> float:
-    """Return the seam's nearest finite collision within one boundary."""
-    moving = set(moving_indexes)
-    seam_start, seam_end = max(
-        (
-            (boundary[first], boundary[second])
-            for first in moving_indexes
-            for second in moving_indexes
-            if first < second
-        ),
-        key=lambda points: _point_distance(*points),
-    )
-    clearance = math.inf
-    for index, edge_start in enumerate(boundary):
-        next_index = (index + 1) % len(boundary)
-        edge_end = boundary[next_index]
-        edge_indexes = {index, next_index}
-        shared_indexes = edge_indexes.intersection(moving)
-        if edge_indexes.issubset(moving):
-            continue
-        if shared_indexes:
-            clearance = min(clearance, _point_distance(edge_start, edge_end))
-            continue
-        clearance = min(
-            clearance,
-            _segment_distance(seam_start, seam_end, edge_start, edge_end),
-        )
-    if not math.isfinite(clearance):
-        raise ValueError("shared-edge participant has no exterior boundary")
-    return clearance
-
-
-def _segment_distance(
-    first_start: QPointF,
-    first_end: QPointF,
-    second_start: QPointF,
-    second_end: QPointF,
-) -> float:
-    """Return the Euclidean distance between two finite segments."""
-    return min(
-        _point_segment_distance(first_start, second_start, second_end),
-        _point_segment_distance(first_end, second_start, second_end),
-        _point_segment_distance(second_start, first_start, first_end),
-        _point_segment_distance(second_end, first_start, first_end),
-    )
-
-
-def _point_segment_distance(point: QPointF, start: QPointF, end: QPointF) -> float:
-    """Return the Euclidean distance from one point to a finite segment."""
-    segment = end - start
-    length_squared = QPointF.dotProduct(segment, segment)
-    if length_squared <= _OFFSET_EPSILON:
-        return _point_distance(point, start)
-    fraction = max(
-        0.0,
-        min(1.0, QPointF.dotProduct(point - start, segment) / length_squared),
-    )
-    return _point_distance(point, start + segment * fraction)
-
-
 def _point_distance(first: QPointF, second: QPointF) -> float:
     """Return the Euclidean distance between two points."""
     return math.hypot(first.x() - second.x(), first.y() - second.y())
-
-
-def _signed_area_twice(boundary: tuple[QPointF, ...]) -> float:
-    """Return twice one finite boundary's signed area."""
-    return sum(
-        point.x() * boundary[(index + 1) % len(boundary)].y()
-        - boundary[(index + 1) % len(boundary)].x() * point.y()
-        for index, point in enumerate(boundary)
-    )
 
 
 __all__ = ["SharedEdgeTranslation", "resolve_shared_edge_translation"]
