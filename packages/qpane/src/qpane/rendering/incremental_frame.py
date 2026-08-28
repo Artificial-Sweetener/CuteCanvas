@@ -23,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtGui import QImage
 
 from ..execution import (
     CancellationToken,
@@ -39,6 +39,7 @@ from ..execution import (
 )
 from ..scene.render_plan import SceneRenderPlan
 from .item_compositor import SceneItemCompositor
+from .storage_allocation import checked_argb_image, checked_painter
 
 logger = logging.getLogger(__name__)
 _TRANSFER_PATCH_PHYSICAL_PX = 1024
@@ -329,11 +330,10 @@ def _compose_frame(
     """Compose one complete detached frame with the canonical global phase."""
     cancellation.raise_if_cancelled()
     started = time.perf_counter()
-    image = QImage(
+    image = checked_argb_image(
         request.physical_size,
-        QImage.Format.Format_ARGB32_Premultiplied,
+        device_pixel_ratio=request.device_pixel_ratio,
     )
-    image.setDevicePixelRatio(request.device_pixel_ratio)
     image.fill(Qt.GlobalColor.transparent)
     logical_width = request.physical_size.width() / request.device_pixel_ratio
     logical_height = request.physical_size.height() / request.device_pixel_ratio
@@ -345,7 +345,7 @@ def _compose_frame(
         logical_width,
         logical_height,
     )
-    painter = QPainter(image)
+    painter = checked_painter(image, "incremental frame transfer")
     try:
         painter.setClipRect(buffer_rect)
         painter.translate(QPointF(margin, margin))

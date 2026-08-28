@@ -40,7 +40,6 @@ from .presenter import RenderingPresenter
 from .scene_coordinates import SceneCoordinateSystem, ScenePoint
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
-
     from ..core import Config
     from ..core.diagnostics_broker import Diagnostics
     from ..execution import ExecutionScope

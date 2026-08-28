@@ -420,6 +420,44 @@ def test_guarded_tiles_keep_newly_visible_vector_content_exact_during_pan(
         coordinator.shutdown()
 
 
+def test_memory_pressure_cancels_prefetch_without_visible_refinement(
+    qapp: QApplication,
+) -> None:
+    """Foreground pressure must retire only speculative guard-tile work."""
+    executor = ControlledExecution()
+    cache = RenderTileCache(24 * 1024 * 1024)
+    coordinator = RenderTileWorkCoordinator(
+        execution_scope=executor.scope,
+        cache=cache,
+        ready=lambda: None,
+    )
+    document = VectorDocument(
+        uuid.uuid4(),
+        RasterBounds(0, 0, 4096, 4096),
+        _document(12).objects,
+    )
+    request = {
+        "source": VectorRenderTileSource(document, document.revision),
+        "source_to_panel": QTransform(4.0, 0.0, 0.0, 4.0, 0.0, 0.0),
+        "panel_rect": QRectF(0.0, 0.0, 1024.0, 768.0),
+        "device_pixel_ratio": 1.0,
+    }
+    try:
+        assert coordinator.request(**request).pending
+        _run_all_refinement(executor, qapp)
+        assert coordinator.request(**request).exact
+        assert coordinator.pending_count == 0
+        assert coordinator.prefetch_pending
+
+        released = coordinator.release_speculative("frame_resize")
+
+        assert released > 0
+        assert coordinator.pending_count == 0
+        assert not coordinator.prefetch_pending
+    finally:
+        coordinator.shutdown()
+
+
 def test_overview_fallback_covers_an_arbitrary_high_zoom_pan(
     qapp: QApplication,
 ) -> None:

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -37,6 +38,11 @@ class CacheRegistry:
 
     coordinator: CacheCoordinator
     consumers: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def memory_relief(self) -> Callable[[int, str], int]:
+        """Return synchronous safe-cache relief for foreground allocations."""
+        return self.coordinator.reclaim_bytes
 
     def _attach(
         self,
@@ -215,15 +221,16 @@ class CacheRegistry:
         self.consumers[consumer_id] = cache
         return cache
 
-    def attach_render_tile_cache(
+    def attach_refinement(
         self,
-        cache: Any,
+        work_coordinator: Any,
         *,
         consumer_id: str = "render_tiles",
     ) -> Any:
-        """Register the shared byte-bounded sampled-render tile cache."""
+        """Register sampled-render cache and speculative work pressure relief."""
         if consumer_id in self.consumers:
             return self.consumers[consumer_id]
+        cache = work_coordinator.cache
         cache.set_usage_changed(
             lambda usage: self.coordinator.update_usage(consumer_id, usage)
         )
@@ -234,6 +241,7 @@ class CacheRegistry:
                 get_usage=lambda: cache.usage_bytes,
                 set_budget=cache.set_budget,
                 trim_to=cache.trim_to,
+                release_speculative=work_coordinator.release_speculative,
             ),
         )
         self.consumers[consumer_id] = cache

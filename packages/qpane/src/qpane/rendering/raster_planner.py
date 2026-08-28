@@ -68,6 +68,7 @@ from .sampled_lattice import (
     source_sampling_phase_is_fractional,
 )
 from .scene_compiler import SceneRenderCompiler
+from .storage_allocation import checked_argb_image, checked_painter
 from .tiles import TileManager
 from .viewport import Viewport
 from .visibility import visible_source_rect_for_layer
@@ -1045,13 +1046,11 @@ def _compose_patch_atlas(
     patches: tuple[tuple[RasterSourcePatch, RasterSourceProduct], ...],
 ) -> QImage:
     """Combine sparse native cores into one transparent source-local image."""
-    atlas = QImage(
-        atlas_bounds.width,
-        atlas_bounds.height,
-        QImage.Format.Format_ARGB32_Premultiplied,
+    atlas = checked_argb_image(
+        QSize(atlas_bounds.width, atlas_bounds.height),
     )
     atlas.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(atlas)
+    painter = checked_painter(atlas, "raster atlas composition")
     painter.setCompositionMode(QPainter.CompositionMode_Source)
     try:
         for patch, product in patches:

@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QImage, QTransform
+from PySide6.QtGui import QTransform
 
 from ..hybrid.model import HybridRasterPrimitive
 from ..hybrid.tile_source import HybridRenderTileSource
@@ -49,6 +49,7 @@ from .sampled_lattice import (
 )
 from .sampled_projection_fallback import reproject_sampled_fallback
 from .sdk import HybridSource
+from .storage_allocation import checked_argb_image
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,10 +314,11 @@ class HybridRenderPlanner:
             clipped_bounds.width * local_to_source_x,
             clipped_bounds.height * local_to_source_y,
         )
-        image = QImage(
-            max(1, round(source_rect.width() * scale_x)),
-            max(1, round(source_rect.height() * scale_y)),
-            QImage.Format.Format_ARGB32_Premultiplied,
+        image = checked_argb_image(
+            QSize(
+                max(1, round(source_rect.width() * scale_x)),
+                max(1, round(source_rect.height() * scale_y)),
+            )
         )
         image.fill(Qt.GlobalColor.transparent)
         return SampledTileRenderData(

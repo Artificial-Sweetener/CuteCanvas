@@ -148,6 +148,11 @@ class RenderTileWorkCoordinator:
         ) + len(self._deferred)
 
     @property
+    def cache(self) -> RenderTileCache:
+        """Return the derived-product cache coordinated with this work owner."""
+        return self._cache
+
+    @property
     def pending_tile_count(self) -> int:
         """Return the number of uncached tiles currently being evaluated."""
         return sum(len(pending.signature) for pending in self._pending.values()) + sum(
@@ -173,6 +178,29 @@ class RenderTileWorkCoordinator:
     def suspend_for_interaction(self) -> None:
         """Retire incomplete products when host interaction pins visible pixels."""
         self._suspend(abandon_current=True)
+
+    def release_speculative(self, reason: str) -> int:
+        """Cancel only prefetch work while preserving visible refinement demand."""
+        if self._closed:
+            return 0
+        self._prefetch_timer.stop()
+        released = len(self._deferred_prefetch)
+        self._deferred_prefetch.clear()
+        prefetch_identities = tuple(
+            identity
+            for identity, pending in self._pending.items()
+            if pending.lane is _RefinementLane.PREFETCH
+        )
+        for identity in prefetch_identities:
+            self._cancel(identity)
+        released += len(prefetch_identities)
+        if released:
+            logger.info(
+                "Cancelled speculative render refinement | reason=%s | work=%d",
+                reason,
+                released,
+            )
+        return released
 
     def _suspend(self, *, abandon_current: bool) -> None:
         """Cancel derived work and optionally prevent the same batch from returning."""

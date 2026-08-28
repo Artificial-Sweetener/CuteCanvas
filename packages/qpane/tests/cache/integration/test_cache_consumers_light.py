@@ -28,11 +28,115 @@ from qpane.cache.consumers import (
     _run_cache_batch_trim,
     _safe_int,
 )
-from qpane.cache.coordinator import CacheCoordinator, CachePriority
+from qpane.cache.coordinator import (
+    CacheConsumerCallbacks,
+    CacheCoordinator,
+    CachePriority,
+)
 
 
 class _CoordinatorStub(CacheCoordinator):
     """Coordinator subclass exposing update usage for testing."""
+
+
+class _ReclaimableConsumer:
+    """Expose deterministic byte release for foreground-reclamation proof."""
+
+    def __init__(self, usage_bytes: int) -> None:
+        """Initialize one fully reclaimable derived cache."""
+        self.usage_bytes = usage_bytes
+
+    def callbacks(self) -> CacheConsumerCallbacks:
+        """Return coordinator callbacks for this derived cache."""
+        return CacheConsumerCallbacks(
+            get_usage=lambda: self.usage_bytes,
+            set_budget=lambda _target: None,
+            trim_to=self.trim_to,
+        )
+
+    def trim_to(self, target_bytes: int) -> None:
+        """Release retained derived bytes down to the requested target."""
+        self.usage_bytes = min(self.usage_bytes, target_bytes)
+
+
+def test_foreground_reclamation_cancels_speculation_before_cache_trim() -> None:
+    """Pressure relief must stop future allocation work before releasing products."""
+    events: list[str] = []
+    usage_bytes = 40
+
+    def usage() -> int:
+        """Return the current derived cache usage."""
+        return usage_bytes
+
+    def trim(target_bytes: int) -> None:
+        """Record cache trimming after speculative cancellation."""
+        nonlocal usage_bytes
+        events.append("trim")
+        usage_bytes = min(usage_bytes, target_bytes)
+
+    def release(reason: str) -> int:
+        """Record one speculative cancellation batch."""
+        events.append(f"release:{reason}")
+        return 3
+
+    coordinator = CacheCoordinator(active_budget_bytes=1024)
+    coordinator.register_consumer(
+        "previews",
+        priority=CachePriority.RASTER_PREVIEWS,
+        callbacks=CacheConsumerCallbacks(
+            get_usage=usage,
+            set_budget=lambda _target: None,
+            trim_to=trim,
+            release_speculative=release,
+        ),
+    )
+
+    assert coordinator.reclaim_bytes(20, "frame_resize") == 20
+    assert events == ["release:frame_resize", "trim"]
+
+
+def test_foreground_reclamation_surrenders_low_priority_data_first() -> None:
+    """Allocation relief should unload idle models before visible render products."""
+    coordinator = CacheCoordinator(active_budget_bytes=1024)
+    models = _ReclaimableConsumer(40)
+    overlays = _ReclaimableConsumer(40)
+    pyramids = _ReclaimableConsumer(40)
+    coordinator.register_consumer(
+        "models",
+        priority=CachePriority.BACKGROUND_MODELS,
+        callbacks=models.callbacks(),
+    )
+    coordinator.register_consumer(
+        "overlays",
+        priority=CachePriority.DERIVED_OVERLAYS,
+        callbacks=overlays.callbacks(),
+    )
+    coordinator.register_consumer(
+        "pyramids",
+        priority=CachePriority.PYRAMIDS,
+        callbacks=pyramids.callbacks(),
+    )
+
+    freed = coordinator.reclaim_bytes(60, "frame_resize")
+
+    assert freed == 60
+    assert models.usage_bytes == 0
+    assert overlays.usage_bytes == 20
+    assert pyramids.usage_bytes == 40
+
+
+def test_foreground_reclamation_never_exceeds_available_derived_data() -> None:
+    """Relief should report an honest shortfall without touching unknown memory."""
+    coordinator = CacheCoordinator(active_budget_bytes=1024)
+    previews = _ReclaimableConsumer(25)
+    coordinator.register_consumer(
+        "previews",
+        priority=CachePriority.RASTER_PREVIEWS,
+        callbacks=previews.callbacks(),
+    )
+
+    assert coordinator.reclaim_bytes(100, "frame_resize") == 25
+    assert previews.usage_bytes == 0
 
 
 def test_run_cache_batch_trim_raises_when_hook_missing() -> None:

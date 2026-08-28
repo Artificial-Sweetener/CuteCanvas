@@ -41,6 +41,7 @@ from .piecewise_compositor import draw_piecewise_item
 from .presentation_effect_compositor import LayerPresentationEffectCompositor
 from .raster_sampling import device_aligned_raster_transform
 from .sampled_item_compositor import SampledItemCompositor
+from .storage_allocation import RenderStorageAllocator
 from .tile_compositing import fallback_output_region, tile_output_rect
 from .transient_raster_compositor import TransientRasterCompositor
 
@@ -48,9 +49,9 @@ from .transient_raster_compositor import TransientRasterCompositor
 class SceneItemCompositor:
     """Own primitive dispatch, clipping, effects, and transient layer isolation."""
 
-    def __init__(self) -> None:
+    def __init__(self, allocator: RenderStorageAllocator | None = None) -> None:
         """Initialize without a reusable transient isolation surface."""
-        self._isolation = LayerIsolationCompositor()
+        self._isolation = LayerIsolationCompositor(allocator)
         self._presentation_effects = LayerPresentationEffectCompositor()
         self._transient_rasters = TransientRasterCompositor(self._isolation)
         self._sampled_items = SampledItemCompositor(
@@ -60,6 +61,10 @@ class SceneItemCompositor:
             apply_clip=self._apply_layer_clip,
             apply_effects=self._apply_layer_effects,
         )
+
+    def release_idle_storage(self) -> int:
+        """Release reusable layer scratch while preserving scene sources."""
+        return self._isolation.release_idle_storage()
 
     def draw_visible_items(
         self,

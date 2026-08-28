@@ -36,6 +36,7 @@ from ..scene.presentation_effects import (
     LayerPresentationStyle,
 )
 from ..scene.render_plan import SceneRenderItem, SceneRenderPlan
+from .storage_allocation import checked_argb_image, checked_painter, require_image
 
 DrawLayerItems = Callable[
     [QPainter, SceneRenderPlan, tuple[SceneRenderItem, ...]], None
@@ -130,10 +131,9 @@ class LayerPresentationEffectCompositor:
             max(1, math.ceil(panel_bounds.width() * dpr)),
             max(1, math.ceil(panel_bounds.height() * dpr)),
         )
-        coverage = QImage(physical_size, QImage.Format.Format_ARGB32_Premultiplied)
-        coverage.setDevicePixelRatio(dpr)
+        coverage = checked_argb_image(physical_size, device_pixel_ratio=dpr)
         coverage.fill(Qt.GlobalColor.transparent)
-        coverage_painter = QPainter(coverage)
+        coverage_painter = checked_painter(coverage, "effect coverage")
         try:
             coverage_painter.translate(-panel_bounds.left(), -panel_bounds.top())
             draw_layer_items(coverage_painter, plan, items)
@@ -237,7 +237,7 @@ def _combined_bounds(
 def _colorized_silhouette(image: QImage, color: QColor) -> QImage:
     """Replace RGB content while preserving the source product's exact alpha."""
     result = QImage(image)
-    painter = QPainter(result)
+    painter = checked_painter(result, "effect composition")
     try:
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
         painter.fillRect(result.rect(), QColor(color))
@@ -276,15 +276,21 @@ def _outer_glow(
             max(1, round(silhouette.width() * scale)),
             max(1, round(silhouette.height() * scale)),
         )
-        small_silhouette = silhouette.scaled(
-            small_size,
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+        small_silhouette = require_image(
+            silhouette.scaled(
+                small_size,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ),
+            "presentation effect silhouette downscale",
         )
-        small_coverage = coverage.scaled(
-            small_size,
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+        small_coverage = require_image(
+            coverage.scaled(
+                small_size,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ),
+            "presentation effect coverage downscale",
         )
         small = _outer_glow(
             small_silhouette,
@@ -292,13 +298,16 @@ def _outer_glow(
             max(1.0, radius * scale),
             opacity,
         )
-        expanded = small.scaled(
-            silhouette.size(),
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+        expanded = require_image(
+            small.scaled(
+                silhouette.size(),
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ),
+            "presentation effect expansion",
         )
         expanded.setDevicePixelRatio(silhouette.devicePixelRatioF())
-        painter = QPainter(expanded)
+        painter = checked_painter(expanded, "effect expansion")
         try:
             painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_DestinationOut
@@ -328,10 +337,12 @@ def _offset_effect(
     groups: tuple[tuple[tuple[QPointF, ...], float], ...],
 ) -> QImage:
     """Draw offset silhouettes and subtract original coverage from the result."""
-    result = QImage(silhouette.size(), QImage.Format.Format_ARGB32_Premultiplied)
-    result.setDevicePixelRatio(silhouette.devicePixelRatioF())
+    result = checked_argb_image(
+        silhouette.size(),
+        device_pixel_ratio=silhouette.devicePixelRatioF(),
+    )
     result.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(result)
+    painter = checked_painter(result, "effect colorization")
     try:
         for offsets, opacity in groups:
             painter.setOpacity(max(0.0, min(1.0, opacity)))
@@ -350,11 +361,10 @@ def _offset_effect(
 def _opaque_support(coverage: QImage) -> QImage:
     """Return full alpha wherever rendered layer coverage is nonzero."""
     coverage_pixels, coverage_backing = qimage_to_numpy_const_view_argb32(coverage)
-    support = QImage(
+    support = checked_argb_image(
         coverage_backing.size(),
-        QImage.Format.Format_ARGB32_Premultiplied,
+        device_pixel_ratio=coverage_backing.devicePixelRatioF(),
     )
-    support.setDevicePixelRatio(coverage_backing.devicePixelRatioF())
     support.fill(Qt.GlobalColor.transparent)
     support_pixels, support_backing = qimage_to_numpy_view_argb32(support)
     support_pixels[coverage_pixels[..., 3] != 0] = 255

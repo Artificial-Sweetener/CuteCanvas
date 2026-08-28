@@ -27,12 +27,14 @@ from ..execution import CancellationToken
 
 @dataclass(frozen=True, slots=True)
 class SystemHeadroomSample:
-    """Immutable physical and swap-memory observation."""
+    """Immutable physical, swap, and process-commit headroom observation."""
 
     available_bytes: int
     total_bytes: int
     swap_total_bytes: int | None = None
     swap_free_bytes: int | None = None
+    commit_limit_bytes: int | None = None
+    commit_available_bytes: int | None = None
 
     def diagnostic_snapshot(self) -> dict[str, object]:
         """Return the cache-coordinator diagnostic representation."""
@@ -44,6 +46,10 @@ class SystemHeadroomSample:
             snapshot["swap_total_bytes"] = max(0, self.swap_total_bytes)
         if self.swap_free_bytes is not None:
             snapshot["swap_free_bytes"] = max(0, self.swap_free_bytes)
+        if self.commit_limit_bytes is not None:
+            snapshot["commit_limit_bytes"] = max(0, self.commit_limit_bytes)
+        if self.commit_available_bytes is not None:
+            snapshot["commit_available_bytes"] = max(0, self.commit_available_bytes)
         return snapshot
 
 
@@ -126,4 +132,6 @@ def _sample_windows_headroom() -> SystemHeadroomSample | None:
         total_bytes=int(status.total_physical),
         swap_total_bytes=swap_total,
         swap_free_bytes=swap_free,
+        commit_limit_bytes=int(status.total_page_file),
+        commit_available_bytes=int(status.available_page_file),
     )

@@ -66,6 +66,7 @@ class _BudgetedCacheConsumer:
         missing_batch_label: str,
         warn_message: str,
         pre_trim: Callable[[], None] | None = None,
+        release_speculative: Callable[[str], int] | None = None,
     ) -> None:
         """Register manager cache signals and budgets with the shared coordinator."""
         self._manager = manager
@@ -84,6 +85,7 @@ class _BudgetedCacheConsumer:
             get_usage=self._get_usage,
             set_budget=self._set_budget,
             trim_to=self._trim_to,
+            release_speculative=release_speculative,
         )
         coordinator.register_consumer(
             consumer_id,

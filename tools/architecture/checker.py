@@ -23,6 +23,7 @@ from pathlib import Path
 from .model import Diagnostic
 from .policy import load_policy
 from .python_validation import validate_python
+from .qt_allocation_validation import validate_qt_allocation_safety
 from .rust_validation import validate_rust
 from .snapshot import repository_snapshot
 from .state_validation import validate_architecture_state
@@ -48,6 +49,7 @@ def validate_repository(
         )
         source_diagnostics = [
             *validate_python(snapshot, policy),
+            *validate_qt_allocation_safety(snapshot),
             *validate_python_structure(snapshot, policy),
             *validate_rust(snapshot, policy),
         ]
