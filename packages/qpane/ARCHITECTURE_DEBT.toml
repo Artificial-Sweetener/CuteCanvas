@@ -19,7 +19,7 @@ next_extraction = "Move cache and prefetch value types, coercion, and serializat
 id = "QPANE-ARCH-002"
 owner = "QPane scene composition"
 paths = ["packages/qpane/src/qpane/rendering/item_compositor.py"]
-fingerprint = "sha256:8e47f0dec2fb0e2894bd85ac99e7ec32065889411bffc46a36f0cff8b911e894"
+fingerprint = "sha256:838373eaf4df7838856b50a4ee8f6515da09194ff263d9a8b1be9656781ef63f"
 issue = "chore:QPANE-ARCH-002"
 review_by = 2026-12-15
 responsibilities = [
@@ -34,7 +34,7 @@ next_extraction = "Extract direct and tiled raster drawing, repair selection, an
 id = "QPANE-ARCH-003"
 owner = "QPane presentation"
 paths = ["packages/qpane/src/qpane/rendering/presenter.py"]
-fingerprint = "sha256:6933f9e69bdd9c5e5fc609ba587890c7dc79c70d00e5a13d572b4dd8bcdc058a"
+fingerprint = "sha256:26cbd98136d37571caa39efcfc7ff2cd9604c43bb43e4be94a29dd29a84df310"
 issue = "chore:QPANE-ARCH-003"
 review_by = 2026-12-15
 responsibilities = [
@@ -49,14 +49,13 @@ next_extraction = "Move coordinate projection, conversion, and hit-testing behav
 id = "QPANE-ARCH-005"
 owner = "QPane buffered rendering"
 paths = ["packages/qpane/src/qpane/rendering/render.py"]
-fingerprint = "sha256:3771f576ac8d68c84fa18eb54ce2ff470954e11558caaf50ca4b1af196a12fbd"
+fingerprint = "sha256:3ba88119a31c5beb071e76aa5ab70f6963b3fc636080ac601aef643d8ab6fb35"
 issue = "chore:QPANE-ARCH-005"
 review_by = 2026-12-15
 responsibilities = [
   "base buffer allocation and damage painting",
   "scroll and transform reuse",
   "navigation refinement lifecycle",
-  "presentation metrics and diagnostics",
 ]
 next_extraction = "Extract navigation refinement state, repair publication, cancellation, and metrics into a focused refinement owner."
 
@@ -64,13 +63,13 @@ next_extraction = "Extract navigation refinement state, repair publication, canc
 id = "QPANE-ARCH-006"
 owner = "QPane tile rendering"
 paths = ["packages/qpane/src/qpane/rendering/tiles.py"]
-fingerprint = "sha256:284fcc97df7d2d55acf2cb790f3adbbdc8908eb2c2d11588e33bbcf9a5349c41"
+fingerprint = "sha256:042413e6cbbd330a4a19e32d27cc0358eea965c7ad69312fae13ee75a34e607a"
 issue = "chore:QPANE-ARCH-006"
 review_by = 2026-12-15
 responsibilities = [
-  "tile product generation and value types",
   "tile cache admission and eviction",
   "asynchronous worker, prefetch, and retry lifecycle",
+  "tile-source eviction, invalidation, and usage diagnostics",
 ]
 next_extraction = "Extract tile submission, cancellation, prefetch, outcome adoption, and retry scheduling into a tile work coordinator."
 

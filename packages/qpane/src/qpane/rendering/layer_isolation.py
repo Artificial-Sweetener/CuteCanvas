@@ -22,12 +22,19 @@ from collections.abc import Callable
 from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QImage, QPainter, QPainterPath
 
+from .storage_allocation import (
+    RenderStorageAllocationError,
+    RenderStorageAllocator,
+    checked_painter,
+)
+
 
 class LayerIsolationCompositor:
     """Own the reusable transparent surface used for one-layer replacement."""
 
-    def __init__(self) -> None:
+    def __init__(self, allocator: RenderStorageAllocator | None = None) -> None:
         """Create an isolation owner without allocating a frame-sized image."""
+        self._allocator = allocator or RenderStorageAllocator()
         self._buffer: QImage | None = None
         self._nested_buffers: list[QImage | None] = []
         self._depth = 0
@@ -54,7 +61,7 @@ class LayerIsolationCompositor:
                 depth=depth,
                 logical_clip=logical_clip,
             )
-            layer_painter = QPainter(buffer)
+            layer_painter = checked_painter(buffer, "layer isolation")
             try:
                 layer_painter.setWorldTransform(painter.worldTransform())
                 if logical_clip is not None:
@@ -95,12 +102,15 @@ class LayerIsolationCompositor:
             or buffer.size() != size
             or abs(buffer.devicePixelRatioF() - dpr) > 1e-6
         ):
-            buffer = QImage(size, QImage.Format_ARGB32_Premultiplied)
-            buffer.setDevicePixelRatio(dpr)
+            buffer = self._allocator.create_image(size, dpr)
+            if buffer.isNull():
+                raise RenderStorageAllocationError(
+                    "Native storage unavailable for isolated layer"
+                )
             self._set_buffer_at_depth(depth, buffer)
             buffer.fill(Qt.transparent)
         elif logical_clip is not None:
-            clear = QPainter(buffer)
+            clear = checked_painter(buffer, "layer isolation clear")
             try:
                 clear.setWorldTransform(painter.worldTransform())
                 clear.setClipPath(logical_clip)
@@ -111,6 +121,22 @@ class LayerIsolationCompositor:
         else:
             buffer.fill(Qt.transparent)
         return buffer
+
+    def release_idle_storage(self) -> int:
+        """Release reusable isolation buffers when no composite is active."""
+        if self._depth > 0:
+            return 0
+        buffers = tuple(
+            buffer
+            for buffer in (self._buffer, *self._nested_buffers)
+            if buffer is not None and not buffer.isNull()
+        )
+        released = sum(
+            RenderStorageAllocator.estimated_bytes(buffer.size()) for buffer in buffers
+        )
+        self._buffer = None
+        self._nested_buffers.clear()
+        return released
 
     def _buffer_at_depth(self, depth: int) -> QImage | None:
         """Return the reusable surface assigned to one nesting depth."""

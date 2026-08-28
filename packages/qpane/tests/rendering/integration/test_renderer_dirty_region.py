@@ -22,6 +22,10 @@ from PySide6.QtCore import QPointF, QRect, QRectF, QSize
 from PySide6.QtGui import QImage, QRegion, Qt, QTransform
 
 from qpane.rendering import Renderer
+from qpane.rendering.frame_geometry import (
+    COMPOSITING_PATCH_PHYSICAL_PX,
+    canonical_patch_rects,
+)
 from qpane.rendering.navigation_plan import translated_navigation_plan
 from qpane.scene.render_plan import RenderStrategy
 from qpane_test_support.render_compare import checker_image
@@ -110,12 +114,17 @@ def test_canonical_physical_patches_never_remerge(qapp) -> None:
     renderer = Renderer(host)
     renderer.allocate_buffers(QSize(1200, 700), 1.0)
 
-    patches = renderer._canonical_patch_rects(QRegion(renderer._surface.pixmap.rect()))
+    surface_rect = renderer._surface.pixmap.rect()
+    patches = canonical_patch_rects(
+        QRegion(surface_rect),
+        surface_rect=surface_rect,
+        patch_size=COMPOSITING_PATCH_PHYSICAL_PX,
+    )
 
     assert len(patches) > 1
     assert all(
-        patch.width() <= renderer._COMPOSITING_PATCH_PHYSICAL_PX
-        and patch.height() <= renderer._COMPOSITING_PATCH_PHYSICAL_PX
+        patch.width() <= COMPOSITING_PATCH_PHYSICAL_PX
+        and patch.height() <= COMPOSITING_PATCH_PHYSICAL_PX
         for patch in patches
     )
 

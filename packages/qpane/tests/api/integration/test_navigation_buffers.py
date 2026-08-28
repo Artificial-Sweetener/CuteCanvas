@@ -20,6 +20,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QRegion
+
+from qpane.rendering.navigation_buffer import scroll_repair_regions
 from qpane.rendering.render import Renderer
 
 
@@ -32,3 +36,38 @@ def test_navigation_reuse_declines_nonpositive_zoom_without_raising() -> None:
     reused = renderer.tryTransformBuffers(SimpleNamespace(zoom=0.0))
 
     assert not reused
+
+
+def test_linear_scroll_journals_only_repair_pixels_retained_by_inverse_scroll() -> None:
+    """Newly exposed pixels need repair but cannot affect a linear rollback."""
+    surface_rect = QRect(0, 0, 100, 80)
+
+    regions = scroll_repair_regions(
+        surface_rect,
+        QRegion(surface_rect),
+        dx=10,
+        dy=0,
+        bleed=2,
+        linear_scroll=True,
+    )
+
+    assert regions.translated_valid == QRegion(QRect(10, 0, 90, 80))
+    assert regions.repair == QRegion(QRect(0, 0, 12, 80))
+    assert regions.rollback == QRegion(QRect(10, 0, 2, 80))
+    assert regions.repair_rects == (QRect(0, 0, 12, 80),)
+
+
+def test_wrapped_scroll_journals_every_repaired_storage_pixel() -> None:
+    """Wrapped addressing requires every repair pixel under the old origin."""
+    surface_rect = QRect(0, 0, 100, 80)
+
+    regions = scroll_repair_regions(
+        surface_rect,
+        QRegion(surface_rect),
+        dx=10,
+        dy=0,
+        bleed=2,
+        linear_scroll=False,
+    )
+
+    assert regions.rollback == regions.repair

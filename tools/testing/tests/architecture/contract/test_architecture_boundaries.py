@@ -22,6 +22,7 @@ from pathlib import Path
 from tools.architecture.model import StructureCategoryPolicy
 from tools.architecture.policy_validation import validate_policy_ownership
 from tools.architecture.python_validation import validate_python
+from tools.architecture.qt_allocation_validation import validate_qt_allocation_safety
 from tools.architecture.rust_validation import validate_rust
 from tools.architecture.structure_validation import validate_python_structure
 from tools.testing.tests.architecture.contract.architecture_governance_support import (
@@ -69,6 +70,65 @@ def test_python_policy_reports_each_protected_boundary_rule(tmp_path: Path) -> N
         "PY009",
         "STRUCT001",
     } <= rules
+
+
+def test_retained_rendering_rejects_unchecked_native_storage_allocation(
+    tmp_path: Path,
+) -> None:
+    """Direct frame-sized Qt allocation must fail the repository architecture gate."""
+    unsafe = tmp_path / "packages/qpane/src/qpane/rendering/unsafe_surface.py"
+    write(
+        unsafe,
+        "from PySide6.QtCore import QSize\n"
+        "from PySide6.QtGui import QImage\n"
+        "IMAGE = QImage(QSize(100, 100), QImage.Format_ARGB32)\n",
+    )
+
+    diagnostics = validate_qt_allocation_safety(tmp_path)
+
+    assert [(item.rule, item.path, item.line) for item in diagnostics] == [
+        (
+            "QTALLOC001",
+            "packages/qpane/src/qpane/rendering/unsafe_surface.py",
+            3,
+        )
+    ]
+
+
+def test_retained_rendering_accepts_the_checked_allocation_owner(
+    tmp_path: Path,
+) -> None:
+    """The single checked owner may construct Qt storage for validation and retry."""
+    owner = tmp_path / "packages/qpane/src/qpane/rendering/storage_allocation.py"
+    write(
+        owner,
+        "from PySide6.QtCore import QSize\n"
+        "from PySide6.QtGui import QImage\n"
+        "IMAGE = QImage(QSize(100, 100), QImage.Format_ARGB32)\n",
+    )
+
+    assert validate_qt_allocation_safety(tmp_path) == []
+
+
+def test_retained_rendering_rejects_unchecked_native_painter_activation(
+    tmp_path: Path,
+) -> None:
+    """Direct painter activation must fail because Qt can return an inactive painter."""
+    unsafe = tmp_path / "packages/qpane/src/qpane/rendering/unsafe_painter.py"
+    write(
+        unsafe,
+        "from PySide6.QtGui import QPainter\nPAINTER = QPainter(object())\n",
+    )
+
+    diagnostics = validate_qt_allocation_safety(tmp_path)
+
+    assert [(item.rule, item.path, item.line) for item in diagnostics] == [
+        (
+            "QTALLOC002",
+            "packages/qpane/src/qpane/rendering/unsafe_painter.py",
+            2,
+        )
+    ]
 
 
 def test_global_size_policy_uses_judgment_first_diagnostics(tmp_path: Path) -> None:

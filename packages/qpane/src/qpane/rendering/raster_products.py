@@ -26,6 +26,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 
 from ..scene.identity import SourceRenderAssetKey
+from .storage_allocation import require_image
 
 
 class RasterPyramidProducts(Protocol):
@@ -203,11 +204,14 @@ class RasterRenderProductStore:
             self._preview_products.move_to_end(cache_key)
             return cached
         height = max(1, round(full_image.height() * width / full_image.width()))
-        preview = full_image.scaled(
-            width,
-            height,
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+        preview = require_image(
+            full_image.scaled(
+                width,
+                height,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ),
+            "raster preview scaling",
         )
         preview_bytes = preview.sizeInBytes()
         if preview_bytes <= self._preview_budget_bytes:

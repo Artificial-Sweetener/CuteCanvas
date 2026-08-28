@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING
 from ..types import DiagnosticRecord
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard
-
     from ..viewer import QPane
 logger = logging.getLogger(__name__)
 
@@ -172,7 +171,7 @@ def _build_aggregate_record(snapshot: dict[str, object]) -> DiagnosticRecord | N
     total_mb = _to_mb(headroom.get("total_bytes"))
     if available_mb > 0.0 and total_mb > 0.0:
         headroom_parts.append(
-            f"headroom {available_mb:.1f}/{total_mb:.1f} MB ({(available_mb/total_mb)*100:.0f}%)"
+            f"headroom {available_mb:.1f}/{total_mb:.1f} MB ({(available_mb / total_mb) * 100:.0f}%)"
         )
     swap_total_mb = _to_mb(headroom.get("swap_total_bytes"))
     swap_free_mb = _to_mb(headroom.get("swap_free_bytes"))

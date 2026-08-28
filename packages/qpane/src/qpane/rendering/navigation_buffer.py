@@ -23,6 +23,7 @@ from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QImage, QPainter, QRegion, QTransform
 
 from ..scene.render_plan import SceneRenderPlan
+from .storage_allocation import checked_painter
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,53 @@ class NavigationBufferResult:
     def __post_init__(self) -> None:
         """Detach mutable region data from the transformation operation."""
         object.__setattr__(self, "exposed_region", QRegion(self.exposed_region))
+
+
+@dataclass(frozen=True, slots=True)
+class ScrollRepairRegions:
+    """Describe valid, repair, and rollback geometry after a buffer scroll."""
+
+    translated_valid: QRegion
+    repair: QRegion
+    rollback: QRegion
+    repair_rects: tuple[QRect, ...]
+
+    def __post_init__(self) -> None:
+        """Detach mutable Qt regions and rectangles from renderer state."""
+        object.__setattr__(self, "translated_valid", QRegion(self.translated_valid))
+        object.__setattr__(self, "repair", QRegion(self.repair))
+        object.__setattr__(self, "rollback", QRegion(self.rollback))
+        object.__setattr__(
+            self,
+            "repair_rects",
+            tuple(QRect(rect) for rect in self.repair_rects),
+        )
+
+
+def scroll_repair_regions(
+    surface_rect: QRect,
+    valid_region: QRegion,
+    *,
+    dx: int,
+    dy: int,
+    bleed: int,
+    linear_scroll: bool,
+) -> ScrollRepairRegions:
+    """Plan exposed-pixel repair and the minimal pre-mutation rollback journal."""
+    surface_region = QRegion(surface_rect)
+    translated_valid = valid_region.translated(dx, dy).intersected(surface_region)
+    missing = surface_region.subtracted(translated_valid)
+    repair = QRegion()
+    for rect in missing:
+        repair = repair.united(QRegion(rect.adjusted(-bleed, -bleed, bleed, bleed)))
+    repair = repair.intersected(surface_region)
+    rollback = repair.intersected(translated_valid) if linear_scroll else repair
+    return ScrollRepairRegions(
+        translated_valid,
+        repair,
+        rollback,
+        tuple(QRect(rect) for rect in repair),
+    )
 
 
 def navigation_buffer_transform(
@@ -94,7 +142,7 @@ def transform_navigation_buffer(
         viewport_size.height(),
     ).intersected(target.rect())
     source_rect = source.rect() if source_guard_valid else target_rect
-    painter = QPainter(target)
+    painter = checked_painter(target, "navigation buffer transfer")
     try:
         painter.setCompositionMode(QPainter.CompositionMode_Source)
         painter.setClipRect(target_rect)
@@ -107,3 +155,12 @@ def transform_navigation_buffer(
     covered = transform.mapRect(QRectF(source_rect)).toAlignedRect()
     exposed = QRegion(target_rect).subtracted(QRegion(covered))
     return NavigationBufferResult(exposed)
+
+
+__all__ = [
+    "NavigationBufferResult",
+    "ScrollRepairRegions",
+    "navigation_buffer_transform",
+    "scroll_repair_regions",
+    "transform_navigation_buffer",
+]

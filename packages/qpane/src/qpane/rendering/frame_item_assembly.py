@@ -103,7 +103,12 @@ class FrameItemAssembler:
             item.descriptor.layer_id for item in projection_fallbacks
         )
         effect_items = self._effects.apply(
-            (*raster_items, *vector_items, *sampled_items, *projection_fallbacks)
+            (
+                *raster_items,
+                *vector_items,
+                *sampled_items,
+                *projection_fallbacks,
+            )
         )
         continuous_items = self._continuity.resolve(
             effect_items,

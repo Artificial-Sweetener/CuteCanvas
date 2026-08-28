@@ -22,9 +22,12 @@ from dataclasses import dataclass
 from math import isclose
 
 from PySide6.QtCore import QPointF, QRect, QRectF
+from PySide6.QtGui import QRegion
 
 from ..scene.model import SceneDescriptor
 from ..scene.render_plan import SceneContentSnapshot
+
+COMPOSITING_PATCH_PHYSICAL_PX = 512
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,3 +92,31 @@ def visible_scene_rect(
         physical_viewport_rect.bottomRight() - viewport_center - current_pan
     ) / safe_zoom + scene_center
     return QRectF(top_left_scene, bottom_right_scene).normalized()
+
+
+def canonical_patch_rects(
+    region: QRegion,
+    *,
+    surface_rect: QRect,
+    patch_size: int,
+) -> list[QRect]:
+    """Expand physical damage to globally anchored compositing patches."""
+    if region.isEmpty():
+        return []
+    patches: dict[tuple[int, int], QRect] = {}
+    for rect in region:
+        start_column = max(0, rect.left() // patch_size)
+        end_column = max(0, rect.right() // patch_size)
+        start_row = max(0, rect.top() // patch_size)
+        end_row = max(0, rect.bottom() // patch_size)
+        for row in range(start_row, end_row + 1):
+            for column in range(start_column, end_column + 1):
+                patch = QRect(
+                    column * patch_size,
+                    row * patch_size,
+                    patch_size,
+                    patch_size,
+                ).intersected(surface_rect)
+                if not patch.isEmpty():
+                    patches[(row, column)] = patch
+    return [patches[index] for index in sorted(patches)]

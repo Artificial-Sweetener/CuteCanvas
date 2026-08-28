@@ -19,7 +19,6 @@
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
 from math import isclose
 from typing import TYPE_CHECKING
 
@@ -34,16 +33,20 @@ from ..scene.render_plan import (
 from .base_raster_fast_path import base_only_raster_item
 from .coordinates import CoordinateContext
 from .frame_buffer_presenter import FrameBufferPresenter
+from .frame_geometry import COMPOSITING_PATCH_PHYSICAL_PX, canonical_patch_rects
 from .frame_patch_painter import FramePatchPainter
 from .incremental_frame import IncrementalFrameMetrics, IncrementalFrameRefiner
 from .item_compositor import SceneItemCompositor
-from .navigation_buffer import navigation_buffer_transform
+from .memory_relief import RenderMemoryRelief
+from .navigation_buffer import navigation_buffer_transform, scroll_repair_regions
 from .navigation_plan import (
     navigation_products_match,
     navigation_repair_sources_match,
     retained_raster_navigation_delta,
 )
 from .navigation_reuse_policy import requires_linear_scroll_storage
+from .renderer_metrics import RendererMetrics, RendererMetricsTracker
+from .storage_allocation import MemoryRelief, RenderStorageAllocator, require_image
 from .transient_raster import TransientRasterHandoff
 from .transient_raster_damage import transient_raster_transition_damage
 from .widget_surface import WidgetRenderSurface
@@ -53,24 +56,9 @@ if TYPE_CHECKING:
     from ..viewer import QPane
 
 
-@dataclass(frozen=True)
-class RendererMetrics:
-    """Runtime counters describing renderer buffer reuse behaviour."""
-
-    base_buffer_allocations: int
-    scroll_attempts: int
-    scroll_hits: int
-    scroll_misses: int
-    scroll_repairs: int
-    full_redraws: int
-    partial_redraws: int
-    last_paint_ms: float
-
-
 class Renderer:
     """Own the offscreen buffers plus reuse heuristics for the QPane widget."""
 
-    _COMPOSITING_PATCH_PHYSICAL_PX = 512
     _BUFFER_OVERSCAN_PHYSICAL_PX = 64
     _LARGE_VIEWPORT_GUARD_PHYSICAL_PX = 512
     _FOUR_K_VIEWPORT_GUARD_PHYSICAL_PX = 1024
@@ -84,12 +72,16 @@ class Renderer:
         qpane: "QPane",
         *,
         execution_scope: "ExecutionScope | None" = None,
+        memory_relief: MemoryRelief | None = None,
     ):
         """Bind rendering to `qpane` while tracking buffer reuse health."""
         self._qpane = qpane
         self._current_render_plan: SceneRenderPlan | None = None
         self._buffer_render_plan: SceneRenderPlan | None = None
         self._surface = WidgetRenderSurface()
+        self._memory_relief = RenderMemoryRelief(self._surface, memory_relief)
+        storage_allocator = RenderStorageAllocator(self._memory_relief)
+        self._surface.set_allocator(storage_allocator)
         self._dirty_region = QRegion()
         self._buffer_pan = QPointF(0, 0)
         self._subpixel_pan_offset = QPointF(0, 0)
@@ -98,10 +90,7 @@ class Renderer:
         self._buffer_valid_region = QRegion()
         self._presentation_transform = QTransform()
         self._viewport_physical_size = QSize()
-        self._last_paint_duration_ms = 0.0
-        self._paint_duration_sum_ms = 0.0
-        self._paint_duration_count = 0
-        self._paint_duration_max_ms = 0.0
+        self._metrics = RendererMetricsTracker()
         self._base_buffer_allocations = 0
         self._scroll_attempts = 0
         self._scroll_hits = 0
@@ -110,7 +99,8 @@ class Renderer:
         self._full_redraws = 0
         self._partial_redraws = 0
         self._transient_raster_handoff = TransientRasterHandoff()
-        self._items = SceneItemCompositor()
+        self._items = SceneItemCompositor(storage_allocator)
+        self._memory_relief.add_reclaimer(self._items.release_idle_storage)
         self._frame_presenter = FrameBufferPresenter()
         self._patch_painter = FramePatchPainter(
             qpane,
@@ -151,30 +141,27 @@ class Renderer:
             self.markDirty(plan.qpane_rect)  # Mark entire view dirty for first paint
         # Redraw dirty buffers if any region has been marked as dirty.
         if not self._dirty_region.isEmpty():
-            # Pass the entire region object and plan to the redraw methods.
             self._redraw_base_image_buffer(self._dirty_region, plan)
         # Clear the dirty region now that buffer painting is complete for this frame.
         self._dirty_region = QRegion()
         end_time = time.perf_counter()
-        self._last_paint_duration_ms = (end_time - start_time) * 1000
-        if self._last_paint_duration_ms > 0.0:
-            self._paint_duration_sum_ms += self._last_paint_duration_ms
-            self._paint_duration_count += 1
-            self._paint_duration_max_ms = max(
-                self._paint_duration_max_ms, self._last_paint_duration_ms
-            )
+        self._metrics.record_paint((end_time - start_time) * 1000)
 
         self._mark_diagnostics_dirty()
 
     def allocate_buffers(self, physical_size: QSize, dpr: float):
         """Allocate and clear the base buffer sized to the physical viewport."""
         self._navigation_refiner.cancel()
-        self._viewport_physical_size = QSize(physical_size)
-        self._buffer_overscan_physical_px = self._overscan_for_viewport(physical_size)
+        overscan_physical_px = self._overscan_for_viewport(physical_size)
         self._surface.allocate(
-            self._overscanned_buffer_size(physical_size),
+            QSize(
+                physical_size.width() + 2 * overscan_physical_px,
+                physical_size.height() + 2 * overscan_physical_px,
+            ),
             dpr,
         )
+        self._viewport_physical_size = QSize(physical_size)
+        self._buffer_overscan_physical_px = overscan_physical_px
         self._buffer_guard_valid = False
         self._buffer_valid_region = QRegion()
         self._presentation_transform.reset()
@@ -392,43 +379,49 @@ class Renderer:
         if not navigation_repair_sources_match(buffer_plan, settled_plan):
             self._scroll_misses += 1
             return False
-        if requires_linear_scroll_storage(settled_plan):
-            self._surface.scroll_linear(dx, dy)
-        else:
-            self._surface.scroll(dx, dy)
-        self._mark_diagnostics_dirty()
-        self._buffer_pan = target_buffer_pan
-        surface_region = QRegion(surface.rect())
-        self._buffer_valid_region = self._buffer_valid_region.translated(
-            dx,
-            dy,
-        ).intersected(surface_region)
-        missing_region = surface_region.subtracted(self._buffer_valid_region)
-        bleed = self._SCROLL_REPAIR_BLEED_PHYSICAL_PX
-        repair_region = QRegion()
-        for rect in missing_region:
-            repair_region = repair_region.united(
-                QRegion(rect.adjusted(-bleed, -bleed, bleed, bleed))
+        linear_scroll = requires_linear_scroll_storage(settled_plan)
+        if linear_scroll:
+            self._surface.normalize_storage()
+            surface = self._surface.pixmap
+        self._surface.begin_frame_update(QRegion())
+        try:
+            if linear_scroll:
+                self._surface.scroll_linear_transactional(dx, dy)
+            else:
+                self._surface.scroll(dx, dy)
+            repair = scroll_repair_regions(
+                surface.rect(),
+                self._buffer_valid_region,
+                dx=dx,
+                dy=dy,
+                bleed=self._SCROLL_REPAIR_BLEED_PHYSICAL_PX,
+                linear_scroll=linear_scroll,
             )
-        repair_region = repair_region.intersected(surface_region)
-        repair_rects = [QRect(rect) for rect in repair_region]
-        if (
-            repair_rects
-            and settled_plan
-            and self._repair_base_buffer_strips(repair_rects, settled_plan) is False
-        ):
-            self.markDirty()
-            self._scroll_misses += 1
-            self._buffer_valid_region = QRegion()
-            self.qpane.update()
-            return False
-        self._buffer_valid_region += repair_region
-        self._scroll_hits += 1
-        self._scroll_repairs += 1
-        self._buffer_render_plan = settled_plan
-        self._buffer_guard_valid = True
-        self._subpixel_pan_offset = QPointF()
-        self._current_render_plan = plan
+            self._surface.protect_frame_region(repair.rollback)
+            if (
+                repair.repair_rects
+                and settled_plan
+                and self._repair_base_buffer_strips(repair.repair_rects, settled_plan)
+                is False
+            ):
+                self._surface.rollback_frame_update()
+                self.markDirty()
+                self._scroll_misses += 1
+                self.qpane.update()
+                return False
+            self._buffer_valid_region = repair.translated_valid + repair.repair
+            self._buffer_pan = target_buffer_pan
+            self._scroll_hits += 1
+            self._scroll_repairs += 1
+            self._buffer_render_plan = settled_plan
+            self._buffer_guard_valid = True
+            self._subpixel_pan_offset = QPointF()
+            self._current_render_plan = plan
+        except Exception:
+            self._surface.rollback_frame_update()
+            raise
+        else:
+            self._surface.commit_frame_update()
         self.qpane.update()
         self._mark_diagnostics_dirty()
         return True
@@ -493,7 +486,7 @@ class Renderer:
 
     def get_last_paint_duration_ms(self) -> float:
         """Return the duration of the last paint call in milliseconds."""
-        return self._last_paint_duration_ms
+        return self._metrics.last_paint_ms
 
     def get_current_render_plan(self) -> SceneRenderPlan | None:
         """Return the most recent scene render plan captured during painting."""
@@ -659,7 +652,10 @@ class Renderer:
         if cached is not None:
             self._opaque_image_cache.move_to_end(cache_key)
             return cached
-        alpha = image.convertToFormat(QImage.Format.Format_Alpha8)
+        alpha = require_image(
+            image.convertToFormat(QImage.Format.Format_Alpha8),
+            "opaque image alpha conversion",
+        )
         pixels = bytes(alpha.constBits())
         width = alpha.width()
         stride = alpha.bytesPerLine()
@@ -675,7 +671,7 @@ class Renderer:
 
     def snapshot_metrics(self) -> RendererMetrics:
         """Return current renderer reuse counters for diagnostics displays."""
-        return RendererMetrics(
+        return self._metrics.snapshot(
             base_buffer_allocations=self._base_buffer_allocations,
             scroll_attempts=self._scroll_attempts,
             scroll_hits=self._scroll_hits,
@@ -683,21 +679,11 @@ class Renderer:
             scroll_repairs=self._scroll_repairs,
             full_redraws=self._full_redraws,
             partial_redraws=self._partial_redraws,
-            last_paint_ms=self._last_paint_duration_ms,
         )
 
     def paint_stats(self) -> tuple[float, float, float]:
         """Return (last, average, max) paint durations in milliseconds."""
-        average = (
-            self._paint_duration_sum_ms / self._paint_duration_count
-            if self._paint_duration_count > 0
-            else 0.0
-        )
-        return (
-            self._last_paint_duration_ms,
-            average,
-            self._paint_duration_max_ms,
-        )
+        return self._metrics.paint_stats()
 
     @classmethod
     def _plan_supports_exact_scroll_reuse(
@@ -886,41 +872,51 @@ class Renderer:
         )
         if not physical_rects:
             return
-        if full_viewport_dirty:
-            self._surface.begin_full_repaint()
-        base_only_item = base_only_raster_item(plan)
+        protected_region = QRegion()
+        for physical_rect in physical_rects:
+            protected_region += physical_rect
+        self._surface.begin_frame_update(protected_region)
+        try:
+            if full_viewport_dirty:
+                self._surface.begin_full_repaint()
+            base_only_item = base_only_raster_item(plan)
 
-        def draw(
-            painter: QPainter,
-            panel_clips: tuple[QRectF, ...],
-        ) -> None:
-            """Draw the current plan through its most direct canonical path."""
-            if base_only_item is not None:
-                self._items.draw_raster_item(
+            def draw(
+                painter: QPainter,
+                panel_clips: tuple[QRectF, ...],
+            ) -> None:
+                """Draw the current plan through its most direct canonical path."""
+                if base_only_item is not None:
+                    self._items.draw_raster_item(
+                        painter,
+                        plan,
+                        base_only_item,
+                        panel_clips=panel_clips,
+                    )
+                    return
+                self._items.draw_visible_items(
                     painter,
                     plan,
-                    base_only_item,
                     panel_clips=panel_clips,
                 )
-                return
-            self._items.draw_visible_items(
-                painter,
-                plan,
-                panel_clips=panel_clips,
-            )
 
-        if full_viewport_dirty:
-            for physical_rect in physical_rects:
-                self._paint_repair_patches([physical_rect], draw)
+            if full_viewport_dirty:
+                for physical_rect in physical_rects:
+                    self._paint_repair_patches([physical_rect], draw)
+            else:
+                self._paint_repair_patches(physical_rects, draw)
+            if full_viewport_dirty:
+                self._buffer_pan = QPointF(plan.current_pan)
+                self._subpixel_pan_offset = QPointF()
+                self._buffer_guard_valid = True
+                self._buffer_valid_region = QRegion(self._surface.pixmap.rect())
+                self._buffer_render_plan = plan
+                self._presentation_transform.reset()
+        except Exception:
+            self._surface.rollback_frame_update()
+            raise
         else:
-            self._paint_repair_patches(physical_rects, draw)
-        if full_viewport_dirty:
-            self._buffer_pan = QPointF(plan.current_pan)
-            self._subpixel_pan_offset = QPointF()
-            self._buffer_guard_valid = True
-            self._buffer_valid_region = QRegion(self._surface.pixmap.rect())
-            self._buffer_render_plan = plan
-            self._presentation_transform.reset()
+            self._surface.commit_frame_update()
 
     def _partial_damage_requires_full_repaint(self, plan: SceneRenderPlan) -> bool:
         """Reject patch painting while the backing buffer uses another viewport."""
@@ -966,7 +962,11 @@ class Renderer:
             clipped = aligned.toAlignedRect().intersected(surface_rect)
             if not clipped.isEmpty():
                 physical_region = physical_region.united(QRegion(clipped))
-        return self._canonical_patch_rects(physical_region)
+        return canonical_patch_rects(
+            physical_region,
+            surface_rect=surface_rect,
+            patch_size=COMPOSITING_PATCH_PHYSICAL_PX,
+        )
 
     def _visible_buffer_crop_is_valid(self, physical_delta: QPoint) -> bool:
         """Return whether retained pixels cover the requested visible crop."""
@@ -979,30 +979,6 @@ class Renderer:
         if not self._surface.pixmap.rect().contains(visible_crop):
             return False
         return QRegion(visible_crop).subtracted(self._buffer_valid_region).isEmpty()
-
-    def _canonical_patch_rects(self, region: QRegion) -> list[QRect]:
-        """Expand physical damage to globally anchored compositing patches."""
-        if region.isEmpty():
-            return []
-        patch_size = self._COMPOSITING_PATCH_PHYSICAL_PX
-        surface_rect = self._surface.pixmap.rect()
-        patches: dict[tuple[int, int], QRect] = {}
-        for rect in region:
-            start_column = max(0, rect.left() // patch_size)
-            end_column = max(0, rect.right() // patch_size)
-            start_row = max(0, rect.top() // patch_size)
-            end_row = max(0, rect.bottom() // patch_size)
-            for row in range(start_row, end_row + 1):
-                for column in range(start_column, end_column + 1):
-                    patch = QRect(
-                        column * patch_size,
-                        row * patch_size,
-                        patch_size,
-                        patch_size,
-                    ).intersected(surface_rect)
-                    if not patch.isEmpty():
-                        patches[(row, column)] = patch
-        return [patches[index] for index in sorted(patches)]
 
     def _overscanned_buffer_size(self, viewport_size: QSize) -> QSize:
         """Return the backing-buffer size including physical overscan."""

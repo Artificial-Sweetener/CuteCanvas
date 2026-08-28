@@ -43,6 +43,7 @@ from ..scene.source_capabilities import LayerSourceCapabilities
 from ..vector.drawing import draw_vector_document
 from ..vector.snapshot import VectorPresentationSnapshot
 from .projective_visibility import visible_source_rect
+from .storage_allocation import checked_argb_image, checked_painter
 
 
 @runtime_checkable
@@ -125,13 +126,9 @@ class SceneRegionRasterizer:
         _, invertible = scene_to_pixels.inverted()
         if not invertible:
             raise ValueError("scene sample transform must be invertible")
-        output = QImage(pixel_size, QImage.Format.Format_ARGB32_Premultiplied)
-        if output.isNull():
-            raise MemoryError("scene sample image could not be allocated")
+        output = checked_argb_image(pixel_size)
         output.fill(0)
-        painter = QPainter(output)
-        if not painter.isActive():
-            raise RuntimeError("scene sample painter could not be activated")
+        painter = checked_painter(output, "scene sample composition")
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)

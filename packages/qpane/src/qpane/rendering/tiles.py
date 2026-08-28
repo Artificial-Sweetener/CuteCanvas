@@ -20,7 +20,7 @@ import logging
 from collections import OrderedDict
 from collections import OrderedDict as OrderedDictType
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
@@ -28,7 +28,6 @@ from PySide6.QtGui import QImage
 from ..core import CacheSettings, Config
 from ..core.threading import assert_qt_main_thread
 from ..execution import (
-    CancellationToken,
     ExecutionHandle,
     ExecutionOutcome,
     ExecutionRejected,
@@ -47,26 +46,14 @@ from .cache_admission import cache_admits_bytes, estimated_image_region_bytes
 from .cache_metrics import CacheManagerMetrics, CacheMetricsMixin
 from .owner_callback import OwnerCallback
 from .raster_tile_grid import RasterTileGrid
+from .tile_product import Tile
+from .tile_product import generate_tile as _generate_tile
 
 logger = logging.getLogger(__name__)
 
 _TILE_EVICTION_BATCH = 16
 _TILE_RETRY_BASE_MS = 50
 _TILE_RETRY_MAX_MS = 1000
-
-
-@dataclass(slots=True, frozen=True)
-class Tile:
-    """A container for tile data and its memory footprint."""
-
-    key: SceneLayerTileKey
-    image: QImage
-    size_bytes: int = field(init=False)
-
-    def __post_init__(self):
-        """Calculate the byte footprint for this tile image."""
-        # QImage.sizeInBytes() is more accurate than width * height * depth/8
-        object.__setattr__(self, "size_bytes", self.image.sizeInBytes())
 
 
 @dataclass(slots=True, frozen=True)
@@ -91,21 +78,6 @@ class _SourceTilePayloadKey:
             row=key.row,
             col=key.col,
         )
-
-
-def _generate_tile(
-    key: SceneLayerTileKey,
-    source_image: QImage,
-    cancellation: CancellationToken,
-) -> Tile:
-    """Crop one detached tile product cooperatively."""
-    cancellation.raise_if_cancelled()
-    stride = key.tile_size - key.tile_overlap
-    x = key.col * stride
-    y = key.row * stride
-    cropped_image = source_image.copy(x, y, key.tile_size, key.tile_size)
-    cancellation.raise_if_cancelled()
-    return Tile(key=key, image=cropped_image)
 
 
 # Typed aliases for clarity

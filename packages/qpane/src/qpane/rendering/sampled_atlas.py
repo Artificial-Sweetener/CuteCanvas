@@ -21,12 +21,13 @@ import uuid
 from collections.abc import Hashable
 from math import isclose
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QImage, QPainter
 
 from ..scene.identity import SourceRenderAssetKey, source_render_asset_key
 from ..scene.render_plan import SampledTileRenderData
 from .raster_products import RasterRenderProductStore
+from .storage_allocation import checked_argb_image, checked_painter
 
 _MAX_ATLAS_PIXELS = 4 * 1024 * 1024
 
@@ -86,13 +87,11 @@ def _compose_atlas(
     tiles: tuple[SampledTileRenderData, ...],
 ) -> QImage:
     """Copy native tile cores onto one transparent source-anchored image."""
-    atlas = QImage(
-        round(atlas_rect.width()),
-        round(atlas_rect.height()),
-        QImage.Format.Format_ARGB32_Premultiplied,
+    atlas = checked_argb_image(
+        QSize(round(atlas_rect.width()), round(atlas_rect.height())),
     )
     atlas.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(atlas)
+    painter = checked_painter(atlas, "sampled atlas composition")
     painter.setCompositionMode(QPainter.CompositionMode_Source)
     try:
         for tile in tiles:

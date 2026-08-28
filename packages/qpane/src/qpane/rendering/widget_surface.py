@@ -17,25 +17,42 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QImage, QPainter, QPixmap, QRegion
 
+from .storage_allocation import (
+    RenderStorageAllocationError,
+    RenderStorageAllocator,
+    checked_painter,
+    require_image,
+)
+from .surface_frame_continuity import SurfaceFrameContinuity
 from .wrapped_geometry import wrapped_rect_segments
+
+logger = logging.getLogger(__name__)
 
 
 class WidgetRenderSurface:
     """Own one GUI-thread pixmap that can be scrolled and painted in place."""
 
-    def __init__(self) -> None:
+    def __init__(self, allocator: RenderStorageAllocator | None = None) -> None:
         """Create an unallocated surface."""
+        self._allocator = allocator or RenderStorageAllocator()
         self._pixmap = QPixmap()
         self._image = QImage()
         self._staging_pixmap = QPixmap()
         self._spare_pixmap = QPixmap()
+        self._frame_continuity = SurfaceFrameContinuity(self._allocator)
         self._image_current = False
         self._storage_origin = QPoint()
+
+    def set_allocator(self, allocator: RenderStorageAllocator) -> None:
+        """Replace the allocation boundary without disturbing retained storage."""
+        self._allocator = allocator
+        self._frame_continuity.set_allocator(allocator)
 
     @property
     def pixmap(self) -> QPixmap:
@@ -53,17 +70,48 @@ class WidgetRenderSurface:
         return QPoint(self._storage_origin)
 
     def allocate(self, physical_size: QSize, device_pixel_ratio: float) -> None:
-        """Allocate transparent native storage with the requested DPR."""
-        self._image = QImage(
+        """Atomically replace storage after every candidate allocation succeeds."""
+        if physical_size.isEmpty():
+            return
+        candidate_image = self._allocator.create_image(
             physical_size,
-            QImage.Format.Format_ARGB32_Premultiplied,
+            device_pixel_ratio,
         )
-        self._image.setDevicePixelRatio(device_pixel_ratio)
-        self._image.fill(Qt.GlobalColor.transparent)
-        self.publish_image()
-        self._spare_pixmap = QPixmap(physical_size)
-        self._spare_pixmap.setDevicePixelRatio(device_pixel_ratio)
-        self._spare_pixmap.fill(Qt.GlobalColor.transparent)
+        self._require_storage(candidate_image, "render image")
+        candidate_image.fill(Qt.GlobalColor.transparent)
+        candidate_pixmap = self._allocator.create_pixmap_from_image(candidate_image)
+        self._require_storage(candidate_pixmap, "render publication")
+        candidate_spare = self._allocator.create_pixmap(
+            physical_size,
+            device_pixel_ratio,
+        )
+        if candidate_spare.isNull():
+            logger.warning(
+                "Reclaimable staging reserve unavailable; retaining front frame | "
+                "requested_bytes=%d",
+                self._allocator.estimated_bytes(physical_size),
+                extra={
+                    "memory_pressure": {
+                        "operation": "staging_reserve",
+                        "requested_bytes": self._allocator.estimated_bytes(
+                            physical_size
+                        ),
+                    }
+                },
+            )
+        else:
+            candidate_spare.fill(Qt.GlobalColor.transparent)
+        if self.is_allocated and not self._frame_continuity.has_replacement:
+            self._frame_continuity.retain_replacement(
+                self._pixmap,
+                self._storage_origin,
+            )
+        self._image = candidate_image
+        self._pixmap = candidate_pixmap
+        self._staging_pixmap = QPixmap()
+        self._spare_pixmap = candidate_spare
+        self._storage_origin = QPoint()
+        self._image_current = True
 
     def matches(self, physical_size: QSize, device_pixel_ratio: float) -> bool:
         """Return whether the surface matches the requested physical geometry."""
@@ -84,6 +132,47 @@ class WidgetRenderSurface:
             raise RuntimeError("render surface must be allocated before repainting")
         self._storage_origin = QPoint()
         self._image_current = False
+
+    def begin_frame_update(self, protected_region: QRegion | None = None) -> None:
+        """Begin one frame transaction and protect its intended mutation region."""
+        if not self.is_allocated:
+            return
+        self._frame_continuity.begin(
+            self._pixmap,
+            self._storage_origin,
+            (
+                QRegion(self._pixmap.rect())
+                if protected_region is None
+                else protected_region
+            ),
+        )
+
+    def protect_frame_region(self, logical_region: QRegion) -> None:
+        """Retain storage patches before a frame transaction mutates them."""
+        self._frame_continuity.protect(
+            self._pixmap,
+            self._storage_origin,
+            logical_region,
+        )
+
+    def scroll_linear_transactional(self, dx: int, dy: int) -> QRegion:
+        """Scroll linear storage while retaining only pixels needed for rollback."""
+        self.normalize_storage()
+        return self._frame_continuity.scroll_linear(self._pixmap, dx, dy)
+
+    def commit_frame_update(self) -> None:
+        """Accept the current frame and release its protected predecessor."""
+        self._frame_continuity.commit()
+
+    def rollback_frame_update(self) -> bool:
+        """Restore the last completed frame after a rejected or failed update."""
+        restored = self._frame_continuity.rollback(self._pixmap)
+        if restored is None:
+            return False
+        self._pixmap, self._storage_origin = restored
+        self._image = QImage()
+        self._image_current = False
+        return True
 
     def scroll(self, dx: int, dy: int) -> QRegion:
         """Advance the wrapped origin and return newly exposed logical pixels."""
@@ -117,18 +206,18 @@ class WidgetRenderSurface:
     def snapshot(self) -> QImage:
         """Return a linear image snapshot in logical buffer order."""
         if self._storage_origin.isNull():
-            return self._pixmap.toImage()
-        snapshot = QImage(
+            return require_image(self._pixmap.toImage(), "surface snapshot")
+        snapshot = self._allocator.create_image(
             self._pixmap.size(),
-            QImage.Format.Format_ARGB32_Premultiplied,
+            self._pixmap.devicePixelRatio(),
         )
-        snapshot.setDevicePixelRatio(self._pixmap.devicePixelRatio())
+        self._require_storage(snapshot, "wrapped surface snapshot")
         snapshot.fill(
             Qt.GlobalColor.transparent
             if self._pixmap.hasAlphaChannel()
             else Qt.GlobalColor.black
         )
-        painter = QPainter(snapshot)
+        painter = checked_painter(snapshot, "wrapped surface snapshot")
         try:
             self._draw_logical_rect(
                 painter,
@@ -146,17 +235,20 @@ class WidgetRenderSurface:
             raise RuntimeError("render surface must be allocated before image access")
         self.normalize_storage()
         if not self._image_current:
-            self._image = self._pixmap.toImage()
+            candidate = require_image(
+                self._pixmap.toImage(),
+                "native image synchronization",
+            )
+            self._image = candidate
             self._image_current = True
         return self._image
 
     def publish_image(self) -> None:
-        """Replace the native presentation with the current full image."""
-        if self._image.isNull():
-            self._pixmap = QPixmap()
-            self._image_current = False
-            return
-        self._pixmap = QPixmap.fromImage(self._image)
+        """Publish a valid working image without interpreting failure as blank."""
+        self._require_storage(self._image, "working image publication")
+        candidate = self._allocator.create_pixmap_from_image(self._image)
+        self._require_storage(candidate, "native image publication")
+        self._pixmap = candidate
         self._storage_origin = QPoint()
         self._image_current = True
 
@@ -168,7 +260,7 @@ class WidgetRenderSurface:
             raise ValueError("patch dimensions must match the physical target")
         self.normalize_storage()
         device_pixel_ratio = self._pixmap.devicePixelRatio()
-        painter = QPainter(self._pixmap)
+        painter = checked_painter(self._pixmap, "surface patch publication")
         try:
             painter.setCompositionMode(QPainter.CompositionMode_Source)
             painter.drawImage(
@@ -204,7 +296,7 @@ class WidgetRenderSurface:
             )
             self._image_current = False
             return
-        painter = QPainter(self._pixmap)
+        painter = checked_painter(self._pixmap, "surface frame mutation")
         try:
             draw(painter)
         finally:
@@ -218,7 +310,7 @@ class WidgetRenderSurface:
     ) -> None:
         """Map logical repair drawing directly onto wrapped native storage."""
         device_pixel_ratio = self._pixmap.devicePixelRatio()
-        painter = QPainter(self._pixmap)
+        painter = checked_painter(self._pixmap, "wrapped surface frame mutation")
         try:
             for logical_rect in logical_region:
                 clipped = logical_rect.intersected(self._pixmap.rect())
@@ -252,7 +344,9 @@ class WidgetRenderSurface:
         """Materialize wrapped pixels linearly when a non-pan operation requires it."""
         if not self.is_allocated or self._storage_origin.isNull():
             return
-        self._image = self.snapshot()
+        candidate = self.snapshot()
+        self._require_storage(candidate, "wrapped storage snapshot")
+        self._image = candidate
         self.publish_image()
 
     def prepare_staging(self) -> None:
@@ -266,17 +360,19 @@ class WidgetRenderSurface:
             self._staging_pixmap = self._spare_pixmap
             self._spare_pixmap = QPixmap()
         else:
-            self._staging_pixmap = QPixmap(self._pixmap.size())
-            self._staging_pixmap.setDevicePixelRatio(self._pixmap.devicePixelRatio())
-            self._staging_pixmap.fill(Qt.GlobalColor.transparent)
+            candidate = self._allocator.create_pixmap(
+                self._pixmap.size(),
+                self._pixmap.devicePixelRatio(),
+            )
+            self._require_storage(candidate, "staging pixmap")
+            candidate.fill(Qt.GlobalColor.transparent)
+            self._staging_pixmap = candidate
 
     def paint_staging(self, draw: Callable[[QPainter], None]) -> None:
         """Apply one bounded mutation to the unpublished staging image."""
         if self._staging_pixmap.isNull():
             raise RuntimeError("staging must be prepared before painting")
-        painter = QPainter(self._staging_pixmap)
-        if not painter.isActive():
-            raise RuntimeError("staging painter could not be activated")
+        painter = checked_painter(self._staging_pixmap, "staging frame mutation")
         try:
             draw(painter)
         finally:
@@ -293,9 +389,7 @@ class WidgetRenderSurface:
             raise ValueError("transfer image geometry must match native staging")
         if not image.rect().contains(physical_rect):
             raise ValueError("transfer patch must be inside the source image")
-        painter = QPainter(self._staging_pixmap)
-        if not painter.isActive():
-            raise RuntimeError("staging painter could not be activated")
+        painter = checked_painter(self._staging_pixmap, "staging patch transfer")
         device_pixel_ratio = self._staging_pixmap.devicePixelRatio()
         try:
             painter.setCompositionMode(QPainter.CompositionMode_Source)
@@ -328,15 +422,36 @@ class WidgetRenderSurface:
 
     def restore(self, image: QImage) -> None:
         """Replace native storage with a saved image snapshot."""
-        self.discard_staging()
         if image.isNull():
-            self._pixmap = QPixmap()
-            self._image = QImage()
-            self._storage_origin = QPoint()
-            self._image_current = False
+            self.clear_presentation()
             return
-        self._image = QImage(image)
-        self.publish_image()
+        candidate_image = QImage(image)
+        candidate_pixmap = self._allocator.create_pixmap_from_image(candidate_image)
+        self._require_storage(candidate_pixmap, "restored image publication")
+        self.discard_staging()
+        self._image = candidate_image
+        self._pixmap = candidate_pixmap
+        self._storage_origin = QPoint()
+        self._image_current = True
+
+    def clear_presentation(self) -> None:
+        """Commit the explicit semantic operation that removes the front frame."""
+        self._pixmap = QPixmap()
+        self._image = QImage()
+        self._staging_pixmap = QPixmap()
+        self._spare_pixmap = QPixmap()
+        self._frame_continuity.clear()
+        self._storage_origin = QPoint()
+        self._image_current = False
+
+    def release_reclaimable_storage(self) -> int:
+        """Release unpublished and spare frames while preserving presentation."""
+        released = self._pixmap_bytes(self._staging_pixmap) + self._pixmap_bytes(
+            self._spare_pixmap
+        )
+        self._staging_pixmap = QPixmap()
+        self._spare_pixmap = QPixmap()
+        return released
 
     def _draw_logical_rect(
         self,
@@ -345,9 +460,15 @@ class WidgetRenderSurface:
         target_origin: QPoint,
     ) -> None:
         """Draw one logical physical rectangle from wrapped native storage."""
-        source_image = self._pixmap.toImage()
+        source_image = require_image(
+            self._pixmap.toImage(),
+            "wrapped source extraction",
+        )
         if not source_image.hasAlphaChannel():
-            source_image = source_image.convertToFormat(QImage.Format.Format_RGBX8888)
+            source_image = require_image(
+                source_image.convertToFormat(QImage.Format.Format_RGBX8888),
+                "wrapped source conversion",
+            )
         for segment in wrapped_rect_segments(
             logical_rect,
             surface_size=self._pixmap.size(),
@@ -371,3 +492,18 @@ class WidgetRenderSurface:
             rect.width() / device_pixel_ratio,
             rect.height() / device_pixel_ratio,
         )
+
+    @staticmethod
+    def _require_storage(storage: QImage | QPixmap, operation: str) -> None:
+        """Reject a null native candidate without mutating retained state."""
+        if storage.isNull():
+            raise RenderStorageAllocationError(
+                f"Native storage unavailable during {operation}"
+            )
+
+    @staticmethod
+    def _pixmap_bytes(pixmap: QPixmap) -> int:
+        """Return conservative storage bytes for one native pixmap."""
+        if pixmap.isNull():
+            return 0
+        return RenderStorageAllocator.estimated_bytes(pixmap.size())

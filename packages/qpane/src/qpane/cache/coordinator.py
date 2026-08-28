@@ -21,68 +21,17 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
-from enum import IntEnum
+
+from .coordinator_model import (
+    CacheConsumerCallbacks,
+    CachePriority,
+    ConsumerRegistration,
+    ConsumerState,
+    TrimRecord,
+)
+from .foreground_reclamation import reclaim_for_foreground_allocation
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class CacheConsumerCallbacks:
-    """Hooks that let the coordinator inspect and enforce cache usage."""
-
-    get_usage: Callable[[], int]
-    set_budget: Callable[[int], None]
-    trim_to: Callable[[int], None]
-
-
-class CachePriority(IntEnum):
-    """Eviction ordering where lower values trim before higher ones."""
-
-    BACKGROUND_MODELS = 10
-    BRUSH_TIPS = 15
-    VECTOR_PRODUCTS = 18
-    DERIVED_OVERLAYS = 20
-    RASTER_PREVIEWS = 25
-    TILES = 30
-    PYRAMIDS = 40
-
-
-@dataclass(slots=True)
-class ConsumerRegistration:
-    """Captured registration metadata plus optional budget hints."""
-
-    consumer_id: str
-    priority: CachePriority
-    callbacks: CacheConsumerCallbacks
-    weight: float = 1.0
-    preferred_bytes: int | None = None
-    override_bytes: int | None = None
-
-
-@dataclass(slots=True)
-class _ConsumerState:
-    """Tracks live usage for a registered consumer and the last trim applied."""
-
-    registration: ConsumerRegistration
-    usage_bytes: int = 0
-    last_trim: TrimRecord | None = None
-    capacity_bytes: int | None = None
-
-    @property
-    def consumer_id(self) -> str:
-        """Expose the registered consumer identifier for logging helpers."""
-        return self.registration.consumer_id
-
-
-@dataclass(frozen=True, slots=True)
-class TrimRecord:
-    """Describe the last trim the coordinator asked a consumer to perform."""
-
-    reason: str
-    trimmed_bytes: int
-    target_bytes: int
-    timestamp: float
 
 
 class CacheCoordinator:
@@ -103,7 +52,7 @@ class CacheCoordinator:
                 refresh cache domain rows.
         """
         self._active_budget_bytes = max(0, active_budget_bytes)
-        self._consumers: dict[str, _ConsumerState] = {}
+        self._consumers: dict[str, ConsumerState] = {}
         self._missing_consumer_logs: set[tuple[str, str]] = set()
         self._dirty_callback = dirty_callback
         self._enforcing = False
@@ -190,7 +139,7 @@ class CacheCoordinator:
                 override_bytes if override_bytes is None else max(0, override_bytes)
             ),
         )
-        state = _ConsumerState(registration=registration)
+        state = ConsumerState(registration=registration)
         self._consumers[consumer_id] = state
         target = self._resolve_target_bytes(registration)
         if target is not None:
@@ -354,6 +303,34 @@ class CacheCoordinator:
             self._total_usage() + max(0, int(size_bytes))
         ) <= self._active_budget_bytes
 
+    def reclaim_bytes(self, requested_bytes: int, reason: str) -> int:
+        """Synchronously release derived cache data for a foreground allocation.
+
+        Reclamation follows semantic eviction priority before cache size. Registered
+        consumers expose only data that is safe to recreate; authoritative source
+        content must never be registered with this coordinator.
+
+        Args:
+            requested_bytes: Minimum number of bytes the caller wants released.
+            reason: Allocation operation that triggered synchronous relief.
+
+        Returns:
+            Number of bytes reported released by all cooperating consumers.
+        """
+        result = reclaim_for_foreground_allocation(
+            self._consumers.values(),
+            requested_bytes=requested_bytes,
+            reason=reason,
+            trim_consumer=lambda state, target, trim_reason: self._trim_consumer_to(
+                state,
+                target,
+                reason=trim_reason,
+            ),
+        )
+        self._last_trim_events = result.events
+        self._mark_dirty()
+        return result.freed_bytes
+
     def _warn_unknown_consumer(self, consumer_id: str, operation: str) -> None:
         """Log once per consumer/operation pair when IDs are missing."""
         key = (consumer_id, operation)
@@ -397,7 +374,7 @@ class CacheCoordinator:
             total_weight = float(len(weights))
         return weights, total_weight
 
-    def _apply_capacity(self, state: _ConsumerState, target_bytes: int) -> None:
+    def _apply_capacity(self, state: ConsumerState, target_bytes: int) -> None:
         """Apply one cache ceiling only when the effective capacity changes."""
         target = max(0, int(target_bytes))
         if state.capacity_bytes == target:
@@ -461,7 +438,7 @@ class CacheCoordinator:
                                 }
                             )
                 if self._total_usage() > self._active_budget_bytes:
-                    contenders: list[tuple[float, CachePriority, _ConsumerState]] = []
+                    contenders: list[tuple[float, CachePriority, ConsumerState]] = []
                     for state in self._consumers.values():
                         entitlement = self._entitlement_bytes(
                             state.consumer_id, weights, total_weight
@@ -527,7 +504,7 @@ class CacheCoordinator:
             self._enforcing = False
 
     def _trim_consumer_to(
-        self, state: _ConsumerState, target: int, *, reason: str
+        self, state: ConsumerState, target: int, *, reason: str
     ) -> int:
         """Trim the cache ``state`` controls down to ``target`` bytes.
 

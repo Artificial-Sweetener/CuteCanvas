@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, QSizeF, QTimer
 from PySide6.QtGui import (
     QPainter,
-    QPainterPath,
     QPixmap,
     QRegion,
     Qt,
@@ -55,6 +54,7 @@ from ..types import OverlayState, SceneSnapshotOverlayLayer, SceneSnapshotOverla
 from ..vector.render_cache import VectorRenderCache
 from .compiled_scene import CompiledRenderScene
 from .coordinates import CoordinateContext, PanelHitTest
+from .frame_continuity import attempt_retained_frame_update
 from .frame_geometry import RenderFrameGeometry, visible_scene_rect
 from .frame_item_assembly import FrameItemAssembler
 from .frame_projector import SceneFrameProjector
@@ -80,11 +80,13 @@ from .scene_coordinates import (
     SceneCoordinateSystem,
 )
 from .scene_hit_testing import SceneRenderHitTester
+from .storage_allocation import checked_painter, presentation_painter
 from .tiles import TileManager
 from .transient_hybrid_support import TransientHybridSupport
 from .transient_raster_bridge import TransientRasterBridge
 from .vector_planner import VectorRenderPlanner
 from .viewport import Viewport
+from .viewport_border_storage import build_viewport_border_storage
 from .viewport_resize import ViewportResizeAlignment
 
 if TYPE_CHECKING:
@@ -149,6 +151,7 @@ class RenderingPresenter:
         self.renderer = Renderer(
             qpane,
             execution_scope=self._execution_scope,
+            memory_relief=cache_registry.memory_relief if cache_registry else None,
         )
         self._viewport_corner_radius = 0.0
         self._viewport_border_masks: tuple[QPixmap, ...] = ()
@@ -182,13 +185,13 @@ class RenderingPresenter:
         if cache_registry is not None:
             cache_registry.attach_vector_render_cache(self._vector_cache)
         self._render_tile_cache = RenderTileCache()
-        if cache_registry is not None:
-            cache_registry.attach_render_tile_cache(self._render_tile_cache)
         self._render_refinement = RenderTileWorkCoordinator(
             execution_scope=self._execution_scope,
             cache=self._render_tile_cache,
             ready=self._handle_render_refinement_ready,
         )
+        if cache_registry is not None:
+            cache_registry.attach_refinement(self._render_refinement)
         self._raster_planner = RasterRenderPlanner(
             compiler=self._scene_compiler,
             projector=self._frame_projector,
@@ -471,7 +474,7 @@ class RenderingPresenter:
                 if content_overlays or active_scene_overlays
                 else None
             )
-            painter = QPainter(self._qpane)
+            painter = presentation_painter(self._qpane, "blank viewport presentation")
             try:
 
                 def draw_blank_frame(target: QPainter) -> None:
@@ -498,18 +501,23 @@ class RenderingPresenter:
         if render_plan is None:
             render_plan = self.calculateRenderPlan(is_blank=is_blank)
         if render_plan:
-            self._ensure_buffer_matches_widget()
-            self.renderer.paint(render_plan)
-            painted_plan = self.renderer.get_current_render_plan()
-            self._transient_rasters.admit(
-                None if painted_plan is None else painted_plan.transient_raster
-            )
-            self._last_scroll_reuse_signature = self._scroll_reuse_signature_for_plan(
-                render_plan
-            )
+            if not attempt_retained_frame_update(
+                render_plan,
+                ensure_storage=self._ensure_buffer_matches_widget,
+                paint=self.renderer.paint,
+            ):
+                self._last_scroll_reuse_signature = None
+            else:
+                painted_plan = self.renderer.get_current_render_plan()
+                self._transient_rasters.admit(
+                    None if painted_plan is None else painted_plan.transient_raster
+                )
+                self._last_scroll_reuse_signature = (
+                    self._scroll_reuse_signature_for_plan(render_plan)
+                )
         else:
             self._last_scroll_reuse_signature = None
-        painter = QPainter(self._qpane)
+        painter = presentation_painter(self._qpane, "retained viewport presentation")
         try:
 
             def draw_frame(target: QPainter) -> None:
@@ -602,7 +610,7 @@ class RenderingPresenter:
             strict=True,
         ):
             buffer.fill(Qt.GlobalColor.transparent)
-            border_painter = QPainter(buffer)
+            border_painter = checked_painter(buffer, "viewport border composition")
             try:
                 border_painter.translate(
                     -border_rect.left(),
@@ -637,37 +645,13 @@ class RenderingPresenter:
         )
         if self._viewport_border_mask_signature == signature:
             return self._viewport_border_masks
-        rounded_path = QPainterPath()
-        rounded_path.addRoundedRect(
+        masks, buffers = build_viewport_border_storage(
             QRectF(self._qpane.rect()),
             self._viewport_corner_radius,
-            self._viewport_corner_radius,
+            border_rects,
         )
-        masks: list[QPixmap] = []
-        buffers: list[QPixmap] = []
-        for border_rect in border_rects:
-            mask = QPixmap(border_rect.size())
-            mask.fill(Qt.GlobalColor.transparent)
-            opaque = QPixmap(border_rect.size())
-            opaque.fill(Qt.GlobalColor.white)
-            mask_painter = QPainter(mask)
-            try:
-                mask_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                mask_painter.setClipPath(
-                    rounded_path.translated(
-                        -border_rect.left(),
-                        -border_rect.top(),
-                    )
-                )
-                mask_painter.drawPixmap(QPoint(), opaque)
-            finally:
-                mask_painter.end()
-            masks.append(mask)
-            buffer = QPixmap(border_rect.size())
-            buffer.fill(Qt.GlobalColor.transparent)
-            buffers.append(buffer)
-        self._viewport_border_masks = tuple(masks)
-        self._viewport_border_buffers = tuple(buffers)
+        self._viewport_border_masks = masks
+        self._viewport_border_buffers = buffers
         self._viewport_border_mask_signature = signature
         return self._viewport_border_masks
 
