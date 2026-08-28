@@ -106,6 +106,51 @@ def test_headroom_monitor_updates_budget_and_snapshot(qapp) -> None:
         qapp.processEvents()
 
 
+def test_headroom_monitor_limits_caches_when_windows_commit_is_contended(qapp) -> None:
+    """Commit exhaustion must trigger relief even while physical RAM is abundant."""
+
+    class _CommitContendedProvider:
+        class _VM:
+            total = 100 * MB
+            available = 80 * MB
+
+        class _Swap:
+            total = 20 * MB
+            free = 2 * MB
+
+        @staticmethod
+        def virtual_memory():
+            return _CommitContendedProvider._VM()
+
+        @staticmethod
+        def swap_memory():
+            return _CommitContendedProvider._Swap()
+
+    qpane_widget = CuteCanvas(features=())
+    try:
+        coordinator = qpane_widget.cacheCoordinator
+        assert coordinator is not None
+        monitor = qpane_widget._state._headroom
+        monitor.set_provider(_CommitContendedProvider)
+        sample = headroom.SystemHeadroomSample(
+            available_bytes=80 * MB,
+            total_bytes=100 * MB,
+            swap_total_bytes=20 * MB,
+            swap_free_bytes=2 * MB,
+            commit_limit_bytes=120 * MB,
+            commit_available_bytes=2 * MB,
+        )
+        monitor._adopt(sample)
+
+        assert coordinator.active_budget_bytes == 0
+        snapshot = coordinator.snapshot().get("headroom") or {}
+        assert snapshot["commit_limit_bytes"] == 120 * MB
+        assert snapshot["commit_available_bytes"] == 2 * MB
+    finally:
+        qpane_widget.deleteLater()
+        qapp.processEvents()
+
+
 def test_headroom_monitor_stops_in_hard_mode(qapp) -> None:
     qpane_widget = CuteCanvas(features=())
     try:

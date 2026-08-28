@@ -148,11 +148,30 @@ class HeadroomMonitor:
             max(0, int(settings.headroom_cap_mb)) * MB,
         )
         usage_bytes = coordinator.total_usage_bytes
-        capacity_bytes = max(0, total - headroom_bytes)
-        budget_bytes = min(
-            max(available + usage_bytes - headroom_bytes, usage_bytes),
-            capacity_bytes,
+        budget_bytes = _safe_resident_budget(
+            total_bytes=total,
+            available_bytes=available,
+            resident_bytes=usage_bytes,
+            reserve_bytes=headroom_bytes,
         )
+        if (
+            sample.commit_limit_bytes is not None
+            and sample.commit_available_bytes is not None
+        ):
+            commit_limit = max(0, sample.commit_limit_bytes)
+            commit_reserve = min(
+                int(commit_limit * max(0.0, float(settings.headroom_percent))),
+                max(0, int(settings.headroom_cap_mb)) * MB,
+            )
+            budget_bytes = min(
+                budget_bytes,
+                _safe_resident_budget(
+                    total_bytes=commit_limit,
+                    available_bytes=max(0, sample.commit_available_bytes),
+                    resident_bytes=usage_bytes,
+                    reserve_bytes=commit_reserve,
+                ),
+            )
         snapshot = sample.diagnostic_snapshot()
         if (
             budget_bytes != coordinator.active_budget_bytes
@@ -190,3 +209,16 @@ class HeadroomMonitor:
 
 
 __all__ = ["HeadroomMonitor"]
+
+
+def _safe_resident_budget(
+    *,
+    total_bytes: int,
+    available_bytes: int,
+    resident_bytes: int,
+    reserve_bytes: int,
+) -> int:
+    """Return a cache budget that restores the requested system headroom."""
+    capacity = max(0, total_bytes - reserve_bytes)
+    pressure_target = max(0, available_bytes + resident_bytes - reserve_bytes)
+    return min(pressure_target, capacity)

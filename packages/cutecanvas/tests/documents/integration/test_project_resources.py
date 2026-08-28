@@ -27,6 +27,7 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 
 from cutecanvas import CuteCanvas, VectorShapeKind, VectorStyle
+from cutecanvas.placed import store as placed_store_module
 from cutecanvas.placed.model import FileFingerprint
 from cutecanvas.placed.store import PlacedAssetStore
 from cutecanvas.raster.assets import EditableRasterAssetStore
@@ -210,6 +211,38 @@ def test_imported_and_linked_pixels_share_project_resource_identity() -> None:
     assert embedded.revision == linked.revision + 1
     assert assets.remove(asset_id)
     assert resources.get(asset_id) is None
+
+
+def test_rejected_placed_image_preparation_preserves_authoritative_pixels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fallible derived-bounds update must not publish partial image state."""
+    resources = ProjectResourceStore()
+    assets = PlacedAssetStore(resources)
+    original = QImage(40, 30, QImage.Format.Format_ARGB32_Premultiplied)
+    original.fill(QColor(10, 20, 30, 255))
+    asset_id = assets.create_embedded(original)
+    original_asset_revision = assets.revision
+    original_resource = resources.get(asset_id)
+    assert original_resource is not None
+
+    def reject_bounds(_image: QImage) -> QRectF | None:
+        """Simulate native-memory rejection before authoritative publication."""
+        raise MemoryError("simulated content-bounds contention")
+
+    monkeypatch.setattr(placed_store_module, "_image_content_bounds", reject_bounds)
+    replacement = QImage(40, 30, QImage.Format.Format_ARGB32_Premultiplied)
+    replacement.fill(QColor(200, 100, 50, 255))
+
+    with pytest.raises(MemoryError, match="simulated content-bounds contention"):
+        assets.replace_embedded(asset_id, replacement)
+
+    retained = assets.get(asset_id)
+    retained_resource = resources.get(asset_id)
+    assert retained is not None and retained.image is not None
+    assert retained.image.pixelColor(1, 1) == QColor(10, 20, 30, 255)
+    assert assets.revision == original_asset_revision
+    assert retained_resource == original_resource
 
 
 def test_layer_duplicates_share_until_an_undoable_resource_fork(qapp) -> None:
