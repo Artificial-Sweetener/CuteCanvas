@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.0.7 (2026-09-11)
+
+### Bug Fixes
+
+- Clear mask previews when layers are removed
+  ([`716c3bd`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/716c3bda4381760d91df7681b5d78224ae8eb82e))
+
+
 ## v1.0.6 (2026-08-28)
 
 ### Bug Fixes
