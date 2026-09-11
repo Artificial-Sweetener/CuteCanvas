@@ -38,7 +38,7 @@ class ViewportApiMixin:
             self.compositionService(),
             assembler,
         )
-        composition_id = selection.composition_id(spec)
+        composition_id = selection.validate(spec)
         record = self.compositionService().record(composition_id)
         self._open_composition_record(record, fit_view=True)
         self.viewSession().set_viewport_spec(spec, composition_id=composition_id)

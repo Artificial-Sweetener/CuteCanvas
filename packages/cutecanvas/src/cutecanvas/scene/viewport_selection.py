@@ -26,6 +26,7 @@ from ..composition.layers import CompositionLayerInstance
 from ..composition.service import CompositionService
 from ..document import (
     CanvasContentKind,
+    CanvasContentReference,
     CanvasDocument,
     CanvasRenderVariant,
     CanvasViewportSpec,
@@ -36,12 +37,32 @@ from .layer_assembly import CompositionLayerSceneAssembler
 
 
 @dataclass(frozen=True, slots=True)
+class _ViewportLayerResolution:
+    """Describe currently available layers for one viewport selection."""
+
+    instances: tuple[CompositionLayerInstance, ...]
+    complete: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ViewportSceneSelection:
     """Resolve one viewport specification into a filtered scene."""
 
     document: CanvasDocument
     compositions: CompositionService
     assembler: CompositionLayerSceneAssembler
+
+    def validate(self, spec: CanvasViewportSpec) -> uuid.UUID:
+        """Validate an available viewport source and return its composition."""
+        composition_id = self.composition_id(spec)
+        for reference in spec.source.references:
+            self.document.resolve_content(reference)
+        resolution = self._resolve_layers(spec, composition_id)
+        if not resolution.complete:
+            self._raise_unavailable_source(spec)
+        if spec.render_variant is CanvasRenderVariant.MASK_COVERAGE:
+            self._validate_mask_coverage_instances(resolution.instances)
+        return composition_id
 
     def composition_id(self, spec: CanvasViewportSpec) -> uuid.UUID:
         """Return the composition whose coordinate space presents the source."""
@@ -69,10 +90,16 @@ class ViewportSceneSelection:
         composition_id = self.composition_id(spec)
         if document_scene.scene_id != composition_id:
             raise ValueError("document scene does not match viewport source")
-        instances = self._instances(spec, composition_id)
-        if spec.render_variant is CanvasRenderVariant.MASK_COVERAGE:
-            self._validate_mask_coverage_instances(instances)
-        selected = self.assembler.assemble_instances(document_scene, instances)
+        resolution = self._resolve_layers(spec, composition_id)
+        if (
+            spec.render_variant is CanvasRenderVariant.MASK_COVERAGE
+            and resolution.complete
+        ):
+            self._validate_mask_coverage_instances(resolution.instances)
+        selected = self.assembler.assemble_instances(
+            document_scene,
+            resolution.instances,
+        )
         if spec.render_variant is CanvasRenderVariant.MASK_COVERAGE:
             return self._mask_coverage_scene(selected)
         return selected
@@ -80,8 +107,7 @@ class ViewportSceneSelection:
     def revision(self, spec: CanvasViewportSpec) -> tuple[object, ...]:
         """Return document and selection identity affecting the resolved scene."""
         current = tuple(
-            self.document.resolve_content(reference).current
-            for reference in spec.source.references
+            self._current_reference(reference) for reference in spec.source.references
         )
         return (
             spec.viewport_id,
@@ -90,34 +116,51 @@ class ViewportSceneSelection:
             self.assembler.revision(),
         )
 
-    def _instances(
+    def _resolve_layers(
         self,
         spec: CanvasViewportSpec,
         composition_id: uuid.UUID,
-    ) -> tuple[CompositionLayerInstance, ...]:
-        """Return selected instances in composition order."""
+    ) -> _ViewportLayerResolution:
+        """Return available selected instances and source completeness."""
         instances = self.compositions.layers.layers_for_composition(composition_id)
         references = spec.source.references
         kind = references[0].kind
         if kind is CanvasContentKind.COMPOSITION:
-            return instances
+            return _ViewportLayerResolution(instances, True)
         if kind is CanvasContentKind.LAYER:
             selected_ids = {reference.layer_id for reference in references}
             selected = tuple(
                 instance for instance in instances if instance.layer_id in selected_ids
             )
-            if len(selected) != len(selected_ids):
-                raise KeyError("viewport layer no longer exists")
-            return selected
+            return _ViewportLayerResolution(
+                selected,
+                len(selected) == len(selected_ids),
+            )
         resource_id = references[0].resource_id
         selected = tuple(
             instance
             for instance in instances
             if instance.source.resource_id == resource_id
         )
-        if not selected:
-            raise KeyError("viewport resource is not mounted by the composition")
-        return selected[:1]
+        return _ViewportLayerResolution(selected[:1], bool(selected))
+
+    def _current_reference(
+        self,
+        reference: CanvasContentReference,
+    ) -> CanvasContentReference | None:
+        """Return current content identity or absence after source removal."""
+        try:
+            return self.document.resolve_content(reference).current
+        except KeyError:
+            return None
+
+    @staticmethod
+    def _raise_unavailable_source(spec: CanvasViewportSpec) -> None:
+        """Raise the source-specific binding failure for an initial mount."""
+        kind = spec.source.references[0].kind
+        if kind is CanvasContentKind.LAYER:
+            raise KeyError("viewport layer no longer exists")
+        raise KeyError("viewport resource is not mounted by the composition")
 
     def _validate_document(self, spec: CanvasViewportSpec) -> None:
         """Reject sources owned by another document."""

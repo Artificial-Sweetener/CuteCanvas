@@ -169,6 +169,51 @@ def test_layer_viewport_is_live_and_does_not_mutate_the_composition(qapp) -> Non
         document.close()
 
 
+def test_mask_viewport_becomes_empty_when_its_layer_is_removed(qapp) -> None:
+    """Keep a mask-only sibling view valid after its selected layer disappears."""
+
+    document = CanvasDocument()
+    author = CuteCanvas(document=document, features=("mask",))
+    preview = CuteCanvas(
+        document=document,
+        document_runtime=author.documentRuntime(),
+        features=("mask",),
+    )
+    try:
+        composition_id = author.createCompositionFromImage(_image(), title="Source")
+        mask_id = author.createBlankMask(_image().size())
+        assert mask_id is not None
+        snapshot = author.getCompositionSnapshot().compositions[composition_id]
+        mask_layer = next(
+            layer for layer in snapshot.layers if layer.source_id == mask_id
+        )
+        spec = CanvasViewportSpec(
+            CanvasViewportSource.content(
+                document.content_reference(
+                    composition_id,
+                    layer_id=mask_layer.layer_id,
+                )
+            ),
+            render_variant=CanvasRenderVariant.MASK_COVERAGE,
+            interaction=CanvasViewportInteraction.FIT_ONLY,
+        )
+        preview.setViewportSpec(spec)
+        qapp.processEvents()
+
+        assert author.removeMaskFromComposition(composition_id, mask_id)
+        qapp.processEvents()
+
+        preview_scene = preview.currentScene()
+        assert preview_scene is not None
+        assert preview_scene.layers == ()
+        assert preview.viewportSpec() == spec
+        assert len(document.snapshot().compositions[composition_id].layers) == 1
+    finally:
+        preview.close()
+        author.close()
+        document.close()
+
+
 def test_fit_only_view_refits_without_mutating_interactive_sibling(qapp) -> None:
     """Hostile resize refits only the explicitly responsive viewport."""
 
