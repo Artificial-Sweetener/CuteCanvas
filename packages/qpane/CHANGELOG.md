@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v3.0.5 (2026-09-12)
+
+### Bug Fixes
+
+- Keep edited content visible without cache retention
+  ([#35](https://github.com/Artificial-Sweetener/CuteCanvas/pull/35),
+  [`b89a5b6`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/b89a5b67addbbc1147dc61ddc02f6e6bc7f4f3eb))
+
+
 ## v3.0.4 (2026-08-28)
 
 ### Bug Fixes
