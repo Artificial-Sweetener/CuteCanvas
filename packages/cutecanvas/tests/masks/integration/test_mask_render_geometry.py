@@ -57,7 +57,7 @@ def test_preview_stride_defaults_to_visible_density_before_cache_warmup(qapp) ->
     controller = MaskController(
         assets,
         source_to_panel_point=lambda point: QPointF(point),
-        config=Config(),
+        config=Config(cache={"mode": "hard", "budget_mb": 1024}),
         mask_config=MaskConfigSlice(),
         live_previews=MaskLivePreviewStore(),
     )

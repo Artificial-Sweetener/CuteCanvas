@@ -387,13 +387,8 @@ class MaskRenderWorkCoordinator:
             )
             if sub_mask_image is not None and stride > 1:
                 sub_mask_image.setText("qpane_preview_stride", str(stride))
-        preview_provisional = (
-            sub_mask_image is not None
-            and sub_mask_image.text("qpane_preview_provisional") == "1"
-        )
-        snippet_source = sub_mask_image
-        async_snippet = snippet_source
-        if force_async_colorize or preview_provisional:
+        async_snippet = sub_mask_image
+        if force_async_colorize:
             async_snippet = self._snapshot_region(
                 mask_layer,
                 dirty_image_rect,
@@ -406,7 +401,6 @@ class MaskRenderWorkCoordinator:
             and async_available
             and (
                 force_async_colorize
-                or preview_provisional
                 or (generated_snapshot and area > SNIPPET_ASYNC_THRESHOLD_PX)
             )
         )
