@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.0.8 (2026-09-12)
+
+### Bug Fixes
+
+- **qpane**: Keep edited content visible without cache retention
+  ([#35](https://github.com/Artificial-Sweetener/CuteCanvas/pull/35),
+  [`b89a5b6`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/b89a5b67addbbc1147dc61ddc02f6e6bc7f4f3eb))
+
+
 ## v1.0.7 (2026-09-11)
 
 ### Bug Fixes
