@@ -30,13 +30,18 @@ class SampledFrameAdmission:
     source_transition_layer_ids: frozenset[uuid.UUID]
     transient_support_layer_ids: frozenset[uuid.UUID]
     sampled_layer_ids: frozenset[uuid.UUID]
+    immediate_fallback_layer_ids: frozenset[uuid.UUID] = frozenset()
 
     @property
     def fallback_candidate_layer_ids(self) -> frozenset[uuid.UUID]:
         """Return layers that need a complete dense fallback product."""
-        return (self.pending_layer_ids & self.source_transition_layer_ids) | (
-            (self.pending_layer_ids | self.transient_support_layer_ids)
-            - self.sampled_layer_ids
+        return (
+            self.immediate_fallback_layer_ids
+            | (self.pending_layer_ids & self.source_transition_layer_ids)
+            | (
+                (self.pending_layer_ids | self.transient_support_layer_ids)
+                - self.sampled_layer_ids
+            )
         )
 
     def continuity_layer_ids(

@@ -93,3 +93,18 @@ def test_fallback_candidates_cover_source_transitions_and_empty_support() -> Non
     assert admission.fallback_candidate_layer_ids == frozenset(
         {source_transition, unsupported_patch}
     )
+
+
+def test_unavailable_refinement_requires_immediate_dense_fallback() -> None:
+    """A declined sampled request must still present its authoritative source."""
+
+    unavailable_layer = uuid.uuid4()
+    admission = SampledFrameAdmission(
+        frozenset(),
+        frozenset(),
+        frozenset(),
+        frozenset(),
+        frozenset({unavailable_layer}),
+    )
+
+    assert admission.fallback_candidate_layer_ids == frozenset({unavailable_layer})

@@ -48,7 +48,7 @@ _TRANSFER_STEP_BUDGET_MS = 4.0
 
 @dataclass(frozen=True, slots=True)
 class IncrementalFrameMetrics:
-    """Describe exact-frame lifecycle and GUI publication latency."""
+    """Describe exact-frame lifecycle and synchronous GUI work."""
 
     completed_frames: int
     cancelled_frames: int
@@ -156,7 +156,7 @@ class IncrementalFrameRefiner(QObject):
             device_pixel_ratio,
             overscan_physical_px,
         )
-        started = time.perf_counter()
+        started = time.thread_time()
         request = ExecutionRequest(
             operation="render.navigation_frame",
             requirements=ExecutionRequirements(
@@ -183,7 +183,7 @@ class IncrementalFrameRefiner(QObject):
                 self._awaiting_adoption_generation = None
             self._maximum_step_ms = max(
                 self._maximum_step_ms,
-                (time.perf_counter() - started) * 1000.0,
+                (time.thread_time() - started) * 1000.0,
             )
             return False
         self._handle = None if handle.state.is_terminal else handle
@@ -196,7 +196,7 @@ class IncrementalFrameRefiner(QObject):
         )
         self._maximum_step_ms = max(
             self._maximum_step_ms,
-            (time.perf_counter() - started) * 1000.0,
+            (time.thread_time() - started) * 1000.0,
         )
         return True
 
@@ -235,7 +235,7 @@ class IncrementalFrameRefiner(QObject):
         ):
             return
         self._awaiting_adoption_generation = None
-        started = time.perf_counter()
+        started = time.thread_time()
         self._prepare()
         self._result = result
         patch_size = _TRANSFER_PATCH_PHYSICAL_PX
@@ -252,7 +252,7 @@ class IncrementalFrameRefiner(QObject):
         self._next_patch = 0
         self._maximum_step_ms = max(
             self._maximum_step_ms,
-            (time.perf_counter() - started) * 1000.0,
+            (time.thread_time() - started) * 1000.0,
         )
         self._maximum_worker_ms = max(self._maximum_worker_ms, result.worker_ms)
         self._timer.start()
@@ -262,7 +262,7 @@ class IncrementalFrameRefiner(QObject):
         result = self._result
         if result is None:
             return
-        started = time.perf_counter()
+        started = time.thread_time()
         try:
             while self._next_patch < len(self._patches):
                 self._transfer_patch(
@@ -270,14 +270,14 @@ class IncrementalFrameRefiner(QObject):
                     self._patches[self._next_patch],
                 )
                 self._next_patch += 1
-                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                elapsed_ms = (time.thread_time() - started) * 1000.0
                 if elapsed_ms >= _TRANSFER_STEP_BUDGET_MS:
                     self._maximum_step_ms = max(self._maximum_step_ms, elapsed_ms)
                     self._timer.start()
                     return
             self._maximum_step_ms = max(
                 self._maximum_step_ms,
-                (time.perf_counter() - started) * 1000.0,
+                (time.thread_time() - started) * 1000.0,
             )
             publish_started = time.perf_counter()
             self._publish(result.plan)
