@@ -1598,6 +1598,67 @@ def test_update_mask_region_forces_async_colorize_uses_full_res(
     np.testing.assert_array_equal(snippet_view, expected_slice)
 
 
+def test_provisional_stroke_preview_does_not_schedule_discarded_colorization(
+    qpane_with_mask, monkeypatch
+):
+    """Keep provisional stroke feedback off the full-resolution worker path."""
+    qpane, mask_manager, image_id = qpane_with_mask
+    service = _mask_service(qpane)
+    source = QImage(3840, 2160, QImage.Format.Format_Grayscale8)
+    source.fill(0)
+    mask_id = mask_manager.create_mask(source)
+    _attach_test_mask(service, mask_manager, mask_id, image_id)
+    assert qpane.setActiveMaskID(mask_id)
+    layer = mask_manager.get_layer(mask_id)
+    assert layer is not None
+    scheduled_snippets: list[tuple[object, ...]] = []
+    rendered_previews: list[QImage] = []
+
+    def tracking_schedule(*args, **kwargs):
+        scheduled_snippets.append((*args, *kwargs.values()))
+        return True
+
+    monkeypatch.setattr(
+        MaskRenderWorkCoordinator,
+        "schedule_snippet",
+        tracking_schedule,
+    )
+    original_update = service.controller.renders.update_region
+
+    def tracking_update(
+        self,
+        dirty_rect_arg,
+        mask_layer_arg,
+        *,
+        sub_mask_image=None,
+        colorized_image=None,
+    ):
+        if sub_mask_image is not None:
+            rendered_previews.append(sub_mask_image.copy())
+        return original_update(
+            dirty_rect_arg,
+            mask_layer_arg,
+            sub_mask_image=sub_mask_image,
+            colorized_image=colorized_image,
+        )
+
+    service.controller.renders.update_region = MethodType(
+        tracking_update,
+        service.controller.renders,
+    )
+    dirty_rect = QRect(513, 384, 96, 96)
+    preview = QImage(32, 32, QImage.Format.Format_Grayscale8)
+    preview.fill(255)
+    preview.setText("qpane_preview_stride", "3")
+    preview.setText("qpane_preview_provisional", "1")
+
+    service.updateMaskRegion(dirty_rect, layer, sub_mask_image=preview)
+
+    assert scheduled_snippets == []
+    assert len(rendered_previews) == 1
+    assert rendered_previews[0].text("qpane_preview_provisional") == "1"
+
+
 def test_mask_reorder_commit_targets_active_layer(qpane_with_mask):
     qpane, mask_manager, image_id = qpane_with_mask
     service = qpane.mask_service

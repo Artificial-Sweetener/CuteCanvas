@@ -198,6 +198,8 @@ def test_tiled_base_and_upscale_remain_visually_coherent_in_every_frame(qapp) ->
         comparison_pane = comparison.currentCanvas()
         assert reference_pane is not None
         assert comparison_pane is not None
+        reference_pane.applySettings(cache={"mode": "hard", "budget_mb": 1024})
+        comparison_pane.applySettings(cache={"mode": "hard", "budget_mb": 1024})
         reference_view = reference_pane.view()
 
         for iteration, (zoom, pan, size) in enumerate(
@@ -403,6 +405,7 @@ def test_pair_switches_never_present_mixed_compositing_patches(qapp) -> None:
         qapp.processEvents()
         pane = workspace.currentCanvas()
         assert pane is not None
+        pane.applySettings(cache={"mode": "hard", "budget_mb": 1024})
         pane.viewport.setZoomAndPan(2.35, QPointF(-149.0, 131.0))
         pane.grab()
 

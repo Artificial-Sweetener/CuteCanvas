@@ -42,8 +42,9 @@ from .item_compositor import SceneItemCompositor
 from .storage_allocation import checked_argb_image, checked_painter
 
 logger = logging.getLogger(__name__)
-_TRANSFER_PATCH_PHYSICAL_PX = 1024
+_TRANSFER_PATCH_PHYSICAL_PX = 256
 _TRANSFER_STEP_BUDGET_MS = 4.0
+_TRANSFER_RESUME_INTERVAL_MS = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +124,7 @@ class IncrementalFrameRefiner(QObject):
         self._maximum_worker_ms = 0.0
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(0)
+        self._timer.setInterval(_TRANSFER_RESUME_INTERVAL_MS)
         self._timer.timeout.connect(self._advance_transfer)
 
     @property

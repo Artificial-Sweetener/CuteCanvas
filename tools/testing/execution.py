@@ -250,10 +250,8 @@ def _ci_targets(
 
 
 def _parallel_worker_budget() -> int:
-    """Avoid oversubscribing constrained macOS Qt runners."""
-    if sys.platform == "darwin":
-        return min(_MAX_PARALLEL_TEST_PROCESSES, os.cpu_count() or 1)
-    return _MAX_PARALLEL_TEST_PROCESSES
+    """Keep process-isolated test groups within the available CPU envelope."""
+    return min(_MAX_PARALLEL_TEST_PROCESSES, os.cpu_count() or 1)
 
 
 def _run_commands_in_parallel(

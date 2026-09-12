@@ -115,7 +115,7 @@ path = "packages/cutecanvas/src/cutecanvas/masks/render_coordination.py"
 kind = "remediation"
 justification = "Prefetch, snippet, colorize, deferred publication, and diagnostics lifecycles remain mixed pending prefetch extraction."
 review_by = 2026-12-15
-max_lines = 781
+max_lines = 775
 next_limit = 560
 debt = "CUTECANVAS-ARCH-005"
 

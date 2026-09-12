@@ -205,18 +205,16 @@ def test_ci_gate_parallelizes_groups_but_serializes_strong_cases() -> None:
 def test_ci_parallelism_never_oversubscribes_available_cpus(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep macOS Qt group concurrency within the runner's CPU envelope."""
-    monkeypatch.setattr("tools.testing.execution.sys.platform", "darwin")
+    """Keep every hosted process group within the runner's CPU envelope."""
     monkeypatch.setattr("tools.testing.execution.os.cpu_count", lambda: 3)
     assert _parallel_worker_budget() == 3
 
 
-def test_ci_parallelism_retains_the_repository_cap(
+def test_ci_parallelism_retains_the_repository_cap_when_capacity_allows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep the proven fast process budget on non-macOS hosts."""
-    monkeypatch.setattr("tools.testing.execution.sys.platform", "win32")
-    monkeypatch.setattr("tools.testing.execution.os.cpu_count", lambda: 2)
+    """Retain the repository process cap on sufficiently large hosts."""
+    monkeypatch.setattr("tools.testing.execution.os.cpu_count", lambda: 32)
     assert _parallel_worker_budget() == 8
 
 
