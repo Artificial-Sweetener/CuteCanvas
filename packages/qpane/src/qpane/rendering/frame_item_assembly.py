@@ -70,6 +70,7 @@ class FrameItemAssembler:
             source_transition_ids,
             frozenset(transient_support_bounds),
             frozenset(item.descriptor.layer_id for item in sampled.items),
+            sampled.immediate_fallback_layer_ids,
         )
         fallback_ids = admission.fallback_candidate_layer_ids
         fallback_layers = tuple(

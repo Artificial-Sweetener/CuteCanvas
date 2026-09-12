@@ -59,6 +59,7 @@ class SampledFramePlan:
     items: tuple[SampledLayerRenderItem, ...]
     pending_layer_ids: frozenset[uuid.UUID] = frozenset()
     projection_fallbacks: tuple[SampledLayerRenderItem, ...] = ()
+    immediate_fallback_layer_ids: frozenset[uuid.UUID] = frozenset()
 
 
 class HybridRenderPlanner:
@@ -90,6 +91,7 @@ class HybridRenderPlanner:
         items: list[SampledLayerRenderItem] = []
         projection_fallbacks: list[SampledLayerRenderItem] = []
         pending_layer_ids: set[uuid.UUID] = set()
+        immediate_fallback_layer_ids: set[uuid.UUID] = set()
         for compiled_layer in compiled.hybrid_layers:
             layer = compiled_layer.descriptor
             snapshot = compiled_layer.snapshot
@@ -151,6 +153,8 @@ class HybridRenderPlanner:
             if refinement.pending:
                 pending_layer_ids.add(layer.layer_id)
             if products is None:
+                if not refinement.pending:
+                    immediate_fallback_layer_ids.add(layer.layer_id)
                 fallback = reproject_sampled_fallback(
                     previous_items,
                     descriptor=layer,
@@ -246,6 +250,7 @@ class HybridRenderPlanner:
             tuple(items),
             frozenset(pending_layer_ids),
             tuple(projection_fallbacks),
+            frozenset(immediate_fallback_layer_ids),
         )
 
     @staticmethod

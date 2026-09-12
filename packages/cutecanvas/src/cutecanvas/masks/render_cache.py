@@ -46,6 +46,10 @@ from .mask import MaskAssetStore, MaskLayer
 from .mask_undo import MaskHistoryChange
 from .preview_products import preview_mask_coverage, preview_mask_overlay
 from .rasterizer import MaskRasterizer
+from .render_admission import (
+    MaskRenderAdmission,
+    estimate_argb_presentation_bytes,
+)
 from .render_product_geometry import (
     scaled_source_rect,
     storage_damage_destination,
@@ -144,8 +148,7 @@ class MaskRenderCache:
         self._usage_callback: Callable[[], None] | None = None
         self._usage_batch_depth = 0
         self._usage_notification_pending = False
-        self._admission_guard: Callable[[int], bool] | None = None
-        self._rejected_keys: set[MaskRenderCacheKey] = set()
+        self._admission = MaskRenderAdmission(self.cache_limit_bytes)
         self._hits = 0
         self._misses = 0
         self._evictions = 0
@@ -307,7 +310,7 @@ class MaskRenderCache:
 
     def set_admission_guard(self, guard: Callable[[int], bool] | None) -> None:
         """Install an optional cache-admission guard."""
-        self._admission_guard = guard
+        self._admission.set_guard(guard)
 
     def cache_limit_bytes(self) -> int:
         """Return the configured mask cache budget."""
@@ -863,7 +866,7 @@ class MaskRenderCache:
         self._cache.clear()
         self._entry_bytes.clear()
         self._total_bytes = 0
-        self._rejected_keys.clear()
+        self._admission.clear_rejections()
         self._live_previews.clear()
         self._live_preview_products.clear()
         self._notify_usage()
@@ -1011,8 +1014,10 @@ class MaskRenderCache:
                 result = QPixmap.fromImage(stored)
                 self._insert(key, result, mask_id=mask_id)
                 return result
-            elif self._async_handler is not None and (
-                image.width() * image.height() > self._async_threshold_px
+            elif (
+                self._async_handler is not None
+                and (image.width() * image.height() > self._async_threshold_px)
+                and self._admission.can_retain(estimate_argb_presentation_bytes(image))
             ):
                 if self._async_pending.get(mask_id) == key.render_revision:
                     return None
@@ -1237,7 +1242,7 @@ class MaskRenderCache:
     ) -> None:
         """Insert one raster and enforce the configured budget."""
         size = self._estimate_bytes(pixmap)
-        if not self._allow_insert(size, key):
+        if not self._admission.admit(size, key):
             return
         self._total_bytes -= self._entry_bytes.get(key, 0)
         self._cache[key] = pixmap
@@ -1251,21 +1256,6 @@ class MaskRenderCache:
             excluded.add(active_id)
         self._evict_to_budget(excluded)
         self._notify_usage()
-
-    def _allow_insert(self, size: int, key: MaskRenderCacheKey) -> bool:
-        """Return whether one raster fits cache-admission guardrails."""
-        budget = self.cache_limit_bytes()
-        allowed = size <= budget and (
-            self._admission_guard is None or self._admission_guard(size)
-        )
-        if not allowed and key not in self._rejected_keys:
-            logger.warning(
-                "requested item exceeds budget; not cached | consumer=mask_overlays | size=%d | budget=%d",
-                size,
-                budget,
-            )
-            self._rejected_keys.add(key)
-        return allowed
 
     def _drop(self, key: MaskRenderCacheKey, *, reason: str) -> int:
         """Remove one cached raster and return its byte size."""
