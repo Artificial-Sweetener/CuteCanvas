@@ -94,16 +94,16 @@ next_extraction = "Move SAM manager attachment, predictor reset, generated-mask 
 id = "CUTECANVAS-ARCH-007"
 owner = "CuteCanvas persistence"
 paths = ["packages/cutecanvas/src/cutecanvas/persistence/codec.py"]
-fingerprint = "sha256:7db3dda702037d6418e362986f097f03277e5266345d4253df4464a1be3eaf21"
+fingerprint = "sha256:a0c67fce8d3aacda4d634fd6e50836864306a48032e7044fc1ae9e185de0b7dc"
 issue = "chore:CUTECANVAS-ARCH-007"
 review_by = 2026-12-15
 responsibilities = [
   "archive container IO and version dispatch",
   "composition document table and root assembly",
-  "raster, coverage, placed, mask, and vector resource codecs",
+  "raster, coverage, mask, and vector resource codecs",
   "resource reference and archive graph validation",
 ]
-next_extraction = "Extract placed and raster resource encoders and decoders behind typed resource codec owners."
+next_extraction = "Extract raster resource encoders and decoders behind a typed raster codec owner."
 
 [[debts]]
 id = "CUTECANVAS-ARCH-008"

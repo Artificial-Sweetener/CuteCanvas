@@ -163,8 +163,8 @@ path = "packages/cutecanvas/src/cutecanvas/persistence/codec.py"
 kind = "remediation"
 justification = "Archive IO, composition encoding, resource codecs, migration, and reference validation remain mixed pending typed resource codec extraction."
 review_by = 2026-12-15
-max_lines = 1069
-next_limit = 980
+max_lines = 957
+next_limit = 850
 debt = "CUTECANVAS-ARCH-007"
 
 [[waivers]]
