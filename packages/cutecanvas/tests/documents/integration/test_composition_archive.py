@@ -336,7 +336,7 @@ def test_private_archive_round_trip_restores_order_transform_and_off_canvas_pixe
     )
     with zipfile.ZipFile(archive_path) as container:
         manifest = json.loads(container.read("manifest.json"))
-    assert manifest["version"] == 15
+    assert manifest["version"] == 16
     assert manifest["documents"][0]["document"]["canvas_bounds"] == [
         0.0,
         0.0,

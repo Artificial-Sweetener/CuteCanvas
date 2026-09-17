@@ -25,7 +25,7 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QRectF, QSize
+from PySide6.QtCore import QRectF
 
 from cutecanvas.coverage import (
     CoverageAssetSnapshot,
@@ -33,10 +33,6 @@ from cutecanvas.coverage import (
     CoverageSnapshot,
 )
 from cutecanvas.types import RasterExtentPolicy
-from qpane.sdk.raster import (
-    numpy_to_qimage_argb32,
-    qimage_to_numpy_argb32,
-)
 from qpane.sdk.scene import RasterBounds
 from qpane.sdk.vector import VectorDocument, VectorObject
 
@@ -48,10 +44,8 @@ from ..composition.model import (
 )
 from ..composition.resource_references import instance_resources
 from ..placed.model import (
-    FileFingerprint,
     PlacedAssetMode,
     PlacedAssetSnapshot,
-    PlacedAssetStatus,
 )
 from ..raster.color_surface import ColorRasterSnapshot
 from ..raster.sparse_grid import (
@@ -72,10 +66,11 @@ from .coverage_codec import (
 from .layer_codec import decode_layer, encode_layer
 from .legacy_shared_edges import recover_version_14_shared_edges
 from .model import CompositionArchiveSnapshot
+from .placed_asset_codec import decode_placed, placed_manifest, write_placed
 from .vector_object_codec import decode_vector_object, encode_vector_object
 
 _FORMAT = "qpane-composition"
-_VERSION = 15
+_VERSION = 16
 _MIGRATABLE_VERSIONS = frozenset(range(2, _VERSION + 1))
 _MAX_RASTER_PIXELS = 268_435_456
 _MAX_COLOR_RASTER_BYTES = _MAX_RASTER_PIXELS * 4
@@ -119,17 +114,7 @@ class CompositionArchiveCodec:
                 for raster_id, snapshot in archive.rasters.items():
                     self._write_sparse_tiles(container, "rasters", raster_id, snapshot)
                 for asset_id, snapshot in archive.placed_assets.items():
-                    if snapshot.image is None or (
-                        snapshot.mode is PlacedAssetMode.LINKED
-                        and not snapshot.keep_fallback
-                    ):
-                        continue
-                    with container.open(f"placed/{asset_id}.npy", "w") as stream:
-                        np.save(
-                            stream,
-                            qimage_to_numpy_argb32(snapshot.image),
-                            allow_pickle=False,
-                        )
+                    write_placed(container, asset_id, snapshot)
             os.replace(temporary_path, destination)
             temporary_path = None
         finally:
@@ -231,7 +216,7 @@ class CompositionArchiveCodec:
                 ProjectResourceKind.IMPORTED_RASTER,
                 ProjectResourceKind.LINKED_RASTER,
             }:
-                entry["payload"] = _placed_manifest(
+                entry["payload"] = placed_manifest(
                     resource_id,
                     archive.placed_assets[resource_id],
                 )
@@ -387,7 +372,7 @@ class CompositionArchiveCodec:
                     current=version >= 10,
                 )
             elif kind in {"placed-asset", "imported-raster", "linked-raster"}:
-                placed = cls._decode_placed(
+                placed = decode_placed(
                     container,
                     str(resource_id),
                     payload,
@@ -578,74 +563,6 @@ class CompositionArchiveCodec:
             bounds=RasterBounds(*(int(value) for value in bounds_values)),
             objects=tuple(objects),
             revision=int(item.get("revision", 0)),
-        )
-
-    @staticmethod
-    def _decode_placed(
-        container: zipfile.ZipFile,
-        asset_id: str,
-        item: object,
-    ) -> PlacedAssetSnapshot:
-        """Validate and reconstruct one placed provenance payload."""
-        if not isinstance(item, dict):
-            raise TypeError("placed asset entries must be objects")
-        size_values = item.get("source_size")
-        if not isinstance(size_values, list) or len(size_values) != 2:
-            raise ValueError("placed source_size must contain two integers")
-        source_size = QSize(int(size_values[0]), int(size_values[1]))
-        if source_size.isEmpty():
-            raise ValueError("placed source_size must be positive")
-        if source_size.width() * source_size.height() > _MAX_RASTER_PIXELS:
-            raise ValueError("placed raster exceeds archive pixel limit")
-        mode = PlacedAssetMode(str(item["mode"]))
-        keep_fallback = bool(item["keep_fallback"])
-        pixel_path = item.get("pixels")
-        image = None
-        if pixel_path is not None:
-            expected_path = f"placed/{asset_id}.npy"
-            if pixel_path != expected_path:
-                raise ValueError("placed pixel path does not match its identifier")
-            info = container.getinfo(expected_path)
-            if info.file_size > _MAX_COLOR_RASTER_BYTES + 4096:
-                raise ValueError("placed pixel payload exceeds archive size limit")
-            with container.open(expected_path) as stream:
-                pixels = np.load(stream, allow_pickle=False)
-            image = numpy_to_qimage_argb32(pixels)
-            if image.size() != source_size:
-                raise ValueError("placed pixels do not match source_size")
-        if mode is PlacedAssetMode.EMBEDDED and image is None:
-            raise ValueError("embedded placed assets require archived pixels")
-        source_path_value = item.get("source_path")
-        source_path = (
-            None if source_path_value is None else Path(str(source_path_value))
-        )
-        fingerprint_values = item.get("fingerprint")
-        fingerprint = None
-        if fingerprint_values is not None:
-            if not isinstance(fingerprint_values, list) or len(fingerprint_values) != 2:
-                raise ValueError(
-                    "placed fingerprint must contain size and modified time"
-                )
-            fingerprint = FileFingerprint(
-                int(fingerprint_values[0]),
-                int(fingerprint_values[1]),
-            )
-        status = PlacedAssetStatus(str(item["status"]))
-        error = None if item.get("error") is None else str(item["error"])
-        if mode is PlacedAssetMode.LINKED and image is None:
-            status = PlacedAssetStatus.MISSING
-            error = "linked pixels were not embedded in the composition archive"
-        return PlacedAssetSnapshot(
-            image=image,
-            source_size=source_size,
-            mode=mode,
-            source_path=source_path,
-            status=status,
-            error=error,
-            keep_fallback=keep_fallback,
-            fingerprint=fingerprint,
-            content_revision=int(item["content_revision"]),
-            generation=int(item["generation"]),
         )
 
     @staticmethod
@@ -1081,38 +998,6 @@ def _sparse_from_dense(
     if bounds is not None:
         grid.replace(bounds, pixels)
     return grid.snapshot(bounds, extent_policy)
-
-
-def _placed_manifest(
-    asset_id: uuid.UUID,
-    snapshot: PlacedAssetSnapshot,
-) -> dict[str, object]:
-    """Return provenance and optional fallback metadata for a placed source."""
-    include_pixels = snapshot.image is not None and (
-        snapshot.mode is PlacedAssetMode.EMBEDDED or snapshot.keep_fallback
-    )
-    fingerprint = (
-        None
-        if snapshot.fingerprint is None
-        else [snapshot.fingerprint.size, snapshot.fingerprint.modified_ns]
-    )
-    return {
-        "mode": snapshot.mode.value,
-        "source_path": (
-            None if snapshot.source_path is None else str(snapshot.source_path)
-        ),
-        "status": snapshot.status.value,
-        "error": snapshot.error,
-        "keep_fallback": snapshot.keep_fallback,
-        "fingerprint": fingerprint,
-        "content_revision": snapshot.content_revision,
-        "generation": snapshot.generation,
-        "source_size": [
-            snapshot.source_size.width(),
-            snapshot.source_size.height(),
-        ],
-        "pixels": f"placed/{asset_id}.npy" if include_pixels else None,
-    }
 
 
 def _vector_manifest(document: VectorDocument) -> dict[str, object]:
