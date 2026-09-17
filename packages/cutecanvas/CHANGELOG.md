@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v1.0.9 (2026-09-17)
+
+### Bug Fixes
+
+- Preserve imported image precision when saving documents
+  ([#37](https://github.com/Artificial-Sweetener/CuteCanvas/pull/37),
+  [`0cfa076`](https://github.com/Artificial-Sweetener/CuteCanvas/commit/0cfa0764dcbf8293ce2e2bddff31ef63162b7c9f))
+
+
 ## v1.0.8 (2026-09-12)
 
 ### Bug Fixes
