@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload unsealed candidate plan
         if: steps.plan.outputs.released == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: candidate-plan-${{ steps.plan.outputs.plan_id }}
           path: ${{ runner.temp }}/release-plan.json
@@ -125,7 +125,7 @@ jobs:
           python -m twine check --strict "packages/${{ matrix.product }}/dist/"*
 
       - name: Upload immutable candidate distribution
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-${{ matrix.product }}
           path: packages/${{ matrix.product }}/dist/*
@@ -175,7 +175,7 @@ jobs:
         run: python -m maturin sdist --out dist
 
       - name: Upload immutable native distribution
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-ferrastra-${{ matrix.platform }}
           path: packages/ferrastra/dist/*
@@ -221,28 +221,28 @@ jobs:
           sudo apt-get install --yes --no-install-recommends libegl1
 
       - name: Download candidate plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: candidate-plan-${{ needs.prepare.outputs.plan_id }}
           path: plan
 
       - name: Download QPane candidate
         if: needs.prepare.outputs.qpane_version != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-qpane
           path: distributions/qpane
 
       - name: Download CuteCanvas candidate
         if: needs.prepare.outputs.cutecanvas_version != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-${{ needs.prepare.outputs.plan_id }}-cutecanvas
           path: distributions/cutecanvas
 
       - name: Download Ferrastra candidates
         if: needs.prepare.outputs.ferrastra_released == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-${{ needs.prepare.outputs.plan_id }}-ferrastra-*
           path: distributions/ferrastra
@@ -263,7 +263,7 @@ jobs:
           echo "recovery_id=$recovery_id" >> "$GITHUB_OUTPUT"
 
       - name: Upload sealed release plan
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sealed-plan-${{ steps.identity.outputs.recovery_id }}
           path: sealed-release-plan.json
@@ -302,7 +302,7 @@ jobs:
           python -m pip install --constraint constraints-tooling.txt pip packaging
 
       - name: Download sealed plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sealed-plan-${{ needs.candidate-gate.outputs.recovery_id }}
 
@@ -351,7 +351,7 @@ jobs:
           python -m pip install --constraint constraints-tooling.txt pip packaging
 
       - name: Download sealed plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sealed-plan-${{ needs.candidate-gate.outputs.recovery_id }}
 
